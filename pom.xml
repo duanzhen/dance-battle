@@ -15,7 +15,7 @@
 	<description>dance game service</description>
 	<properties>
 		<java.version>21</java.version>
-		<!-- Docker/GitHub Actions 里前端 dist 已预构建,跳过 pnpm 步骤 -->
+		<!-- Docker/GitHub Actions 里前端 dist 已预构建,跳过 npm 步骤 -->
 		<skipFrontendBuild>false</skipFrontendBuild>
 		<mybatis-plus.version>3.5.16</mybatis-plus.version>
 		<satoken.version>1.45.0</satoken.version>
@@ -125,18 +125,17 @@
 				<version>3.5.0</version>
 				<executions>
 					<execution>
-						<id>pnpm-install</id>
+						<id>npm-install</id>
 						<phase>prepare-package</phase>
 						<goals>
 							<goal>exec</goal>
 						</goals>
 						<configuration>
-							<executable>pnpm</executable>
+							<executable>npm</executable>
 							<skip>${skipFrontendBuild}</skip>
 							<workingDirectory>${project.basedir}/frontend</workingDirectory>
 							<arguments>
 								<argument>install</argument>
-								<argument>--frozen-lockfile</argument>
 								<argument>--prefer-offline</argument>
 							</arguments>
 						</configuration>
@@ -148,10 +147,11 @@
 							<goal>exec</goal>
 						</goals>
 						<configuration>
-							<executable>pnpm</executable>
+							<executable>npm</executable>
 							<skip>${skipFrontendBuild}</skip>
 							<workingDirectory>${project.basedir}/frontend</workingDirectory>
 							<arguments>
+								<argument>run</argument>
 								<argument>build:prod</argument>
 							</arguments>
 						</configuration>

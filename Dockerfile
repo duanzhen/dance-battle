@@ -1,17 +1,16 @@
 # syntax=docker/dockerfile:1
 
 # ---------- 构建阶段 ----------
-# 前端构建由 mvn package 自动完成(pom 中 exec 插件执行 pnpm install + build:prod)
+# 前端构建由 mvn package 自动完成(pom 中 exec 插件执行 npm install + build:prod)
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
-# 安装 Node 22 + pnpm(供 maven exec 插件调用)
+# 安装 Node 22 + npm(供 maven exec 插件调用)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates xz-utils \
     && curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz | tar -xJ -C /opt \
     && ln -s /opt/node-v22.14.0-linux-x64/bin/node /usr/local/bin/node \
     && ln -s /opt/node-v22.14.0-linux-x64/bin/npm /usr/local/bin/npm \
-    && npm install -g pnpm@11 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pom.xml .

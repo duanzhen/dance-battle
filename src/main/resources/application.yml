@@ -1,0 +1,69 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: dance-game
+  servlet:
+    multipart:
+      # 单文件最大 100MB,请求体上限 110MB(图片/视频上传)
+      max-file-size: 100MB
+      max-request-size: 110MB
+  web:
+    resources:
+      # spring-boot:run 时优先服务前端源码目录的最新构建(frontend/dist);
+      # 打 jar 后该目录不存在,自动回退 classpath:/static/ 中的打包产物
+      static-locations: file:./frontend/dist/,classpath:/static/
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:192.168.100.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:game_db}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:password}
+  data:
+    redis:
+      host: ${REDIS_HOST:192.168.100.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.dance.street.game.domain
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+sa-token:
+  # 单账号登录:无状态 JWT,前端通过 Authorization: Bearer <token> 携带
+  token-name: Authorization
+  # token 有效期(秒)= 72 小时;JWT 自带过期时间,服务端重启不影响
+  timeout: 259200
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: false
+  # 只认 Bearer 前缀的 token(同时影响 header 与 query 参数)
+  token-prefix: Bearer
+  # 不使用 cookie 存/读 token(纯 Authorization 头,避免 cookie 干扰)
+  is-read-cookie: false
+  # JWT 签名密钥(生产环境务必通过 JWT_SECRET_KEY 环境变量覆盖)
+  jwt-secret-key: ${JWT_SECRET_KEY:dance-game-jwt-secret-key-2026}
+
+sse:
+  enabled: true
+  path: /sse
+
+# 单账号登录凭证(写在配置文件)
+login:
+  username: ${LOGIN_USERNAME:admin}
+  password: ${LOGIN_PASSWORD:123456}
+
+# 本地文件上传(替代对象存储)
+file:
+  upload:
+    # 上传根目录(可用 FILE_UPLOAD_PATH 环境变量覆盖)
+    path: ${FILE_UPLOAD_PATH:./upload}
+    # 单文件大小上限(字节),与 spring.servlet.multipart.max-file-size 保持一致
+    max-size: 104857600

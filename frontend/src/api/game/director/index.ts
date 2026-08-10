@@ -1,0 +1,111 @@
+import axios from 'axios';
+
+/**
+ * 手机导播台 API:使用赛事 auth_key 认证(Authorization: Bearer auth_key),
+ * 与管理员接口完全隔离。
+ */
+
+let directorAuthKey: string | null = null;
+
+export function setDirectorAuthKey(key: string) {
+  directorAuthKey = key;
+}
+
+const directorRequest = axios.create({
+  baseURL: import.meta.env.VITE_APP_BASE_API,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json;charset=utf-8',
+    clientid: import.meta.env.VITE_APP_CLIENT_ID
+  }
+});
+
+directorRequest.interceptors.request.use((config) => {
+  if (directorAuthKey) {
+    config.headers.Authorization = 'Bearer ' + directorAuthKey;
+  }
+  return config;
+});
+
+/** 获取当前认证赛事信息 */
+export function getDirectorTournament() {
+  return directorRequest({
+    url: '/game/director/tournament',
+    method: 'get'
+  });
+}
+
+/** 赛段列表(仅当前赛事) */
+export function listDirectorStages(tournamentId: string | number) {
+  return directorRequest({
+    url: '/game/director/stage/list',
+    method: 'get',
+    params: { tournamentId }
+  });
+}
+
+/** 场次列表(按赛段) */
+export function listDirectorMatches(stageId: string | number) {
+  return directorRequest({
+    url: '/game/director/match/list',
+    method: 'get',
+    params: { stageId }
+  });
+}
+
+/** 开始赛段 */
+export function directorStartStage(id: string | number) {
+  return directorRequest({
+    url: `/game/director/stage/${id}/start`,
+    method: 'put'
+  });
+}
+
+/** 完成赛段 */
+export function directorCompleteStage(id: string | number) {
+  return directorRequest({
+    url: `/game/director/stage/${id}/complete`,
+    method: 'put'
+  });
+}
+
+/** 擂台赛:下一场 */
+export function directorArenaNext(id: string | number) {
+  return directorRequest({
+    url: `/game/director/stage/${id}/arena-next`,
+    method: 'post'
+  });
+}
+
+/** 开始场次 */
+export function directorStartMatch(id: string | number) {
+  return directorRequest({
+    url: `/game/director/match/${id}/start`,
+    method: 'post'
+  });
+}
+
+/** 回退单场结算 */
+export function directorResetMatch(id: string | number) {
+  return directorRequest({
+    url: `/game/director/match/${id}/reset`,
+    method: 'post'
+  });
+}
+
+/** 提交比赛结果 */
+export function directorSubmitResult(id: string | number, data: any) {
+  return directorRequest({
+    url: `/game/director/match/${id}/submit-result`,
+    method: 'post',
+    data
+  });
+}
+
+/** 确认公布结果 */
+export function directorPublishResult(id: string | number) {
+  return directorRequest({
+    url: `/game/director/match/${id}/publish-result`,
+    method: 'post'
+  });
+}

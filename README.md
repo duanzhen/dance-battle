@@ -1,0 +1,99 @@
+# 无败 - 街舞赛事管理系统
+
+无败-面向街舞舞者的掰头平台 赛事创建、赛段编排、场次生成、打分结算、裁判端判罚、大屏实时投射（分布式 SSE）与手机导播台。后端基于 Spring Boot 4，前端为 Vue 3 前后端统一打包为单 Jar 部署。
+
+## 技术栈
+
+### 后端
+
+| 组件 | 版本 | 说明 |
+| --- | --- | --- |
+| Spring Boot | 4.0.7 | WebMVC + Validation + AOP |
+| Java | 21 | |
+| MyBatis-Plus | 3.5.16 | `mybatis-plus-spring-boot4-starter`，分页插件 |
+| Sa-Token | 1.45.0 | 单账号登录，`@SaCheckPermission` 注解鉴权 |
+| Redisson | 4.7.0 | Redis 客户端，支撑分布式 SSE 发布订阅与分布式锁 |
+| FastExcel / Hutool / MapStruct-Plus | 1.3.0 / 5.8.40 / 1.5.0 | 导出、工具、VO/BO 转换 |
+
+### 前端（`frontend/`）
+
+| 组件 | 版本 |
+| --- | --- |
+| Vue | 3.5 |
+| Vite | 6.4 |
+| Element Plus | 2.11 |
+| Pinia / Vue Router | 3 / 4.6 |
+| UnoCSS | 66 |
+
+## 功能
+
+- 赛事管理：赛事大厅、按模板一键创建（海选 + 淘汰赛链 + 场景 + 对战树控件）
+- 赛段编排：海选 / 擂台 / 淘汰 / 决赛等赛制，晋级规则可配置
+- 场次与对战树：自动生成场次、种子配对、场次结算
+- 打分引擎：总分制 / 胜负平制 多裁判聚合、排名计算
+- 裁判端：独立临时鉴权，判罚页与大屏定向推送
+- 大屏投射：基于SSE，多实例可互相广播
+- MC： 手机导播台流程管理
+- 登录：单账号（账号密码写在配置/环境变量，默认 `admin / 123456`），登录后直达赛事大厅
+
+## 目录结构
+
+```text
+dance-battle/
+├── src/main/java
+│   ├── com/dance/street/game        应用入口/配置 + 赛事业务模块(controller/service/mapper/domain/engine)
+│   └── org/dromara
+│       └── common                   通用框架类(core/mybatis/sse/tenant 等)
+├── src/main/resources               配置文件 + mapper XML
+├── frontend/                        Vue3 前端源码
+├── sql/game_db.sql                  数据库初始化脚本(13 张业务表)
+├── Dockerfile / docker-compose.yml  容器化部署
+├── .env.example                     环境变量示例
+└── .github/workflows/build.yml      CI:构建 jar + 推送 Docker 镜像
+```
+
+## 快速开始
+
+### 方式一：Docker Compose
+
+```bash
+cd dance-game
+cp .env.example .env     # 按需修改密码
+docker compose up -d --build
+```
+
+启动后访问 <http://localhost:8080>。Compose 会：
+
+- 启动 MySQL 8.0，数据目录外置到 `mysql-data` 卷，首次启动自动导入 `sql/game_db.sql` 建表
+- 启动 Redis 7
+- 构建并启动应用（等待 MySQL/Redis 健康检查通过后）
+
+### 方式二：打包 Jar
+
+```bash
+# 打包(自动构建前端并打进 static)
+./mvnw -Dmaven.test.skip=true package
+
+# 运行
+java -jar target/game-0.0.1-SNAPSHOT.jar
+```
+
+访问 <http://localhost:8080>。
+
+## 环境变量
+
+以下变量均可通过环境变量覆盖（Docker Compose 或 `java -jar` 前设置）：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MYSQL_HOST` | `mysql` | MySQL 地址 |
+| `MYSQL_PORT` | `3306` | MySQL 端口 |
+| `MYSQL_DATABASE` | `game_db` | 数据库名 |
+| `MYSQL_USER` | `root` | 数据库用户 |
+| `MYSQL_PASSWORD` | `password` | 数据库密码 |
+| `REDIS_HOST` | `redis` | Redis 地址 |
+| `REDIS_PORT` | `6379` | Redis 端口 |
+| `REDIS_PASSWORD` | 空 | Redis 密码（空 = 无密码） |
+| `LOGIN_USERNAME` | `admin` | 系统登录账号 |
+| `LOGIN_PASSWORD` | `123456` | 系统登录密码 |
+| `FILE_UPLOAD_PATH` | `./upload`（Docker 内为 `/app/upload`） | 文件上传存储目录 |

@@ -1,0 +1,127 @@
+package com.dance.street.game.domain.vo;
+
+import com.dance.street.game.domain.TStage;
+import cn.idev.excel.annotation.ExcelIgnoreUnannotated;
+import cn.idev.excel.annotation.ExcelProperty;
+import org.dromara.common.excel.annotation.ExcelDictFormat;
+import org.dromara.common.excel.convert.ExcelDictConvert;
+import io.github.linpeilie.annotations.AutoMapper;
+import lombok.Data;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.Date;
+
+
+
+/**
+ * 赛段流程视图对象 t_stage
+ *
+ * @author duane
+ * @date 2026-01-11
+ */
+@Data
+@ExcelIgnoreUnannotated
+@AutoMapper(target = TStage.class)
+public class TStageVo implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    /**
+     *
+     */
+    @ExcelProperty(value = "")
+    private Long id;
+
+    /**
+     *
+     */
+    @ExcelProperty(value = "")
+    private Long tournamentId;
+
+    /**
+     * 上一赛段ID
+     */
+    @ExcelProperty(value = "上一赛段ID")
+    private Long prevStageId;
+
+    /**
+     * 下一赛段ID (可修改以实现途中变轨)
+     */
+    @ExcelProperty(value = "下一赛段ID (可修改以实现途中变轨)")
+    private Long nextStageId;
+
+    /**
+     * 父ID (用于同分加赛)
+     */
+    @ExcelProperty(value = "父ID (用于同分加赛)")
+    private Long parentStageId;
+
+    /**
+     * 32进16 / 复活赛
+     */
+    @ExcelProperty(value = "32进16 / 复活赛")
+    private String name;
+
+    /**
+     * AUDITION, KNOCKOUT, FFA, GROUP
+     */
+    @ExcelProperty(value = "AUDITION, KNOCKOUT, FFA, GROUP")
+    private String stageMode;
+
+    /**
+     * 每队成员数量
+     */
+    private Long members;
+
+    /**
+     * 在大图中处于第几列 (X轴)
+     */
+    @ExcelProperty(value = "在大图中处于第几列 (X轴)")
+    private Long visualColIndex;
+
+    /**
+     *
+     */
+    @ExcelProperty(value = "")
+    private String ruleConfig;
+
+    /**
+     * 状态
+     */
+    @ExcelProperty(value = "状态")
+    private String status;
+
+    /**
+     * 起始队伍数量
+     */
+    @ExcelProperty(value = "起始队伍数量")
+    private Long teamCountStart;
+
+    /**
+     * 晋级队伍数量
+     */
+    @ExcelProperty(value = "晋级队伍数量")
+    private Long teamCountEnd;
+
+    /**
+     * 是否完成初始化配置：0-否 1-是
+     */
+    @ExcelProperty(value = "是否完成初始化配置：0-否 1-是")
+    private Long isInitialized;
+
+    /**
+     * 视觉配置：{"color": "#f59e0b", "icon": "trophy"}
+     */
+    @ExcelProperty(value = "视觉配置")
+    private String visualConfig;
+
+    /**
+     * 备注
+     */
+    @ExcelProperty(value = "备注")
+    private String remark;
+
+
+}

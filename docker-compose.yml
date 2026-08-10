@@ -1,0 +1,76 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dance-game-mysql
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-password}
+      MYSQL_DATABASE: game_db
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      # MySQL 数据目录外置,容器重建不丢数据
+      - mysql-data:/var/lib/mysql
+      # 首次初始化自动建表
+      - ./sql/game_db.sql:/docker-entrypoint-initdb.d/01-game_db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: dance-game-redis
+    restart: unless-stopped
+    command: ["sh", "-c", 'if [ -n "$$REDIS_PASSWORD" ]; then exec redis-server --requirepass "$$REDIS_PASSWORD"; else exec redis-server; fi']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping | grep PONG; else redis-cli ping | grep PONG; fi']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dance-game-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: game_db
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      LOGIN_USERNAME: ${LOGIN_USERNAME:-admin}
+      LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
+      # 上传文件路径(挂载到容器外,容器重建不丢)
+      FILE_UPLOAD_PATH: /app/upload
+    volumes:
+      - app-upload:/app/upload
+    ports:
+      - "8080:8080"
+
+volumes:
+  mysql-data:
+  app-upload:
+  redis-data:

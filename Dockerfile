@@ -16,6 +16,8 @@ RUN apt-get update \
 COPY pom.xml .
 COPY src ./src
 COPY frontend ./frontend
+# 建表脚本(pom 会将其打进 jar 的 classpath:sql/game_db.sql, 供启动时 JDBC 兜底建表)
+COPY sql ./sql
 
 RUN mvn -B -Dmaven.test.skip=true package
 

@@ -13,8 +13,6 @@ services:
     volumes:
       # MySQL 数据目录外置,容器重建不丢数据
       - mysql-data:/var/lib/mysql
-      # 首次初始化自动建表
-      - ./sql/game_db.sql:/docker-entrypoint-initdb.d/01-game_db.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 5s

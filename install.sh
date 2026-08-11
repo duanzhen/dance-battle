@@ -1,29 +1,40 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # =============================================================================
-# run.sh - dance-battle(无败街舞赛事系统)一键部署脚本
+# install.sh - dance-battle(无败街舞赛事系统)一键部署脚本
 #
-# 部署策略(自动降级):
-#   方式 1: 从阿里云个人容器镜像仓库拉取镜像并 docker compose 启动
-#   方式 2: 阿里云不可用 -> GHCR (ghcr.io/duanzhen/dance-battle), mysql/redis 用 Docker Hub 官方镜像
-#   方式 3: 仍然失败 -> 本地构建镜像后运行
+# 一行安装(将本脚本托管到任意 HTTPS 地址后, 直接复制运行):
+#   curl -fsSL https://<托管地址>/install.sh | sh
 #
-# 首次运行会自动安装 Docker:
-#   - Linux : Docker 官方脚本(优先阿里云镜像源), 需要 sudo/root
-#   - macOS : 通过 Homebrew 安装 Docker Desktop
+# 脚本自动完成:
+#   1. 当前目录缺少部署文件时, 由脚本直接生成 docker-compose.yml / .env
+#      到 INSTALL_DIR(默认 ~/dance-battle), 不下载任何文件也不拉代码
+#   2. 首次运行自动安装 Docker:
+#      - Linux : 官方 get.docker.com 脚本, 优先阿里云镜像源(--mirror Aliyun),
+#                失败回退 DaoCloud 脚本与默认源; 需要 sudo/root
+#      - macOS : 通过 Homebrew 安装 Docker Desktop
+#   3. 按顺序部署(自动降级):
+#      方式 1: 阿里云容器镜像仓库(ALIYUN_REGISTRY, 国内优先)
+#      方式 2: GHCR (ghcr.io/duanzhen/dance-battle), mysql/redis 用 Docker Hub 官方镜像
+#      方式 3: 本地构建镜像后运行
 #
-# 镜像地址均可通过环境变量覆盖, 例如:
-#   APP_IMAGE_ALIYUN=my.registry/app:latest ./run.sh
+# 可通过环境变量覆盖, 例如:
+#   INSTALL_DIR=/opt/dance-battle REPO_URL=https://gitee.com/xxx/dance-battle.git ./install.sh
+#   APP_IMAGE_ALIYUN=my.registry/app:0.1.1 ./install.sh
 # =============================================================================
 
-set -uo pipefail
+set -u
 
 # ---------------------------------------------------------------------------
-# 镜像配置
+# 项目与镜像配置
 # ---------------------------------------------------------------------------
+# 自动下载项目时使用的仓库与分支(仅一行管道运行时需要, 项目目录内运行可忽略)
+REPO_URL="${REPO_URL:-https://github.com/duanzhen/dance-battle.git}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+INSTALL_DIR="${INSTALL_DIR:-${HOME:-$PWD}/dance-battle}"
+
+# 方式 1: 阿里云个人仓库(国内优先)
 ALIYUN_REGISTRY="${ALIYUN_REGISTRY:-crpi-9o335a19vfah6d7c.cn-hangzhou.personal.cr.aliyuncs.com/dance_battel}"
-
-# 方式 1: 阿里云个人仓库
-APP_IMAGE_ALIYUN="${APP_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/app:latest}"
+APP_IMAGE_ALIYUN="${APP_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/app:0.1.1}"
 MYSQL_IMAGE_ALIYUN="${MYSQL_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/mysql:8.0}"
 REDIS_IMAGE_ALIYUN="${REDIS_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/redis:7-alpine}"
 
@@ -38,7 +49,7 @@ APP_IMAGE_LOCAL="${APP_IMAGE_LOCAL:-dance-game-app:latest}"
 # ---------------------------------------------------------------------------
 # 全局状态
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR=""
 OS=""
 SUDO=""       # docker 命令前缀; 非 docker 组用户需要 sudo -E 保留环境变量
 SUDO_ROOT=""  # 系统级命令前缀(安装/启动服务)
@@ -76,6 +87,228 @@ setup_sudo() {
             fi
         fi
     fi
+}
+
+# ---------------------------------------------------------------------------
+# 项目自举: 一行管道运行时自动下载项目文件
+# ---------------------------------------------------------------------------
+have_curl() { command -v curl >/dev/null 2>&1; }
+have_wget() { command -v wget >/dev/null 2>&1; }
+
+# 下载到 stdout, 或 -o <file> 下载到文件; 优先 curl 后 wget
+http_get() {
+    local url="$1" out=""
+    if [ "${2:-}" = "-o" ]; then
+        out="${3:-}"
+    fi
+    if have_curl; then
+        if [ -n "$out" ]; then
+            curl -fsSL --connect-timeout 15 -o "$out" "$url"
+        else
+            curl -fsSL --connect-timeout 15 "$url"
+        fi
+    elif have_wget; then
+        if [ -n "$out" ]; then
+            wget -q --timeout=15 -O "$out" "$url"
+        else
+            wget -q --timeout=15 -O - "$url"
+        fi
+    else
+        return 1
+    fi
+}
+
+# 从仓库地址提取 owner/repo, 用于构造下载地址
+repo_path() {
+    printf '%s' "$1" | sed -e 's#^git@[^:]*:##' -e 's#^https\?://[^/]*/##' -e 's#\.git$##'
+}
+
+bootstrap_project() {
+    local dir="$1"
+
+    # 已在项目目录内直接运行(本地 clone / 源码目录)
+    if [ -f docker-compose.yml ] && [ -f .env.example ]; then
+        PROJECT_DIR="$(pwd)"
+        info "已在项目目录内运行: ${PROJECT_DIR}"
+        return 0
+    fi
+
+    # 复用之前生成过的安装目录
+    if [ -f "$dir/docker-compose.yml" ] && [ -f "$dir/.env" ]; then
+        PROJECT_DIR="$dir"
+        info "复用已下载的部署文件: ${PROJECT_DIR}"
+        return 0
+    fi
+
+    # 由脚本直接生成部署文件, 预构建镜像部署无需下载任何文件/代码
+    info "生成部署文件到 ${dir} ..."
+    mkdir -p "$dir"
+
+    cat > "$dir/docker-compose.yml" <<'COMPOSE_EOF'
+# 由 install.sh 自动生成, 与仓库 docker-compose.yml 保持同步
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.0}
+    container_name: dance-game-mysql
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-password}
+      MYSQL_DATABASE: game_db
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      # MySQL 数据目录外置,容器重建不丢数据
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: dance-game-redis
+    restart: unless-stopped
+    command: ["sh", "-c", 'if [ -n "$$REDIS_PASSWORD" ]; then exec redis-server --requirepass "$$REDIS_PASSWORD"; else exec redis-server; fi']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping | grep PONG; else redis-cli ping | grep PONG; fi']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-dance-game-app:latest}
+    container_name: dance-game-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: game_db
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      LOGIN_USERNAME: ${LOGIN_USERNAME:-admin}
+      LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
+      # 服务端口:默认 80,修改后同时生效于容器内监听端口与宿主机映射
+      SERVER_PORT: ${SERVER_PORT:-80}
+      # JWT 密钥:留空则首次运行自动生成并持久化到宿主机 ./data/jwt(挂载在 /var/tmp/jwt),重启复用
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/var/tmp/jwt/dance-game-jwt-secret.key}
+      # 上传文件路径(挂载到容器外,容器重建不丢)
+      FILE_UPLOAD_PATH: /app/upload
+    volumes:
+      - app-upload:/app/upload
+      # JWT 密钥文件持久化到宿主机目录,容器重建不重新生成密钥(避免旧 token 全部失效)
+      - ./data/jwt:/var/tmp/jwt
+    ports:
+      - "${SERVER_PORT:-80}:${SERVER_PORT:-80}"
+
+volumes:
+  mysql-data:
+  app-upload:
+  redis-data:
+COMPOSE_EOF
+
+    cat > "$dir/.env" <<'ENV_EOF'
+# 由 install.sh 自动生成, 按需修改
+
+# MySQL root 密码(默认 password)
+MYSQL_PASSWORD=password
+
+# Redis 密码(默认无密码,留空即可)
+REDIS_PASSWORD=
+
+# 系统登录账号
+LOGIN_USERNAME=admin
+LOGIN_PASSWORD=123456
+
+# 服务端口(容器内监听与宿主机映射一致,默认 80)
+SERVER_PORT=80
+
+# JWT 签名密钥:留空则首次运行自动生成随机密钥并持久化到宿主机目录(Docker 下为 ./data/jwt)
+# 显式设置后优先级最高,适用于多实例共享同一密钥等场景
+JWT_SECRET_KEY=
+
+# 自动生成密钥的持久化文件路径(宿主机目录挂载点,默认 Docker 内 /var/tmp/jwt)
+JWT_SECRET_FILE=/var/tmp/jwt/dance-game-jwt-secret.key
+ENV_EOF
+
+    if [ ! -f "$dir/docker-compose.yml" ] || [ ! -f "$dir/.env" ]; then
+        rm -rf "$dir" 2>/dev/null || true
+        die "部署文件生成失败, 请检查 ${dir} 目录权限"
+    fi
+    PROJECT_DIR="$dir"
+    info "部署文件生成完成"
+}
+
+# 本地构建镜像前确保有完整源码(git clone -> tarball)
+ensure_source() {
+    local dir="$PROJECT_DIR"
+    if [ -f "$dir/Dockerfile" ] && [ -f "$dir/pom.xml" ]; then
+        return 0
+    fi
+
+    info "本地构建需要完整源码, 开始下载项目代码到 ${dir} ..."
+    if ! command -v git >/dev/null 2>&1 && ! have_curl && ! have_wget; then
+        die "需要 git / curl / wget 下载源码, 请先安装"
+    fi
+    rm -rf "$dir" 2>/dev/null || true
+
+    # 方式 A: git clone
+    if command -v git >/dev/null 2>&1; then
+        info "通过 git 下载项目: ${REPO_URL} (分支 ${REPO_BRANCH})"
+        if git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$dir" >/dev/null 2>&1; then
+            info "源码下载完成"
+            return 0
+        fi
+        warn "git clone 失败, 尝试 tarball 下载..."
+        rm -rf "$dir" 2>/dev/null || true
+    fi
+
+    # 方式 B: tarball 下载并解压
+    local path tgz parent tmp extracted="" e
+    path="$(repo_path "$REPO_URL")"
+    if printf '%s' "$REPO_URL" | grep -q "gitee"; then
+        tgz="${REPO_TARBALL_URL:-https://gitee.com/${path}/repository/archive/${REPO_BRANCH}.tar.gz}"
+    else
+        tgz="${REPO_TARBALL_URL:-https://codeload.github.com/${path}/tar.gz/refs/heads/${REPO_BRANCH}}"
+    fi
+    parent="$(dirname "$dir")"
+    mkdir -p "$parent"
+    tmp="$(mktemp -d)" || die "无法创建临时目录"
+    info "通过 tarball 下载项目: ${tgz}"
+    if (cd "$tmp" && http_get "$tgz" | tar -xz) >/dev/null 2>&1; then
+        for e in "$tmp"/*/; do
+            [ -d "$e" ] || continue
+            extracted="$e"
+            break
+        done
+    fi
+    if [ -n "$extracted" ]; then
+        mv "$extracted" "$dir" || die "解压项目失败"
+        rm -rf "$tmp"
+        info "源码下载完成"
+        return 0
+    fi
+    rm -rf "$tmp" 2>/dev/null || true
+    die "源码下载失败, 请手动执行: git clone ${REPO_URL} ${dir}"
 }
 
 # ---------------------------------------------------------------------------
@@ -146,27 +379,48 @@ ensure_docker() {
 }
 
 install_docker_linux() {
-    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    if ! have_curl && ! have_wget; then
         die "需要 curl 或 wget 才能安装 Docker, 请先安装"
     fi
-    TMP_SCRIPT="$(mktemp)"
-    info "下载 Docker 官方安装脚本..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --connect-timeout 15 https://get.docker.com -o "$TMP_SCRIPT" \
-            || die "下载 https://get.docker.com 失败, 请检查网络"
-    else
-        wget -q --timeout=15 -O "$TMP_SCRIPT" https://get.docker.com \
-            || die "下载 https://get.docker.com 失败, 请检查网络"
-    fi
-    info "执行 Docker 安装(优先阿里云镜像源)..."
-    if ! $SUDO_ROOT sh "$TMP_SCRIPT" --mirror Aliyun; then
+    TMP_SCRIPT="$(mktemp)" || die "无法创建临时文件"
+    local mirror="${DOCKER_INSTALL_MIRROR:-Aliyun}"
+
+    # 1) 官方一键脚本 get.docker.com, 优先阿里云镜像源(国内成功率最高)
+    info "下载 Docker 官方安装脚本(get.docker.com)..."
+    if http_get "https://get.docker.com" -o "$TMP_SCRIPT"; then
+        info "执行 Docker 安装(--mirror ${mirror})..."
+        if $SUDO_ROOT sh "$TMP_SCRIPT" --mirror "$mirror"; then
+            post_docker_install
+            return 0
+        fi
         warn "阿里云镜像源安装失败, 尝试默认源..."
-        $SUDO_ROOT sh "$TMP_SCRIPT" || die "Docker 安装脚本执行失败, 请手动安装"
+        if $SUDO_ROOT sh "$TMP_SCRIPT"; then
+            post_docker_install
+            return 0
+        fi
+        warn "官方脚本安装失败..."
+    else
+        warn "get.docker.com 下载失败..."
     fi
+
+    # 2) DaoCloud 镜像脚本兜底(国内可达性更好)
+    info "改用 DaoCloud 安装脚本(get.daocloud.io)..."
+    if http_get "https://get.daocloud.io/docker" -o "$TMP_SCRIPT" \
+        && $SUDO_ROOT sh "$TMP_SCRIPT"; then
+        post_docker_install
+        return 0
+    fi
+
+    die "Docker 安装失败, 请手动安装: https://docs.docker.com/engine/install/"
+}
+
+# 安装成功后的收尾: 非 root 用户加入 docker 组
+post_docker_install() {
     if [ "$(id -u)" -ne 0 ]; then
         $SUDO_ROOT usermod -aG docker "$(id -un)" 2>/dev/null || true
         warn "已将当前用户加入 docker 组(重新登录后可不加 sudo 使用 docker)"
     fi
+    info "Docker 安装完成"
 }
 
 install_docker_macos() {
@@ -241,16 +495,20 @@ install_compose_linux() {
         $SUDO_ROOT yum install -y docker-compose-plugin >/dev/null 2>&1 && return 0
     fi
 
-    # 兜底: 下载官方 docker compose 二进制(cli 插件)
-    if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+    # 兜底: 下载官方 docker compose 二进制(cli 插件), GitHub 失败回退 DaoCloud 镜像
+    if have_curl || have_wget; then
         local url="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
+        local url_cn="https://get.daocloud.io/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
         local tmp
         tmp="$(mktemp)"
         info "从 GitHub 下载 docker compose 插件: ${url}"
-        if command -v curl >/dev/null 2>&1; then
-            curl -fsSL --connect-timeout 15 -o "$tmp" "$url" || { rm -f "$tmp"; warn "GitHub 下载失败"; return 1; }
-        else
-            wget -q --timeout=15 -O "$tmp" "$url" || { rm -f "$tmp"; warn "GitHub 下载失败"; return 1; }
+        if ! http_get "$url" -o "$tmp"; then
+            warn "GitHub 下载失败, 尝试 DaoCloud 镜像..."
+            if ! http_get "$url_cn" -o "$tmp"; then
+                rm -f "$tmp"
+                warn "docker compose 二进制下载失败"
+                return 1
+            fi
         fi
         $SUDO_ROOT mkdir -p /usr/local/lib/docker/cli-plugins
         $SUDO_ROOT install -m 0755 "$tmp" /usr/local/lib/docker/cli-plugins/docker-compose
@@ -308,7 +566,7 @@ ensure_strong_password() {
     warn "当前 ${key} 为默认值或强度不足(至少 8 位且需包含数字和字母), 需要重新设置"
 
     # 非交互场景: 通过同名环境变量提供
-    new="${!key:-}"
+    eval "new=\${$key:-}"
     if [ -n "$new" ]; then
         if password_ok "$new"; then
             set_env "$key" "$new"
@@ -318,15 +576,30 @@ ensure_strong_password() {
         die "环境变量 ${key} 不符合强度要求(至少 8 位, 且同时包含数字和字母)"
     fi
 
-    if [ ! -t 0 ]; then
+    # 既没有终端输入, 也没有控制终端时, 视为非交互环境
+    if [ ! -t 0 ] && [ ! -e /dev/tty ]; then
         die "当前为非交互环境, 请通过环境变量 ${key} 提供至少 8 位、含数字和字母的密码"
     fi
 
     while :; do
-        printf '请输入新的%s (至少 8 位, 需包含数字和字母): ' "$desc"
-        if ! read -rs new; then
-            printf '\n'
-            die "未输入密码, 已中止"
+        printf '请输入新的%s (至少 8 位, 需包含数字和字母, 输入不回显): ' "$desc"
+        # 兼容两种场景:
+        #   - ./install.sh 直接运行: 标准输入即终端
+        #   - curl ... | sh 管道运行: 标准输入已被脚本占用, 改用 /dev/tty 读取
+        # 隐藏回显用 stty(避免依赖 read -s, dash 不支持)
+        if [ -e /dev/tty ]; then
+            stty -echo < /dev/tty 2>/dev/null || true
+            if ! read -r new < /dev/tty; then
+                stty echo < /dev/tty 2>/dev/null || true
+                printf '\n'
+                die "未输入密码, 已中止"
+            fi
+            stty echo < /dev/tty 2>/dev/null || true
+        else
+            if ! read -r new; then
+                printf '\n'
+                die "未输入密码, 已中止"
+            fi
         fi
         printf '\n'
         if password_ok "$new"; then
@@ -436,17 +709,15 @@ build_and_deploy() {
 }
 
 print_success() {
-    local user pass mpass
+    local user pass
     user="$(get_env LOGIN_USERNAME admin)"
     pass="$(get_env LOGIN_PASSWORD 123456)"
-    mpass="$(get_env MYSQL_PASSWORD password)"
     info ""
     info "================================================================"
     info "部署成功!"
     info "  访问地址  : http://localhost:${SERVER_PORT}"
     info "  登录账号  : ${user}"
     info "  登录密码  : ${pass}"
-    info "  MySQL密码 : ${mpass}"
     info ""
     info "  查看日志  : $SUDO $COMPOSE_CMD logs -f app"
     info "  停止服务  : $SUDO $COMPOSE_CMD down"
@@ -457,7 +728,8 @@ print_success() {
 # 主流程
 # ---------------------------------------------------------------------------
 main() {
-    cd "$SCRIPT_DIR"
+    bootstrap_project "$INSTALL_DIR"
+    cd "$PROJECT_DIR" || die "无法进入项目目录: ${PROJECT_DIR}"
     detect_os
     setup_sudo
     ensure_docker
@@ -476,6 +748,8 @@ main() {
         exit 0
     fi
 
+    # 方式 3: 本地构建镜像(此时才需要完整源码)
+    ensure_source
     if build_and_deploy; then
         print_success
         exit 0

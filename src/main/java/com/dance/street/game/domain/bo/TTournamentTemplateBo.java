@@ -19,7 +19,7 @@ public class TTournamentTemplateBo {
     private String name;
 
     /**
-     * 模版编码:AUDITION_32 / AUDITION_16
+     * 模版编码:AUDITION_32 / AUDITION_16 / AUDITION_ARENA
      */
     @NotBlank(message = "模版编码不能为空")
     private String templateCode;

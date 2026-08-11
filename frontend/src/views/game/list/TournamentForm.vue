@@ -301,6 +301,12 @@ const templates = [
     label: '16人淘汰赛',
     tag: '精简',
     stages: ['海选', '16强', '8强', '半决赛', '决赛']
+  },
+  {
+    code: 'AUDITION_ARENA',
+    label: '32人擂台赛',
+    tag: '擂台',
+    stages: ['海选', '32强', '16强', '擂台赛']
   }
 ];
 

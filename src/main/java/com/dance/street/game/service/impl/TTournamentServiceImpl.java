@@ -78,6 +78,13 @@ public class TTournamentServiceImpl implements ITTournamentService {
             new StageDef("半决赛", "KNOCKOUT", 4L, 2L),
             new StageDef("决赛", "KNOCKOUT", 2L, 1L)
         ));
+        // 海选 → 32强 → 16强 → 擂台赛(淘汰至 8 人后进擂台)
+        m.put("AUDITION_ARENA", List.of(
+            new StageDef("海选", "AUDITION", 40L, 32L),
+            new StageDef("32强", "KNOCKOUT", 32L, 16L),
+            new StageDef("16强", "KNOCKOUT", 16L, 8L),
+            new StageDef("擂台赛", "ARENA", 8L, 1L)
+        ));
         return m;
     }
 
@@ -201,24 +208,24 @@ public class TTournamentServiceImpl implements ITTournamentService {
         TVisSceneVo mainScene = createScene(tid, "主视觉", 1L);
         TVisSceneVo bracketScene = createScene(tid, "对战", 2L);
 
-        // 4. 对战场景:每个淘汰赛赛段一个对战树 widget,层叠摆放——
-        //    最外层(人数最多)最大,向内快速收缩(参考已手动调好的 353),统一居中(960,540)对齐
-        long[][] layerSizes = {
-            {1870, 1030}, // 第 1 个淘汰赛(32强/16强)
-            {1480, 950},  // 16强
-            {1090, 820},  // 8强
-            {680, 570},   // 半决赛
-            {390, 180}    // 决赛
-        };
+        // 4. 对战场景:每个淘汰赛赛段一个对战树 widget,按 2 列网格排布——
+        //    各 widget 坐标互不重叠(32强/16强等不再共用中心点互相遮挡),
+        //    网格行数随淘汰赛赛段数量自动扩展,任意模板都适用
+        int cols = 2;
+        int gridGap = 25;
+        int knockoutCount = (int) stages.stream().filter(s -> "KNOCKOUT".equals(s.getStageMode())).count();
+        int gridRows = Math.max(1, (knockoutCount + cols - 1) / cols);
+        long gridW = (1920L - (long) gridGap * (cols + 1)) / cols;
+        long gridH = (1080L - (long) gridGap * (gridRows + 1)) / gridRows;
         int idx = 0;
         for (TStageVo stage : stages) {
             if (!"KNOCKOUT".equals(stage.getStageMode())) {
                 continue;
             }
-            long w = layerSizes[Math.min(idx, layerSizes.length - 1)][0];
-            long h = layerSizes[Math.min(idx, layerSizes.length - 1)][1];
-            long x = Math.round(960.0 - w / 2.0);
-            long y = Math.round(540.0 - h / 2.0);
+            int col = idx % cols;
+            int row = idx / cols;
+            long x = gridGap + (long) col * (gridW + gridGap);
+            long y = gridGap + (long) row * (gridH + gridGap);
             TVisWidgetBo wb = new TVisWidgetBo();
             wb.setTournamentId(tid);
             wb.setSceneId(bracketScene.getId());
@@ -229,8 +236,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
             wb.setRenderConfig("{}");
             wb.setX(x);
             wb.setY(y);
-            wb.setW(w);
-            wb.setH(h);
+            wb.setW(gridW);
+            wb.setH(gridH);
             wb.setZIndex((long) (idx + 1));
             wb.setVisible(1L);
             wb.setLocked(0L);
@@ -325,6 +332,16 @@ public class TTournamentServiceImpl implements ITTournamentService {
                 + "\"aggregateRule\":\"SUM\",\"refereeAggregateRule\":\"SUM\"},"
                 + "\"transition\":{\"mode\":\"AUTO\",\"reshuffle\":false},"
                 + "\"advanceCount\":" + d.end() + "}";
+        }
+        if ("ARENA".equals(d.mode())) {
+            // 擂台赛:不生成对阵,开始后由导播台逐场创建对决;
+            // 配置与前端 ArenaStageConfig 默认值对齐(后端当前仅读胜负结算,其余为展示/预留)
+            return "{\"mode\":\"ARENA\",\"format\":\"BO1\","
+                + "\"challengerCount\":" + d.start() + ","
+                + "\"maxChallenges\":3,\"challengeOrder\":\"RANDOM\","
+                + "\"winStreakBonus\":10,\"defenseBonus\":5,"
+                + "\"allowDefenderRest\":true,\"allowRechallenge\":false,\"timeoutReplacement\":true,"
+                + "\"transition\":{\"mode\":\"AUTO\",\"reshuffle\":false}}";
         }
         return "{\"mode\":\"KNOCKOUT\",\"format\":\"BO1\","
             + "\"scoring\":{\"type\":\"WIN_LOSS_DRAW\",\"matchMode\":\"STANDARD\"},"

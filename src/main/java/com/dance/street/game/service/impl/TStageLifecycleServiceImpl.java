@@ -14,11 +14,15 @@ import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.bo.AddGuestBo;
 import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
+import com.dance.street.game.domain.bo.TCompetitorBo;
+import com.dance.street.game.domain.bo.TCompetitorMemberBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
+import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.engine.common.GroupConfig;
 import com.dance.street.game.engine.common.PromotionTarget;
 import com.dance.street.game.engine.common.TransitionConfig;
@@ -42,6 +46,8 @@ import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.service.ITCompetitorMemberService;
+import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.RefereeSseNotifier;
@@ -78,6 +84,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final TMatchRoundMapper matchRoundMapper;
     private final TPlayerMapper playerMapper;
     private final TRoundScoreMapper roundScoreMapper;
+    private final ITCompetitorService competitorService;
+    private final ITCompetitorMemberService competitorMemberService;
     private final StageGeneratorFactory generatorFactory = new StageGeneratorFactory();
     private final ITScoredMatchService scoredMatchService;
     private final RefereeSseNotifier refereeSseNotifier;
@@ -735,6 +743,88 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (target == null) {
             return;
         }
+        appendParticipantWithRound(target, competitorId);
+        log.info("海选赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());
+        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TCompetitorVo addGuest(AddGuestBo bo) {
+        TStage stage = mustGetStage(bo.getStageId());
+        // 嘉宾禁止加入海选(海选走签到/补签到流程)
+        if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("海选赛段不支持嘉宾加入");
+        }
+        // 仅赛段中间态(PENDING/GAMING)可加入:未初始化或已结算/取消均拒绝
+        if (!StageConstants.STAGE_PENDING.equals(stage.getStatus())
+            && !StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
+            throw new ServiceException("仅赛段中间态(PENDING/GAMING)可加入嘉宾,当前状态: {}", stage.getStatus());
+        }
+        if (bo.getName() == null || bo.getName().isBlank()) {
+            throw new ServiceException("嘉宾名称不能为空");
+        }
+
+        // 1. 创建参赛单位:嘉宾标记 GUEST、种子排到队尾
+        TCompetitorBo cbo = new TCompetitorBo();
+        cbo.setTournamentId(stage.getTournamentId());
+        cbo.setStageId(stage.getId());
+        cbo.setType(bo.getType() == null ? 0L : bo.getType());
+        cbo.setName(bo.getName().trim());
+        cbo.setNumber(StringUtils.isNotBlank(bo.getNumber()) ? bo.getNumber().trim() : nextGuestNumber(stage));
+        cbo.setSeedRank(nextSeedRank(stage));
+        cbo.setRemark("GUEST");
+        TCompetitorVo vo = competitorService.insertByBo(cbo);
+        Long competitorId = vo.getId();
+
+        // 2. 可选:关联选手(校验选手属于当前赛事)
+        if (bo.getPlayerId() != null) {
+            TPlayer player = playerMapper.selectById(bo.getPlayerId());
+            if (player == null || !Objects.equals(stage.getTournamentId(), player.getTournamentId())) {
+                throw new ServiceException("选手不存在或不属于当前赛事");
+            }
+            TCompetitorMemberBo mbo = new TCompetitorMemberBo();
+            mbo.setTournamentId(stage.getTournamentId());
+            mbo.setCompetitorId(competitorId);
+            mbo.setPlayerId(player.getId());
+            mbo.setRole("MEMBER");
+            competitorMemberService.insertByBo(mbo);
+        }
+
+        // 3. 已生成对阵:按赛制把嘉宾挂入未结算场次
+        long matchCount = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId()));
+        if (matchCount > 0) {
+            StageModeEnum mode = StageModeEnum.fromCode(stage.getStageMode());
+            if (StageModeEnum.KNOCKOUT.equals(mode)) {
+                appendToLeastPopulatedMatch(stage, competitorId);
+            } else if (StageModeEnum.GROUP.equals(mode)) {
+                appendToGroupMatches(stage, competitorId);
+            }
+            // ARENA 等轮转制:queue 由全部参赛方实时计算,无需挂入场次
+        }
+
+        log.info("嘉宾[{}](id={})加入赛段[{}]({})", bo.getName().trim(), competitorId, stage.getId(), stage.getStageMode());
+        tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
+        return vo;
+    }
+
+    /** 追加参赛方:仅新增 participant,复用场次已有轮次(淘汰赛/小组赛一个场次一个通用轮次) */
+    private void appendParticipant(TMatch target, Long competitorId) {
+        long nextSlot = nextSlotIndex(target);
+        TMatchParticipant p = new TMatchParticipant();
+        p.setTenantId(target.getTenantId());
+        p.setTournamentId(target.getTournamentId());
+        p.setMatchId(target.getId());
+        p.setCompetitorId(competitorId);
+        p.setDisplaySlotIndex(nextSlot);
+        p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
+        participantMapper.insert(p);
+        log.info("参赛方[{}]追加到场次[{}](slot={})", competitorId, target.getId(), nextSlot);
+    }
+
+    /** 追加参赛方并新建轮次(海选补签到:每个参赛方一个独立轮次,裁判逐选手打分) */
+    private void appendParticipantWithRound(TMatch target, Long competitorId) {
         long nextSlot = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
                 .eq(TMatchParticipant::getMatchId, target.getId())
                 .select(TMatchParticipant::getDisplaySlotIndex))
@@ -748,26 +838,140 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
         TMatchParticipant p = new TMatchParticipant();
         p.setTenantId(target.getTenantId());
-        p.setTournamentId(stage.getTournamentId());
+        p.setTournamentId(target.getTournamentId());
         p.setMatchId(target.getId());
         p.setCompetitorId(competitorId);
         p.setDisplaySlotIndex(nextSlot);
         p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
         participantMapper.insert(p);
 
-        // 海选每个参赛方一个独立轮次,裁判逐选手打分
+        // 每个参赛方一个独立轮次,裁判逐选手打分
         TMatchRound round = new TMatchRound();
         round.setTenantId(target.getTenantId());
-        round.setTournamentId(stage.getTournamentId());
+        round.setTournamentId(target.getTournamentId());
         round.setMatchId(target.getId());
         round.setRoundSequence(nextRound);
         round.setCompetitorId(competitorId);
         round.setStatus(target.getStatus());
         matchRoundMapper.insert(round);
 
-        log.info("海选赛段[{}]补签到:参赛方[{}]挂入场次[{}](slot={},round={})",
-            stageId, competitorId, target.getId(), nextSlot, nextRound);
-        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
+        log.info("参赛方[{}]挂入场次[{}](slot={},round={})", competitorId, target.getId(), nextSlot, nextRound);
+    }
+
+    /** 场次内下一可用展示位 */
+    private long nextSlotIndex(TMatch target) {
+        return participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, target.getId())
+                .select(TMatchParticipant::getDisplaySlotIndex))
+            .stream().mapToLong(p -> p.getDisplaySlotIndex() == null ? 0L : p.getDisplaySlotIndex())
+            .max().orElse(0L) + 1L;
+    }
+
+    /**
+     * 淘汰赛:把嘉宾挂入当前未结算(非加赛)的场次中参与人数最少的一场。
+     * 该场结算后,胜者(含嘉宾)按 promotion_rule 正常晋级/填下游。
+     */
+    private void appendToLeastPopulatedMatch(TStage stage, Long competitorId) {
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .orderByAsc(TMatch::getId));
+        TMatch target = leastPopulatedUnsettledMatch(stage, matches, competitorId);
+        if (target == null) {
+            log.warn("赛段[{}]无可挂入的未结算场次,嘉宾[{}]仅创建参赛单位", stage.getId(), competitorId);
+            return;
+        }
+        appendParticipant(target, competitorId);
+        tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), target.getId(), "match");
+    }
+
+    /**
+     * 小组赛:把嘉宾挂入参与人数最少小组的全部未结算场次,补齐剩余轮次对阵。
+     */
+    private void appendToGroupMatches(TStage stage, Long competitorId) {
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .orderByAsc(TMatch::getId));
+        List<TMatch> candidates = unsettledMatches(stage, matches, competitorId);
+        if (candidates.isEmpty()) {
+            log.warn("赛段[{}]无可挂入的未结算场次,嘉宾[{}]仅创建参赛单位", stage.getId(), competitorId);
+            return;
+        }
+        // 按 displayZone(G1/G2...) 分组,取参与人数最少的组
+        Map<String, Long> countByZone = new HashMap<>();
+        for (TMatch m : candidates) {
+            String zone = m.getDisplayZone() == null ? "" : m.getDisplayZone();
+            long cnt = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, m.getId()));
+            countByZone.merge(zone, cnt, Long::sum);
+        }
+        String targetZone = countByZone.entrySet().stream()
+            .min(Map.Entry.comparingByValue())
+            .map(Map.Entry::getKey).orElse("");
+        int appended = 0;
+        for (TMatch m : candidates) {
+            String zone = m.getDisplayZone() == null ? "" : m.getDisplayZone();
+            if (targetZone.equals(zone)) {
+                appendParticipant(m, competitorId);
+                appended++;
+                tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), m.getId(), "match");
+            }
+        }
+        log.info("小组赛[{}]嘉宾[{}]挂入组[{}]未结算场次 {} 场", stage.getId(), competitorId, targetZone, appended);
+    }
+
+    /** 过滤未结算、非同分加赛、且尚未包含该参赛方的场次,返回其中参与人数最少的一场 */
+    private TMatch leastPopulatedUnsettledMatch(TStage stage, List<TMatch> matches, Long competitorId) {
+        List<TMatch> candidates = unsettledMatches(stage, matches, competitorId);
+        TMatch target = null;
+        long minCount = Long.MAX_VALUE;
+        for (TMatch m : candidates) {
+            long cnt = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, m.getId()));
+            if (cnt < minCount) {
+                minCount = cnt;
+                target = m;
+            }
+        }
+        return target;
+    }
+
+    /** 未结算、非同分加赛、且尚未包含该参赛方的场次 */
+    private List<TMatch> unsettledMatches(TStage stage, List<TMatch> matches, Long competitorId) {
+        if (matches.isEmpty()) {
+            return List.of();
+        }
+        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
+        long existed = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+            .in(TMatchParticipant::getMatchId, matchIds)
+            .eq(TMatchParticipant::getCompetitorId, competitorId));
+        if (existed > 0) {
+            return List.of();
+        }
+        return matches.stream()
+            .filter(m -> !StageConstants.MATCH_SETTLED.equals(m.getStatus()))
+            .filter(m -> !(StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛")))
+            .toList();
+    }
+
+    /** 嘉宾选手号:留空时按本赛段最大数字型选手号 +1 生成,前缀 G 与常规选手区分 */
+    private String nextGuestNumber(TStage stage) {
+        long maxNum = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stage.getId())
+                .select(TCompetitor::getNumber))
+            .stream().map(TCompetitor::getNumber)
+            .filter(n -> n != null && n.matches("\\d+"))
+            .mapToLong(Long::parseLong)
+            .max().orElse(0L);
+        return "G" + (maxNum + 1);
+    }
+
+    /** 下一可用种子顺位(嘉宾排到队尾) */
+    private long nextSeedRank(TStage stage) {
+        return competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stage.getId())
+                .select(TCompetitor::getSeedRank))
+            .stream().mapToLong(c -> c.getSeedRank() == null ? 0L : c.getSeedRank())
+            .max().orElse(0L) + 1L;
     }
 
     @Override

@@ -100,7 +100,7 @@
             <template v-else-if="currentStage && getStageConfigComponent(currentStage.stageMode)">
               <!-- 选手列表 -->
               <div class="mb-4">
-                <StageCompetitorList :key="'comp-' + currentStage.id" :stage-id="currentStage.id" />
+                <StageCompetitorList :key="'comp-' + currentStage.id" :stage-id="currentStage.id" :stage-mode="currentStage.stageMode" />
               </div>
 
               <component

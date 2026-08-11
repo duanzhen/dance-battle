@@ -26,6 +26,8 @@ import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
+import com.dance.street.game.domain.bo.AddGuestBo;
+import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
@@ -235,5 +237,19 @@ public class TStageController extends BaseController {
         CalculateAdvancementBo bo = new CalculateAdvancementBo();
         bo.setStageId(id);
         return R.ok(tStageLifecycleService.calculateAdvancement(bo));
+    }
+
+    /**
+     * 嘉宾加入:除海选外任意赛段,在赛段中间态(PENDING/GAMING)加入;
+     * 已生成对阵时按赛制自动挂入未结算场次(淘汰赛/小组赛),擂台赛由轮转队列自动纳入。
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "赛段嘉宾", businessType = BusinessType.INSERT)
+    @RepeatSubmit()
+    @PostMapping("/{stageId}/guest")
+    public R<TCompetitorVo> addGuest(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
+                                     @Validated @RequestBody AddGuestBo bo) {
+        bo.setStageId(stageId);
+        return R.ok(tStageLifecycleService.addGuest(bo));
     }
 }

@@ -3,7 +3,17 @@
     <!-- 头部 -->
     <div class="flex-none px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
       <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
-      <div class="flex items-center gap-2 text-xs">
+      <div class="flex items-center gap-3 text-xs">
+        <el-button
+          type="warning"
+          size="small"
+          class="!h-7 !px-3 !text-xs"
+          :disabled="isAudition"
+          :title="isAudition ? '海选赛段不支持嘉宾加入' : '赛段中间态(PENDING/GAMING)可加入嘉宾'"
+          @click="openGuestDialog"
+        >
+          添加嘉宾
+        </el-button>
         <span class="text-neutral-500">共</span>
         <span class="text-amber-500 font-mono">{{ competitors.length }}</span>
         <span class="text-neutral-500">名</span>
@@ -50,8 +60,12 @@
                       class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-green-500/10 text-green-500 border border-green-500/20">
                   个人
                 </span>
+                <span v-if="isGuest(competitor)"
+                      class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                  嘉宾
+                </span>
               </div>
-              <div v-if="competitor.remark" class="text-xs text-neutral-500 truncate">
+              <div v-if="competitor.remark && !isGuest(competitor)" class="text-xs text-neutral-500 truncate">
                 {{ competitor.remark }}
               </div>
             </div>
@@ -76,22 +90,92 @@
         </div>
       </div>
     </div>
+
+    <!-- 添加嘉宾弹窗 -->
+    <el-dialog
+      v-model="guestDialogVisible"
+      title="添加嘉宾"
+      width="420px"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="72px" @submit.prevent>
+        <el-form-item label="名称" required>
+          <el-input v-model="guestForm.name" placeholder="嘉宾名称" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-radio-group v-model="guestForm.type">
+            <el-radio :value="0">个人</el-radio>
+            <el-radio :value="1">队伍</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="选手号">
+          <el-input v-model="guestForm.number" placeholder="留空自动生成(G+序号)" maxlength="20" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button size="small" @click="guestDialogVisible = false">取消</el-button>
+        <el-button size="small" type="warning" :loading="guestSubmitting" @click="handleAddGuest">确认加入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
+import { ElMessage } from 'element-plus';
 import { listCompetitor } from '@/api/game/competitor';
+import { addStageGuest } from '@/api/game/stage';
 import { CompetitorVO } from '@/api/game/competitor/types';
 
 // Props
 const props = defineProps<{
   stageId: string | number;
+  stageMode?: string;
 }>();
 
 // 状态
 const loading = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
+
+// 海选赛段不支持嘉宾加入
+const isAudition = computed(() => props.stageMode === 'AUDITION');
+
+// 嘉宾标记:remark == GUEST(由后端 addGuest 写入)
+const isGuest = (competitor: CompetitorVO) => competitor.remark === 'GUEST';
+
+// 添加嘉宾弹窗
+const guestDialogVisible = ref(false);
+const guestSubmitting = ref(false);
+const guestForm = ref({ name: '', type: 0, number: '' });
+
+const openGuestDialog = () => {
+  guestForm.value = { name: '', type: 0, number: '' };
+  guestDialogVisible.value = true;
+};
+
+const handleAddGuest = async () => {
+  if (!guestForm.value.name.trim()) {
+    ElMessage.warning('请输入嘉宾名称');
+    return;
+  }
+  guestSubmitting.value = true;
+  try {
+    await addStageGuest(props.stageId, {
+      name: guestForm.value.name.trim(),
+      type: guestForm.value.type,
+      number: guestForm.value.number.trim() || undefined
+    });
+    ElMessage.success('嘉宾已加入赛段');
+    guestDialogVisible.value = false;
+    loadCompetitors();
+  } catch (error) {
+    console.error('添加嘉宾失败:', error);
+    ElMessage.error((error as any)?.message || '添加嘉宾失败');
+  } finally {
+    guestSubmitting.value = false;
+  }
+};
 
 // 加载参赛选手列表
 const loadCompetitors = async () => {

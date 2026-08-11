@@ -93,6 +93,24 @@ export const getArenaOverview = (stageId: string | number) => {
 };
 
 /**
+ * 嘉宾加入赛段(除海选外任意赛段,赛段中间态 PENDING/GAMING 可加)
+ * @param stageId 赛段ID
+ * @param data { name, type?, number?, playerId? }
+ */
+export const addStageGuest = (stageId: string | number, data: {
+  name: string;
+  type?: number;
+  number?: string;
+  playerId?: string | number;
+}) => {
+  return request({
+    url: '/game/stage/' + stageId + '/guest',
+    method: 'post',
+    data
+  });
+};
+
+/**
  * 下一赛段对战树预排:上一赛段胜者(含未最终确认)按种子顺位排入本赛段
  * @param stageId 要预排的(下一)赛段ID
  */

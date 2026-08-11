@@ -3,8 +3,10 @@ package com.dance.street.game.service;
 import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
+import com.dance.street.game.domain.bo.AddGuestBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
+import com.dance.street.game.domain.vo.TCompetitorVo;
 
 import java.util.List;
 
@@ -29,6 +31,13 @@ public interface ITStageLifecycleService {
      * 保证其可被裁判打分并参与最终结算。仅 AUDITION + GAMING 且已生成场次时生效,否则为空操作。
      */
     void appendAuditionCompetitor(Long stageId, Long competitorId);
+
+    /**
+     * 嘉宾加入:除海选外任意赛段,在赛段中间态(PENDING/GAMING)加入。
+     * 已生成对阵时按赛制自动挂入未结算场次(淘汰赛/小组赛),擂台赛由轮转队列自动纳入;
+     * 尚未生成对阵时仅创建参赛单位,后续生成对阵会包含嘉宾。
+     */
+    TCompetitorVo addGuest(AddGuestBo bo);
 
     /** 海选分圈随机抽取:把已签到选手随机均衡分配到各圈场次(可重抽,赛段未开始时) */
     List<CircleAssignVo> randomCircles(Long stageId);

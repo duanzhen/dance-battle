@@ -67,7 +67,7 @@
       <section>
         <span class="section-title">当前场次属性</span>
         <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-3">
-          <p class="text-[10px] text-amber-400">自动关联赛事当前进行(GAMING)的赛段与场次，无需手动绑定；每 5 秒自动刷新。</p>
+          <p class="text-[10px] text-amber-400">仅淘汰赛赛段显示，自动关联当前进行(GAMING)的场次，无需手动绑定；SSE 实时刷新。</p>
         </div>
         <div>
           <AssetUpload
@@ -79,7 +79,9 @@
             @update:model-value="$emit('update:bgImage', ($event as string))"
           />
         </div>
-        <p class="text-[10px] text-neutral-600 mt-2">显示当前赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像/实时比分，领先方高亮。无进行中场次时控件透明。</p>
+        <p class="text-[10px] text-neutral-600 mt-2">
+          显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像/实时比分，领先方高亮。非淘汰赛赛段或暂无进行中场次时控件保持透明。
+        </p>
       </section>
     </div>
   </div>
@@ -92,6 +94,7 @@ import AssetUpload from './common/AssetUpload.vue';
 import { getStageFlow } from '@/api/game/stage';
 import { listCompetitor } from '@/api/game/competitor';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
+import { StageMode } from '../stages/types';
 
 const route = useRoute();
 
@@ -120,16 +123,25 @@ const loadData = async () => {
     // 用赛程流转接口定位当前进行中赛段及其场次(大屏投射窗口没有路由 id,依赖组件注入)
     const flow: any = await getStageFlow(tournamentId.value);
     const data = flow.data;
+    const currentStage = (data?.stages || []).find((s: any) => s.id === data?.currentStageId);
+    lastStageId = currentStage?.id != null ? String(currentStage.id) : null;
+    stageName.value = currentStage?.name || '';
+    // 场次控件仅服务淘汰赛:非淘汰赛赛段(小组/海选/擂台等)保持透明
+    if (currentStage?.stageMode !== StageMode.KNOCKOUT) {
+      match.value = null;
+      participants.value = [];
+      lastMatchId = null;
+      return;
+    }
     const current = data?.currentMatch;
     if (!current) {
       match.value = null;
+      participants.value = [];
+      lastMatchId = null;
       return;
     }
     match.value = current;
-    const currentStage = (data?.stages || []).find((s: any) => s.id === data?.currentStageId);
-    lastStageId = currentStage?.id != null ? String(currentStage.id) : null;
     lastMatchId = current?.id != null ? String(current.id) : null;
-    stageName.value = currentStage?.name || '';
     roundSeq.value = 1;
     participants.value = ((data?.currentMatchParticipants || []) as any[])
       .slice()
@@ -172,13 +184,18 @@ const handleTournamentEvent = (data: any) => {
     loadData();
     return;
   }
-  // 尚未定位当前场次(如首屏加载时比赛未开始):任何赛事事件都尝试刷新,避免首屏未就绪后永远不显示
+  const sid = data.stageId != null ? String(data.stageId) : null;
+  const mid = data.matchId != null ? String(data.matchId) : null;
+  // 尚未定位当前赛段/场次(如首屏加载时比赛未开始):任何赛事事件都尝试刷新,避免首屏未就绪后永远不显示
   if (!lastStageId && !lastMatchId) {
     loadData();
     return;
   }
-  const sid = data.stageId != null ? String(data.stageId) : null;
-  const mid = data.matchId != null ? String(data.matchId) : null;
+  // 赛段级事件且赛段已切换(如从海选进入淘汰赛):刷新以切换显示/隐藏
+  if (!mid && sid && sid !== lastStageId) {
+    loadData();
+    return;
+  }
   if ((sid && sid === lastStageId) || (mid && mid === lastMatchId)) {
     loadData();
   }

@@ -1,5 +1,6 @@
 server:
-  port: 8080
+  # 服务端口,可用 SERVER_PORT 环境变量覆盖(Docker 默认 80,本地 jar 默认 8080)
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
@@ -34,6 +35,11 @@ mybatis-plus:
   global-config:
     banner: false
 
+# 启动时自动检查数据库与表结构,缺失则用 JDBC 兜底建库建表(读取 sql/game_db.sql)
+app:
+  schema-init:
+    enabled: ${SCHEMA_INIT_ENABLED:true}
+
 sa-token:
   # 单账号登录:无状态 JWT,前端通过 Authorization: Bearer <token> 携带
   token-name: Authorization
@@ -48,7 +54,8 @@ sa-token:
   token-prefix: Bearer
   # 不使用 cookie 存/读 token(纯 Authorization 头,避免 cookie 干扰)
   is-read-cookie: false
-  # JWT 签名密钥(生产环境务必通过 JWT_SECRET_KEY 环境变量覆盖)
+  # JWT 签名密钥:启动时由 JwtSecretInitializer 覆盖(优先 JWT_SECRET_KEY 环境变量,
+  # 否则读取/生成持久化密钥文件 JWT_SECRET_FILE),此处仅为无初始化器时的兜底值
   jwt-secret-key: ${JWT_SECRET_KEY:dance-game-jwt-secret-key-2026}
 
 sse:
@@ -59,6 +66,10 @@ sse:
 login:
   username: ${LOGIN_USERNAME:admin}
   password: ${LOGIN_PASSWORD:123456}
+  # 登录失败 IP 限流:窗口内同一 IP 连续失败达到上限后锁定该 IP,防止暴力破解
+  rate-limit:
+    max-failures: 5
+    window-minutes: 15
 
 # 本地文件上传(替代对象存储)
 file:

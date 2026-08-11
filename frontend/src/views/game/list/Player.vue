@@ -32,7 +32,16 @@
 
     <!-- 第二行：按钮和segmented -->
     <div class="flex justify-between items-center pb-4">
-      <span class="text-xs text-neutral-500">管理参赛选手名单及战队归属</span>
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-xs text-neutral-500">管理参赛选手名单及战队归属</span>
+        <span
+          v-if="auditionGaming"
+          class="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded text-[10px] text-amber-500 flex items-center gap-1 flex-shrink-0"
+        >
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+          海选进行中，签到后自动加入场次
+        </span>
+      </div>
       <div class="flex items-center gap-1">
         <el-button type="warning" size="small" :icon="Plus" @click="handleAdd" class="amber-button">添加选手</el-button>
         <el-button size="small" @click="showImportDialog = true" class="import-button">批量导入</el-button>
@@ -374,6 +383,12 @@ const currentCheckInPlayer = ref<PlayerVO | null>(null);
 const firstStageInfo = ref<{ stageMode?: string; status?: string; circles?: number } | null>(null);
 const circleResult = ref<CircleAssignVo[] | null>(null);
 const drawingCircles = ref(false);
+
+// 海选赛段已开始:提示签到后会自动加入当前场次继续参赛
+const auditionGaming = computed(() => {
+  const info = firstStageInfo.value;
+  return !!info && info.stageMode === 'AUDITION' && info.status === 'GAMING';
+});
 
 // 仅分圈海选、赛段未开始时显示"随机抽取圈"
 const canRandomCircles = computed(() => {

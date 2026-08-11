@@ -24,6 +24,12 @@ public interface ITStageLifecycleService {
     /** 赛段 PENDING→GAMING;淘汰赛只开第一场(逐场进行),其余赛制所有场次进入 GAMING */
     void startStage(Long stageId);
 
+    /**
+     * 海选赛段进行中补签到:把新参赛方挂入当前人数最少的圈场次(新增 participant + round),
+     * 保证其可被裁判打分并参与最终结算。仅 AUDITION + GAMING 且已生成场次时生效,否则为空操作。
+     */
+    void appendAuditionCompetitor(Long stageId, Long competitorId);
+
     /** 海选分圈随机抽取:把已签到选手随机均衡分配到各圈场次(可重抽,赛段未开始时) */
     List<CircleAssignVo> randomCircles(Long stageId);
 

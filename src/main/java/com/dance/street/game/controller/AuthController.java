@@ -3,6 +3,8 @@ package com.dance.street.game.controller;
 import cn.dev33.satoken.annotation.SaIgnore;
 import cn.dev33.satoken.stp.SaLoginModel;
 import cn.dev33.satoken.stp.StpUtil;
+import com.dance.street.game.config.LoginIpRateLimiter;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,8 @@ import java.util.Map;
 @RestController
 public class AuthController {
 
+    private final LoginIpRateLimiter loginIpRateLimiter;
+
     @Value("${login.username}")
     private String username;
 
@@ -33,10 +37,16 @@ public class AuthController {
     private String password;
 
     @PostMapping("/login")
-    public R<Map<String, Object>> login(@Validated @RequestBody LoginBody body) {
+    public R<Map<String, Object>> login(@Validated @RequestBody LoginBody body, HttpServletRequest request) {
+        String ip = loginIpRateLimiter.resolveIp(request);
+        if (loginIpRateLimiter.isBlocked(ip)) {
+            throw new ServiceException(loginIpRateLimiter.blockedMessage(ip));
+        }
         if (!username.equals(body.getUsername()) || !password.equals(body.getPassword())) {
+            loginIpRateLimiter.recordFailure(ip);
             throw new ServiceException("用户名或密码错误");
         }
+        loginIpRateLimiter.clear(ip);
         // 单账号:固定 loginId=1,userId 写入 JWT 载荷,供 LoginHelper.getUserId() 使用
         StpUtil.login(1L, new SaLoginModel().setExtra("userId", 1L));
         Map<String, Object> data = new HashMap<>();

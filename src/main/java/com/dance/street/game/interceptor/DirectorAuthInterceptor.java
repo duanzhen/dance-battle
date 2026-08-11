@@ -12,6 +12,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * 手机导播台认证拦截器：从 Authorization header(或 SSE 的 query 参数)提取赛事 authKey，
  * 校验后把赛事信息存入 request attribute。与裁判端独立，使用赛事自己的 auth_key。
  *
+ * <p>仅接受 {@code Authorization: Bearer <authKey>} 请求头,不使用 query 参数,
+ * 避免 authKey 出现在 URL/访问日志。/game/director/** 下无 SSE 端点,无需 query 兜底。</p>
+ *
  * @author duane
  */
 @Component
@@ -25,18 +28,11 @@ public class DirectorAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        String authHeader = request.getHeader("Authorization");
-        String authKey = null;
-        if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
-            authKey = authHeader.substring(BEARER_PREFIX.length()).trim();
-        } else {
-            // EventSource 无法自定义请求头,兼容 query 参数携带 authKey
-            authKey = request.getParameter("authKey");
-        }
+        String authKey = resolveAuthKey(request);
         if (authKey == null || authKey.isEmpty()) {
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write("{\"code\":401,\"msg\":\"请提供赛事认证凭证\"}");
+            response.getWriter().write("{\"code\":401,\"msg\":\"请通过 Authorization: Bearer <authKey> 提供赛事认证凭证\"}");
             return false;
         }
 
@@ -50,5 +46,14 @@ public class DirectorAuthInterceptor implements HandlerInterceptor {
 
         request.setAttribute(DIRECTOR_ATTR, tournament);
         return true;
+    }
+
+    /** 认证凭证仅从 Authorization 头解析,不使用 query 参数 */
+    private String resolveAuthKey(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
+            return authHeader.substring(BEARER_PREFIX.length()).trim();
+        }
+        return null;
     }
 }

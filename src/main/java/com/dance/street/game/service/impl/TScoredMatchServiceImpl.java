@@ -77,7 +77,8 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
                 // 裁判端无登录租户上下文,需显式带租户,否则 tenant_id 插入报错
                 rs.setTenantId(match.getTenantId());
                 rs.setCompetitorId(se.getCompetitorId());
-                rs.setRefereeId(se.getRefereeId() != null ? se.getRefereeId() : refId);
+                // 打分身份一律以服务端确定的 refId 为准,忽略客户端逐条提交的 refereeId
+                rs.setRefereeId(refId);
                 rs.setScore(se.getScore());
                 rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
                 rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);

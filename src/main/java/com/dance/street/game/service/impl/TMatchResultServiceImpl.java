@@ -90,6 +90,14 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         ScoringConfig sc = rc != null ? rc.getScoring() : null;
         MatchModeEnum mode = MatchModeEnum.fromCode(match.getMatchMode());
 
+        // 安全:打分明细里的 refereeId 一律以服务端确定的 bo.refereeId 为准,
+        // 清除客户端逐条提交的 refereeId,防止冒用其他裁判身份投票/打分
+        if (bo.getScores() != null) {
+            for (ScoreEntryBo se : bo.getScores()) {
+                se.setRefereeId(null);
+            }
+        }
+
         List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, match.getId()));
         List<Long> competitorIds = parts.stream()
@@ -156,7 +164,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                     rs.setRoundId(target.getId());
                     rs.setTenantId(match.getTenantId());
                     rs.setCompetitorId(se.getCompetitorId());
-                    rs.setRefereeId(se.getRefereeId() != null ? se.getRefereeId() : refId);
+                    rs.setRefereeId(refId);
                     rs.setScore(se.getScore());
                     rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
                     rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
@@ -181,7 +189,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 // 裁判端无登录租户上下文,需显式带租户,否则 tenant_id 插入报错
                 rs.setTenantId(match.getTenantId());
                 rs.setCompetitorId(se.getCompetitorId());
-                rs.setRefereeId(se.getRefereeId() != null ? se.getRefereeId() : bo.getRefereeId());
+                rs.setRefereeId(bo.getRefereeId());
                 rs.setScore(se.getScore());
                 rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
                 rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);

@@ -23,11 +23,15 @@ import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
+import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.service.ITPlayerService;
 import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITCompetitorMemberService;
+import com.dance.street.game.service.ITStageLifecycleService;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -51,6 +55,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
     private final ITStageService stageService;
     private final ITCompetitorMemberService competitorMemberService;
     private final TCompetitorMemberMapper competitorMemberMapper;
+    private final ITStageLifecycleService stageLifecycleService;
 
     /**
      * 查询选手自然人
@@ -204,6 +209,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
      * @return 签到后的选手信息
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TPlayerVo checkIn(CheckInBo bo) {
         // 1. 根据playerId查询player信息
         TPlayer player = baseMapper.selectById(bo.getPlayerId());
@@ -229,6 +235,12 @@ public class TPlayerServiceImpl implements ITPlayerService {
         TStageVo firstStage = stageService.getFirstStageByTournamentId(tournamentId);
         if (firstStage == null) {
             throw new RuntimeException("赛事没有设置赛段");
+        }
+        // 海选(首个赛段)已结束时禁止继续签到:迟到者无法再参与海选与后续晋级
+        if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())
+            && (StageConstants.STAGE_SETTLED.equals(firstStage.getStatus())
+                || StageConstants.STAGE_DISCARD.equals(firstStage.getStatus()))) {
+            throw new RuntimeException("海选已结束，无法继续签到");
         }
 
         Long competitorId;
@@ -257,6 +269,11 @@ public class TPlayerServiceImpl implements ITPlayerService {
             memberBo.setPlayerId(playerId);
             memberBo.setRole("MEMBER");
             competitorMemberService.insertByBo(memberBo);
+
+            // 海选已开始(场次已生成):把新签到选手挂入当前人数最少的圈场次,可被裁判打分并参与结算
+            if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())) {
+                stageLifecycleService.appendAuditionCompetitor(firstStage.getId(), competitorId);
+            }
 
         } else if ("JOIN".equalsIgnoreCase(checkInType)) {
             // 5.2 加入已有competitor

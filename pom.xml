@@ -163,6 +163,25 @@
 				<artifactId>maven-resources-plugin</artifactId>
 				<executions>
 					<execution>
+						<!-- 将 sql/game_db.sql 打进 jar(classpath:sql/game_db.sql),供启动时 JDBC 兜底建表 -->
+						<id>copy-sql-script</id>
+						<phase>process-resources</phase>
+						<goals>
+							<goal>copy-resources</goal>
+						</goals>
+						<configuration>
+							<outputDirectory>${project.build.outputDirectory}/sql</outputDirectory>
+							<resources>
+								<resource>
+									<directory>${project.basedir}/sql</directory>
+									<includes>
+										<include>game_db.sql</include>
+									</includes>
+								</resource>
+							</resources>
+						</configuration>
+					</execution>
+					<execution>
 						<id>copy-frontend-dist</id>
 						<phase>prepare-package</phase>
 						<goals>

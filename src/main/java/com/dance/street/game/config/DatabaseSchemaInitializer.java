@@ -1,0 +1,261 @@
+package com.dance.street.game.config;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
+
+import javax.sql.DataSource;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * 数据库 schema 启动自检 + JDBC 兜底初始化。
+ *
+ * <p>应用启动时检查数据库与业务表是否存在,缺失时读取 {@code sql/game_db.sql}
+ * 中的建表语句自动补齐,不依赖 MySQL 容器初始化脚本、也不依赖 Spring SQL Init,
+ * 因此无论是 Docker Compose、裸 jar 还是直连已有 MySQL 实例,表结构都能自动就绪。</p>
+ *
+ * <p>兜底逻辑全部基于原生 JDBC:</p>
+ * <ol>
+ *   <li>先尝试用主数据源连接;若报“数据库不存在”,用去掉库名的 URL 连接实例,
+ *       执行 {@code CREATE DATABASE IF NOT EXISTS} 建库;</li>
+ *   <li>逐表查询 {@code information_schema} 判断是否存在,缺失的表以
+ *       {@code CREATE TABLE IF NOT EXISTS} 创建(保留已有表与数据,绝不执行 DROP);</li>
+ *   <li>可开关: {@code app.schema-init.enabled=false} 或环境变量
+ *       {@code SCHEMA_INIT_ENABLED=false} 关闭。</li>
+ * </ol>
+ */
+@Slf4j
+@Component
+public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
+
+    /** 解析 CREATE TABLE 语句及表名(兼容带/不带反引号、IF NOT EXISTS) */
+    private static final Pattern CREATE_TABLE_PATTERN = Pattern.compile(
+        "(?is)^\\s*CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?`?([\\w$]+)`?");
+    private static final Pattern CREATE_TABLE_IF_NOT_EXISTS_PATTERN = Pattern.compile(
+        "(?is)^\\s*CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS");
+
+    private static final String SQL_RESOURCE_CLASSPATH = "sql/game_db.sql";
+    private static final String SQL_RESOURCE_FILESYSTEM = "sql/game_db.sql";
+
+    private final DataSource dataSource;
+    private final String jdbcUrl;
+    private final String jdbcUsername;
+    private final String jdbcPassword;
+    private final boolean enabled;
+
+    public DatabaseSchemaInitializer(
+        DataSource dataSource,
+        @Value("${spring.datasource.url:}") String jdbcUrl,
+        @Value("${spring.datasource.username:}") String jdbcUsername,
+        @Value("${spring.datasource.password:}") String jdbcPassword,
+        @Value("${app.schema-init.enabled:true}") boolean enabled) {
+        this.dataSource = dataSource;
+        this.jdbcUrl = jdbcUrl;
+        this.jdbcUsername = jdbcUsername;
+        this.jdbcPassword = jdbcPassword;
+        this.enabled = enabled;
+    }
+
+    /**
+     * 全部单例 Bean 实例化完成后执行(此时 DataSource/MyBatis 已就绪,Web 服务尚未对外),
+     * 保证业务请求到达前表结构已就绪。
+     */
+    @Override
+    public void afterSingletonsInstantiated() {
+        if (!enabled) {
+            log.info("数据库 schema 自动初始化已关闭(app.schema-init.enabled=false)");
+            return;
+        }
+        String script = loadSqlScript();
+        List<String> ddlList = parseCreateTableStatements(script);
+        if (ddlList.isEmpty()) {
+            log.warn("sql/game_db.sql 中未解析到任何 CREATE TABLE 语句,跳过 schema 初始化");
+            return;
+        }
+
+        ensureDatabase();
+
+        int created = 0;
+        int existed = 0;
+        int failed = 0;
+        try (Connection connection = dataSource.getConnection()) {
+            for (String ddl : ddlList) {
+                String table = extractTableName(ddl);
+                try {
+                    if (tableExists(connection, table)) {
+                        existed++;
+                        log.debug("数据表已存在,跳过: {}", table);
+                    } else {
+                        executeDdl(connection, withIfNotExists(ddl));
+                        created++;
+                        log.info("自动建表成功: {}", table);
+                    }
+                } catch (SQLException e) {
+                    failed++;
+                    log.error("自动建表失败: {} - {}", table, e.getMessage());
+                }
+            }
+        } catch (SQLException e) {
+            log.error("连接数据库检查表结构失败: {}", e.getMessage());
+            return;
+        }
+        if (failed > 0) {
+            log.warn("schema 自检完成: 已存在 {} 张,新建 {} 张,失败 {} 张", existed, created, failed);
+        } else {
+            log.info("schema 自检完成: 已存在 {} 张,新建 {} 张", existed, created);
+        }
+    }
+
+    /**
+     * 确保数据库存在:主数据源能连上说明库已存在;连不上且报“未知数据库”时,
+     * 用去掉库名的 URL 连接 MySQL 实例并自动建库。
+     */
+    private void ensureDatabase() {
+        try (Connection ignored = dataSource.getConnection()) {
+            return;
+        } catch (SQLException e) {
+            if (!isUnknownDatabase(e)) {
+                log.warn("连接数据库失败(非库缺失),跳过建库: {}", e.getMessage());
+                return;
+            }
+        }
+
+        String serverUrl = stripDatabaseName(jdbcUrl);
+        String database = extractDatabaseName(jdbcUrl);
+        if (serverUrl == null || database.isEmpty()) {
+            log.error("无法解析数据库 URL({}),跳过自动建库", jdbcUrl);
+            return;
+        }
+        String createDb = "CREATE DATABASE IF NOT EXISTS `" + database
+            + "` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci";
+        try (Connection connection = DriverManager.getConnection(serverUrl, jdbcUsername, jdbcPassword);
+             Statement statement = connection.createStatement()) {
+            statement.execute(createDb);
+            log.info("数据库 {} 不存在,已通过 JDBC 自动创建", database);
+        } catch (SQLException e) {
+            log.error("自动建库失败({}): {},请手动创建数据库后重试", database, e.getMessage());
+        }
+    }
+
+    /**
+     * 判断异常是否为“数据库不存在”(mysql-connector-j 常见于错误码 1049 或
+     * “Unknown database”字样)。
+     */
+    private static boolean isUnknownDatabase(SQLException e) {
+        return e.getErrorCode() == 1049
+            || (e.getMessage() != null && e.getMessage().toLowerCase().contains("unknown database"));
+    }
+
+    private static boolean tableExists(Connection connection, String table) throws SQLException {
+        String schema = connection.getCatalog();
+        try (PreparedStatement ps = connection.prepareStatement(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?")) {
+            ps.setString(1, schema);
+            ps.setString(2, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getInt(1) > 0;
+            }
+        }
+    }
+
+    private static void executeDdl(Connection connection, String ddl) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(ddl);
+        }
+    }
+
+    /**
+     * 从 classpath 或工作目录加载建表脚本(jar 内与源码目录两种运行形态都支持)。
+     */
+    private String loadSqlScript() {
+        ClassPathResource resource = new ClassPathResource(SQL_RESOURCE_CLASSPATH);
+        if (resource.exists()) {
+            try (InputStream in = resource.getInputStream()) {
+                return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                log.warn("读取 classpath:{} 失败: {}", SQL_RESOURCE_CLASSPATH, e.getMessage());
+            }
+        }
+        Path file = Path.of(SQL_RESOURCE_FILESYSTEM);
+        if (Files.isRegularFile(file)) {
+            try {
+                return Files.readString(file, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                log.warn("读取 {} 失败: {}", file.toAbsolutePath(), e.getMessage());
+            }
+        }
+        throw new IllegalStateException("未找到建表脚本 sql/game_db.sql(classpath 与工作目录均不存在)");
+    }
+
+    /**
+     * 解析建表脚本,只保留 CREATE TABLE 语句(忽略 DROP TABLE / SET / 注释等,
+     * 避免误删已有数据)。
+     */
+    static List<String> parseCreateTableStatements(String script) {
+        List<String> ddlList = new ArrayList<>();
+        for (String part : script.split(";")) {
+            String statement = part.trim();
+            if (statement.isEmpty()) {
+                continue;
+            }
+            if (CREATE_TABLE_PATTERN.matcher(statement).find()) {
+                ddlList.add(statement);
+            }
+        }
+        return ddlList;
+    }
+
+    static String extractTableName(String ddl) {
+        Matcher matcher = CREATE_TABLE_PATTERN.matcher(ddl);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        throw new IllegalStateException("无法从建表语句中解析表名: " + ddl);
+    }
+
+    /** 转换为 IF NOT EXISTS,多实例并发启动时也不会互相冲突 */
+    static String withIfNotExists(String ddl) {
+        if (CREATE_TABLE_IF_NOT_EXISTS_PATTERN.matcher(ddl).find()) {
+            return ddl;
+        }
+        return ddl.replaceFirst("(?is)^\\s*CREATE\\s+TABLE\\s+", "CREATE TABLE IF NOT EXISTS ");
+    }
+
+    /**
+     * 去掉 URL 中的库名,保留主机/端口与连接参数,用于连接实例级建库。
+     * 例如 jdbc:mysql://host:3306/game_db?a=b -> jdbc:mysql://host:3306/?a=b
+     */
+    private static String stripDatabaseName(String url) {
+        int queryIndex = url.indexOf('?');
+        String base = queryIndex >= 0 ? url.substring(0, queryIndex) : url;
+        String params = queryIndex >= 0 ? url.substring(queryIndex) : "";
+        int slash = base.lastIndexOf('/');
+        if (slash < 0) {
+            return null;
+        }
+        return base.substring(0, slash + 1) + params;
+    }
+
+    private static String extractDatabaseName(String url) {
+        int queryIndex = url.indexOf('?');
+        String base = queryIndex >= 0 ? url.substring(0, queryIndex) : url;
+        int slash = base.lastIndexOf('/');
+        return slash >= 0 ? base.substring(slash + 1) : "";
+    }
+}

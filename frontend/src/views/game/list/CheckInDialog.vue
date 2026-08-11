@@ -337,7 +337,7 @@ const handleSubmit = async () => {
     handleClose();
   } catch (error) {
     console.error('签到失败:', error);
-    ElMessage.error('签到失败');
+    ElMessage.error((error as any)?.message || '签到失败');
   } finally {
     submitting.value = false;
   }

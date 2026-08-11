@@ -690,6 +690,88 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void appendAuditionCompetitor(Long stageId, Long competitorId) {
+        if (stageId == null || competitorId == null) {
+            return;
+        }
+        TStage stage = mustGetStage(stageId);
+        if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+            || !StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
+            return;
+        }
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .orderByAsc(TMatch::getId));
+        if (matches.isEmpty()) {
+            // 尚无场次:后续生成对阵(自动补救)时会纳入该参赛方,无需处理
+            return;
+        }
+        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
+        long existed = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+            .in(TMatchParticipant::getMatchId, matchIds)
+            .eq(TMatchParticipant::getCompetitorId, competitorId));
+        if (existed > 0) {
+            return;
+        }
+        // 仅可挂入未结算的正式圈场次(加赛只允许同分选手参与,不追加新人)
+        List<TMatch> candidates = matches.stream()
+            .filter(m -> !StageConstants.MATCH_SETTLED.equals(m.getStatus()))
+            .filter(m -> !(StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛")))
+            .toList();
+        if (candidates.isEmpty()) {
+            return;
+        }
+        // 选择当前人数最少的圈,尽量保持各圈均衡
+        TMatch target = null;
+        long minCount = Long.MAX_VALUE;
+        for (TMatch m : candidates) {
+            long cnt = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, m.getId()));
+            if (cnt < minCount) {
+                minCount = cnt;
+                target = m;
+            }
+        }
+        if (target == null) {
+            return;
+        }
+        long nextSlot = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, target.getId())
+                .select(TMatchParticipant::getDisplaySlotIndex))
+            .stream().mapToLong(p -> p.getDisplaySlotIndex() == null ? 0L : p.getDisplaySlotIndex())
+            .max().orElse(0L) + 1L;
+        long nextRound = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, target.getId())
+                .select(TMatchRound::getRoundSequence))
+            .stream().mapToLong(r -> r.getRoundSequence() == null ? 0L : r.getRoundSequence())
+            .max().orElse(0L) + 1L;
+
+        TMatchParticipant p = new TMatchParticipant();
+        p.setTenantId(target.getTenantId());
+        p.setTournamentId(stage.getTournamentId());
+        p.setMatchId(target.getId());
+        p.setCompetitorId(competitorId);
+        p.setDisplaySlotIndex(nextSlot);
+        p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
+        participantMapper.insert(p);
+
+        // 海选每个参赛方一个独立轮次,裁判逐选手打分
+        TMatchRound round = new TMatchRound();
+        round.setTenantId(target.getTenantId());
+        round.setTournamentId(stage.getTournamentId());
+        round.setMatchId(target.getId());
+        round.setRoundSequence(nextRound);
+        round.setCompetitorId(competitorId);
+        round.setStatus(target.getStatus());
+        matchRoundMapper.insert(round);
+
+        log.info("海选赛段[{}]补签到:参赛方[{}]挂入场次[{}](slot={},round={})",
+            stageId, competitorId, target.getId(), nextSlot, nextRound);
+        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void completeStage(Long stageId) {
         TStage stage = mustGetStage(stageId);
         if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {

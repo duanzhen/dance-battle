@@ -62,11 +62,16 @@ cp .env.example .env     # 按需修改密码
 docker compose up -d --build
 ```
 
-启动后访问 <http://localhost:8080>。Compose 会：
+启动后访问 <http://localhost>（默认端口 80，可通过 `SERVER_PORT` 环境变量修改）。Compose 会：
 
 - 启动 MySQL 8.0，数据目录外置到 `mysql-data` 卷，首次启动自动导入 `sql/game_db.sql` 建表
 - 启动 Redis 7
 - 构建并启动应用（等待 MySQL/Redis 健康检查通过后）
+
+> MySQL/Redis 仅暴露在 Compose 内部网络，不映射宿主机端口，只能由应用容器通过 `mysql` / `redis` 服务名访问。
+> JWT 密钥默认自动生成并持久化到宿主机 `./data/jwt`（容器内挂载于 `/var/tmp/jwt`），容器重建不更换密钥，旧登录态保持有效。
+
+应用启动时还会用 JDBC 做一次 schema 自检：数据库或业务表缺失时自动读取 `sql/game_db.sql` 建库建表（只补缺失的表，不删不改已有数据）。因此即使绕过 MySQL 初始化脚本、直连已有 MySQL 实例，表结构也会自动就绪；可通过 `SCHEMA_INIT_ENABLED=false` 关闭。
 
 ### 方式二：打包 Jar
 
@@ -78,7 +83,7 @@ docker compose up -d --build
 java -jar target/game-0.0.1-SNAPSHOT.jar
 ```
 
-访问 <http://localhost:8080>。
+访问 <http://localhost:8080>（本地 jar 默认端口 8080）。
 
 ## 环境变量
 
@@ -96,4 +101,8 @@ java -jar target/game-0.0.1-SNAPSHOT.jar
 | `REDIS_PASSWORD` | 空 | Redis 密码（空 = 无密码） |
 | `LOGIN_USERNAME` | `admin` | 系统登录账号 |
 | `LOGIN_PASSWORD` | `123456` | 系统登录密码 |
+| `SERVER_PORT` | `80`（Docker）/ `8080`（本地 jar） | 服务端口，修改后宿主机映射与容器内监听端口同步变更 |
+| `JWT_SECRET_KEY` | 空（自动生成） | JWT 签名密钥；显式设置后优先级最高，留空则首次运行随机生成并持久化到密钥文件 |
+| `JWT_SECRET_FILE` | `/var/tmp/jwt/dance-game-jwt-secret.key` | 自动生成的密钥持久化文件路径（Docker 下挂载宿主机 `./data/jwt`，本地 jar 默认 `/var/tmp/dance-game-jwt-secret.key`） |
 | `FILE_UPLOAD_PATH` | `./upload`（Docker 内为 `/app/upload`） | 文件上传存储目录 |
+| `SCHEMA_INIT_ENABLED` | `true` | 启动时自动检查/创建数据库与表结构（JDBC 兜底，读取 `sql/game_db.sql`） |

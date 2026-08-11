@@ -465,6 +465,13 @@ public class RefereeMatchController {
         if (!StageConstants.MATCH_GAMING.equals(match.getStatus())) {
             return R.fail("场次状态不允许提交判罚");
         }
+        // 越权防护:裁判只能提交本人所在赛事的场次,且必须已被分配该赛段
+        if (referee.getTournamentId() != null && !referee.getTournamentId().equals(match.getTournamentId())) {
+            return R.fail("无权提交该场次的判罚");
+        }
+        if (!refereeStageService.getStageIdsByRefereeId(referee.getId()).contains(match.getStageId())) {
+            return R.fail("未分配该赛段的判罚权限");
+        }
 
         MatchResultVo result = matchResultService.submitResult(bo);
         log.info("裁判[{}](id={})提交场次[{}]判罚结果", referee.getName(), referee.getId(), matchId);

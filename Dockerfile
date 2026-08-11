@@ -33,9 +33,10 @@ ENV TZ=Asia/Shanghai \
     REDIS_PORT=6379 \
     REDIS_PASSWORD= \
     LOGIN_USERNAME=admin \
-    LOGIN_PASSWORD=123456
+    LOGIN_PASSWORD=123456 \
+    SERVER_PORT=80
 
 COPY --from=build /app/target/game-0.0.1-SNAPSHOT.jar app.jar
 
-EXPOSE 8080
+EXPOSE 80
 ENTRYPOINT ["java", "-jar", "app.jar"]

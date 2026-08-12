@@ -59,6 +59,27 @@ public class TTournamentServiceImpl implements ITTournamentService {
     /** 赛事模版:模版编码 → 赛段定义(海选 + 淘汰赛链) */
     private static final Map<String, List<StageDef>> TEMPLATES = buildTemplates();
 
+    /** 32 模板(海选→32强→16强→8强→半决赛→决赛)对战树尺寸:按赛段起始人数 {宽, 高} */
+    private static final Map<Long, long[]> BRACKET_SIZES_AUDITION_32 = Map.of(
+        32L, new long[]{1848L, 1022L},
+        16L, new long[]{1463L, 945L},
+        8L, new long[]{1095L, 812L},
+        4L, new long[]{715L, 574L},
+        2L, new long[]{458L, 212L}
+    );
+
+    /** 16 模板(海选→16强→8强→半决赛→决赛)对战树尺寸:按赛段起始人数 {宽, 高} */
+    private static final Map<Long, long[]> BRACKET_SIZES_AUDITION_16 = Map.of(
+        16L, new long[]{1843L, 1025L},
+        8L, new long[]{1414L, 890L},
+        4L, new long[]{944L, 598L},
+        2L, new long[]{446L, 204L}
+    );
+
+    /** 画布尺寸:与赛事创建时的 logicalWidth/logicalHeight 保持一致 */
+    private static final long CANVAS_W = 1920L;
+    private static final long CANVAS_H = 1080L;
+
     private static Map<String, List<StageDef>> buildTemplates() {
         Map<String, List<StageDef>> m = new LinkedHashMap<>();
         // 海选 → 32强 → 16强 → 8强 → 半决赛 → 决赛
@@ -90,6 +111,30 @@ public class TTournamentServiceImpl implements ITTournamentService {
 
     /** 赛段定义:名称 / 赛制 / 起始人数 / 晋级人数 */
     private record StageDef(String name, String mode, Long start, Long end) {
+    }
+
+    /**
+     * 对战树尺寸:按模板编码 + 赛段起始人数取 {宽, 高}。
+     * 32/16/擂台模板均采用居中嵌套排版;擂台模板复用 32 模板的尺寸表。
+     * 尺寸参考手工调优后的线上排版;未命中(如人数不在表内)时给默认尺寸兜底。
+     *
+     * @param templateCode   模板编码(AUDITION_32 / AUDITION_16 / AUDITION_ARENA)
+     * @param teamCountStart 赛段起始人数
+     * @return {宽, 高};未知模板编码返回 null
+     */
+    private static long[] bracketSize(String templateCode, Long teamCountStart) {
+        Map<Long, long[]> sizes = switch (templateCode) {
+            case "AUDITION_32" -> BRACKET_SIZES_AUDITION_32;
+            case "AUDITION_16" -> BRACKET_SIZES_AUDITION_16;
+            // 擂台模板淘汰链为 32强→16强→8强(擂台赛段),与 32 模板同尺寸
+            case "AUDITION_ARENA" -> BRACKET_SIZES_AUDITION_32;
+            default -> null;
+        };
+        if (sizes == null) {
+            return null;
+        }
+        long[] wh = teamCountStart == null ? null : sizes.get(teamCountStart);
+        return wh != null ? wh : new long[]{1200L, 700L};
     }
 
     /**
@@ -208,24 +253,18 @@ public class TTournamentServiceImpl implements ITTournamentService {
         TVisSceneVo mainScene = createScene(tid, "主视觉", 1L);
         TVisSceneVo bracketScene = createScene(tid, "对战", 2L);
 
-        // 4. 对战场景:每个淘汰赛赛段一个对战树 widget,按 2 列网格排布——
-        //    各 widget 坐标互不重叠(32强/16强等不再共用中心点互相遮挡),
-        //    网格行数随淘汰赛赛段数量自动扩展,任意模板都适用
-        int cols = 2;
-        int gridGap = 25;
-        int knockoutCount = (int) stages.stream().filter(s -> "KNOCKOUT".equals(s.getStageMode())).count();
-        int gridRows = Math.max(1, (knockoutCount + cols - 1) / cols);
-        long gridW = (1920L - (long) gridGap * (cols + 1)) / cols;
-        long gridH = (1080L - (long) gridGap * (gridRows + 1)) / gridRows;
+        // 4. 对战场景:每个淘汰赛赛段一个对战树 widget,统一「大框套小框」居中嵌套排版——
+        //    外层(人数最多)最宽,内层逐级缩小,所有 widget 中心对齐画布中心 (960,540),
+        //    外层左右两列卡片恰好露在内层两侧,形成树形层叠效果。
+        //    尺寸取自手工调优后的线上排版(参考赛事 2087560015994183682 / 2087560627817308162)。
         int idx = 0;
         for (TStageVo stage : stages) {
             if (!"KNOCKOUT".equals(stage.getStageMode())) {
                 continue;
             }
-            int col = idx % cols;
-            int row = idx / cols;
-            long x = gridGap + (long) col * (gridW + gridGap);
-            long y = gridGap + (long) row * (gridH + gridGap);
+            long[] wh = bracketSize(bo.getTemplateCode(), stage.getTeamCountStart());
+            long x = (CANVAS_W - wh[0]) / 2;
+            long y = (CANVAS_H - wh[1]) / 2;
             TVisWidgetBo wb = new TVisWidgetBo();
             wb.setTournamentId(tid);
             wb.setSceneId(bracketScene.getId());
@@ -236,13 +275,68 @@ public class TTournamentServiceImpl implements ITTournamentService {
             wb.setRenderConfig("{}");
             wb.setX(x);
             wb.setY(y);
-            wb.setW(gridW);
-            wb.setH(gridH);
+            wb.setW(wh[0]);
+            wb.setH(wh[1]);
             wb.setZIndex((long) (idx + 1));
             wb.setVisible(1L);
             wb.setLocked(0L);
             visWidgetService.insertByBo(wb);
             idx++;
+        }
+
+        // 擂台模板专用:定位擂台赛段(8 强展示 + 擂台场景均绑定它)
+        TStageVo arenaStage = stages.stream()
+            .filter(s -> "ARENA".equals(s.getStageMode()))
+            .findFirst()
+            .orElse(null);
+
+        // 4.5 擂台模板:对战场景补「对战树-8强」控件(绑定擂台赛段)。
+        //     16 强结算晋级出的 8 人写入擂台赛段后,由对战树组件按标准 8 强种子摆位展示,
+        //     与 32强/16强 对战树构成标准三层对战树(32 → 16 → 8)。
+        if (arenaStage != null) {
+            long[] wh = BRACKET_SIZES_AUDITION_32.getOrDefault(arenaStage.getTeamCountStart(),
+                new long[]{1095L, 812L});
+            TVisWidgetBo arenaBracket = new TVisWidgetBo();
+            arenaBracket.setTournamentId(tid);
+            arenaBracket.setSceneId(bracketScene.getId());
+            arenaBracket.setName("对战树-8强");
+            arenaBracket.setType("BRACKET");
+            arenaBracket.setLayoutConfig("{}");
+            arenaBracket.setDataConfig("{\"stageId\":\"" + arenaStage.getId()
+                + "\",\"tournamentId\":\"" + tid + "\"}");
+            arenaBracket.setRenderConfig("{}");
+            arenaBracket.setX((CANVAS_W - wh[0]) / 2);
+            arenaBracket.setY((CANVAS_H - wh[1]) / 2);
+            arenaBracket.setW(wh[0]);
+            arenaBracket.setH(wh[1]);
+            arenaBracket.setZIndex((long) (idx + 1));
+            arenaBracket.setVisible(1L);
+            arenaBracket.setLocked(0L);
+            visWidgetService.insertByBo(arenaBracket);
+            idx++;
+        }
+
+        // 4.6 擂台模板:第三个场景「擂台」,全屏放置擂台积分组件(ARENA_SCORE)。
+        //     绑定擂台赛段后,16 强结算晋级出的 8 强名单(轮转队列/积分/当前对决)
+        //     由 ArenaOverview 实时提供并展示在大屏,避免晋级后看不到是谁进了擂台赛。
+        if (arenaStage != null) {
+            TVisSceneVo arenaScene = createScene(tid, "擂台", 3L);
+            TVisWidgetBo arenaWidget = new TVisWidgetBo();
+            arenaWidget.setTournamentId(tid);
+            arenaWidget.setSceneId(arenaScene.getId());
+            arenaWidget.setName("擂台赛");
+            arenaWidget.setType("ARENA_SCORE");
+            arenaWidget.setLayoutConfig("{}");
+            arenaWidget.setDataConfig("{\"stageId\":\"" + arenaStage.getId() + "\",\"tournamentId\":\"" + tid + "\"}");
+            arenaWidget.setRenderConfig("{}");
+            arenaWidget.setX(0L);
+            arenaWidget.setY(0L);
+            arenaWidget.setW(CANVAS_W);
+            arenaWidget.setH(CANVAS_H);
+            arenaWidget.setZIndex(1L);
+            arenaWidget.setVisible(1L);
+            arenaWidget.setLocked(0L);
+            visWidgetService.insertByBo(arenaWidget);
         }
 
         // 5. 当前场次 widget:置于对战场景最上层,全屏显示(自动关联赛事当前进行中的赛段与场次)
@@ -256,8 +350,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
         currentMatchWidget.setRenderConfig("{}");
         currentMatchWidget.setX(0L);
         currentMatchWidget.setY(0L);
-        currentMatchWidget.setW(1920L);
-        currentMatchWidget.setH(1080L);
+        currentMatchWidget.setW(CANVAS_W);
+        currentMatchWidget.setH(CANVAS_H);
         // 对战树 zIndex 从 1 递增,取 idx+1 保证在所有图层之上
         currentMatchWidget.setZIndex((long) idx + 1);
         currentMatchWidget.setVisible(1L);

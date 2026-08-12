@@ -441,6 +441,99 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         participantMapper.insert(p);
     }
 
+    /**
+     * 轮空场次自动结算:单边轮空(1 名真人)直接判胜,按淘汰赛规则填下游占位或标记晋级;
+     * 双边轮空(两个空位)无胜者,仅置为已结算。返回本次结算的场次数。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int settleByeMatches(Long stageId) {
+        TStage stage = stageMapper.selectById(stageId);
+        if (stage == null || !StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+            return 0;
+        }
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .in(TMatch::getStatus, StageConstants.MATCH_PENDING, StageConstants.MATCH_GAMING));
+        int settled = 0;
+        for (TMatch m : matches) {
+            List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, m.getId())
+                .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+            List<TMatchParticipant> real = parts.stream()
+                .filter(p -> p.getCompetitorId() != null)
+                .toList();
+            if (real.size() >= 2) {
+                continue; // 正常对决,不处理
+            }
+            if (real.size() == 1) {
+                TMatchParticipant winner = real.get(0);
+                TMatchParticipant upd = new TMatchParticipant();
+                upd.setOutcomeStatus(MatchOutcomeEnum.WIN.getCode());
+                upd.setRankInMatch(1L);
+                participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
+                    .eq(TMatchParticipant::getMatchId, m.getId())
+                    .eq(TMatchParticipant::getCompetitorId, winner.getCompetitorId()));
+                resolveKnockoutByeWinner(m, winner.getCompetitorId());
+            }
+            markMatchSettled(m);
+            settled++;
+        }
+        if (settled > 0) {
+            log.info("赛段[{}]轮空场次自动结算 {} 场", stageId, settled);
+        }
+        return settled;
+    }
+
+    /** 轮空胜者去向:填下游场次占位;finalMatch 则标记晋级下一赛段 */
+    private void resolveKnockoutByeWinner(TMatch match, Long winnerCompetitorId) {
+        Map<String, PromotionTarget> rule = RuleConfigParser.parsePromotionRule(match.getPromotionRule());
+        PromotionTarget winnerTarget = rule.get("1");
+        if (winnerTarget == null) {
+            return;
+        }
+        if (StageConstants.ACTION_FINAL_ADVANCE.equals(winnerTarget.getAction())) {
+            markCompetitorAdvance(winnerCompetitorId, match);
+        } else if (StageConstants.ACTION_ADVANCE.equals(winnerTarget.getAction())
+            && winnerTarget.getTargetMatchId() != null && winnerTarget.getTargetSlot() != null) {
+            TMatchParticipant pUpd = new TMatchParticipant();
+            pUpd.setCompetitorId(winnerCompetitorId);
+            participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
+                .eq(TMatchParticipant::getMatchId, winnerTarget.getTargetMatchId())
+                .eq(TMatchParticipant::getDisplaySlotIndex, winnerTarget.getTargetSlot().longValue()));
+        }
+    }
+
+    /** 轮空胜者晋级标记:finalRank=场次位置(与正常结算一致),outcomeStatus=ADVANCE */
+    private void markCompetitorAdvance(Long competitorId, TMatch match) {
+        Long rank = match.getDisplayRow() != null ? match.getDisplayRow() + 1 : null;
+        if (rank == null) {
+            long cnt = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, match.getStageId())
+                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
+            rank = cnt + 1;
+        }
+        TCompetitor cupd = new TCompetitor();
+        cupd.setId(competitorId);
+        cupd.setFinalRank(rank);
+        cupd.setOutcomeStatus(OutcomeStatusEnum.ADVANCE.getCode());
+        competitorMapper.updateById(cupd);
+    }
+
+    /** 场次与轮次置为已结算并通知裁判端/赛事事件 */
+    private void markMatchSettled(TMatch match) {
+        TMatch mUpd = new TMatch();
+        mUpd.setId(match.getId());
+        mUpd.setStatus(StageConstants.MATCH_SETTLED);
+        matchMapper.updateById(mUpd);
+        TMatchRound roundUpd = new TMatchRound();
+        roundUpd.setStatus(StageConstants.MATCH_SETTLED);
+        matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
+            .eq(TMatchRound::getMatchId, match.getId()));
+        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "match");
+        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
+    }
+
     @Override
     public ArenaOverviewVo getArenaOverview(Long stageId) {
         TStage stage = mustGetStage(stageId);
@@ -661,6 +754,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 gm.setStageId(stageId);
                 generateMatches(gm);
             }
+        }
+        // 轮空场次自动晋级:人数不足 2 的幂时,单边轮空直接判胜填下游/标晋级,无需人工判罚
+        if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+            settleByeMatches(stageId);
         }
         stage.setStatus(StageConstants.STAGE_GAMING);
         stageMapper.updateById(stage);

@@ -27,6 +27,12 @@ public interface ITStageLifecycleService {
     void startStage(Long stageId);
 
     /**
+     * 轮空场次自动结算:单边轮空(1 名真人)直接判胜并填下游/标晋级,双边轮空置为已结算。
+     * 返回本次结算的场次数。
+     */
+    int settleByeMatches(Long stageId);
+
+    /**
      * 海选赛段进行中补签到:把新参赛方挂入当前人数最少的圈场次(新增 participant + round),
      * 保证其可被裁判打分并参与最终结算。仅 AUDITION + GAMING 且已生成场次时生效,否则为空操作。
      */

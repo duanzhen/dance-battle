@@ -1,5 +1,5 @@
 <template>
-  <div class="w-full h-full">
+  <div class="w-full h-full" :style="bracketStyle">
     <!-- 查看模式:对阵树(按 displayZone 分左右两列) -->
     <div v-if="mode !== 'edit'" class="w-full h-full overflow-hidden flex">
       <div v-if="loading" class="w-full flex items-center justify-center text-neutral-500 text-xs">加载中...</div>
@@ -52,7 +52,7 @@
           :class="leftSlots.length === 1 ? 'justify-center' : 'justify-between'"
         >
           <template v-for="(s, i) in leftSlots" :key="'l' + i">
-            <div class="final-card" :class="{ 'final-win': s.leftWin }">
+            <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
               <span class="name" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
@@ -68,7 +68,7 @@
           :class="rightSlots.length === 1 ? 'justify-center' : 'justify-between'"
         >
           <template v-for="(s, i) in rightSlots" :key="'r' + i">
-            <div class="final-card" :class="{ 'final-win': s.leftWin }">
+            <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
               <span class="name" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
@@ -86,10 +86,28 @@
         <StageSelector
           label="绑定赛段"
           :model-value="(stageId as any) ?? null"
-          only-mode="KNOCKOUT"
+          only-mode="KNOCKOUT,ARENA"
           @update:model-value="$emit('update:stageId', $event)"
         />
-        <p class="text-[10px] text-neutral-600 mt-2">对战树仅支持绑定淘汰赛赛段;配对按赛段配置:SEED 为标准种子对位(1-16、2-15),SEQUENTIAL 为相邻配对(1-2、3-4);已生成场次显示胜者高亮,实时刷新。</p>
+        <p class="text-[10px] text-neutral-600 mt-2">对战树绑定淘汰赛赛段为标准对战树(配对按 SEED 标准种子对位或 SEQUENTIAL 相邻配对,已生成场次胜者高亮);绑定擂台赛段时展示该赛段 8 强名单(标准种子摆位,仅供展示)。</p>
+      </section>
+      <section>
+        <span class="section-title">样式配置</span>
+        <div class="space-y-3 mt-2">
+          <ColorInput label="文字颜色" :model-value="textColor || '#ffffff'" @update:model-value="$emit('update:textColor', $event)" />
+          <ColorInput label="边框颜色" :model-value="borderColor || '#404040'" @update:model-value="$emit('update:borderColor', $event)" />
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">背景颜色</span>
+              <button
+                v-if="bgColor"
+                class="text-[10px] text-neutral-500 hover:text-amber-400"
+                @click="$emit('update:bgColor', '')"
+              >设为透明</button>
+            </div>
+            <ColorInput :model-value="bgColor || '#000000'" @update:model-value="$emit('update:bgColor', $event)" />
+          </div>
+        </div>
       </section>
     </div>
   </div>
@@ -98,14 +116,34 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import StageSelector from '../stages/StageSelector.vue';
+import ColorInput from './common/ColorInput.vue';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
 import { getStage, getStagePreBracket } from '@/api/game/stage';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
-const props = defineProps<{ stageId?: string | number; mode?: 'view' | 'edit'; tournamentId?: string | number | null }>();
-defineEmits<{ 'update:stageId': [value: string | number | null] }>();
+const props = defineProps<{
+  stageId?: string | number;
+  mode?: 'view' | 'edit';
+  tournamentId?: string | number | null;
+  textColor?: string;
+  borderColor?: string;
+  bgColor?: string;
+}>();
+defineEmits<{
+  'update:stageId': [value: string | number | null];
+  'update:textColor': [value: string];
+  'update:borderColor': [value: string];
+  'update:bgColor': [value: string];
+}>();
+
+// 样式配置:通过 CSS 变量作用于全部对战卡;未配置时回退默认样式(白字/灰边/透明底)
+const bracketStyle = computed(() => ({
+  '--bracket-text': props.textColor || undefined,
+  '--bracket-border': props.borderColor || undefined,
+  '--bracket-bg': props.bgColor || undefined
+}));
 
 const loading = ref(false);
 const loadedOnce = ref(false);
@@ -118,6 +156,7 @@ const prePairs = ref<any[]>([]);
 const isFinal = ref(false);
 const isSemi = ref(false);
 const stageModeError = ref(false);
+const stageMode = ref('');
 const prevZoneMap = ref<Record<string, string>>({});
 const stagePairingMode = ref('');
 const stageTeamCountStart = ref(0);
@@ -154,6 +193,7 @@ const loadData = async () => {
   if (!props.stageId) {
     competitors.value = [];
     matches.value = [];
+    stageMode.value = '';
     return;
   }
   if (!loadedOnce.value) {
@@ -171,9 +211,10 @@ const loadData = async () => {
       stagePairingMode.value = '';
       stageTeamCountStart.value = 0;
     }
-    // 对战树仅支持淘汰赛:绑定到其他赛制时给出提示,不渲染对阵
+    // 对战树支持淘汰赛(标准对战树)与擂台赛(8 强名单展示);其他赛制提示不支持
     const boundMode = stageInfo?.data?.stageMode;
-    if (boundMode && boundMode !== 'KNOCKOUT') {
+    stageMode.value = boundMode || '';
+    if (boundMode && boundMode !== 'KNOCKOUT' && boundMode !== 'ARENA') {
       stageModeError.value = true;
       competitors.value = [];
       matches.value = [];
@@ -183,6 +224,7 @@ const loadData = async () => {
       prePairs.value = [];
       isFinal.value = false;
       isSemi.value = false;
+      stageMode.value = '';
       loadedOnce.value = true;
       return;
     }
@@ -288,6 +330,7 @@ interface BracketSlot {
   rightScore: string;
   leftWin: boolean;
   rightWin: boolean;
+  leftBye?: boolean;
   rightBye: boolean;
   leftSrc?: string;
   rightSrc?: string;
@@ -301,8 +344,64 @@ const nameOf = (cid: any) => {
 
 const isWinner = (p: any) => p?.outcomeStatus === 'WIN' || (p?.rankInMatch === 1 && p?.scoreValue != null);
 
+// 擂台赛段展示:8 强参赛者按标准种子摆位排成 4 对(左 2 右 2),仅供展示,不对应对决场次
+const arenaSlots = computed<BracketSlot[]>(() => {
+  const count = competitors.value.length;
+  // 名单尚未生成(16 强未结算/未开始擂台赛段):只搭空骨架,不显示"轮空"
+  // (轮空只对真实对阵有意义,开赛前不可能预知轮空)
+  if (count === 0) {
+    const bracketSize = Math.max(2, nextPow2(stageTeamCountStart.value || 8));
+    const pairCount = Math.max(1, bracketSize / 2);
+    const half = Math.ceil(pairCount / 2);
+    return Array.from({ length: pairCount }, (_, i) => ({
+      zone: i < half ? 'LEFT' : 'RIGHT',
+      order: i % half,
+      name: '8强',
+      status: 'PENDING',
+      leftName: '',
+      rightName: '',
+      leftScore: '',
+      rightScore: '',
+      leftWin: false,
+      rightWin: false,
+      rightBye: false,
+      leftSrc: '',
+      rightSrc: ''
+    } as BracketSlot));
+  }
+  const bracketSize = Math.max(2, nextPow2(count || stageTeamCountStart.value || 8));
+  const pairCount = Math.max(1, bracketSize / 2);
+  const half = Math.ceil(pairCount / 2);
+  const layout = seedLayout(bracketSize);
+  return Array.from({ length: pairCount }, (_, i) => {
+    const leftIdx = layout[2 * i] - 1;
+    const rightIdx = layout[2 * i + 1] - 1;
+    const left = leftIdx < count ? competitors.value[leftIdx] : null;
+    const right = rightIdx < count ? competitors.value[rightIdx] : null;
+    return {
+      zone: i < half ? 'LEFT' : 'RIGHT',
+      order: i % half,
+      name: '8强',
+      status: 'PENDING',
+      leftName: left?.name || '',
+      rightName: right?.name || '',
+      leftScore: '',
+      rightScore: '',
+      leftWin: false,
+      rightWin: false,
+      rightBye: false,
+      leftSrc: '',
+      rightSrc: ''
+    } as BracketSlot;
+  });
+});
+
 // 每个对战卡严格对应一个 t_match(按场次渲染,含比分/胜者);未生成对阵时按种子预排
 const bracketSlots = computed<BracketSlot[]>(() => {
+  // 擂台赛段:8 强名单展示
+  if (stageMode.value === 'ARENA') {
+    return arenaSlots.value;
+  }
   if (matches.value.length > 0) {
     return matches.value.map((m: any) => {
       const ss = (participantsByMatch.value[m.id] || [])
@@ -316,12 +415,13 @@ const bracketSlots = computed<BracketSlot[]>(() => {
         order: m.displayRow ?? 0,
         name: m.name || '',
         status: m.status || 'PENDING',
-        leftName: nameOf(left?.competitorId) || '',
+        leftName: left?.competitorId == null ? '轮空' : (nameOf(left.competitorId) || ''),
         rightName: right?.competitorId == null ? '轮空' : (nameOf(right.competitorId) || ''),
         leftScore: left?.scoreValue == null ? '' : String(left.scoreValue),
         rightScore: right?.scoreValue == null ? '' : String(right.scoreValue),
         leftWin: !!left && isWinner(left),
         rightWin: !!right && isWinner(right),
+        leftBye: left?.competitorId == null,
         rightBye: right?.competitorId == null,
         leftSrc: '',
         rightSrc: ''
@@ -343,6 +443,7 @@ const bracketSlots = computed<BracketSlot[]>(() => {
       rightScore: '',
       leftWin: false,
       rightWin: false,
+      leftBye: p.leftStatus === 'BYE',
       rightBye: p.rightStatus === 'BYE',
       leftSrc: p.left?.sourceMatchName || '',
       rightSrc: p.right?.sourceMatchName || ''
@@ -392,12 +493,13 @@ const bracketSlots = computed<BracketSlot[]>(() => {
         order: i % half,
         name: '待对阵',
         status: 'PENDING',
-        leftName: left?.name || '',
+        leftName: left?.name || '轮空',
         rightName: right?.name || '轮空',
         leftScore: '',
         rightScore: '',
         leftWin: false,
         rightWin: false,
+        leftBye: !left,
         rightBye: !right,
         leftSrc: '',
         rightSrc: ''
@@ -421,6 +523,7 @@ const bracketSlots = computed<BracketSlot[]>(() => {
       rightScore: '',
       leftWin: false,
       rightWin: false,
+      leftBye: false,
       rightBye: !right,
       leftSrc: '',
       rightSrc: ''
@@ -429,6 +532,9 @@ const bracketSlots = computed<BracketSlot[]>(() => {
 });
 
 const emptyHint = computed(() => {
+  if (stageMode.value === 'ARENA') {
+    return '等待 16 强结算,晋级 8 强名单生成后展示';
+  }
   if (preStatus.value === 'WAIT_PREV') {
     return '等待上一赛段结算,胜者产生后自动预排';
   }
@@ -608,7 +714,9 @@ const handleTournamentEvent = (data: any) => {
   max-width: 100%;
 }
 .final-card {
-  border: 1px solid #404040;
+  border: 1px solid var(--bracket-border, #404040);
+  background: var(--bracket-bg, transparent);
+  color: var(--bracket-text, inherit);
   border-radius: 6px;
   padding: 8px 10px;
   display: flex;
@@ -628,15 +736,16 @@ const handleTournamentEvent = (data: any) => {
   max-width: 100%;
 }
 .final-win {
-  background: transparent;
-  border-color: #404040;
+  background: var(--bracket-bg, transparent);
+  border-color: var(--bracket-border, #404040);
 }
 .final-bye {
   opacity: 0.35;
 }
 .champion-card {
   border-width: 2px;
-  border-color: #404040;
+  border-color: var(--bracket-border, #404040);
+  color: var(--bracket-text, inherit);
   padding: 12px 14px;
   font-size: clamp(12px, 1.5vw, 24px);
   width: 9.5em;

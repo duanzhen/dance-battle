@@ -363,6 +363,22 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
             throw new ServiceException("赛段状态不允许开始场次");
         }
+        // 轮空场次(单边/双边轮空):无需裁判,开始即自动结算晋级,直接返回
+        long realCount = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, matchId))
+            .stream().filter(p -> p.getCompetitorId() != null).count();
+        if (realCount <= 1) {
+            if (StageConstants.STAGE_PENDING.equals(stage.getStatus())) {
+                TStage sUpd = new TStage();
+                sUpd.setId(stage.getId());
+                sUpd.setStatus(StageConstants.STAGE_GAMING);
+                stageMapper.updateById(sUpd);
+                refereeSseNotifier.notifyStage(stage.getId(), "stage");
+                tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
+            }
+            stageLifecycleService.settleByeMatches(stage.getId());
+            return;
+        }
         // 淘汰赛逐场进行:同赛段其他进行中场次回退 PENDING 并清空已提交分数,保证同时只有一个进行中
         if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
             List<TMatch> otherGaming = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()

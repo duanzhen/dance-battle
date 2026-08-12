@@ -132,13 +132,10 @@ public class KnockoutGenerator implements StageGenerator {
     private SlotPlan seedSlot(int slotIndex, int seed, int actualCount, List<Long> seeded) {
         SlotPlan s = new SlotPlan();
         s.setSlotIndex(slotIndex);
-        if (seed <= actualCount) {
-            s.setCompetitorId(seeded.get(seed - 1));
-            s.setBye(false);
-        } else {
-            s.setCompetitorId(null); // BYE
-            s.setBye(true);
-        }
+        // 槽位无参赛方(人数不足补位 或 种子位空缺)一律视为轮空,统一由轮空自动结算处理
+        Long cid = seed <= actualCount ? seeded.get(seed - 1) : null;
+        s.setCompetitorId(cid);
+        s.setBye(cid == null);
         return s;
     }
 

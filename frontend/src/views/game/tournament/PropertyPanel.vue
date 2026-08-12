@@ -124,6 +124,9 @@
                   @update:stageId="handleUpdateProp('stageId', $event)"
                   @update:bgImage="handleUpdateProp('bgImage', $event)"
                   @update:showScore="handleUpdateProp('showScore', $event)"
+                  @update:textColor="handleUpdateProp('textColor', $event)"
+                  @update:borderColor="handleUpdateProp('borderColor', $event)"
+                  @update:bgColor="handleUpdateProp('bgColor', $event)"
                 />
               </div>
             </section>

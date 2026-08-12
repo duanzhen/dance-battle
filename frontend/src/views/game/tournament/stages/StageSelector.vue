@@ -48,7 +48,9 @@ const tid = computed(
 const loading = ref(false);
 const stages = ref<any[]>([]);
 const filteredStages = computed(() =>
-  props.onlyMode ? stages.value.filter((s) => s.stageMode === props.onlyMode) : stages.value
+  props.onlyMode
+    ? stages.value.filter((s) => props.onlyMode!.split(',').includes(s.stageMode))
+    : stages.value
 );
 
 const load = async () => {

@@ -29,6 +29,9 @@
               <el-dropdown-item v-if="settingsStore.showSettings" command="setLayout">
                 <span>{{ proxy.$t('navbar.layoutSetting') }}</span>
               </el-dropdown-item>
+              <el-dropdown-item command="changePassword">
+                <span>{{ proxy.$t('navbar.changePassword') }}</span>
+              </el-dropdown-item>
               <el-dropdown-item divided command="logout">
                 <span>{{ proxy.$t('navbar.logout') }}</span>
               </el-dropdown-item>
@@ -37,6 +40,7 @@
         </el-dropdown>
       </div>
     </div>
+    <password-dialog ref="passwordDialogRef" />
   </div>
 </template>
 
@@ -46,6 +50,7 @@ import { useUserStore } from '@/store/modules/user';
 import { useSettingsStore } from '@/store/modules/settings';
 import router from '@/router';
 import { ElMessageBoxOptions } from 'element-plus/es/components/message-box/src/message-box.type';
+import PasswordDialog from '@/components/PasswordDialog/index.vue';
 
 const appStore = useAppStore();
 const userStore = useUserStore();
@@ -78,8 +83,13 @@ const emits = defineEmits(['setLayout']);
 const setLayout = () => {
   emits('setLayout');
 };
+const passwordDialogRef = ref<InstanceType<typeof PasswordDialog>>();
+const changePassword = () => {
+  passwordDialogRef.value?.open();
+};
 // 定义Command方法对象 通过key直接调用方法
 const commandMap: { [key: string]: any } = {
+  changePassword,
   setLayout,
   logout
 };

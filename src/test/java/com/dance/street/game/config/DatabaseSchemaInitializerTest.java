@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 验证 sql/game_db.sql 的建表语句解析:只保留 CREATE TABLE,
- * 忽略 DROP/SET/注释,并正确识别 13 张业务表。
+ * 忽略 DROP/SET/注释,并正确识别 14 张业务表。
  */
 class DatabaseSchemaInitializerTest {
 
@@ -24,7 +24,7 @@ class DatabaseSchemaInitializerTest {
 
         List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
 
-        assertEquals(13, ddlList.size());
+        assertEquals(14, ddlList.size());
         for (String ddl : ddlList) {
             assertTrue(ddl.matches("(?is)^CREATE\\s+TABLE.*"), "应为 CREATE TABLE 语句: " + ddl);
             assertFalse(ddl.matches("(?is)^DROP\\s+TABLE.*"), "不应包含 DROP 语句: " + ddl);

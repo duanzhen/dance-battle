@@ -2,8 +2,8 @@
 # =============================================================================
 # install.sh - dance-battle(无败街舞赛事系统)一键部署脚本
 #
-# 一行安装(将本脚本托管到任意 HTTPS 地址后, 直接复制运行):
-#   curl -fsSL https://<托管地址>/install.sh | sh
+# 一行安装命令:
+#   curl -fsSL https://dance-battel.oss-cn-hangzhou.aliyuncs.com/install.sh | sh
 #
 # 脚本自动完成:
 #   1. 当前目录缺少部署文件时, 由脚本直接生成 docker-compose.yml / .env
@@ -34,7 +34,7 @@ INSTALL_DIR="${INSTALL_DIR:-${HOME:-$PWD}/dance-battle}"
 
 # 方式 1: 阿里云个人仓库(国内优先)
 ALIYUN_REGISTRY="${ALIYUN_REGISTRY:-crpi-9o335a19vfah6d7c.cn-hangzhou.personal.cr.aliyuncs.com/dance_battel}"
-APP_IMAGE_ALIYUN="${APP_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/app:0.1.1}"
+APP_IMAGE_ALIYUN="${APP_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/app:latest}"
 MYSQL_IMAGE_ALIYUN="${MYSQL_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/mysql:8.0}"
 REDIS_IMAGE_ALIYUN="${REDIS_IMAGE_ALIYUN:-${ALIYUN_REGISTRY}/redis:7-alpine}"
 

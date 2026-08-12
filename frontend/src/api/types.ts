@@ -14,3 +14,11 @@ export interface LoginResult {
   token: string;
   username?: string;
 }
+
+/**
+ * 修改密码请求
+ */
+export interface ChangePasswordData {
+  oldPassword?: string;
+  newPassword?: string;
+}

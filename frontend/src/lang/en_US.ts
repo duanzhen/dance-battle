@@ -80,6 +80,23 @@ export default {
     selectTenant: 'Select Tenant',
     layoutSetting: 'Layout Setting',
     personalCenter: 'Personal Center',
+    changePassword: 'Change Password',
     logout: 'Logout'
+  },
+  // Change password dialog i18n
+  passwordDialog: {
+    title: 'Change Password',
+    oldPassword: 'Old Password',
+    newPassword: 'New Password',
+    confirmPassword: 'Confirm New Password',
+    oldRequired: 'Please enter the old password',
+    newRequired: 'Please enter a new password',
+    newLength: 'The new password must be between 6 and 32 characters',
+    confirmRequired: 'Please enter the new password again',
+    confirmNotMatch: 'The two new passwords do not match',
+    sameAsOld: 'The new password cannot be the same as the old one',
+    success: 'Password changed. Please sign in with the new password.',
+    cancel: 'Cancel',
+    confirm: 'Confirm'
   }
 };

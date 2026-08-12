@@ -4,6 +4,7 @@ import cn.dev33.satoken.annotation.SaIgnore;
 import cn.dev33.satoken.stp.SaLoginModel;
 import cn.dev33.satoken.stp.StpUtil;
 import com.dance.street.game.config.LoginIpRateLimiter;
+import com.dance.street.game.service.LoginAccountService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
@@ -29,12 +30,10 @@ import java.util.Map;
 public class AuthController {
 
     private final LoginIpRateLimiter loginIpRateLimiter;
+    private final LoginAccountService loginAccountService;
 
     @Value("${login.username}")
     private String username;
-
-    @Value("${login.password}")
-    private String password;
 
     @PostMapping("/login")
     public R<Map<String, Object>> login(@Validated @RequestBody LoginBody body, HttpServletRequest request) {
@@ -42,7 +41,7 @@ public class AuthController {
         if (loginIpRateLimiter.isBlocked(ip)) {
             throw new ServiceException(loginIpRateLimiter.blockedMessage(ip));
         }
-        if (!username.equals(body.getUsername()) || !password.equals(body.getPassword())) {
+        if (!loginAccountService.verify(body.getUsername(), body.getPassword())) {
             loginIpRateLimiter.recordFailure(ip);
             throw new ServiceException("用户名或密码错误");
         }

@@ -371,6 +371,24 @@ CREATE TABLE `t_vis_widget` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `t_login_account`
+--
+
+DROP TABLE IF EXISTS `t_login_account`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `t_login_account` (
+  `id` bigint NOT NULL,
+  `username` varchar(50) NOT NULL COMMENT '登录账号',
+  `password` varchar(100) NOT NULL COMMENT 'BCrypt 加密后的登录密码',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统登录账号表(修改密码后持久化)';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `test_demo`
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;

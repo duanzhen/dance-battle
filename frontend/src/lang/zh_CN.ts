@@ -80,6 +80,23 @@ export default {
     selectTenant: '选择租户',
     layoutSetting: '布局设置',
     personalCenter: '个人中心',
+    changePassword: '修改密码',
     logout: '退出登录'
+  },
+  // 修改密码弹窗国际化
+  passwordDialog: {
+    title: '修改密码',
+    oldPassword: '旧密码',
+    newPassword: '新密码',
+    confirmPassword: '确认新密码',
+    oldRequired: '请输入旧密码',
+    newRequired: '请输入新密码',
+    newLength: '新密码长度必须介于 6 和 32 个字符之间',
+    confirmRequired: '请再次输入新密码',
+    confirmNotMatch: '两次输入的新密码不一致',
+    sameAsOld: '新密码不能与旧密码相同',
+    success: '密码修改成功，请使用新密码重新登录',
+    cancel: '取 消',
+    confirm: '确 定'
   }
 };

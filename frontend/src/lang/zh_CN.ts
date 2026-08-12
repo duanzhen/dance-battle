@@ -86,12 +86,16 @@ export default {
   // 修改密码弹窗国际化
   passwordDialog: {
     title: '修改密码',
+    forceTitle: '请修改默认密码',
+    subtitle: '为保障账号安全，请定期更换密码',
+    forceTip: '当前仍在使用系统默认密码，为保障账号安全，请先设置新密码',
     oldPassword: '旧密码',
     newPassword: '新密码',
     confirmPassword: '确认新密码',
     oldRequired: '请输入旧密码',
     newRequired: '请输入新密码',
-    newLength: '新密码长度必须介于 6 和 32 个字符之间',
+    newLength: '新密码长度必须介于 8 和 32 个字符之间',
+    needLetterNumber: '新密码必须同时包含字母和数字',
     confirmRequired: '请再次输入新密码',
     confirmNotMatch: '两次输入的新密码不一致',
     sameAsOld: '新密码不能与旧密码相同',

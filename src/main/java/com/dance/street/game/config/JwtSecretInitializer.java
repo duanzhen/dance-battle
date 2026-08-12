@@ -20,9 +20,10 @@ import java.util.Set;
  *
  * <p>优先级:JWT_SECRET_KEY 环境变量(显式指定) &gt; 密钥文件(首次运行生成后持久化) &gt; 本次随机生成。</p>
  *
- * <p>密钥文件默认写入 /var/tmp/dance-game-jwt-secret.key(可用 JWT_SECRET_FILE 覆盖),
+ * <p>密钥文件默认写入 ./data/jwt/dance-game-jwt-secret.key(可用 JWT_SECRET_FILE 覆盖),
  * 首次运行自动生成随机密钥并落盘,后续重启直接读取,保证无状态 JWT 在重启后不失效。
- * Docker 部署时该目录应挂载宿主机目录/卷持久化,否则容器重建会重新生成密钥、旧 token 全部失效。</p>
+ * Docker 中默认落在 /app/data/jwt(与 SQLite 同卷),部署时挂载该卷持久化即可;
+ * 否则容器重建会重新生成密钥、旧 token 全部失效。</p>
  */
 @Slf4j
 @Component
@@ -30,7 +31,7 @@ public class JwtSecretInitializer implements SmartInitializingSingleton {
 
     public static final String ENV_SECRET_KEY = "JWT_SECRET_KEY";
     public static final String ENV_SECRET_FILE = "JWT_SECRET_FILE";
-    public static final String DEFAULT_SECRET_FILE = "/var/tmp/dance-game-jwt-secret.key";
+    public static final String DEFAULT_SECRET_FILE = "./data/jwt/dance-game-jwt-secret.key";
 
     /** 48 字节 -> 64 位 Base64 URL 字符(HS256 及以上强度) */
     private static final int SECRET_BYTES = 48;

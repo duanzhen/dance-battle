@@ -86,12 +86,16 @@ export default {
   // Change password dialog i18n
   passwordDialog: {
     title: 'Change Password',
+    forceTitle: 'Change Default Password',
+    subtitle: 'For account security, change your password regularly',
+    forceTip: 'You are still using the system default password. Please set a new one to keep your account secure.',
     oldPassword: 'Old Password',
     newPassword: 'New Password',
     confirmPassword: 'Confirm New Password',
     oldRequired: 'Please enter the old password',
     newRequired: 'Please enter a new password',
-    newLength: 'The new password must be between 6 and 32 characters',
+    newLength: 'The new password must be between 8 and 32 characters',
+    needLetterNumber: 'The new password must contain both letters and numbers',
     confirmRequired: 'Please enter the new password again',
     confirmNotMatch: 'The two new passwords do not match',
     sameAsOld: 'The new password cannot be the same as the old one',

@@ -13,6 +13,8 @@ export interface LoginData {
 export interface LoginResult {
   token: string;
   username?: string;
+  /** 是否仍在使用默认密码(为 true 时前端强制弹窗要求修改) */
+  defaultPassword?: boolean;
 }
 
 /**

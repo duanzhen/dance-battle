@@ -1,0 +1,3 @@
+org.springframework.boot.EnvironmentPostProcessor=\
+com.dance.street.game.config.SqliteFallbackEnvironmentPostProcessor,\
+com.dance.street.game.config.RedisStandaloneEnvironmentPostProcessor

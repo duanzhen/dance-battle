@@ -134,15 +134,18 @@ class KnockoutGeneratorTest {
         List<MatchPlan> r1 = round(plan, 1);
 
         assertEquals(4, r1.size());
-        // 查表摆位:场0=1vs8, 场1=4vs5(左), 场2=3vs6, 场3=2vs7(右)
-        assertEquals(1L, r1.get(0).getSlots().get(0).getCompetitorId());
-        assertEquals(8L, r1.get(0).getSlots().get(1).getCompetitorId());
-        assertEquals(4L, r1.get(1).getSlots().get(0).getCompetitorId());
-        assertEquals(5L, r1.get(1).getSlots().get(1).getCompetitorId());
-        assertEquals(3L, r1.get(2).getSlots().get(0).getCompetitorId());
-        assertEquals(6L, r1.get(2).getSlots().get(1).getCompetitorId());
-        assertEquals(2L, r1.get(3).getSlots().get(0).getCompetitorId());
-        assertEquals(7L, r1.get(3).getSlots().get(1).getCompetitorId());
+        // 查表摆位:场0=(1,8)、场1=(4,5)、场2=(3,6)、场3=(2,7),强种子分散;
+        // 同一场上下槽位是随机摆放的,只校验配对集合,不校验槽位顺序
+        List<List<Long>> expectedPairs = List.of(
+            List.of(1L, 8L), List.of(4L, 5L), List.of(3L, 6L), List.of(2L, 7L));
+        for (int i = 0; i < expectedPairs.size(); i++) {
+            List<Long> pair = expectedPairs.get(i);
+            List<Long> actual = List.of(
+                r1.get(i).getSlots().get(0).getCompetitorId(),
+                r1.get(i).getSlots().get(1).getCompetitorId());
+            assertTrue(actual.containsAll(pair) && pair.containsAll(actual),
+                "场" + i + " 应为配对 " + pair + ",实际 " + actual);
+        }
     }
 
     private List<MatchPlan> round(BracketPlan plan, int round) {

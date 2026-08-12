@@ -8,6 +8,7 @@ import { isRelogin } from '@/utils/request';
 import { useUserStore } from '@/store/modules/user';
 import { useSettingsStore } from '@/store/modules/settings';
 import { usePermissionStore } from '@/store/modules/permission';
+import { getPasswordStatus } from '@/api/login';
 import { ElMessage } from 'element-plus/es';
 
 NProgress.configure({ showSpinner: false });
@@ -39,6 +40,11 @@ router.beforeEach(async (to, from, next) => {
         } else {
           isRelogin.show = false;
           const accessRoutes = await usePermissionStore().generateRoutes();
+          // 刷新页面后复查是否仍在使用默认密码,用于恢复强制改密弹窗
+          const [, statusRes] = await tos(getPasswordStatus());
+          if (statusRes) {
+            useUserStore().setDefaultPassword(!!statusRes.data.defaultPassword);
+          }
           // 根据roles权限生成可访问的路由表
           accessRoutes.forEach((route) => {
             if (!isHttp(route.path)) {

@@ -50,4 +50,35 @@ class DatabaseSchemaInitializerTest {
         String already = "CREATE TABLE IF NOT EXISTS `t_match` (`id` bigint NOT NULL)";
         assertEquals(already, DatabaseSchemaInitializer.withIfNotExists(already));
     }
+
+    @Test
+    void sqliteScriptParsesTablesAndIndexes() throws IOException {
+        String script = Files.readString(Path.of("sql/game_db.sqlite.sql"), StandardCharsets.UTF_8);
+
+        List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
+        List<String> indexList = DatabaseSchemaInitializer.parseCreateIndexStatements(script);
+
+        assertEquals(14, ddlList.size());
+        assertEquals(10, indexList.size());
+        for (String index : indexList) {
+            assertTrue(index.matches("(?is)^CREATE\\s+(UNIQUE\\s+)?INDEX.*"), "应为 CREATE INDEX 语句: " + index);
+            assertFalse(index.matches("(?is)^CREATE\\s+TABLE.*"), "不应包含建表语句: " + index);
+        }
+    }
+
+    @Test
+    void withIfNotExistsIndexAddsGuardAndKeepsExistingGuard() {
+        String plain = "CREATE INDEX `idx_comp` ON `t_competitor_member` (`competitor_id`)";
+        assertEquals(
+            "CREATE INDEX IF NOT EXISTS `idx_comp` ON `t_competitor_member` (`competitor_id`)",
+            DatabaseSchemaInitializer.withIfNotExistsIndex(plain));
+
+        String unique = "CREATE UNIQUE INDEX `uk_username` ON `t_login_account` (`username`)";
+        assertEquals(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `uk_username` ON `t_login_account` (`username`)",
+            DatabaseSchemaInitializer.withIfNotExistsIndex(unique));
+
+        String already = "CREATE UNIQUE INDEX IF NOT EXISTS `uk_username` ON `t_login_account` (`username`)";
+        assertEquals(already, DatabaseSchemaInitializer.withIfNotExistsIndex(already));
+    }
 }

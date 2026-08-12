@@ -20,12 +20,15 @@ import org.dromara.common.sse.utils.TournamentSseMessageUtils;
 import org.dromara.common.core.exception.ServiceException;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.Objects;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 场景控件元素Service业务层处理
@@ -40,7 +43,10 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
 
     private final TVisWidgetMapper baseMapper;
     private final com.dance.street.game.mapper.TVisSceneMapper sceneMapper;
-    private final RedissonClient redissonClient;
+    private final ObjectProvider<RedissonClient> redissonClientProvider;
+
+    /** 无 Redis(单机模式)时的 JVM 本地场景锁 */
+    private static final Map<String, ReentrantLock> JVM_SCENE_LOCKS = new ConcurrentHashMap<>();
 
     /**
      * 查询场景控件元素
@@ -149,9 +155,7 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
             throw new ServiceException("控件不存在");
         }
         Long sceneId = widget.getSceneId();
-        RLock lock = redissonClient.getLock("vis:scene:" + sceneId);
-        lock.lock();
-        try {
+        withSceneLock(sceneId, () -> {
             List<TVisWidget> widgets = baseMapper.selectList(Wrappers.<TVisWidget>lambdaQuery()
                 .eq(TVisWidget::getSceneId, sceneId).orderByDesc(TVisWidget::getZIndex));
             int idx = -1;
@@ -178,11 +182,7 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
             b.setZIndex(az);
             baseMapper.updateById(a);
             baseMapper.updateById(b);
-        } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
-        }
+        });
     }
 
     /**
@@ -194,9 +194,7 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
         if (sceneId == null || widgetIds == null || widgetIds.isEmpty()) {
             return;
         }
-        RLock lock = redissonClient.getLock("vis:scene:" + sceneId);
-        lock.lock();
-        try {
+        withSceneLock(sceneId, () -> {
             boolean hasLocked = widgetIds.stream()
                 .map(baseMapper::selectById)
                 .filter(Objects::nonNull)
@@ -213,10 +211,34 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
                     baseMapper.updateById(w);
                 }
             }
-        } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
+        });
+    }
+
+    /**
+     * 按场景加锁执行动作:有 Redis 时用 Redisson 分布式锁(多实例原子),
+     * 无 Redis(单机模式)时退化为 JVM 本地可重入锁。
+     */
+    private void withSceneLock(Long sceneId, Runnable action) {
+        String lockKey = "vis:scene:" + sceneId;
+        RedissonClient client = redissonClientProvider.getIfAvailable();
+        if (client != null) {
+            RLock lock = client.getLock(lockKey);
+            lock.lock();
+            try {
+                action.run();
+            } finally {
+                if (lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
             }
+            return;
+        }
+        ReentrantLock lock = JVM_SCENE_LOCKS.computeIfAbsent(lockKey, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            action.run();
+        } finally {
+            lock.unlock();
         }
     }
 

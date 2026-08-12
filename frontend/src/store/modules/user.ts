@@ -15,6 +15,7 @@ export const useUserStore = defineStore('user', () => {
   const avatar = ref('');
   const roles = ref<Array<string>>([]); // 用户角色编码集合 → 判断路由权限
   const permissions = ref<Array<string>>([]); // 用户权限编码集合 → 判断按钮权限
+  const defaultPassword = ref(false); // 当前账号是否仍在使用默认密码(首次登录强制改密)
 
   /**
    * 登录
@@ -29,6 +30,7 @@ export const useUserStore = defineStore('user', () => {
       setToken(data.token);
       token.value = data.token;
       name.value = data.username || '';
+      defaultPassword.value = !!data.defaultPassword;
       return Promise.resolve();
     }
     return Promise.reject(err);
@@ -56,7 +58,12 @@ export const useUserStore = defineStore('user', () => {
     token.value = '';
     roles.value = [];
     permissions.value = [];
+    defaultPassword.value = false;
     removeToken();
+  };
+
+  const setDefaultPassword = (value: boolean) => {
+    defaultPassword.value = value;
   };
 
   const setAvatar = (value: string) => {
@@ -71,9 +78,11 @@ export const useUserStore = defineStore('user', () => {
     avatar,
     roles,
     permissions,
+    defaultPassword,
     login,
     getInfo,
     logout,
+    setDefaultPassword,
     setAvatar
   };
 });

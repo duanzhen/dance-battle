@@ -47,7 +47,8 @@ class ScoringEngineTest {
     }
 
     @Test
-    void winLossDraw_unjudgedCompetitorGetsNullOutcome() {
+    void winLossDraw_singleWinnerFillsUnjudgedAsLoss() {
+        // 1v1 语义兜底:恰好一个胜者时,其余未判定参赛方按负处理
         ScoringConfig cfg = new ScoringConfig(); // 无 outcomeRules,用默认 1/0.5/0
 
         MatchScoreInput input = MatchScoreInput.builder()
@@ -59,7 +60,23 @@ class ScoringEngineTest {
 
         List<MatchScoreResult> results = engine.compute(input);
         assertResult(find(results, 1L), bd(1), 1, "WIN");
-        assertResult(find(results, 2L), bd(0), 2, null);
+        assertResult(find(results, 2L), bd(0), 2, "LOSS");
+    }
+
+    @Test
+    void winLossDraw_noWinnerKeepsUnjudgedOutcomeNull() {
+        // 没有胜者时不触发 1v1 兜底:未判定参赛方得 0 分,outcome 保持 null
+        ScoringConfig cfg = new ScoringConfig();
+
+        MatchScoreInput input = MatchScoreInput.builder()
+            .matchMode(MatchModeEnum.STANDARD)
+            .scoringConfig(cfg)
+            .competitorIds(List.of(1L, 2L))
+            .build();
+
+        List<MatchScoreResult> results = engine.compute(input);
+        assertResult(find(results, 1L), bd(0), 1, null);
+        assertResult(find(results, 2L), bd(0), 1, null);
     }
 
     // ---------------- VOTING: 总分制 ----------------

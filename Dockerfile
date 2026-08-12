@@ -40,5 +40,14 @@ ENV TZ=Asia/Shanghai \
 
 COPY --from=build /app/target/game-0.0.1-SNAPSHOT.jar app.jar
 
+# ---------- 数据持久化 ----------
+# VOLUME 声明挂载点:单机模式下 SQLite 数据 + JWT 密钥(/app/data)与上传文件(/app/upload)
+# 容器重建后数据仍保留。JWT 密钥默认写入 /app/data/jwt(与数据库同卷),无需单独挂载。
+# 注意:Dockerfile 只能声明匿名卷;匿名卷在容器删除后仍留在磁盘上,但新建容器不会自动复用。
+# 要可控的命名卷/宿主机目录持久化,请用:
+#   docker run -v app-data:/app/data -v app-upload:/app/upload ...
+# 或直接使用 docker-compose.standalone.yml(已配好命名卷)。
+VOLUME ["/app/data", "/app/upload"]
+
 EXPOSE 80
 ENTRYPOINT ["java", "-jar", "app.jar"]

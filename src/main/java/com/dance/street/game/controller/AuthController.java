@@ -51,6 +51,7 @@ public class AuthController {
         Map<String, Object> data = new HashMap<>();
         data.put("token", StpUtil.getTokenValue());
         data.put("username", username);
+        data.put("defaultPassword", loginAccountService.isDefaultPassword());
         return R.ok(data);
     }
 

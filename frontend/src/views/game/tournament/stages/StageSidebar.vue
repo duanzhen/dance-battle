@@ -3,88 +3,12 @@
     <!-- 头部 -->
     <div class="px-6 py-4 border-b border-neutral-800">
       <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">
-        {{ isCreating ? '新建赛段' : '通用配置' }}
+        通用配置
       </h3>
     </div>
 
-    <!-- 步骤1: 选择赛段类型 -->
-    <div v-if="isCreating && step === 1" class="p-6 space-y-6">
-      <div>
-        <label class="text-xs text-neutral-500 mb-3 block">选择赛段类型</label>
-        <div class="grid grid-cols-2 gap-3">
-          <button
-            v-for="type in stageTypes"
-            :key="type.mode"
-            @click="selectStageType(type.mode)"
-            class="type-button"
-            :class="{ selected: selectedStageMode === type.mode }"
-          >
-            <component :is="type.icon" class="w-6 h-6 mb-2" />
-            <div class="text-sm font-medium text-neutral-200">{{ type.label }}</div>
-            <div class="text-xs text-neutral-500 mt-1">{{ type.description }}</div>
-          </button>
-        </div>
-      </div>
-
-      <div class="pt-4 border-t border-neutral-800">
-        <button
-          @click="cancelCreate"
-          class="w-full py-2.5 text-sm font-medium rounded-lg border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors"
-        >
-          取消
-        </button>
-      </div>
-    </div>
-
-    <!-- 步骤2: 配置赛段信息 -->
-    <div v-else-if="isCreating && step === 2" class="p-6 space-y-6">
-      <!-- 已选类型显示 -->
-      <div class="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
-        <div class="text-xs text-amber-500 mb-1">已选择</div>
-        <div class="text-sm font-medium text-amber-500">{{ getStageModeLabel(selectedStageMode) }}</div>
-      </div>
-
-      <!-- 赛段名称 -->
-      <div>
-        <label class="text-xs text-neutral-500 mb-2 block">赛段名称</label>
-        <input
-          v-model="newStageData.name"
-          class="w-full bg-black border border-neutral-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-          placeholder="输入赛段名称"
-        />
-      </div>
-
-      <!-- 嵌入配置组件 (INIT 模式) -->
-      <div class="mt-6 pt-6 border-t border-neutral-800">
-        <component
-          v-if="getStageConfigComponent(selectedStageMode)"
-          :is="getStageConfigComponent(selectedStageMode)"
-          :stage="tempStage"
-          :mode="ConfigMode.INIT"
-          @update="handleTempStageUpdate"
-        />
-      </div>
-
-      <!-- 操作按钮 -->
-      <div class="pt-4 border-t border-neutral-800 space-y-2">
-        <button
-          @click="completeCreate"
-          :disabled="!canComplete"
-          class="w-full py-2.5 text-sm font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          完成配置
-        </button>
-        <button
-          @click="goBack"
-          class="w-full py-2.5 text-sm font-medium rounded-lg border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors"
-        >
-          返回
-        </button>
-      </div>
-    </div>
-
     <!-- 正常模式: 编辑已有赛段 -->
-    <div v-else class="p-6 space-y-6">
+    <div class="p-6 space-y-6">
       <!-- 赛段名称 -->
       <div>
         <label class="text-xs text-neutral-500 mb-2 block">赛段名称</label>
@@ -124,21 +48,6 @@
         <div class="bg-black border border-neutral-800 rounded-lg p-2.5 text-sm text-neutral-400">
           {{ getStageModeLabel(localStage.stageMode) }}
         </div>
-      </div>
-
-      <!-- INIT_DONE 模式: 显示初始化配置 -->
-      <div class="mt-6 pt-6 border-t border-neutral-800">
-        <div class="text-xs text-neutral-500 mb-3 flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-green-500"></span>
-          初始化配置
-        </div>
-        <component
-          v-if="getStageConfigComponent(localStage.stageMode)"
-          :is="getStageConfigComponent(localStage.stageMode)"
-          :stage="localStage"
-          :mode="ConfigMode.INIT_DONE"
-          @update="handleUpdate"
-        />
       </div>
 
       <!-- 队伍数量预览 -->
@@ -259,23 +168,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, markRaw } from 'vue';
-import { ChevronDown, Trophy, Mic, Target, ListOrdered } from 'lucide-vue-next';
+import { ref, watch, computed } from 'vue';
+import { ChevronDown } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import { initializeStage, generateMatches, startStage, completeStage, calculateAdvancement } from '@/api/game/stage/lifecycle';
 import { listReferee } from '@/api/game/referee';
 import { getStageRefereeIds, assignStageReferees } from '@/api/game/refereeStage';
-import { StageData, StageMode, ConfigMode } from './types';
-import KnockoutStageConfig from './KnockoutStageConfig.vue';
-import GroupStageConfig from './GroupStageConfig.vue';
-import AuditionStageConfig from './AuditionStageConfig.vue';
-import ArenaStageConfig from './ArenaStageConfig.vue';
-import RankingStageConfig from './RankingStageConfig.vue';
+import { StageData, StageMode } from './types';
 
 // Props
 const props = defineProps<{
   stage: StageData | null;
-  isCreating?: boolean;
   stages?: Array<{
     id: number | string;
     name: string;
@@ -288,8 +191,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   update: [stage: StageData];
   delete: [];
-  create: [stageMode: StageMode, name: string, status: string, ruleConfig: string];
-  cancel: [];
   refresh: [];
 }>();
 
@@ -303,68 +204,6 @@ const prevStage = computed(() => {
   return props.stages?.find((s) => String(s.id) === String(cur.prevStageId)) || null;
 });
 const canStartStage = computed(() => !prevStage.value || prevStage.value.status === 'SETTLED');
-
-// 新建赛段相关
-const step = ref<1 | 2>(1);
-const selectedStageMode = ref<StageMode>(StageMode.KNOCKOUT);
-const newStageData = ref({
-  name: '',
-  status: 'DRAFT'
-});
-
-// 赛段配置组件映射
-const stageConfigComponents = {
-  [StageMode.KNOCKOUT]: markRaw(KnockoutStageConfig),
-  [StageMode.GROUP]: markRaw(GroupStageConfig),
-  [StageMode.AUDITION]: markRaw(AuditionStageConfig),
-  [StageMode.ARENA]: markRaw(ArenaStageConfig),
-  [StageMode.RANK]: markRaw(RankingStageConfig)
-};
-
-// 获取赛段配置组件
-const getStageConfigComponent = (stageMode: StageMode) => {
-  return stageConfigComponents[stageMode] || null;
-};
-
-// 默认配置
-const defaultConfigs: Record<StageMode, any> = {
-  [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
-  [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
-  [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-  [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' },
-  [StageMode.RANK]: {
-    mode: 'RANK', scale: 32, advanceCount: 16, circles: 1, format: 'BO1',
-    publishMode: 'AUTO', publishScope: 'ALL',
-    scoring: {
-      type: 'MULTI_DIM', matchMode: 'RANKING',
-      refereeAggregateRule: 'AVG', aggregateRule: 'SUM', trimRatio: 0.1,
-      dimensions: [
-        { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
-        { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
-        { key: 'CREAT', name: '创意', weight: 0.3, maxScore: 100 }
-      ]
-    }
-  }
-};
-
-// 临时赛段数据 (用于步骤2配置预览)
-const tempStage = ref<StageData>({
-  id: 'temp',
-  name: '',
-  stageMode: StageMode.KNOCKOUT,
-  status: 'DRAFT',
-  ruleConfig: JSON.stringify(defaultConfigs[StageMode.KNOCKOUT]),
-  teamCountStart: 0,
-  teamCountEnd: 0
-});
-
-// 赛段类型配置
-const stageTypes = [
-  { mode: StageMode.KNOCKOUT, label: '淘汰赛', description: '单败淘汰制', icon: Trophy },
-  { mode: StageMode.AUDITION, label: '选拔赛', description: '海选晋级', icon: Mic },
-  { mode: StageMode.ARENA, label: '擂台赛', description: 'SEVEN TO SMOKE', icon: Target },
-  { mode: StageMode.RANK, label: '排名赛', description: '多维度打分排名', icon: ListOrdered }
-];
 
 // 赛段类型标签映射
 const stageModeLabels: Record<string, string> = {
@@ -385,40 +224,6 @@ const canDelete = computed(() => {
   return localStage.value.status !== 'GAMING' && localStage.value.status !== 'SETTLED';
 });
 
-// 验证是否可以完成创建
-const canComplete = computed(() => {
-  // 必须填写赛段名称
-  if (!newStageData.value.name.trim()) return false;
-
-  // 验证配置组件数据
-  try {
-    const parsed = JSON.parse(tempStage.value.ruleConfig);
-
-    // 根据不同赛段类型验证（兼容扁平默认格式与嵌套序列化格式）
-    if (selectedStageMode.value === StageMode.KNOCKOUT) {
-      const k = parsed.knockout || parsed;
-      return k.teamsCount > 0 && k.advanceCount > 0;
-    }
-    if (selectedStageMode.value === StageMode.GROUP) {
-      const g = parsed.group || parsed;
-      return g.groupCount >= 2 && g.teamsPerGroup >= 2 && g.advancePerGroup >= 1;
-    }
-    if (selectedStageMode.value === StageMode.AUDITION) {
-      return parsed.scale > 0 && parsed.advanceCount > 0;
-    }
-    if (selectedStageMode.value === StageMode.ARENA) {
-      return parsed.challengerCount > 0 && parsed.maxChallenges > 0;
-    }
-    if (selectedStageMode.value === StageMode.RANK) {
-      return parsed.scale > 0 && parsed.advanceCount > 0 && (parsed.scoring?.dimensions?.length > 0);
-    }
-
-    return true;
-  } catch (e) {
-    return false;
-  }
-});
-
 // 获取删除禁用原因
 const getDeleteDisabledReason = () => {
   if (localStage.value.status === 'GAMING') return '赛段进行中,无法删除';
@@ -429,60 +234,6 @@ const getDeleteDisabledReason = () => {
 // 获取赛段类型标签
 const getStageModeLabel = (mode: string) => {
   return stageModeLabels[mode] || mode;
-};
-
-// 选择赛段类型
-const selectStageType = (mode: StageMode) => {
-  selectedStageMode.value = mode;
-  step.value = 2;
-
-  // 设置默认名称
-  const typeInfo = stageTypes.find((t) => t.mode === mode);
-  if (typeInfo) {
-    newStageData.value.name = typeInfo.label;
-  }
-
-  // 初始化临时赛段数据
-  tempStage.value = {
-    id: 'temp',
-    name: newStageData.value.name,
-    stageMode: mode,
-    status: newStageData.value.status as any,
-    ruleConfig: JSON.stringify(defaultConfigs[mode]),
-    teamCountStart: 0,
-    teamCountEnd: 0
-  };
-};
-
-// 返回上一步
-const goBack = () => {
-  step.value = 1;
-};
-
-// 取消创建
-const cancelCreate = () => {
-  emit('cancel');
-};
-
-// 处理临时赛段更新
-const handleTempStageUpdate = (updated: StageData) => {
-  tempStage.value = { ...tempStage.value, ...updated };
-};
-
-// 完成创建
-const completeCreate = () => {
-  if (!canComplete.value) return;
-
-  // 发出创建事件，状态固定为 DRAFT
-  emit('create', selectedStageMode.value, newStageData.value.name, 'DRAFT', tempStage.value.ruleConfig);
-
-  // 重置表单
-  step.value = 1;
-  selectedStageMode.value = StageMode.KNOCKOUT;
-  newStageData.value = {
-    name: '',
-    status: 'DRAFT'
-  };
 };
 
 // 更新处理
@@ -600,24 +351,6 @@ watch(
     }
   },
   { deep: true }
-);
-
-// 监听 isCreating 变化，进入新建模式时重置状态
-watch(
-  () => props.isCreating,
-  (isCreating) => {
-    if (isCreating) {
-      // 重置到第一步
-      step.value = 1;
-      // 重置选中的赛段类型为默认值
-      selectedStageMode.value = StageMode.KNOCKOUT;
-      // 重置表单数据
-      newStageData.value = {
-        name: '',
-        status: 'DRAFT'
-      };
-    }
-  }
 );
 
 // 监听赛段变化，加载裁判分配

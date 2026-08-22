@@ -20,7 +20,7 @@ export interface VisWidgetVO {
   name: string;
 
   /**
-   * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE
+   * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING
    */
   type: string;
 
@@ -102,7 +102,7 @@ export interface VisWidgetForm extends BaseEntity {
   name?: string;
 
   /**
-   * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE
+   * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING
    */
   type?: string;
 
@@ -179,7 +179,7 @@ export interface VisWidgetQuery extends PageQuery {
   name?: string;
 
   /**
-   * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE
+   * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING
    */
   type?: string;
 

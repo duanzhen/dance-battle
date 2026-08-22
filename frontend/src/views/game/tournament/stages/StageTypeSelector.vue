@@ -104,13 +104,6 @@
               <label class="block text-sm text-neutral-400 mb-1">晋级名额</label>
               <el-input-number v-model="config.advanceCount" :min="1" :max="config.scale - 1" class="w-full" />
             </div>
-            <div>
-              <label class="block text-sm text-neutral-400 mb-1">比赛格式</label>
-              <el-select v-model="config.format" class="w-full">
-                <el-option label="BO1" value="BO1" />
-                <el-option label="BO3" value="BO3" />
-              </el-select>
-            </div>
           </div>
         </div>
 
@@ -289,9 +282,10 @@ const initConfig = () => {
         scale: 32,
         advanceCount: 16,
         circles: 1,
-        format: 'BO1',
         publishMode: 'AUTO',
         publishScope: 'ALL',
+        showScore: true,
+        scoreDisplay: 'TOTAL',
         scoring: {
           type: 'MULTI_DIM',
           matchMode: 'RANKING',

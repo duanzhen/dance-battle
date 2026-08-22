@@ -44,9 +44,9 @@ public class TVisWidgetBo extends BaseEntity {
     private String name;
 
     /**
-     * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE
+     * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING
      */
-    @NotBlank(message = "BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE不能为空", groups = { AddGroup.class, EditGroup.class })
+    @NotBlank(message = "BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING不能为空", groups = { AddGroup.class, EditGroup.class })
     private String type;
 
     /**

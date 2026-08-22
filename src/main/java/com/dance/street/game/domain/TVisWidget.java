@@ -43,7 +43,7 @@ public class TVisWidget extends TenantEntity {
     private String name;
 
     /**
-     * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE
+     * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING
      */
     private String type;
 

@@ -53,6 +53,12 @@ public class RuleConfigHolder implements Serializable {
     /** 公布范围(BATCH 模式使用):ALL=公布全部排名 / TOP_N=只公布前 N 名晋级名单 */
     private String publishScope;
 
+    /** 排名展示是否显示分数(赛段级配置,由排名展示组件读取) */
+    private Boolean showScore;
+
+    /** 排名展示分数显示方式:TOTAL=只显示总分 / DETAIL=总分+各维度分(赛段级配置) */
+    private String scoreDisplay;
+
     /** 打分配置(决定每局如何判定胜负) */
     private ScoringConfig scoring;
 

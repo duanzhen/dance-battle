@@ -53,9 +53,9 @@ public class TVisWidgetVo implements Serializable {
     private String name;
 
     /**
-     * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE
+     * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING
      */
-    @ExcelProperty(value = "BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE")
+    @ExcelProperty(value = "BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING")
     private String type;
 
     /**

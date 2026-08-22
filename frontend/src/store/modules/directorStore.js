@@ -631,6 +631,13 @@ export const useDirectorStore = defineStore('director', () => {
       defaultHeight = 500;
     }
 
+    if (type === 'RANKING') {
+      defaultName = `排名展示 ${currentScene.value.widgets.length + 1}`;
+      dataConfig = { stageId: null };
+      defaultWidth = 800;
+      defaultHeight = 600;
+    }
+
     const newWidget = {
       tournamentId: currentTournamentId,
       sceneId: currentScene.value?.id, // 直接使用 id，应该已经是字符串或数字

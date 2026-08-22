@@ -72,7 +72,6 @@ export interface RankingConfig {
   scale: number; // 参赛人数
   advanceCount: number; // 晋级名额
   circles: number; // 分圈数
-  format: MatchFormat;
   // 结果公布模式:AUTO=实时公布 / MANUAL=导播台手动公布 / BATCH=全部完成后一次性公布
   publishMode: 'AUTO' | 'MANUAL' | 'BATCH';
   // 公布范围:BATCH 使用,ALL=公布全部排名 / TOP_N=只公布前 N 名晋级名单

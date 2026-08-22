@@ -379,6 +379,7 @@ import BracketWidget from './widgets/BracketWidget.vue';
 import MatchDetailWidget from './widgets/MatchDetailWidget.vue';
 import ScoreboardWidget from './widgets/ScoreboardWidget.vue';
 import ArenaWidget from './widgets/ArenaWidget.vue';
+import RankingWidget from './widgets/RankingWidget.vue';
 
 const emit = defineEmits(['widgetUpdated']);
 
@@ -394,7 +395,8 @@ const widgetComponentMap = {
   'BRACKET': BracketWidget,
   'MATCH_DETAIL': MatchDetailWidget,
   'SCOREBOARD': ScoreboardWidget,
-  'ARENA_SCORE': ArenaWidget
+  'ARENA_SCORE': ArenaWidget,
+  'RANKING': RankingWidget
 };
 
 const widget = computed(() => store.selectedWidget);

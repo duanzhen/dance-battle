@@ -175,3 +175,14 @@ export const adjustStageAdvancement = (stageId: string | number, competitorIds: 
     data: competitorIds
   });
 };
+
+/**
+ * 排名赛排名明细:各圈参赛者的总分与各维度聚合分(排名展示组件维度模式使用)
+ * @param stageId 排名赛赛段ID
+ */
+export const getStageRankDetail = (stageId: string | number) => {
+  return request({
+    url: '/game/stage/' + stageId + '/rank-detail',
+    method: 'get'
+  });
+};

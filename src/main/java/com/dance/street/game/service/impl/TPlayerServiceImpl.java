@@ -236,11 +236,12 @@ public class TPlayerServiceImpl implements ITPlayerService {
         if (firstStage == null) {
             throw new RuntimeException("赛事没有设置赛段");
         }
-        // 海选(首个赛段)已结束时禁止继续签到:迟到者无法再参与海选与后续晋级
-        if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())
+        // 海选/排名赛(首个赛段)已结束时禁止继续签到:迟到者无法再参与打分与后续晋级
+        if ((StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())
+                || StageModeEnum.RANK.getCode().equals(firstStage.getStageMode()))
             && (StageConstants.STAGE_SETTLED.equals(firstStage.getStatus())
                 || StageConstants.STAGE_DISCARD.equals(firstStage.getStatus()))) {
-            throw new RuntimeException("海选已结束，无法继续签到");
+            throw new RuntimeException("海选/排名赛已结束，无法继续签到");
         }
 
         Long competitorId;
@@ -270,9 +271,10 @@ public class TPlayerServiceImpl implements ITPlayerService {
             memberBo.setRole("MEMBER");
             competitorMemberService.insertByBo(memberBo);
 
-            // 海选已开始(场次已生成):把新签到选手挂入当前人数最少的圈场次,可被裁判打分并参与结算
-            if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())) {
-                stageLifecycleService.appendAuditionCompetitor(firstStage.getId(), competitorId);
+            // 海选/排名赛已开始(场次已生成):把新签到选手挂入当前人数最少的圈场次,可被裁判打分并参与结算
+            if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())
+                || StageModeEnum.RANK.getCode().equals(firstStage.getStageMode())) {
+                stageLifecycleService.appendStageCompetitor(firstStage.getId(), competitorId);
             }
 
         } else if ("JOIN".equalsIgnoreCase(checkInType)) {

@@ -8,6 +8,7 @@ import com.dance.street.game.domain.bo.InsertStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
+import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TStageVo;
 
@@ -36,10 +37,10 @@ public interface ITStageLifecycleService {
     int settleByeMatches(Long stageId);
 
     /**
-     * 海选赛段进行中补签到:把新参赛方挂入当前人数最少的圈场次(新增 participant + round),
-     * 保证其可被裁判打分并参与最终结算。仅 AUDITION + GAMING 且已生成场次时生效,否则为空操作。
+     * 海选/排名赛赛段进行中补签到:把新参赛方挂入当前人数最少的圈场次(新增 participant + round),
+     * 保证其可被裁判打分并参与最终结算。仅 AUDITION/RANK + GAMING 且已生成场次时生效,否则为空操作。
      */
-    void appendAuditionCompetitor(Long stageId, Long competitorId);
+    void appendStageCompetitor(Long stageId, Long competitorId);
 
     /**
      * 嘉宾加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入。
@@ -89,4 +90,7 @@ public interface ITStageLifecycleService {
      * (传入全部待定者即全部晋级,未选中的待定者标记淘汰)。返回调整的晋级人数。
      */
     int adjustAdvancement(Long stageId, List<Long> competitorIds);
+
+    /** 排名赛排名明细:按圈返回每位参赛者的总分与各维度聚合分(未公布时隐藏分数) */
+    RankDetailVo getRankDetail(Long stageId);
 }

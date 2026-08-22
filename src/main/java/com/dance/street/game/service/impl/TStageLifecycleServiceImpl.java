@@ -25,8 +25,10 @@ import com.dance.street.game.domain.bo.TCompetitorMemberBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
+import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.engine.common.DimensionConfig;
 import com.dance.street.game.engine.common.GroupConfig;
 import com.dance.street.game.engine.common.PromotionTarget;
 import com.dance.street.game.engine.common.TransitionConfig;
@@ -38,12 +40,14 @@ import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.common.enums.TransitionModeEnum;
+import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.generator.BracketPlan;
 import com.dance.street.game.engine.generator.MatchPlan;
 import com.dance.street.game.engine.generator.SlotPlan;
 import com.dance.street.game.engine.generator.StageGeneratorFactory;
 import com.dance.street.game.engine.scoring.MatchScoreInput;
 import com.dance.street.game.engine.scoring.MatchScoreResult;
+import com.dance.street.game.engine.scoring.ScoreAggregator;
 import com.dance.street.game.engine.scoring.ScoringEngine;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
@@ -67,6 +71,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -812,12 +817,14 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void appendAuditionCompetitor(Long stageId, Long competitorId) {
+    public void appendStageCompetitor(Long stageId, Long competitorId) {
         if (stageId == null || competitorId == null) {
             return;
         }
         TStage stage = mustGetStage(stageId);
-        if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+        // 海选/排名赛均为逐选手轮次:签到/补签到选手直接挂入未结算圈场次,可被裁判打分
+        if ((!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+                && !StageModeEnum.RANK.getCode().equals(stage.getStageMode()))
             || !StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
             return;
         }
@@ -858,7 +865,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             return;
         }
         appendParticipantWithRound(target, competitorId);
-        log.info("海选赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());
+        log.info("海选/排名赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
     }
 
@@ -1949,6 +1956,129 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .in(TMatchParticipant::getMatchId, matchIds)
                 .eq(TMatchParticipant::getCompetitorId, competitorId));
         }
+    }
+
+    @Override
+    public RankDetailVo getRankDetail(Long stageId) {
+        TStage stage = mustGetStage(stageId);
+        if (!StageModeEnum.RANK.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("仅排名赛赛段支持排名明细");
+        }
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        // 公布控制:MANUAL/BATCH 且未结算前隐藏分数与维度分
+        boolean hidden = !StageConstants.STAGE_SETTLED.equals(stage.getStatus())
+            && rc != null && rc.getPublishMode() != null && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
+        AggregateRuleEnum refRule = AggregateRuleEnum.fromCode(
+            rc != null && rc.getScoring() != null ? rc.getScoring().getRefereeAggregateRule() : null);
+        java.math.BigDecimal trimRatio = rc != null && rc.getScoring() != null ? rc.getScoring().getTrimRatio() : null;
+        List<DimensionConfig> dims = rc != null && rc.getScoring() != null ? rc.getScoring().getDimensions() : null;
+
+        List<TMatch> matches = matchMapper.selectList(
+            Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stageId)
+                .orderByAsc(TMatch::getDisplayRow)
+                .orderByAsc(TMatch::getId));
+        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
+
+        Map<Long, List<TMatchParticipant>> partsByMatch = matchIds.isEmpty() ? Map.of()
+            : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .in(TMatchParticipant::getMatchId, matchIds))
+                .stream().collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
+        List<Long> roundIds = matchIds.isEmpty() ? List.of() : matchRoundMapper.selectList(
+                Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        Map<Long, List<TMatchRound>> roundsByMatch = matchIds.isEmpty() ? Map.of()
+            : matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds))
+                .stream().collect(Collectors.groupingBy(TMatchRound::getMatchId));
+        Map<Long, List<TRoundScore>> scoresByRound = roundIds.isEmpty() ? Map.of()
+            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds))
+                .stream().collect(Collectors.groupingBy(TRoundScore::getRoundId));
+
+        List<Long> compIds = partsByMatch.values().stream()
+            .flatMap(List::stream)
+            .map(TMatchParticipant::getCompetitorId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        Map<Long, TCompetitor> compMap = compIds.isEmpty() ? Map.of()
+            : competitorMapper.selectByIds(compIds).stream()
+                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+
+        RankDetailVo vo = new RankDetailVo();
+        vo.setStageId(stage.getId());
+        vo.setStageName(stage.getName());
+        vo.setStatus(stage.getStatus());
+        List<RankDetailVo.CircleRank> circles = new ArrayList<>();
+        for (int i = 0; i < matches.size(); i++) {
+            TMatch m = matches.get(i);
+            RankDetailVo.CircleRank cr = new RankDetailVo.CircleRank();
+            cr.setZone(m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone());
+            cr.setTitle(matches.size() > 1 ? "第" + (i + 1) + "圈" : "排名");
+            List<RankDetailVo.CompetitorRank> comps = new ArrayList<>();
+            for (TMatchParticipant p : partsByMatch.getOrDefault(m.getId(), List.of())) {
+                if (p.getCompetitorId() == null) {
+                    continue;
+                }
+                RankDetailVo.CompetitorRank c = new RankDetailVo.CompetitorRank();
+                c.setCompetitorId(p.getCompetitorId());
+                TCompetitor comp = compMap.get(p.getCompetitorId());
+                c.setName(comp != null ? comp.getName() : null);
+                c.setNumber(comp != null ? comp.getNumber() : null);
+                c.setRankInMatch(p.getRankInMatch());
+                c.setScoreValue(hidden ? null : p.getScoreValue());
+                if (!hidden) {
+                    c.setDimensions(aggregateCompetitorDimensions(
+                        m, p.getCompetitorId(), roundsByMatch, scoresByRound, refRule, trimRatio, dims));
+                }
+                comps.add(c);
+            }
+            cr.setCompetitors(comps);
+            circles.add(cr);
+        }
+        vo.setCircles(circles);
+        return vo;
+    }
+
+    /** 聚合某参赛者跨全部轮次(逐选手轮次)的各维度分:按裁判间汇总规则合并多裁判分 */
+    private List<RankDetailVo.DimensionScore> aggregateCompetitorDimensions(
+            TMatch match, Long competitorId,
+            Map<Long, List<TMatchRound>> roundsByMatch,
+            Map<Long, List<TRoundScore>> scoresByRound,
+            AggregateRuleEnum refRule, java.math.BigDecimal trimRatio,
+            List<DimensionConfig> dims) {
+        Map<String, List<java.math.BigDecimal>> byDim = new LinkedHashMap<>();
+        for (TMatchRound r : roundsByMatch.getOrDefault(match.getId(), List.of())) {
+            if (!Objects.equals(r.getCompetitorId(), competitorId)) {
+                continue;
+            }
+            for (TRoundScore s : scoresByRound.getOrDefault(r.getId(), List.of())) {
+                if (s.getCompetitorId() == null || s.getScore() == null) {
+                    continue;
+                }
+                String dim = s.getDimension() != null ? s.getDimension() : StageConstants.DIMENSION_MAIN;
+                byDim.computeIfAbsent(dim, k -> new ArrayList<>()).add(s.getScore());
+            }
+        }
+        List<RankDetailVo.DimensionScore> result = new ArrayList<>();
+        if (dims != null && !dims.isEmpty()) {
+            // 按配置维度顺序返回,保证展示稳定
+            for (DimensionConfig d : dims) {
+                RankDetailVo.DimensionScore ds = new RankDetailVo.DimensionScore();
+                ds.setKey(d.getKey());
+                ds.setName(d.getName());
+                ds.setMaxScore(d.getMaxScore());
+                ds.setScore(ScoreAggregator.aggregate(byDim.getOrDefault(d.getKey(), List.of()), refRule, trimRatio));
+                result.add(ds);
+            }
+        } else {
+            for (Map.Entry<String, List<java.math.BigDecimal>> e : byDim.entrySet()) {
+                RankDetailVo.DimensionScore ds = new RankDetailVo.DimensionScore();
+                ds.setKey(e.getKey());
+                ds.setName(e.getKey());
+                ds.setScore(ScoreAggregator.aggregate(e.getValue(), refRule, trimRatio));
+                result.add(ds);
+            }
+        }
+        return result;
     }
 
     private TStage mustGetStage(Long stageId) {

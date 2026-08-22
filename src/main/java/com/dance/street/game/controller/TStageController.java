@@ -22,6 +22,7 @@ import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
+import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
@@ -302,5 +303,14 @@ public class TStageController extends BaseController {
     public R<Integer> adjustAdvancement(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
                                         @RequestBody List<Long> competitorIds) {
         return R.ok(tStageLifecycleService.adjustAdvancement(stageId, competitorIds));
+    }
+
+    /**
+     * 排名赛排名明细:各圈参赛者的总分与各维度聚合分(供排名展示组件维度模式使用)
+     */
+    @SaCheckPermission("game:stage:query")
+    @GetMapping("/{id}/rank-detail")
+    public R<RankDetailVo> rankDetail(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        return R.ok(tStageLifecycleService.getRankDetail(id));
     }
 }

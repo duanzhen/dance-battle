@@ -16,7 +16,6 @@ public enum StageModeEnum {
     GROUP("GROUP", "小组赛"),
     FFA("FFA", "自由对抗赛"),
     AUDITION("AUDITION", "选拔赛"),
-    SURVIVAL("SURVIVAL", "海选赛"),
     ARENA("ARENA", "擂台赛");
 
     private final String code;

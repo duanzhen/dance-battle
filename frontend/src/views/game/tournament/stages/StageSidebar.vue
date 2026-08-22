@@ -270,7 +270,6 @@ import KnockoutStageConfig from './KnockoutStageConfig.vue';
 import GroupStageConfig from './GroupStageConfig.vue';
 import FFStageConfig from './FFStageConfig.vue';
 import AuditionStageConfig from './AuditionStageConfig.vue';
-import SurvivalStageConfig from './SurvivalStageConfig.vue';
 import ArenaStageConfig from './ArenaStageConfig.vue';
 
 // Props
@@ -319,7 +318,6 @@ const stageConfigComponents = {
   [StageMode.GROUP]: markRaw(GroupStageConfig),
   [StageMode.FFA]: markRaw(FFStageConfig),
   [StageMode.AUDITION]: markRaw(AuditionStageConfig),
-  [StageMode.SURVIVAL]: markRaw(SurvivalStageConfig),
   [StageMode.ARENA]: markRaw(ArenaStageConfig)
 };
 
@@ -334,7 +332,6 @@ const defaultConfigs: Record<StageMode, any> = {
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
   [StageMode.FFA]: { teamsCount: 8, matchCount: 3, format: 'BO1', winPoints: 3, lossPoints: 0, advanceCount: 4 },
   [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-  [StageMode.SURVIVAL]: { roundsCount: 3, eliminationRate: 50, format: 'BO1', advanceByScore: false, advanceQuota: 8 },
   [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' }
 };
 
@@ -362,7 +359,6 @@ const stageModeLabels: Record<string, string> = {
   [StageMode.GROUP]: '小组赛',
   [StageMode.FFA]: '自由对抗赛',
   [StageMode.AUDITION]: '选拔赛',
-  [StageMode.SURVIVAL]: '海选赛',
   [StageMode.ARENA]: '擂台赛'
 };
 
@@ -399,9 +395,6 @@ const canComplete = computed(() => {
     }
     if (selectedStageMode.value === StageMode.AUDITION) {
       return parsed.scale > 0 && parsed.advanceCount > 0;
-    }
-    if (selectedStageMode.value === StageMode.SURVIVAL) {
-      return parsed.roundsCount > 0 && parsed.eliminationRate > 0 && parsed.advanceQuota > 0;
     }
     if (selectedStageMode.value === StageMode.ARENA) {
       return parsed.challengerCount > 0 && parsed.maxChallenges > 0;

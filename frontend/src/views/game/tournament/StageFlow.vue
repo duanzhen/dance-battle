@@ -216,7 +216,6 @@ import KnockoutStageConfig from './stages/KnockoutStageConfig.vue';
 import GroupStageConfig from './stages/GroupStageConfig.vue';
 import FFStageConfig from './stages/FFStageConfig.vue';
 import AuditionStageConfig from './stages/AuditionStageConfig.vue';
-import SurvivalStageConfig from './stages/SurvivalStageConfig.vue';
 import ArenaStageConfig from './stages/ArenaStageConfig.vue';
 import StageCompetitorList from './stages/StageCompetitorList.vue';
 import { StageMode, StageData, ConfigMode } from './stages/types';
@@ -373,7 +372,6 @@ const stageConfigComponents = {
   [StageMode.GROUP]: markRaw(GroupStageConfig),
   [StageMode.FFA]: markRaw(FFStageConfig),
   [StageMode.AUDITION]: markRaw(AuditionStageConfig),
-  [StageMode.SURVIVAL]: markRaw(SurvivalStageConfig),
   [StageMode.ARENA]: markRaw(ArenaStageConfig)
 };
 
@@ -459,7 +457,6 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
       [StageMode.FFA]: { teamsCount: 8, matchCount: 3, format: 'BO1', winPoints: 3, lossPoints: 0, advanceCount: 4 },
       [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-      [StageMode.SURVIVAL]: { roundsCount: 3, eliminationRate: 50, format: 'BO1', advanceByScore: false, advanceQuota: 8 },
       [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' }
     };
     config = defaultConfigs[stageMode] || {};

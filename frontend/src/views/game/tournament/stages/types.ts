@@ -15,7 +15,6 @@ export enum StageMode {
   GROUP = 'GROUP', // 小组赛
   FFA = 'FFA', // 自由对抗赛
   AUDITION = 'AUDITION', // 选拔赛
-  SURVIVAL = 'SURVIVAL', // 海选赛
   ARENA = 'ARENA' // 擂台赛
 }
 
@@ -70,16 +69,6 @@ export interface AuditionConfig {
   format: MatchFormat;
 }
 
-// 海选赛配置
-export interface SurvivalConfig {
-  roundsCount: number; // 海选轮数
-  eliminationRate: number; // 每轮淘汰率 (0-1)
-  advanceThreshold: number; // 晋线分数
-  advanceByScore: boolean; // 是否按分数晋级
-  advanceQuota: number; // 晋级名额
-  format: MatchFormat;
-}
-
 // 擂台赛配置
 export enum ChallengeOrder {
   RANDOM = 'RANDOM', // 随机
@@ -97,7 +86,7 @@ export interface ArenaConfig {
 }
 
 // 联合类型
-export type StageConfig = KnockoutConfig | GroupConfig | FFAConfig | AuditionConfig | SurvivalConfig | ArenaConfig;
+export type StageConfig = KnockoutConfig | GroupConfig | FFAConfig | AuditionConfig | ArenaConfig;
 
 // 赛段数据接口
 export interface StageData {

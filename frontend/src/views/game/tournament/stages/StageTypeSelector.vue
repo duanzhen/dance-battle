@@ -136,39 +136,6 @@
           </div>
         </div>
 
-        <!-- 海选赛配置 -->
-        <div v-if="selectedStageMode === StageMode.SURVIVAL" class="config-section">
-          <h4 class="section-title">海选赛配置</h4>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm text-neutral-400 mb-1">海选轮数</label>
-              <el-input-number v-model="config.roundsCount" :min="1" :max="10" class="w-full" />
-            </div>
-            <div>
-              <label class="block text-sm text-neutral-400 mb-1">晋级名额</label>
-              <el-input-number v-model="config.advanceQuota" :min="1" :max="256" class="w-full" />
-            </div>
-            <div>
-              <label class="block text-sm text-neutral-400 mb-1">每轮淘汰率 (%)</label>
-              <el-input-number v-model="config.eliminationRate" :min="10" :max="90" :step="5" class="w-full" />
-            </div>
-            <div>
-              <label class="block text-sm text-neutral-400 mb-1">比赛格式</label>
-              <el-select v-model="config.format" class="w-full">
-                <el-option label="BO1" value="BO1" />
-                <el-option label="BO3" value="BO3" />
-              </el-select>
-            </div>
-          </div>
-          <div class="mt-4">
-            <el-checkbox v-model="config.advanceByScore">按分数晋级</el-checkbox>
-            <div v-if="config.advanceByScore" class="mt-2">
-              <label class="block text-sm text-neutral-400 mb-1">晋线分数</label>
-              <el-input-number v-model="config.advanceThreshold" :min="0" class="w-full" />
-            </div>
-          </div>
-        </div>
-
         <!-- 擂台赛配置 -->
         <div v-if="selectedStageMode === StageMode.ARENA" class="config-section">
           <h4 class="section-title">擂台赛配置</h4>
@@ -228,7 +195,6 @@ import {
   GroupConfig,
   FFAConfig,
   AuditionConfig,
-  SurvivalConfig,
   ArenaConfig,
   StageTypeSelectEvent
 } from './types';
@@ -328,16 +294,6 @@ const initConfig = () => {
         advanceCount: 16,
         format: 'BO1'
       } as AuditionConfig;
-      break;
-    case StageMode.SURVIVAL:
-      config.value = {
-        roundsCount: 3,
-        eliminationRate: 50,
-        advanceThreshold: 100,
-        advanceByScore: false,
-        advanceQuota: 32,
-        format: 'BO1'
-      } as SurvivalConfig;
       break;
     case StageMode.ARENA:
       config.value = {

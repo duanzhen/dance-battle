@@ -129,7 +129,14 @@ public class RefereeMatchController {
         if (stageRc != null && stageRc.getKnockout() != null
             && StringUtils.isNotBlank(stageRc.getKnockout().getPublishMode())) {
             publishMode = stageRc.getKnockout().getPublishMode();
+        } else if (stageRc != null && StringUtils.isNotBlank(stageRc.getPublishMode())) {
+            publishMode = stageRc.getPublishMode();
         }
+        String publishScope = stageRc != null ? stageRc.getPublishScope() : null;
+        boolean isRankStage = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
+        boolean perCompetitorStage = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode()) || isRankStage;
+        // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分
+        boolean rankResultHidden = isRankStage && !"AUTO".equalsIgnoreCase(publishMode);
         List<TMatch> matches = new ArrayList<>();
         if (!"DIRECTOR".equalsIgnoreCase(publishMode)) {
             matches = matchMapper.selectList(
@@ -137,8 +144,8 @@ public class RefereeMatchController {
                     .eq(TMatch::getStageId, stage.getId())
                     .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
         }
-        // 选拔赛兜底：若赛段已开始但无场次，自动生成
-        if (matches.isEmpty() && StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+        // 选拔赛/排名赛兜底：若赛段已开始但无场次，自动生成
+        if (matches.isEmpty() && perCompetitorStage) {
             long total = matchMapper.selectCount(
                 Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stage.getId()));
             if (total == 0) {
@@ -204,6 +211,7 @@ public class RefereeMatchController {
         vo.setRefereeName(referee.getName());
         vo.setTournamentId(tournamentId);
         vo.setPublishMode(publishMode);
+        vo.setPublishScope(publishScope);
 
         // 打分配置:决定裁判端界面形态(胜平负 / 总分 / 多维度)
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
@@ -334,8 +342,8 @@ public class RefereeMatchController {
                 spi.setCompetitorName(p.getCompetitorId() == null ? null : competitorNameById.get(p.getCompetitorId()));
                 spi.setOutcomeStatus(p.getOutcomeStatus());
                 sps.add(spi);
-                boolean isWinner = "WIN".equals(p.getOutcomeStatus())
-                    || (p.getRankInMatch() != null && p.getRankInMatch() == 1 && p.getScoreValue() != null);
+                boolean isWinner = !rankResultHidden && ("WIN".equals(p.getOutcomeStatus())
+                    || (p.getRankInMatch() != null && p.getRankInMatch() == 1 && p.getScoreValue() != null));
                 if (isWinner && p.getCompetitorId() != null) {
                     winnerName = competitorNameById.get(p.getCompetitorId());
                 }
@@ -374,7 +382,7 @@ public class RefereeMatchController {
 
         // 多裁判判罚进度(STANDARD 淘汰赛):已投票/应投票
         if (match != null && currentRound != null
-            && !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+            && !perCompetitorStage
             && "STANDARD".equals(match.getMatchMode())) {
             int assigned = refereeStageService.getRefereeIdsByStageId(stage.getId()).size();
             if (assigned > 1) {
@@ -392,10 +400,9 @@ public class RefereeMatchController {
         List<RefereeMatchVo.RefereeScoreInfo> myScoreInfos = new ArrayList<>();
         // 查询当前裁判对各参赛方的已有打分
         Map<Long, java.math.BigDecimal> refereeScores = new java.util.HashMap<>();
-        boolean isAudition = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
         List<TRoundScore> myScores;
-        if (isAudition) {
-            // 海选逐选手打分分布在各自轮次,跨本场全部轮次聚合该裁判的打分
+        if (perCompetitorStage) {
+            // 选拔赛/排名赛逐选手打分分布在各自轮次,跨本场全部轮次聚合该裁判的打分
             List<Long> roundIds = matchRoundMapper.selectList(
                     Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
                 .stream().map(TMatchRound::getId).toList();
@@ -428,8 +435,9 @@ public class RefereeMatchController {
             RefereeParticipantInfo pi = new RefereeParticipantInfo();
             pi.setCompetitorId(p.getCompetitorId());
             pi.setDisplaySlotIndex(p.getDisplaySlotIndex());
-            pi.setCurrentScore(p.getScoreValue());
-            pi.setRankInMatch(p.getRankInMatch());
+            // 排名赛未公布时隐藏汇总分与排名,避免裁判端提前看到全局结果
+            pi.setCurrentScore(rankResultHidden ? null : p.getScoreValue());
+            pi.setRankInMatch(rankResultHidden ? null : p.getRankInMatch());
             if (p.getCompetitorId() != null && refereeScores.containsKey(p.getCompetitorId())) {
                 pi.setMyScore(refereeScores.get(p.getCompetitorId()));
             }
@@ -442,7 +450,6 @@ public class RefereeMatchController {
             partInfos.add(pi);
         }
         vo.setParticipants(partInfos);
-
         return R.ok(vo);
     }
 

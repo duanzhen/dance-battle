@@ -74,7 +74,7 @@ const onChange = (e: Event) => {
 };
 
 const modeMap: Record<string, string> = {
-  KNOCKOUT: '淘汰', GROUP: '小组', FFA: '自由对抗', AUDITION: '选拔', ARENA: '擂台'
+  KNOCKOUT: '淘汰', GROUP: '小组', AUDITION: '选拔', ARENA: '擂台', RANK: '排名'
 };
 const statusMap: Record<string, string> = {
   DRAFT: '规划中', PENDING: '未开始', GAMING: '进行中', SETTLED: '已结束', DISCARD: '已取消'

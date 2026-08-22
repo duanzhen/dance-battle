@@ -47,6 +47,12 @@ public class RuleConfigHolder implements Serializable {
     /** 淘汰赛轮次序号(16强=1、8强=2、半决赛=3、决赛=4),仅生成场次命名时使用,不入库 */
     private Integer knockoutRound;
 
+    /** 结果公布模式(排名赛等使用):AUTO=实时公布 / MANUAL=导播台手动公布 / BATCH=全部完成后一次性公布 */
+    private String publishMode;
+
+    /** 公布范围(BATCH 模式使用):ALL=公布全部排名 / TOP_N=只公布前 N 名晋级名单 */
+    private String publishScope;
+
     /** 打分配置(决定每局如何判定胜负) */
     private ScoringConfig scoring;
 

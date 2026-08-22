@@ -83,4 +83,10 @@ public interface ITStageLifecycleService {
 
     /** 计算晋级:从已结算赛段取晋级者,在下一赛段创建新参赛方。返回晋级人数(幂等:已晋级返回 0) */
     int calculateAdvancement(CalculateAdvancementBo bo);
+
+    /**
+     * 排名赛:同分并列导致晋级名额超限时,导播台在中间态手动指定晋级者
+     * (传入全部待定者即全部晋级,未选中的待定者标记淘汰)。返回调整的晋级人数。
+     */
+    int adjustAdvancement(Long stageId, List<Long> competitorIds);
 }

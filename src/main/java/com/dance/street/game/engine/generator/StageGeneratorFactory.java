@@ -20,7 +20,8 @@ public class StageGeneratorFactory {
         this.generators = Map.of(
             StageModeEnum.KNOCKOUT, new KnockoutGenerator(),
             StageModeEnum.GROUP, new GroupGenerator(),
-            StageModeEnum.AUDITION, new AuditionGenerator()
+            StageModeEnum.AUDITION, new AuditionGenerator(),
+            StageModeEnum.RANK, new RankGenerator()
         );
     }
 

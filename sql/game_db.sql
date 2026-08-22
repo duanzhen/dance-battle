@@ -264,7 +264,7 @@ CREATE TABLE `t_stage` (
   `next_stage_id` bigint DEFAULT NULL COMMENT '下一赛段ID (可修改以实现途中变轨)',
   `parent_stage_id` bigint DEFAULT NULL COMMENT '父ID (用于同分加赛)',
   `name` varchar(50) DEFAULT NULL COMMENT '32进16 / 复活赛',
-  `stage_mode` varchar(20) NOT NULL COMMENT 'AUDITION, KNOCKOUT, FFA, GROUP',
+  `stage_mode` varchar(20) NOT NULL COMMENT 'AUDITION, KNOCKOUT, GROUP, ARENA, RANK',
   `members` int DEFAULT '1' COMMENT '每队选手数量',
   `visual_col_index` int DEFAULT NULL COMMENT '在大图中处于第几列 (X轴)',
   `rule_config` json DEFAULT NULL,

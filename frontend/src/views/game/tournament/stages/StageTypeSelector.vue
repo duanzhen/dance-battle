@@ -88,21 +88,21 @@
           </div>
         </div>
 
-        <!-- 自由对抗赛配置 -->
-        <div v-if="selectedStageMode === StageMode.FFA" class="config-section">
-          <h4 class="section-title">自由对抗赛配置</h4>
+        <!-- 排名赛配置 -->
+        <div v-if="selectedStageMode === StageMode.RANK" class="config-section">
+          <h4 class="section-title">排名赛配置</h4>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm text-neutral-400 mb-1">参赛队伍数</label>
-              <el-input-number v-model="config.teamsCount" :min="4" :max="64" class="w-full" />
+              <label class="block text-sm text-neutral-400 mb-1">参赛人数</label>
+              <el-input-number v-model="config.scale" :min="2" :max="512" class="w-full" />
             </div>
             <div>
-              <label class="block text-sm text-neutral-400 mb-1">每队比赛场次</label>
-              <el-input-number v-model="config.matchCount" :min="1" :max="10" class="w-full" />
+              <label class="block text-sm text-neutral-400 mb-1">分圈数</label>
+              <el-input-number v-model="config.circles" :min="1" :max="config.scale" class="w-full" />
             </div>
             <div>
               <label class="block text-sm text-neutral-400 mb-1">晋级名额</label>
-              <el-input-number v-model="config.advanceCount" :min="1" :max="config.teamsCount - 1" class="w-full" />
+              <el-input-number v-model="config.advanceCount" :min="1" :max="config.scale - 1" class="w-full" />
             </div>
             <div>
               <label class="block text-sm text-neutral-400 mb-1">比赛格式</label>
@@ -193,9 +193,9 @@ import {
   KnockoutTemplate,
   KnockoutConfig,
   GroupConfig,
-  FFAConfig,
   AuditionConfig,
   ArenaConfig,
+  RankingConfig,
   StageTypeSelectEvent
 } from './types';
 
@@ -238,6 +238,12 @@ const stageTypes = [
     label: '擂台赛',
     description: 'SEVEN TO SMOKE',
     icon: Target
+  },
+  {
+    mode: StageMode.RANK,
+    label: '排名赛',
+    description: '多维度打分排名',
+    icon: Trophy
   }
 ];
 
@@ -277,15 +283,28 @@ const initConfig = () => {
         format: 'BO1'
       } as GroupConfig;
       break;
-    case StageMode.FFA:
+    case StageMode.RANK:
       config.value = {
-        teamsCount: 8,
-        matchCount: 3,
-        winPoints: 3,
-        lossPoints: 0,
-        advanceCount: 4,
-        format: 'BO1'
-      } as FFAConfig;
+        mode: 'RANK',
+        scale: 32,
+        advanceCount: 16,
+        circles: 1,
+        format: 'BO1',
+        publishMode: 'AUTO',
+        publishScope: 'ALL',
+        scoring: {
+          type: 'MULTI_DIM',
+          matchMode: 'RANKING',
+          refereeAggregateRule: 'AVG',
+          aggregateRule: 'SUM',
+          trimRatio: 0.1,
+          dimensions: [
+            { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
+            { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
+            { key: 'CREAT', name: '创意', weight: 0.3, maxScore: 100 }
+          ]
+        }
+      } as RankingConfig;
       break;
     case StageMode.AUDITION:
       config.value = {

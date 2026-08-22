@@ -64,6 +64,9 @@ public class RefereeMatchVo implements Serializable {
     /** 结果公布模式:AUTO/MANUAL/DIRECTOR */
     private String publishMode;
 
+    /** 公布范围:BATCH 模式使用,ALL=公布全部排名 / TOP_N=只公布前 N 名晋级名单 */
+    private String publishScope;
+
     /** 手动公布模式:裁判已判完、等待导播台公布 */
     private Boolean pendingPublish;
 

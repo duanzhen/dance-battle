@@ -12,13 +12,22 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import com.dance.street.game.domain.bo.TMatchParticipantBo;
 import com.dance.street.game.domain.vo.TMatchParticipantVo;
+import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TStage;
+import com.dance.street.game.engine.common.RuleConfigHolder;
+import com.dance.street.game.engine.common.RuleConfigParser;
+import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
+import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchParticipantService;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.HashMap;
 
 /**
  * 场次参赛人员记录Service业务层处理
@@ -32,6 +41,8 @@ import java.util.Collection;
 public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
 
     private final TMatchParticipantMapper baseMapper;
+    private final TMatchMapper matchMapper;
+    private final TStageMapper stageMapper;
 
     /**
      * 查询场次参赛人员记录
@@ -41,7 +52,9 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
      */
     @Override
     public TMatchParticipantVo queryById(Long id){
-        return baseMapper.selectVoById(id);
+        TMatchParticipantVo vo = baseMapper.selectVoById(id);
+        maskRankScores(List.of(vo));
+        return vo;
     }
 
     /**
@@ -55,6 +68,7 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
     public TableDataInfo<TMatchParticipantVo> queryPageList(TMatchParticipantBo bo, PageQuery pageQuery) {
         LambdaQueryWrapper<TMatchParticipant> lqw = buildQueryWrapper(bo);
         Page<TMatchParticipantVo> result = baseMapper.selectVoPage(pageQuery.build(), lqw);
+        maskRankScores(result.getRecords());
         return TableDataInfo.build(result);
     }
 
@@ -67,7 +81,44 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
     @Override
     public List<TMatchParticipantVo> queryList(TMatchParticipantBo bo) {
         LambdaQueryWrapper<TMatchParticipant> lqw = buildQueryWrapper(bo);
-        return baseMapper.selectVoList(lqw);
+        List<TMatchParticipantVo> list = baseMapper.selectVoList(lqw);
+        maskRankScores(list);
+        return list;
+    }
+
+    /**
+     * 排名赛公布控制:MANUAL/BATCH 模式且赛段未结算(SETTLED)前,
+     * 隐藏参赛方总分/排名,保证大屏与外部接口在公布前看不到结果。
+     */
+    private void maskRankScores(List<TMatchParticipantVo> list) {
+        if (list == null || list.isEmpty()) {
+            return;
+        }
+        Map<Long, Boolean> hiddenByMatch = new HashMap<>();
+        for (TMatchParticipantVo vo : list) {
+            if (vo.getMatchId() == null) {
+                continue;
+            }
+            Boolean hidden = hiddenByMatch.computeIfAbsent(vo.getMatchId(), matchId -> {
+                TMatch m = matchMapper.selectById(matchId);
+                if (m == null) {
+                    return false;
+                }
+                TStage s = stageMapper.selectById(m.getStageId());
+                if (s == null || !StageModeEnum.RANK.getCode().equals(s.getStageMode())) {
+                    return false;
+                }
+                if (StageConstants.STAGE_SETTLED.equals(s.getStatus())) {
+                    return false; // 已结算即已公布
+                }
+                RuleConfigHolder rc = RuleConfigParser.parse(s.getRuleConfig());
+                return rc != null && rc.getPublishMode() != null && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
+            });
+            if (Boolean.TRUE.equals(hidden)) {
+                vo.setScoreValue(null);
+                vo.setRankInMatch(null);
+            }
+        }
     }
 
     private LambdaQueryWrapper<TMatchParticipant> buildQueryWrapper(TMatchParticipantBo bo) {

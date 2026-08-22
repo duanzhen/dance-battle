@@ -53,7 +53,7 @@ public class TStage extends TenantEntity {
     private String name;
 
     /**
-     * AUDITION, KNOCKOUT, FFA, GROUP
+     * AUDITION, KNOCKOUT, GROUP, ARENA, RANK
      */
     private String stageMode;
 

@@ -214,9 +214,9 @@ import StageConfigPlaceholder from './stages/StageConfigPlaceholder.vue';
 import TransitionConfig from './TransitionConfig.vue';
 import KnockoutStageConfig from './stages/KnockoutStageConfig.vue';
 import GroupStageConfig from './stages/GroupStageConfig.vue';
-import FFStageConfig from './stages/FFStageConfig.vue';
 import AuditionStageConfig from './stages/AuditionStageConfig.vue';
 import ArenaStageConfig from './stages/ArenaStageConfig.vue';
+import RankingStageConfig from './stages/RankingStageConfig.vue';
 import StageCompetitorList from './stages/StageCompetitorList.vue';
 import { StageMode, StageData, ConfigMode } from './stages/types';
 
@@ -370,9 +370,9 @@ const isCreatingStage = ref(false);
 const stageConfigComponents = {
   [StageMode.KNOCKOUT]: markRaw(KnockoutStageConfig),
   [StageMode.GROUP]: markRaw(GroupStageConfig),
-  [StageMode.FFA]: markRaw(FFStageConfig),
   [StageMode.AUDITION]: markRaw(AuditionStageConfig),
-  [StageMode.ARENA]: markRaw(ArenaStageConfig)
+  [StageMode.ARENA]: markRaw(ArenaStageConfig),
+  [StageMode.RANK]: markRaw(RankingStageConfig)
 };
 
 // 获取赛段配置组件
@@ -455,9 +455,21 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
     const defaultConfigs: Record<string, any> = {
       [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
-      [StageMode.FFA]: { teamsCount: 8, matchCount: 3, format: 'BO1', winPoints: 3, lossPoints: 0, advanceCount: 4 },
       [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-      [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' }
+      [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' },
+      [StageMode.RANK]: {
+        mode: 'RANK', scale: 32, advanceCount: 16, circles: 1, format: 'BO1',
+        publishMode: 'AUTO', publishScope: 'ALL',
+        scoring: {
+          type: 'MULTI_DIM', matchMode: 'RANKING',
+          refereeAggregateRule: 'AVG', aggregateRule: 'SUM', trimRatio: 0.1,
+          dimensions: [
+            { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
+            { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
+            { key: 'CREAT', name: '创意', weight: 0.3, maxScore: 100 }
+          ]
+        }
+      }
     };
     config = defaultConfigs[stageMode] || {};
   }

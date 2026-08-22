@@ -215,7 +215,8 @@ public class TStageServiceImpl implements ITStageService {
                     ko.put("advanceCount", stage.getTeamCountEnd());
                     changed = true;
                 }
-            } else if (StageModeEnum.AUDITION.getCode().equals(mode)) {
+            } else if (StageModeEnum.AUDITION.getCode().equals(mode)
+                || StageModeEnum.RANK.getCode().equals(mode)) {
                 if (stage.getTeamCountEnd() != null && rc.get("advanceCount") == null) {
                     rc.put("advanceCount", stage.getTeamCountEnd());
                     changed = true;
@@ -587,10 +588,11 @@ public class TStageServiceImpl implements ITStageService {
             vo.setStatus("NO_PREV");
             return vo;
         }
-        // 预排用于 淘汰赛/海选 → 淘汰赛;小组等其他赛段间不做预排
+        // 预排用于 淘汰赛/海选/排名赛 → 淘汰赛;小组等其他赛段间不做预排
         if (!StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())
             || (!StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())
-                && !StageModeEnum.AUDITION.getCode().equals(prev.getStageMode()))) {
+                && !StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
+                && !StageModeEnum.RANK.getCode().equals(prev.getStageMode()))) {
             vo.setStatus("UNSUPPORTED");
             return vo;
         }
@@ -676,7 +678,8 @@ public class TStageServiceImpl implements ITStageService {
             // 承接上一淘汰赛胜者:按胜者位置顺序配对,覆盖本赛段配置的 SEED
             pairingMode = "SEQUENTIAL";
         } else if (StringUtils.isBlank(pairingMode)) {
-            pairingMode = StageModeEnum.AUDITION.getCode().equals(prev.getStageMode()) ? "SEED" : "SEQUENTIAL";
+            pairingMode = (StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
+                || StageModeEnum.RANK.getCode().equals(prev.getStageMode())) ? "SEED" : "SEQUENTIAL";
         }
         if ("SEED".equalsIgnoreCase(pairingMode)) {
             int bracketSize = Math.max(2, nextPowerOfTwo(seedArr.length));

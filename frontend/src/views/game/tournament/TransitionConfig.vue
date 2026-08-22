@@ -124,6 +124,45 @@
         </div>
       </div>
 
+      <!-- 排名赛同分待定晋级调整 -->
+      <div v-if="isRankSource && pendingAdvancers.length > 0" class="space-y-4 border-t border-neutral-800 pt-6">
+        <div class="flex items-center justify-between">
+          <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">同分待定晋级调整</h4>
+          <span class="text-xs text-neutral-500">晋级线同分并列,由导播台手动指定晋级者</span>
+        </div>
+
+        <div class="space-y-1.5">
+          <div
+            v-for="c in pendingAdvancers"
+            :key="c.id"
+            class="flex items-center gap-3 px-3 py-2 rounded-lg bg-black border border-neutral-800"
+            :class="selectedAdvanceIds.includes(String(c.id)) ? 'border-amber-500/50' : ''"
+          >
+            <input
+              type="checkbox"
+              :checked="selectedAdvanceIds.includes(String(c.id))"
+              :disabled="targetLocked"
+              class="accent-amber-500 w-4 h-4"
+              @change="toggleAdvance(c.id)"
+            />
+            <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name }}</span>
+            <span v-if="c.number" class="text-[10px] text-neutral-600 flex-none">#{{ c.number }}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 flex-none">待定</span>
+          </div>
+        </div>
+        <p class="text-[10px] text-neutral-600">勾选即晋级;未勾选的待定者将标记淘汰。全部勾选 = 同分者全部晋级(名额可超限)。</p>
+
+        <div class="flex justify-end">
+          <button
+            @click="saveAdvancement"
+            :disabled="targetLocked || advSaving || selectedAdvanceIds.length === 0"
+            class="px-4 py-2 rounded-lg bg-amber-500 text-neutral-900 text-xs font-bold hover:bg-amber-400 disabled:opacity-40 transition-colors"
+          >
+            {{ advSaving ? '保存中...' : '保存晋级调整' }}
+          </button>
+        </div>
+      </div>
+
       <div class="space-y-4">
         <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">间歇期设置</h4>
         <div class="flex items-center gap-4">
@@ -162,7 +201,8 @@
 import { ref, reactive, computed, onMounted } from 'vue';
 import { ArrowRight, SlidersHorizontal, Zap, Hand, Lock } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
-import { getStage, updateStage, getStagePreBracket } from '@/api/game/stage';
+import { getStage, updateStage, getStagePreBracket, adjustStageAdvancement } from '@/api/game/stage';
+import { listCompetitor } from '@/api/game/competitor';
 
 // Props
 const props = defineProps<{
@@ -186,8 +226,14 @@ const preLoading = ref(false);
 const preStatus = ref('');
 const preSeeds = ref<any[]>([]);
 const saving = ref(false);
+const advSaving = ref(false);
+const pendingAdvancers = ref<any[]>([]);
+const selectedAdvanceIds = ref<string[]>([]);
 const sourceStage = ref<any>(null);
 const targetStage = ref<any>(null);
+
+/** 来源赛段是否为排名赛(同分待定晋级调整仅排名赛需要) */
+const isRankSource = computed(() => sourceStage.value?.stageMode === 'RANK');
 
 /** 目标赛段已开始(非 DRAFT/PENDING)时锁定整页中间态调整 */
 const targetLocked = computed(() => {
@@ -206,8 +252,56 @@ const loadSourceConfig = async () => {
     config.mode = t.mode === 'MANUAL' ? 'MANUAL' : 'AUTO';
     config.reshuffle = !!t.reshuffle;
     config.allowSubstitutions = !!t.allowSubstitutions;
+    await loadPendingAdvancers();
   } catch {
     console.warn('加载转场配置失败');
+  }
+};
+
+/** 加载来源赛段中处于待定(同分)状态的参赛者 */
+const loadPendingAdvancers = async () => {
+  if (!sourceStage.value || sourceStage.value.stageMode !== 'RANK') {
+    pendingAdvancers.value = [];
+    selectedAdvanceIds.value = [];
+    return;
+  }
+  try {
+    const resp: any = await listCompetitor({
+      stageId: sourceStage.value.id,
+      pageNum: 1,
+      pageSize: 1000
+    });
+    const rows: any[] = resp.data?.rows ?? resp.data?.data ?? [];
+    pendingAdvancers.value = rows.filter((c) => c.outcomeStatus === 'PENDING');
+    selectedAdvanceIds.value = [];
+  } catch {
+    pendingAdvancers.value = [];
+  }
+};
+
+const toggleAdvance = (id: string | number) => {
+  const key = String(id);
+  const idx = selectedAdvanceIds.value.indexOf(key);
+  if (idx >= 0) {
+    selectedAdvanceIds.value.splice(idx, 1);
+  } else {
+    selectedAdvanceIds.value.push(key);
+  }
+};
+
+const saveAdvancement = async () => {
+  if (!sourceStage.value || selectedAdvanceIds.value.length === 0) return;
+  advSaving.value = true;
+  try {
+    await adjustStageAdvancement(sourceStage.value.id, selectedAdvanceIds.value);
+    ElMessage.success('同分晋级调整已保存');
+    await loadPendingAdvancers();
+    await loadPreBracket();
+  } catch (e: any) {
+    console.error('保存同分晋级调整失败:', e);
+    ElMessage.error(e?.response?.data?.msg || '保存失败');
+  } finally {
+    advSaving.value = false;
   }
 };
 

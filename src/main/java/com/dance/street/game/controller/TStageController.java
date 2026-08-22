@@ -290,4 +290,17 @@ public class TStageController extends BaseController {
         bo.setStageId(stageId);
         return R.ok(tStageLifecycleService.setSeedOrder(bo));
     }
+
+    /**
+     * 排名赛同分晋级调整:赛段已结算(SETTLED)后,导播台在中间态手动指定
+     * 晋级线上待定(同分并列)参赛者中的晋级者(传入全部即全部晋级,未选中的待定者淘汰)。
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "同分晋级调整", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{stageId}/adjust-advancement")
+    public R<Integer> adjustAdvancement(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
+                                        @RequestBody List<Long> competitorIds) {
+        return R.ok(tStageLifecycleService.adjustAdvancement(stageId, competitorIds));
+    }
 }

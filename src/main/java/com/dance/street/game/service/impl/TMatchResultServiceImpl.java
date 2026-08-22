@@ -49,6 +49,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 比赛结果提交编排:写明细分 → ScoringEngine 算分算排名 → 回写 participant →
@@ -103,8 +104,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         List<Long> competitorIds = parts.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
 
-        // 选拔赛(AUDITION): 多裁判累计打分,不即时结算。重复提交以最新为准(先删旧再写新)
+        // 选拔赛/排名赛(AUDITION/RANK): 多裁判累计打分,不即时结算。重复提交以最新为准(先删旧再写新)
         boolean isAudition = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
+        boolean isRank = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
+        boolean perCompetitor = isAudition || isRank;
         boolean isArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
         // 擂台赛:1v1 分胜负,必须给出胜负判定、不允许判平
         if (isArena) {
@@ -124,13 +127,13 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 throw new ServiceException("擂台赛须选择一方获胜");
             }
         }
-        // 多裁判累计打分(VOTING/RANKING):只累计不结算,由 completeStage 用全部裁判分统一结算
-        if (!isAudition && (mode == MatchModeEnum.VOTING || mode == MatchModeEnum.RANKING)) {
+        // 多裁判累计打分(VOTING/RANKING,非逐选手轮次):只累计不结算,由 completeStage 统一结算
+        if (!perCompetitor && (mode == MatchModeEnum.VOTING || mode == MatchModeEnum.RANKING)) {
             List<MatchScoreResult> accumulated = scoredMatchService.accumulateScores(match, stage, bo);
             return buildVo(match.getId(), StageConstants.MATCH_GAMING, accumulated);
         }
-        // 选拔赛:逐选手 upsert(逐个提交/回改互不影响),提交后立即累计回显,不结算
-        if (isAudition) {
+        // 选拔赛/排名赛:逐选手 upsert(逐个提交/回改互不影响),提交后立即累计回显,不结算
+        if (perCompetitor) {
             List<TMatchRound> auditionRounds = matchRoundMapper.selectList(
                 Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()));
             Map<Long, TMatchRound> roundByCompetitor = new HashMap<>();
@@ -141,40 +144,62 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
             Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
             if (bo.getScores() != null) {
+                // 按 (轮次,选手) 分组:同一选手多个维度一次删除再批量插入,
+                // 避免逐条「先删后插」导致同一次提交的多维度分互相覆盖
+                Map<String, List<ScoreEntryBo>> byRoundCompetitor = new java.util.LinkedHashMap<>();
                 for (ScoreEntryBo se : bo.getScores()) {
                     if (se.getCompetitorId() == null || se.getScore() == null) {
                         continue;
                     }
-                    // 百分制校验:0-100(海选评委打分)
+                    // 分数校验:海选 0-100;排名赛按维度满分校验(未配置时默认 100)
+                    java.math.BigDecimal maxScore = rankMaxScore(sc, se.getDimension());
                     if (se.getScore().compareTo(java.math.BigDecimal.ZERO) < 0
-                        || se.getScore().compareTo(java.math.BigDecimal.valueOf(100)) > 0) {
-                        throw new ServiceException("海选打分须在 0-100 之间");
+                        || se.getScore().compareTo(maxScore) > 0) {
+                        throw new ServiceException("{}打分须在 0-{} 之间", isAudition ? "海选" : "维度", maxScore);
                     }
                     // 只更新该裁判对该选手的打分,保留其他选手已提交的分数
                     TMatchRound target = roundByCompetitor.get(se.getCompetitorId());
                     if (target == null) {
                         target = mustGetRound(match);
                     }
+                    byRoundCompetitor
+                        .computeIfAbsent(target.getId() + ":" + se.getCompetitorId(), k -> new ArrayList<>())
+                        .add(se);
+                }
+                for (Map.Entry<String, List<ScoreEntryBo>> e : byRoundCompetitor.entrySet()) {
+                    String[] key = e.getKey().split(":");
+                    Long roundId = Long.valueOf(key[0]);
+                    Long competitorId = Long.valueOf(key[1]);
                     roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                        .eq(TRoundScore::getRoundId, target.getId())
+                        .eq(TRoundScore::getRoundId, roundId)
                         .eq(TRoundScore::getRefereeId, refId)
-                        .eq(TRoundScore::getCompetitorId, se.getCompetitorId()));
-                    TRoundScore rs = new TRoundScore();
-                    rs.setTournamentId(match.getTournamentId());
-                    rs.setRoundId(target.getId());
-                    rs.setTenantId(match.getTenantId());
-                    rs.setCompetitorId(se.getCompetitorId());
-                    rs.setRefereeId(refId);
-                    rs.setScore(se.getScore());
-                    rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
-                    rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
-                    roundScoreMapper.insert(rs);
+                        .eq(TRoundScore::getCompetitorId, competitorId));
+                    for (ScoreEntryBo se : e.getValue()) {
+                        TRoundScore rs = new TRoundScore();
+                        rs.setTournamentId(match.getTournamentId());
+                        rs.setRoundId(roundId);
+                        rs.setTenantId(match.getTenantId());
+                        rs.setCompetitorId(competitorId);
+                        rs.setRefereeId(refId);
+                        rs.setScore(se.getScore());
+                        rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
+                        rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
+                        roundScoreMapper.insert(rs);
+                    }
                 }
             }
-            accumulateAuditionScores(match, competitorIds);
+            if (isAudition) {
+                accumulateAuditionScores(match, competitorIds);
+            } else {
+                accumulateRankScores(match, stage, competitorIds);
+            }
             List<MatchScoreResult> accumulated = loadAuditionResults(match, competitorIds);
             refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
             tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
+            // 排名赛 BATCH 公布模式:全部裁判对全部选手打分完成后,自动完成赛段一次性公布
+            if (isRank) {
+                maybeAutoPublishRankStage(stage);
+            }
             return buildVo(match.getId(), StageConstants.MATCH_GAMING, accumulated);
         }
 
@@ -210,7 +235,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 多裁判判罚投票(STANDARD):裁判端提交只记一票,全部裁判判完才统一结算
         Map<Long, String> effectiveOutcomes = bo.getOutcomes();
         boolean multiRefereeVote = MatchModeEnum.STANDARD.equals(mode)
-            && !isAudition
+            && !perCompetitor
             && bo.getRefereeId() != null
             && !competitorIds.isEmpty()
             && refereeStageService.getRefereeIdsByStageId(stage.getId()).size() > 1;
@@ -784,6 +809,103 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 .eq(TMatchParticipant::getMatchId, match.getId())
                 .eq(TMatchParticipant::getCompetitorId, cid));
         }
+    }
+
+    /**
+     * 排名赛累计打分:跨本场全部轮次(每个选手一个轮次)聚合多裁判×多维度分,
+     * 用 RANKING 策略重算每个参赛方的总分与排名并回写 participant(场次保持 GAMING)。
+     */
+    private void accumulateRankScores(TMatch match, TStage stage, List<Long> competitorIds) {
+        List<Long> roundIds = matchRoundMapper.selectList(
+                Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        if (roundIds.isEmpty()) {
+            return;
+        }
+        List<TRoundScore> allScores = roundScoreMapper.selectList(
+            Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        MatchScoreInput input = MatchScoreInput.builder()
+            .matchMode(MatchModeEnum.RANKING)
+            .scoringConfig(rc != null ? rc.getScoring() : null)
+            .competitorIds(competitorIds)
+            .rawScores(allScores)
+            .build();
+        List<MatchScoreResult> results = scoringEngine.compute(input);
+        for (MatchScoreResult r : results) {
+            if (r.getCompetitorId() == null) {
+                continue;
+            }
+            participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                .set(TMatchParticipant::getScoreValue, r.getScoreValue())
+                .set(TMatchParticipant::getRankInMatch,
+                    r.getRankInMatch() == null ? null : r.getRankInMatch().longValue())
+                .eq(TMatchParticipant::getMatchId, match.getId())
+                .eq(TMatchParticipant::getCompetitorId, r.getCompetitorId()));
+        }
+    }
+
+    /** 排名赛维度满分:取打分配置中该维度 maxScore,未配置/未命中时默认 100 */
+    private java.math.BigDecimal rankMaxScore(ScoringConfig sc, String dimension) {
+        if (sc != null && sc.getDimensions() != null) {
+            for (var d : sc.getDimensions()) {
+                if (d.getKey() != null && d.getKey().equals(dimension) && d.getMaxScore() != null) {
+                    return d.getMaxScore();
+                }
+            }
+        }
+        return java.math.BigDecimal.valueOf(100);
+    }
+
+    /**
+     * 排名赛 BATCH 公布模式:当全部裁判对全部选手都已打分时,自动完成赛段一次性公布结果。
+     * 判定口径:每名选手的被评裁判数 ≥ 本赛段已分配裁判数(未分配裁判时退化为至少一名裁判评过)。
+     */
+    private void maybeAutoPublishRankStage(TStage stage) {
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        if (rc == null || !"BATCH".equalsIgnoreCase(rc.getPublishMode())) {
+            return;
+        }
+        if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
+            return;
+        }
+        List<Long> refereeIds = refereeStageService.getRefereeIdsByStageId(stage.getId());
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
+        if (matches.isEmpty()) {
+            return;
+        }
+        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
+        List<TMatchParticipant> parts = participantMapper.selectList(
+            Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds)
+                .isNotNull(TMatchParticipant::getCompetitorId));
+        if (parts.isEmpty()) {
+            return;
+        }
+        List<Long> roundIds = matchRoundMapper.selectList(
+                Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        if (roundIds.isEmpty()) {
+            return;
+        }
+        // competitorId -> 已评裁判数(去重)
+        Map<Long, Set<Long>> scoredReferees = new java.util.HashMap<>();
+        roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                .in(TRoundScore::getRoundId, roundIds)
+                .isNotNull(TRoundScore::getRefereeId)
+                .isNotNull(TRoundScore::getCompetitorId))
+            .forEach(rs -> scoredReferees
+                .computeIfAbsent(rs.getCompetitorId(), k -> new java.util.HashSet<>())
+                .add(rs.getRefereeId()));
+        int required = refereeIds.isEmpty() ? 1 : refereeIds.size();
+        boolean allDone = parts.stream()
+            .allMatch(p -> scoredReferees.getOrDefault(p.getCompetitorId(), Set.of()).size() >= required);
+        if (!allDone) {
+            return;
+        }
+        log.info("排名赛赛段[{}]全部裁判对全部选手打分完成,BATCH 模式自动公布", stage.getId());
+        stageLifecycleService.completeStage(stage.getId());
     }
 
     /**

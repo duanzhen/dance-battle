@@ -13,9 +13,9 @@ export enum ConfigMode {
 export enum StageMode {
   KNOCKOUT = 'KNOCKOUT', // 淘汰赛
   GROUP = 'GROUP', // 小组赛
-  FFA = 'FFA', // 自由对抗赛
   AUDITION = 'AUDITION', // 选拔赛
-  ARENA = 'ARENA' // 擂台赛
+  ARENA = 'ARENA', // 擂台赛
+  RANK = 'RANK' // 排名赛
 }
 
 // 淘汰赛模板类型
@@ -51,22 +51,40 @@ export interface GroupConfig {
   format: MatchFormat;
 }
 
-// 自由对抗赛配置
-export interface FFAConfig {
-  teamsCount: number; // 参赛队伍总数
-  matchCount: number; // 每队比赛场次
-  winPoints: number; // 胜积分
-  lossPoints: number; // 负积分
-  advanceCount: number; // 晋级名额
-  format: MatchFormat;
-}
-
 // 选拔赛配置
 export interface AuditionConfig {
   scale: number; // 海选规模
   advanceCondition: string; // 晋级条件
   advanceCount: number; // 晋级名额
   format: MatchFormat;
+}
+
+// 排名赛评分维度(可自定义,不写死)
+export interface RankDimension {
+  key: string; // 维度标识,如 TECH/CREATE/SHOW
+  name: string; // 维度名称
+  weight: number; // 权重(维度间按 WEIGHTED 合成时使用)
+  maxScore: number; // 该维度满分
+}
+
+// 排名赛配置:逐选手轮次,多名裁判按自定义维度打分,总分排名后按名额晋级
+export interface RankingConfig {
+  scale: number; // 参赛人数
+  advanceCount: number; // 晋级名额
+  circles: number; // 分圈数
+  format: MatchFormat;
+  // 结果公布模式:AUTO=实时公布 / MANUAL=导播台手动公布 / BATCH=全部完成后一次性公布
+  publishMode: 'AUTO' | 'MANUAL' | 'BATCH';
+  // 公布范围:BATCH 使用,ALL=公布全部排名 / TOP_N=只公布前 N 名晋级名单
+  publishScope: 'ALL' | 'TOP_N';
+  scoring: {
+    type: 'MULTI_DIM';
+    matchMode: 'RANKING';
+    refereeAggregateRule: 'SUM' | 'AVG' | 'TRIMMED_MEAN';
+    aggregateRule: 'SUM' | 'AVG' | 'WEIGHTED' | 'TRIMMED_MEAN';
+    trimRatio: number;
+    dimensions: RankDimension[];
+  };
 }
 
 // 擂台赛配置
@@ -86,7 +104,7 @@ export interface ArenaConfig {
 }
 
 // 联合类型
-export type StageConfig = KnockoutConfig | GroupConfig | FFAConfig | AuditionConfig | ArenaConfig;
+export type StageConfig = KnockoutConfig | GroupConfig | AuditionConfig | ArenaConfig | RankingConfig;
 
 // 赛段数据接口
 export interface StageData {

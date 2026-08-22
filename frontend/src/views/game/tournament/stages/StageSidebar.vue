@@ -260,7 +260,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, markRaw } from 'vue';
-import { ChevronDown, Trophy, Mic, Target } from 'lucide-vue-next';
+import { ChevronDown, Trophy, Mic, Target, ListOrdered } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import { initializeStage, generateMatches, startStage, completeStage, calculateAdvancement } from '@/api/game/stage/lifecycle';
 import { listReferee } from '@/api/game/referee';
@@ -268,9 +268,9 @@ import { getStageRefereeIds, assignStageReferees } from '@/api/game/refereeStage
 import { StageData, StageMode, ConfigMode } from './types';
 import KnockoutStageConfig from './KnockoutStageConfig.vue';
 import GroupStageConfig from './GroupStageConfig.vue';
-import FFStageConfig from './FFStageConfig.vue';
 import AuditionStageConfig from './AuditionStageConfig.vue';
 import ArenaStageConfig from './ArenaStageConfig.vue';
+import RankingStageConfig from './RankingStageConfig.vue';
 
 // Props
 const props = defineProps<{
@@ -316,9 +316,9 @@ const newStageData = ref({
 const stageConfigComponents = {
   [StageMode.KNOCKOUT]: markRaw(KnockoutStageConfig),
   [StageMode.GROUP]: markRaw(GroupStageConfig),
-  [StageMode.FFA]: markRaw(FFStageConfig),
   [StageMode.AUDITION]: markRaw(AuditionStageConfig),
-  [StageMode.ARENA]: markRaw(ArenaStageConfig)
+  [StageMode.ARENA]: markRaw(ArenaStageConfig),
+  [StageMode.RANK]: markRaw(RankingStageConfig)
 };
 
 // 获取赛段配置组件
@@ -330,9 +330,21 @@ const getStageConfigComponent = (stageMode: StageMode) => {
 const defaultConfigs: Record<StageMode, any> = {
   [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
-  [StageMode.FFA]: { teamsCount: 8, matchCount: 3, format: 'BO1', winPoints: 3, lossPoints: 0, advanceCount: 4 },
   [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-  [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' }
+  [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' },
+  [StageMode.RANK]: {
+    mode: 'RANK', scale: 32, advanceCount: 16, circles: 1, format: 'BO1',
+    publishMode: 'AUTO', publishScope: 'ALL',
+    scoring: {
+      type: 'MULTI_DIM', matchMode: 'RANKING',
+      refereeAggregateRule: 'AVG', aggregateRule: 'SUM', trimRatio: 0.1,
+      dimensions: [
+        { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
+        { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
+        { key: 'CREAT', name: '创意', weight: 0.3, maxScore: 100 }
+      ]
+    }
+  }
 };
 
 // 临时赛段数据 (用于步骤2配置预览)
@@ -350,16 +362,17 @@ const tempStage = ref<StageData>({
 const stageTypes = [
   { mode: StageMode.KNOCKOUT, label: '淘汰赛', description: '单败淘汰制', icon: Trophy },
   { mode: StageMode.AUDITION, label: '选拔赛', description: '海选晋级', icon: Mic },
-  { mode: StageMode.ARENA, label: '擂台赛', description: 'SEVEN TO SMOKE', icon: Target }
+  { mode: StageMode.ARENA, label: '擂台赛', description: 'SEVEN TO SMOKE', icon: Target },
+  { mode: StageMode.RANK, label: '排名赛', description: '多维度打分排名', icon: ListOrdered }
 ];
 
 // 赛段类型标签映射
 const stageModeLabels: Record<string, string> = {
   [StageMode.KNOCKOUT]: '淘汰赛',
   [StageMode.GROUP]: '小组赛',
-  [StageMode.FFA]: '自由对抗赛',
   [StageMode.AUDITION]: '选拔赛',
-  [StageMode.ARENA]: '擂台赛'
+  [StageMode.ARENA]: '擂台赛',
+  [StageMode.RANK]: '排名赛'
 };
 
 // 是否可编辑状态 (规划中/未开始可编辑)
@@ -390,14 +403,14 @@ const canComplete = computed(() => {
       const g = parsed.group || parsed;
       return g.groupCount >= 2 && g.teamsPerGroup >= 2 && g.advancePerGroup >= 1;
     }
-    if (selectedStageMode.value === StageMode.FFA) {
-      return parsed.teamsCount > 0 && parsed.matchCount > 0 && parsed.advanceCount > 0;
-    }
     if (selectedStageMode.value === StageMode.AUDITION) {
       return parsed.scale > 0 && parsed.advanceCount > 0;
     }
     if (selectedStageMode.value === StageMode.ARENA) {
       return parsed.challengerCount > 0 && parsed.maxChallenges > 0;
+    }
+    if (selectedStageMode.value === StageMode.RANK) {
+      return parsed.scale > 0 && parsed.advanceCount > 0 && (parsed.scoring?.dimensions?.length > 0);
     }
 
     return true;

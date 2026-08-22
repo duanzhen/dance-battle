@@ -65,9 +65,9 @@ public class TStageVo implements Serializable {
     private String name;
 
     /**
-     * AUDITION, KNOCKOUT, FFA, GROUP
+     * AUDITION, KNOCKOUT, GROUP, ARENA, RANK
      */
-    @ExcelProperty(value = "AUDITION, KNOCKOUT, FFA, GROUP")
+    @ExcelProperty(value = "AUDITION, KNOCKOUT, GROUP, ARENA, RANK")
     private String stageMode;
 
     /**

@@ -161,3 +161,17 @@ export const getStagePreBracket = (stageId: string | number) => {
     method: 'get'
   });
 };
+
+/**
+ * 排名赛同分晋级调整:赛段已结算后,导播台在中间态手动指定晋级者
+ * (传入全部待定者即全部晋级,未选中的待定者标记淘汰)
+ * @param stageId 排名赛赛段ID
+ * @param competitorIds 要标记晋级的待定参赛者ID
+ */
+export const adjustStageAdvancement = (stageId: string | number, competitorIds: (string | number)[]) => {
+  return request({
+    url: '/game/stage/' + stageId + '/adjust-advancement',
+    method: 'post',
+    data: competitorIds
+  });
+};

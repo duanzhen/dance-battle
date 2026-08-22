@@ -21,8 +21,8 @@
       </div>
     </template>
 
-    <div class="space-y-3 py-1">
-      <div>
+    <div class="grid grid-cols-2 gap-x-5 gap-y-4 py-1">
+      <div class="col-span-2">
         <label class="block text-sm font-medium text-neutral-400 mb-2">赛事封面</label>
         <div
           @click="!isUploadingCover && triggerFileInput()"
@@ -30,7 +30,7 @@
           @dragleave.prevent="isDragging = false"
           @drop.prevent="handleDrop"
           :class="[
-            'relative h-24 w-full rounded-xl border-2 border-dashed transition-all duration-300 flex flex-col items-center justify-center cursor-pointer overflow-hidden group',
+            'relative h-20 w-full rounded-xl border-2 border-dashed transition-all duration-300 flex flex-col items-center justify-center cursor-pointer overflow-hidden group',
             isDragging ? 'border-amber-500 bg-amber-500/10' : 'border-neutral-700 bg-neutral-950 hover:border-neutral-500 hover:bg-neutral-800'
           ]"
         >
@@ -118,39 +118,43 @@
         <p class="text-[11px] text-neutral-600 mt-1">自动创建对应数量的裁判；按模版创建时会自动绑定到所有赛段</p>
       </div>
 
-      <div v-if="!simple" class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-neutral-400 mb-1.5">设计稿宽度</label>
-          <input
-            v-model.number="form.logicalWidth"
-            type="number"
-            placeholder="1920"
-            class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-neutral-400 mb-1.5">设计稿高度</label>
-          <input
-            v-model.number="form.logicalHeight"
-            type="number"
-            placeholder="1080"
-            class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
-          />
+      <div v-if="!simple" :class="props.tournament ? 'col-span-2' : ''">
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5">设计稿尺寸</label>
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1 min-w-0">
+            <input
+              v-model.number="form.logicalWidth"
+              type="number"
+              placeholder="1920"
+              class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
+            />
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-neutral-600 pointer-events-none">宽</span>
+          </div>
+          <span class="flex-none text-neutral-600 text-sm select-none">×</span>
+          <div class="relative flex-1 min-w-0">
+            <input
+              v-model.number="form.logicalHeight"
+              type="number"
+              placeholder="1080"
+              class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
+            />
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-neutral-600 pointer-events-none">高</span>
+          </div>
         </div>
       </div>
 
-      <div v-if="!simple">
+      <div v-if="!simple" class="col-span-2">
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">备注</label>
         <textarea
           v-model="form.remark"
-          rows="3"
+          rows="2"
           placeholder="规则、奖金等..."
           class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all resize-none text-sm"
         ></textarea>
       </div>
 
       <!-- 按模版创建:自动生成赛段链 + 场景 + 对战树关联 -->
-      <div v-if="!props.tournament" class="border-t border-neutral-800 pt-4">
+      <div v-if="!props.tournament" class="col-span-2 border-t border-neutral-800 pt-3">
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">按模版创建</label>
         <p class="text-[11px] text-neutral-600 mb-3">点击模版先选中，再点底部「立即发布」即可创建赛段链（海选 + 淘汰赛）与两个场景（主视觉 / 对战），并自动关联对战树。</p>
         <div class="grid grid-cols-1 gap-2">
@@ -160,7 +164,7 @@
             @click="selectedTemplate = selectedTemplate === tpl.code ? null : tpl.code"
             :disabled="isSubmitting"
             :class="[
-              'text-left w-full rounded-xl border transition-all px-3.5 py-3 group disabled:opacity-50 disabled:cursor-not-allowed',
+              'text-left w-full rounded-xl border transition-all px-3.5 py-2.5 group disabled:opacity-50 disabled:cursor-not-allowed',
               selectedTemplate === tpl.code
                 ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
                 : 'border-neutral-800 bg-neutral-950 hover:border-amber-500/50 hover:bg-neutral-900/80 active:scale-[0.99]'
@@ -257,9 +261,9 @@ const visible = computed({
 });
 
 // 响应式宽度 (模拟 Tailwind md 断点)
-const dialogWidth = ref('560px');
+const dialogWidth = ref('760px');
 const updateWidth = () => {
-  dialogWidth.value = window.innerWidth < 640 ? '90%' : '560px';
+  dialogWidth.value = window.innerWidth < 640 ? '90%' : '760px';
 };
 onMounted(() => {
   window.addEventListener('resize', updateWidth);
@@ -474,6 +478,7 @@ const handleClose = () => {
   padding: 14px 20px;
   margin-right: 0;
   border-bottom: 1px solid #262626;
+  border-radius: 16px 16px 0 0;
   background: linear-gradient(180deg, rgba(245, 158, 11, 0.03) 0%, transparent 100%);
 }
 
@@ -498,7 +503,7 @@ const handleClose = () => {
   right: 20px;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 50%;
   transition: all 0.2s ease;
 }
 

@@ -111,6 +111,47 @@ export const addStageGuest = (stageId: string | number, data: {
 };
 
 /**
+ * 插入嘉宾赛段:在指定赛段与其下一赛段之间插入淘汰赛赛段并变轨
+ * (仅当下一赛段干净——无参赛方、未生成对阵、未结束时允许)
+ * @param data { stageId, name, advanceCount? }
+ */
+export const insertGuestStage = (data: {
+  stageId: string | number;
+  name: string;
+  advanceCount?: number;
+}): AxiosPromise<StageVO> => {
+  return request({
+    url: '/game/stage/insert-guest-stage',
+    method: 'post',
+    data
+  });
+};
+
+/**
+ * 撤销插入的嘉宾赛段(未开始时允许,清理数据并恢复原链表)
+ * @param stageId 嘉宾赛段ID
+ */
+export const removeGuestStage = (stageId: string | number) => {
+  return request({
+    url: '/game/stage/guest-stage/' + stageId,
+    method: 'delete'
+  });
+};
+
+/**
+ * 按外部抽签结果批量设定赛段参赛方种子顺序(seedRank 1..n,仅未初始化时允许)
+ * @param stageId 赛段ID
+ * @param competitorIds 按抽签结果排列的参赛方ID(顺序即种子顺序)
+ */
+export const setStageSeedOrder = (stageId: string | number, competitorIds: (string | number)[]) => {
+  return request({
+    url: '/game/stage/' + stageId + '/seed-order',
+    method: 'post',
+    data: { competitorIds }
+  });
+};
+
+/**
  * 下一赛段对战树预排:上一赛段胜者(含未最终确认)按种子顺位排入本赛段
  * @param stageId 要预排的(下一)赛段ID
  */

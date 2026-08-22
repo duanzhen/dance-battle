@@ -4,9 +4,12 @@ import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.AddGuestBo;
+import com.dance.street.game.domain.bo.InsertStageBo;
+import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
+import com.dance.street.game.domain.vo.TStageVo;
 
 import java.util.List;
 
@@ -39,11 +42,32 @@ public interface ITStageLifecycleService {
     void appendAuditionCompetitor(Long stageId, Long competitorId);
 
     /**
-     * 嘉宾加入:除海选外任意赛段,在赛段中间态(PENDING/GAMING)加入。
-     * 已生成对阵时按赛制自动挂入未结算场次(淘汰赛/小组赛),擂台赛由轮转队列自动纳入;
-     * 尚未生成对阵时仅创建参赛单位,后续生成对阵会包含嘉宾。
+     * 嘉宾加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入。
+     * 仅创建参赛单位进入嘉宾池,不自动挂入任何场次;导播按外部抽签结果设定种子顺序后,
+     * 由 initialize → generateMatches 生成对阵(嘉宾胜出即占晋级名额)。
      */
     TCompetitorVo addGuest(AddGuestBo bo);
+
+    /**
+     * 插入嘉宾赛段:在指定赛段 A 与其下一赛段 B 之间插入淘汰赛赛段 S 并变轨(A→S→B)。
+     * 仅当 B 干净(无参赛方、未生成对阵、未结束)时允许,防止中途插入破坏已推进的晋级链。
+     * 重复插入(下一赛段已是嘉宾赛段)拒绝。
+     *
+     * @return 新赛段
+     */
+    TStageVo insertGuestStage(InsertStageBo bo);
+
+    /**
+     * 撤销插入的嘉宾赛段:清理其参赛方/对阵数据并恢复原链表(A→B)。
+     * 仅允许未开始(无已开打/已结算场次)的嘉宾赛段撤销。
+     */
+    void removeGuestStage(Long stageId);
+
+    /**
+     * 按外部抽签结果批量设定赛段参赛方种子顺序(seedRank 1..n)。
+     * 仅允许赛段尚未 initialize 时执行;返回参赛方数量。
+     */
+    int setSeedOrder(SeedOrderBo bo);
 
     /** 海选分圈随机抽取:把已签到选手随机均衡分配到各圈场次(可重抽,赛段未开始时) */
     List<CircleAssignVo> randomCircles(Long stageId);

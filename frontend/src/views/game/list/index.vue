@@ -11,26 +11,45 @@
           <span class="font-bold text-xl tracking-tight text-white">赛事管理</span>
         </div>
 
-        <div class="flex items-center gap-3">
-          <button
-            class="relative w-9 h-9 rounded-lg bg-neutral-800/60 border border-neutral-700/60 flex items-center justify-center text-neutral-400 hover:text-amber-400 hover:border-amber-500/40 hover:bg-amber-500/5 transition-all"
-          >
-            <span class="sr-only">Notifications</span>
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-              />
-            </svg>
-            <span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-amber-500 rounded-full shadow-[0_0_6px_rgba(245,158,11,0.7)]"></span>
-          </button>
-          <div
-            class="w-9 h-9 rounded-full bg-neutral-800 border-2 border-neutral-700 shadow-sm overflow-hidden hover:border-amber-500/60 hover:shadow-amber-500/20 transition-all cursor-pointer"
-          >
-            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
-          </div>
+        <div class="flex items-center gap-2">
+          <!-- 用户菜单:修改密码 / 退出登录(暂无消息提醒,通知图标已移除) -->
+          <el-dropdown trigger="click" popper-class="user-menu-popper" @command="handleUserCommand">
+            <div
+              class="w-9 h-9 rounded-full bg-neutral-800 border-2 border-neutral-700 shadow-sm overflow-hidden hover:border-amber-500/60 hover:shadow-amber-500/20 cursor-pointer flex items-center justify-center"
+            >
+              <img :src="userStore.avatar" alt="User" class="w-full h-full object-cover" />
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="changePassword">
+                  <span class="flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                      />
+                    </svg>
+                    修改密码
+                  </span>
+                </el-dropdown-item>
+                <el-dropdown-item divided command="logout">
+                  <span class="flex items-center gap-2 text-red-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                      />
+                    </svg>
+                    退出登录
+                  </span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </header>
@@ -55,7 +74,8 @@
 
       <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4 shadow-xl shadow-black/20 mb-8">
         <div class="flex flex-col lg:flex-row gap-4 justify-between">
-          <div class="flex overflow-x-auto pb-2 lg:pb-0 gap-1 no-scrollbar">
+          <!-- 注意:overflow-x-auto 会裁掉四周溢出的阴影/光圈,需留上下左右内边距 -->
+          <div class="flex overflow-x-auto py-2 px-2 gap-1 no-scrollbar">
             <button
               v-for="tab in tabs"
               :key="tab.value"
@@ -83,7 +103,7 @@
               v-model="searchQuery"
               type="text"
               class="block w-full pl-10 pr-3 py-2 border border-neutral-700 rounded-lg leading-5 bg-neutral-950 text-neutral-200 placeholder-neutral-600 focus:outline-none focus:bg-neutral-900 focus:ring-1 focus:ring-amber-500 focus:border-amber-500 transition-all sm:text-sm"
-              placeholder="搜索赛事名称、游戏或ID..."
+              placeholder="搜索赛事名称"
             />
           </div>
         </div>
@@ -200,17 +220,44 @@
 
     <!-- 表单对话框 -->
     <TournamentForm v-model="showForm" @submit-success="handleFormSuccess" />
+    <!-- 修改密码对话框 -->
+    <PasswordDialog ref="passwordDialogRef" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { ElMessageBox } from 'element-plus';
+import { useUserStore } from '@/store/modules/user';
+import PasswordDialog from '@/components/PasswordDialog/index.vue';
 import TournamentForm from './TournamentForm.vue';
 import { listTournament } from '@/api/game/tournament';
 import { TournamentVO } from '@/api/game/tournament/types';
 
 const router = useRouter();
+const userStore = useUserStore();
+const passwordDialogRef = ref<InstanceType<typeof PasswordDialog>>();
+
+// 右上角用户菜单:修改密码 / 退出登录
+const handleUserCommand = async (command: string) => {
+  if (command === 'changePassword') {
+    passwordDialogRef.value?.open();
+    return;
+  }
+  if (command === 'logout') {
+    await ElMessageBox.confirm('确定退出登录吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+    await userStore.logout();
+    router.replace({
+      path: '/login',
+      query: { redirect: encodeURIComponent(router.currentRoute.value.fullPath || '/') }
+    });
+  }
+};
 
 // --- 表单显示控制 ---
 const showForm = ref(false);
@@ -370,5 +417,36 @@ html {
   /* 颜色: 滑块 轨道 */
   scrollbar-color: #404040 #0a0a0a;
   scrollbar-width: thin; /* 变细 */
+}
+
+/* 右上角用户下拉菜单:深色主题 */
+.user-menu-popper.el-popper {
+  background: #171717;
+  border: 1px solid #262626;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* 覆盖 Element Plus 默认悬停变量,统一为深色底 + 琥珀色悬停 */
+  --el-dropdown-menuItem-hover-fill: rgba(245, 158, 11, 0.12);
+  --el-dropdown-menuItem-hover-color: #fbbf24;
+}
+.user-menu-popper .el-dropdown-menu {
+  background: #171717;
+}
+.user-menu-popper .el-dropdown-menu__item {
+  color: #d4d4d4;
+  font-size: 13px;
+  /* 关闭默认过渡动画,避免悬停时背景/颜色来回切换导致闪烁 */
+  transition: none !important;
+}
+.user-menu-popper .el-dropdown-menu__item:not(.is-disabled):hover {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+  color: #fbbf24 !important;
+}
+.user-menu-popper .el-dropdown-menu__item--divided {
+  border-top-color: #262626;
+}
+.user-menu-popper .el-popper__arrow::before {
+  background: #171717;
+  border-color: #262626;
 }
 </style>

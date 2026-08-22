@@ -32,6 +32,14 @@
               >
                 {{ stage.name }}
               </h3>
+              <button
+                v-if="stage.remark === 'GUEST_INSERT' && stage.status !== 'SETTLED' && stage.status !== 'DISCARD'"
+                @click.stop="handleRemoveGuestStage(stage)"
+                class="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-600/80 hover:bg-red-500 text-white flex items-center justify-center shadow-lg z-20"
+                title="撤销插入的嘉宾赛段"
+              >
+                <X class="w-3 h-3" />
+              </button>
               <div class="flex items-center gap-2 text-xs font-mono bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
                 <span class="text-neutral-500">{{ stage.teamCountStart }}</span>
                 <ArrowRight class="w-3 h-3 text-neutral-600" />
@@ -66,10 +74,10 @@
 
               <!-- 插入赛段按钮 - 只有当前赛段不是已结束状态时才显示 -->
               <button
-                v-if="stage.status !== 'SETTLED'"
+                v-if="stage.status !== 'SETTLED' && stage.nextStageId"
                 @click.stop="insertStageAfter(stage.id)"
                 class="absolute -bottom-8 w-6 h-6 rounded-full border border-dashed border-neutral-600 flex items-center justify-center transition-all bg-neutral-900 z-10 text-neutral-600 hover:scale-110 hover:border-amber-500 hover:text-amber-500"
-                title="在此处插入新赛段"
+                title="插入嘉宾赛段(下一赛段须尚未接收参赛方)"
               >
                 <Plus class="w-3 h-3" />
               </button>
@@ -100,7 +108,13 @@
             <template v-else-if="currentStage && getStageConfigComponent(currentStage.stageMode)">
               <!-- 选手列表 -->
               <div class="mb-4">
-                <StageCompetitorList :key="'comp-' + currentStage.id" :stage-id="currentStage.id" :stage-mode="currentStage.stageMode" />
+                <StageCompetitorList
+                  :key="'comp-' + currentStage.id"
+                  :stage-id="currentStage.id"
+                  :stage-mode="currentStage.stageMode"
+                  :stage-status="currentStage.status"
+                  :is-initialized="currentStage.isInitialized"
+                />
               </div>
 
               <component
@@ -155,14 +169,45 @@
         />
       </div>
     </div>
+
+    <!-- 插入嘉宾赛段弹窗 -->
+    <el-dialog
+      v-model="insertDialogVisible"
+      title="插入嘉宾赛段"
+      width="420px"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <el-form label-width="90px" @submit.prevent>
+        <el-form-item label="赛段名称" required>
+          <el-input v-model="insertForm.name" placeholder="如:8进4·嘉宾赛" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="晋级名额">
+          <el-input-number v-model="insertForm.advanceCount" :min="1" :max="1024" />
+          <span class="text-xs text-neutral-500 ml-2">默认取下一赛段人数,胜者(含嘉宾)按此名额晋级</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button size="small" @click="insertDialogVisible = false">取消</el-button>
+        <el-button size="small" type="warning" :loading="inserting" @click="handleInsertStage">确认插入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, markRaw, onMounted } from 'vue';
-import { Plus, ArrowRight, SlidersHorizontal } from 'lucide-vue-next';
+import { Plus, ArrowRight, SlidersHorizontal, X } from 'lucide-vue-next';
+import { ElMessage } from 'element-plus';
 import { useRoute } from 'vue-router';
-import { listStage, addStage as addStageApi, updateStage as updateStageApi, delStage as delStageApi } from '@/api/game/stage';
+import {
+  listStage,
+  addStage as addStageApi,
+  updateStage as updateStageApi,
+  delStage as delStageApi,
+  insertGuestStage,
+  removeGuestStage
+} from '@/api/game/stage';
 import { StageVO, StageForm } from '@/api/game/stage/types';
 import StageSidebar from './stages/StageSidebar.vue';
 import StageConfigPlaceholder from './stages/StageConfigPlaceholder.vue';
@@ -188,6 +233,7 @@ interface Stage {
   ruleConfig: string;
   prevStageId: string | null; // 上一赛段ID
   nextStageId: string | null; // 下一赛段ID
+  remark?: string; // 备注(GUEST_INSERT 表示插入的嘉宾赛段)
   isInitialized?: boolean; // 是否已完成初始化配置
   tournamentId?: string; // 赛事ID
 }
@@ -234,6 +280,7 @@ const loadStages = async (keepSelection: boolean = false) => {
       ruleConfig: item.ruleConfig,
       prevStageId: safeId(item.prevStageId),
       nextStageId: safeId(item.nextStageId),
+      remark: item.remark,
       isInitialized: item.isInitialized === 1,
       tournamentId: String(item.tournamentId || '')
     }));
@@ -565,17 +612,62 @@ const handleDeleteStage = () => {
   deleteStage();
 };
 
-// 在指定赛段后插入新赛段
+// 在指定赛段后插入嘉宾赛段(打开配置弹窗,由后端校验下一赛段是否干净)
+const insertDialogVisible = ref(false);
+const inserting = ref(false);
+const insertForm = ref<{ name: string; advanceCount: number | null }>({ name: '', advanceCount: null });
+const insertAfterStageId = ref<string>('');
+
 const insertStageAfter = (stageId: string) => {
   const stage = stages.value.find((s) => s.id === stageId);
-  if (!stage || stage.status === 'SETTLED') {
-    return; // 已结束的赛段不能在其后插入
-  }
+  if (!stage || !stage.nextStageId) return;
+  const next = stages.value.find((s) => s.id === stage.nextStageId);
+  insertAfterStageId.value = stage.id;
+  insertForm.value = {
+    name: '',
+    advanceCount: next?.teamCountStart || null
+  };
+  insertDialogVisible.value = true;
+};
 
-  // 进入新建赛段模式，并记录插入位置
-  sessionStorage.setItem('insertAfterStageId', stageId);
-  isCreatingStage.value = true;
-  showPlaceholder.value = true;
+const handleInsertStage = async () => {
+  const name = insertForm.value.name.trim();
+  if (!name) {
+    ElMessage.warning('请输入赛段名称');
+    return;
+  }
+  inserting.value = true;
+  try {
+    const { data } = await insertGuestStage({
+      stageId: insertAfterStageId.value,
+      name,
+      advanceCount: insertForm.value.advanceCount || undefined
+    });
+    insertDialogVisible.value = false;
+    ElMessage.success('嘉宾赛段已插入');
+    await loadStages();
+    if (data?.id) {
+      selectStage(String(data.id));
+    }
+  } catch (error) {
+    console.error('插入嘉宾赛段失败:', error);
+    ElMessage.error((error as any)?.msg || (error as any)?.message || '插入嘉宾赛段失败');
+  } finally {
+    inserting.value = false;
+  }
+};
+
+// 撤销插入的嘉宾赛段
+const handleRemoveGuestStage = async (stage: Stage) => {
+  if (!confirm(`确定撤销嘉宾赛段「${stage.name}」吗?其参赛方/对阵数据将被清理,链表恢复原状。`)) return;
+  try {
+    await removeGuestStage(stage.id);
+    ElMessage.success('已撤销嘉宾赛段');
+    await loadStages();
+  } catch (error) {
+    console.error('撤销嘉宾赛段失败:', error);
+    ElMessage.error((error as any)?.msg || (error as any)?.message || '撤销嘉宾赛段失败');
+  }
 };
 
 // --- 生命周期 ---

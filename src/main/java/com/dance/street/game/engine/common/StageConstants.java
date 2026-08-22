@@ -35,4 +35,7 @@ public final class StageConstants {
 
     /** 比赛格式 */
     public static final String FORMAT_BO1 = "BO1";
+
+    /** 插入赛段标记:作为嘉宾/外卡插入的赛段,写入 t_stage.remark,用于幂等与撤销识别 */
+    public static final String GUEST_INSERT_REMARK = "GUEST_INSERT";
 }

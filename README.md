@@ -2,29 +2,6 @@
 
 无败-面向街舞舞者的掰头平台 赛事创建、赛段编排、场次生成、打分结算、裁判端判罚、大屏实时投射（分布式 SSE）与手机导播台。后端基于 Spring Boot 4，前端为 Vue 3 前后端统一打包为单 Jar 部署。
 
-## 技术栈
-
-### 后端
-
-| 组件 | 版本 | 说明 |
-| --- | --- | --- |
-| Spring Boot | 4.0.7 | WebMVC + Validation + AOP |
-| Java | 21 | |
-| MyBatis-Plus | 3.5.16 | `mybatis-plus-spring-boot4-starter`，分页插件 |
-| Sa-Token | 1.45.0 | 单账号登录，`@SaCheckPermission` 注解鉴权 |
-| Redisson | 4.7.0 | Redis 客户端，支撑分布式 SSE 发布订阅与分布式锁 |
-| FastExcel / Hutool / MapStruct-Plus | 1.3.0 / 5.8.40 / 1.5.0 | 导出、工具、VO/BO 转换 |
-
-### 前端（`frontend/`）
-
-| 组件 | 版本 |
-| --- | --- |
-| Vue | 3.5 |
-| Vite | 6.4 |
-| Element Plus | 2.11 |
-| Pinia / Vue Router | 3 / 4.6 |
-| UnoCSS | 66 |
-
 ## 功能
 
 - 赛事管理：赛事大厅、按模板一键创建（海选 + 淘汰赛链 + 场景 + 对战树控件）

@@ -239,6 +239,7 @@ defineExpose({
   margin-right: 0;
   padding: 14px 20px;
   border-bottom: 1px solid #262626;
+  border-radius: 16px 16px 0 0;
   background: linear-gradient(180deg, rgba(245, 158, 11, 0.04) 0%, transparent 100%);
 }
 
@@ -262,7 +263,7 @@ defineExpose({
   right: 20px;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 50%;
   transition: all 0.2s ease;
 }
 

@@ -8,8 +8,8 @@
           type="warning"
           size="small"
           class="!h-7 !px-3 !text-xs"
-          :disabled="isAudition"
-          :title="isAudition ? '海选赛段不支持嘉宾加入' : '赛段中间态(PENDING/GAMING)可加入嘉宾'"
+          :disabled="!canAddGuest"
+          :title="guestBtnTitle"
           @click="openGuestDialog"
         >
           添加嘉宾
@@ -35,11 +35,24 @@
 
     <!-- 选手列表 -->
     <div v-else class="flex-1 overflow-y-auto">
+      <div v-if="canArrange" class="flex-none px-6 py-2 border-b border-neutral-800/50 text-[11px] text-neutral-500">
+        按外部抽签结果拖动排序,保存后 seedRank 依次 1..n,生成对阵时按此顺序配对
+      </div>
       <div class="divide-y divide-neutral-800/50">
         <div
-          v-for="competitor in competitors"
+          v-for="(competitor, index) in competitors"
           :key="competitor.id"
-          class="px-6 py-4 hover:bg-neutral-900/50 transition-colors"
+          class="px-6 py-4 transition-colors"
+          :class="[
+            canArrange ? 'cursor-grab' : '',
+            'hover:bg-neutral-900/50',
+            dragIndex === index ? 'bg-amber-500/5 border-y border-amber-500/20' : ''
+          ]"
+          :draggable="canArrange"
+          @dragstart="onDragStart(index, $event)"
+          @dragover="onDragOver(index, $event)"
+          @drop="onDrop(index)"
+          @dragend="onDragEnd"
         >
           <div class="flex items-center gap-4">
             <!-- 种子排名 -->
@@ -63,6 +76,10 @@
                 <span v-if="isGuest(competitor)"
                       class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/30">
                   嘉宾
+                </span>
+                <span v-if="isGuest(competitor) && !props.isInitialized"
+                      class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-neutral-600/10 text-neutral-400 border border-neutral-600/30">
+                  待排位
                 </span>
               </div>
               <div v-if="competitor.remark && !isGuest(competitor)" class="text-xs text-neutral-500 truncate">
@@ -125,13 +142,15 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { listCompetitor } from '@/api/game/competitor';
-import { addStageGuest } from '@/api/game/stage';
+import { addStageGuest, setStageSeedOrder } from '@/api/game/stage';
 import { CompetitorVO } from '@/api/game/competitor/types';
 
 // Props
 const props = defineProps<{
   stageId: string | number;
   stageMode?: string;
+  stageStatus?: string;
+  isInitialized?: boolean;
 }>();
 
 // 状态
@@ -141,8 +160,69 @@ const competitors = ref<CompetitorVO[]>([]);
 // 海选赛段不支持嘉宾加入
 const isAudition = computed(() => props.stageMode === 'AUDITION');
 
+// 嘉宾可加入/可排位窗口:赛段未初始化且处于规划/未开始态(DRAFT/PENDING)
+const canArrange = computed(() =>
+  !props.isInitialized
+  && (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING')
+);
+const canAddGuest = computed(() => !isAudition.value && canArrange.value);
+const guestBtnTitle = computed(() => {
+  if (isAudition.value) return '海选赛段不支持嘉宾加入';
+  if (props.isInitialized) return '赛段已初始化,名单已锁定,无法再加入嘉宾';
+  if (props.stageStatus !== 'DRAFT' && props.stageStatus !== 'PENDING') return '仅赛段规划/未开始状态(DRAFT/PENDING)可加入嘉宾';
+  return '嘉宾加入后按外部抽签结果拖动排序';
+});
+
 // 嘉宾标记:remark == GUEST(由后端 addGuest 写入)
 const isGuest = (competitor: CompetitorVO) => competitor.remark === 'GUEST';
+
+// 拖拽排序:按外部抽签结果调整参赛方种子顺序
+const dragIndex = ref<number | null>(null);
+const savingOrder = ref(false);
+
+const onDragStart = (index: number, e: DragEvent) => {
+  dragIndex.value = index;
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+};
+
+const onDragOver = (index: number, e: DragEvent) => {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+};
+
+const onDrop = async (index: number) => {
+  if (dragIndex.value === null || dragIndex.value === index) {
+    onDragEnd();
+    return;
+  }
+  const from = dragIndex.value;
+  const list = [...competitors.value];
+  const [moved] = list.splice(from, 1);
+  list.splice(index, 0, moved);
+  competitors.value = list;
+  onDragEnd();
+  await saveSeedOrder();
+};
+
+const onDragEnd = () => {
+  dragIndex.value = null;
+};
+
+const saveSeedOrder = async () => {
+  if (!props.stageId || competitors.value.length === 0 || savingOrder.value) return;
+  savingOrder.value = true;
+  try {
+    await setStageSeedOrder(props.stageId, competitors.value.map((c) => c.id));
+    ElMessage.success('已按抽签结果保存顺序');
+    await loadCompetitors();
+  } catch (error) {
+    console.error('保存种子顺序失败:', error);
+    ElMessage.error((error as any)?.msg || (error as any)?.message || '保存顺序失败');
+    await loadCompetitors();
+  } finally {
+    savingOrder.value = false;
+  }
+};
 
 // 添加嘉宾弹窗
 const guestDialogVisible = ref(false);

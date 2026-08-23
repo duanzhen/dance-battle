@@ -17,9 +17,12 @@
         <!-- Logo 与标题 -->
         <div class="mb-10 flex flex-col items-center gap-5">
           <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-b from-amber-400 to-amber-600 shadow-lg shadow-amber-500/30">
-            <svg class="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+            <img
+              :src="logoCircle"
+              alt="无败"
+              class="h-[52px] w-[52px] object-contain"
+              style="filter: brightness(0) invert(1);"
+            />
           </div>
           <div class="text-center">
             <h1 class="text-2xl font-bold tracking-tight text-white">{{ title }}</h1>
@@ -79,6 +82,7 @@
 import { useUserStore } from '@/store/modules/user';
 import { LoginData } from '@/api/types';
 import { to } from 'await-to-js';
+import logoCircle from '@/assets/logo/logo_circle.png';
 
 const title = import.meta.env.VITE_APP_TITLE;
 const userStore = useUserStore();

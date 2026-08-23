@@ -633,7 +633,7 @@ export const useDirectorStore = defineStore('director', () => {
 
     if (type === 'RANKING') {
       defaultName = `排名展示 ${currentScene.value.widgets.length + 1}`;
-      dataConfig = { stageId: null };
+      dataConfig = { stageId: null, opacity: 100 };
       defaultWidth = 800;
       defaultHeight = 600;
     }
@@ -647,7 +647,7 @@ export const useDirectorStore = defineStore('director', () => {
       y: type === 'IMAGE' || type === 'VIDEO' ? 0 : sceneHeight / 2 - defaultHeight / 2,
       w: defaultWidth,
       h: defaultHeight,
-      zIndex: currentScene.value.widgets.length + 1,
+      // zIndex 由服务端在场景锁内按 max+1 分配,保证新控件在最上层且不重复
       visible: 1,
       locked: 0,
       layoutConfig: JSON.stringify({}),
@@ -664,6 +664,9 @@ export const useDirectorStore = defineStore('director', () => {
       const response = await addVisWidget(newWidget);
 
       if (response.data) {
+        // 后端返回 camelCase zIndex;兜底时取本地最大层级 + 1
+        const zIndex = response.data.zIndex;
+        const z = zIndex != null ? zIndex : Math.max(0, ...currentScene.value.widgets.map((w) => Number(w.z) || 0)) + 1;
         const widget = {
           id: response.data.id,
           name: response.data.name,
@@ -672,7 +675,7 @@ export const useDirectorStore = defineStore('director', () => {
           y: response.data.y,
           w: response.data.w,
           h: response.data.h,
-          z: response.data.zindex,
+          z,
           visible: response.data.visible === 1,
           locked: response.data.locked === 1,
           layoutConfig: response.data.layoutConfig,
@@ -710,63 +713,61 @@ export const useDirectorStore = defineStore('director', () => {
       return;
     }
 
-    // 准备更新数据
+    // 局部更新:只提交实际变更的字段(id/tournamentId/sceneId 为必填)。
+    // 后端对已锁定控件按"提交字段与库值不一致即拒绝"校验,
+    // 全量提交会把本地缓存与数据库的格式漂移(如老数据 NULL 配置、名字本地改动)
+    // 误判成编辑锁定控件,导致解锁/显隐报"控件已锁定"。
     const updateData = {
       id: String(id), // 确保是字符串
       tournamentId: currentTournamentId,
-      sceneId: currentScene.value?.id, // 直接使用 id，应该已经是字符串或数字
-      name: widget.name,
-      type: widget.type,
-      layoutConfig: widget.layoutConfig,
-      dataConfig: widget.dataConfig,
-      renderConfig: widget.renderConfig
+      sceneId: currentScene.value?.id // 直接使用 id，应该已经是字符串或数字
     };
 
-    // 只在 payload 中明确指定时才更新属性
     if (payload.name !== undefined) updateData.name = payload.name;
     if (payload.visible !== undefined) updateData.visible = payload.visible ? 1 : 0;
     if (payload.locked !== undefined) updateData.locked = payload.locked ? 1 : 0;
     if (payload.z !== undefined) updateData.zIndex = payload.z;
 
-    // 更新配置
-    let layoutConfig = {};
+    // 配置类字段:与本地现有配置合并后提交(未涉及则不提交)
     let dataConfig = {};
     let renderConfig = {};
+    let layoutConfig = {};
 
     try {
-      layoutConfig = widget.layoutConfig ? JSON.parse(widget.layoutConfig) : {};
       dataConfig = widget.dataConfig ? JSON.parse(widget.dataConfig) : {};
       renderConfig = widget.renderConfig ? JSON.parse(widget.renderConfig) : {};
+      layoutConfig = widget.layoutConfig ? JSON.parse(widget.layoutConfig) : {};
     } catch (e) {
       console.warn('解析配置失败:', e);
     }
 
-    if (payload.style) {
-      Object.assign(renderConfig, payload.style);
-    }
     if (payload.dataConfig) {
       Object.assign(dataConfig, payload.dataConfig);
+      updateData.dataConfig = JSON.stringify(dataConfig);
     }
-
-    updateData.layoutConfig = JSON.stringify(layoutConfig);
-    updateData.dataConfig = JSON.stringify(dataConfig);
-    updateData.renderConfig = JSON.stringify(renderConfig);
+    if (payload.style) {
+      Object.assign(renderConfig, payload.style);
+      updateData.renderConfig = JSON.stringify(renderConfig);
+    }
+    if (payload.layoutConfig) {
+      Object.assign(layoutConfig, payload.layoutConfig);
+      updateData.layoutConfig = JSON.stringify(layoutConfig);
+    }
 
     try {
       console.log(`🔄 正在更新组件: ${id}`, updateData);
       const response = await updateVisWidget(updateData);
 
       if (response.data) {
-        // 更新本地数据(仅覆盖本次实际提交的字段,未涉及字段保留原值,避免误重置 visible/locked/z)
-        const patch = {
-          name: updateData.name,
-          layoutConfig: updateData.layoutConfig,
-          dataConfig: updateData.dataConfig,
-          renderConfig: updateData.renderConfig
-        };
+        // 仅覆盖本次提交的字段,未涉及字段保留原值(避免把未提交字段重置为 undefined)
+        const patch = {};
+        if (updateData.name !== undefined) patch.name = updateData.name;
         if (updateData.visible !== undefined) patch.visible = updateData.visible === 1;
         if (updateData.locked !== undefined) patch.locked = updateData.locked === 1;
         if (updateData.zIndex !== undefined) patch.z = updateData.zIndex;
+        if (updateData.dataConfig !== undefined) patch.dataConfig = updateData.dataConfig;
+        if (updateData.renderConfig !== undefined) patch.renderConfig = updateData.renderConfig;
+        if (updateData.layoutConfig !== undefined) patch.layoutConfig = updateData.layoutConfig;
         Object.assign(widget, patch);
         console.log(`✅ 成功更新组件`);
       }
@@ -790,11 +791,6 @@ export const useDirectorStore = defineStore('director', () => {
       id: String(id),
       tournamentId: currentTournamentId,
       sceneId: currentScene.value?.id,
-      name: widget.name,
-      type: widget.type,
-      layoutConfig: widget.layoutConfig,
-      dataConfig: widget.dataConfig,
-      renderConfig: widget.renderConfig,
       x: x !== undefined ? x : widget.x,
       y: y !== undefined ? y : widget.y,
       w: w !== undefined ? w : widget.w,

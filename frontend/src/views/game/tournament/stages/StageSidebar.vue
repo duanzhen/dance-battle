@@ -209,7 +209,7 @@ const canStartStage = computed(() => !prevStage.value || prevStage.value.status 
 const stageModeLabels: Record<string, string> = {
   [StageMode.KNOCKOUT]: '淘汰赛',
   [StageMode.GROUP]: '小组赛',
-  [StageMode.AUDITION]: '选拔赛',
+  [StageMode.AUDITION]: '海选赛',
   [StageMode.ARENA]: '擂台赛',
   [StageMode.RANK]: '排名赛'
 };

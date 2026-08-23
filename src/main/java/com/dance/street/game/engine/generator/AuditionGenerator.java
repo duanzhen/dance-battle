@@ -8,9 +8,9 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 选拔赛对阵生成:创建单场比赛,所有参赛方作为参与者全部进入同一场次。
+ * 海选赛对阵生成:创建单场比赛,所有参赛方作为参与者全部进入同一场次。
  *
- * <p>选拔赛本质是"评委打分制":多名裁判对同一批选手打分,按总分排名后前N名晋级。
+ * <p>海选赛本质是"评委打分制":多名裁判对同一批选手打分,按总分排名后前N名晋级。
  * 因此只需生成一场比赛,所有种子选手作为参与者(status=PENDING),
  * 后续由裁判端依次打分(累计写入 TRoundScore),最终由 completeStage 结算排名并晋级。</p>
  */
@@ -47,10 +47,10 @@ public class AuditionGenerator implements StageGenerator {
             int count = base + (c < remainder ? 1 : 0);
             MatchPlan m = new MatchPlan();
             if (circles == 1) {
-                m.setName("选拔赛");
+                m.setName("海选赛");
                 m.setDisplayZone("CENTER");
             } else {
-                m.setName("选拔赛-" + (c + 1) + "圈");
+                m.setName("海选赛-" + (c + 1) + "圈");
                 m.setDisplayZone("ZONE-" + (c + 1));
             }
             m.setRound(1);

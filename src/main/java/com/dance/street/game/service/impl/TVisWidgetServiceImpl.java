@@ -106,14 +106,26 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
      * @return 新增后的场景控件元素
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TVisWidgetVo insertByBo(TVisWidgetBo bo) {
         TVisWidget add = MapstructUtils.convert(bo, TVisWidget.class);
         validEntityBeforeSave(add);
-        baseMapper.insert(add);
+        Long sceneId = add.getSceneId();
+        withSceneLock(sceneId, () -> {
+            // 图层层级以服务端为准:取当前场景最大 zIndex + 1,
+            // 保证新控件永远在最上层且层级不重复(客户端按数量分配会在删除/重排后产生冲突)
+            TVisWidget top = baseMapper.selectOne(Wrappers.<TVisWidget>lambdaQuery()
+                .eq(TVisWidget::getSceneId, sceneId)
+                .orderByDesc(TVisWidget::getZIndex)
+                .last("LIMIT 1"));
+            long nextZ = (top == null || top.getZIndex() == null) ? 1L : top.getZIndex() + 1L;
+            add.setZIndex(nextZ);
+            baseMapper.insert(add);
+        });
         bo.setId(add.getId());
 
         // 通知所有显示该场景的屏幕更新
-        notifySceneUpdate(add.getSceneId());
+        notifySceneUpdate(sceneId);
 
         return MapstructUtils.convert(add, TVisWidgetVo.class);
     }
@@ -140,7 +152,9 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
         // 通知所有显示该场景的屏幕更新
         notifySceneUpdate(update.getSceneId());
 
-        return MapstructUtils.convert(update, TVisWidgetVo.class);
+        // 前端按局部更新提交(仅变更字段),更新后回查完整数据返回,保证 VO 字段完整
+        TVisWidget saved = baseMapper.selectById(update.getId());
+        return MapstructUtils.convert(saved, TVisWidgetVo.class);
     }
 
     /**

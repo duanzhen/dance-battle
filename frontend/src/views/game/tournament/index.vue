@@ -6,8 +6,13 @@
   >
     <header class="h-12 flex-none bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 z-20">
       <div class="flex items-center gap-2">
-        <div class="w-6 h-6 bg-amber-500 rounded flex items-center justify-center font-bold text-xs text-neutral-900 shadow-lg shadow-amber-500/20">
-          G
+        <div class="w-6 h-6 bg-amber-500 rounded flex items-center justify-center shadow-lg shadow-amber-500/20">
+          <img
+            :src="logoFlat"
+            alt="无败"
+            class="w-4 h-4 object-contain"
+            style="filter: brightness(0) invert(1);"
+          />
         </div>
         <span class="font-bold text-sm tracking-wide text-neutral-300">赛事大屏</span>
       </div>
@@ -75,6 +80,7 @@ import { useDirectorStore } from '@/store/modules/directorStore';
 import DirectorLayout from './DirectorLayout.vue';
 import StageFlow from './StageFlow.vue';
 import ConfigPanel from './ConfigPanel.vue';
+import logoFlat from '@/assets/logo/logo_flat.png';
 import MobileDirectorEntry from './MobileDirectorEntry.vue';
 
 const route = useRoute();

@@ -1,7 +1,7 @@
 <template>
   <div class="w-full h-full">
     <!-- 查看模式:排名赛排行榜,按圈分列展示全部选手排名 -->
-    <div v-if="mode !== 'edit'" class="w-full h-full bg-neutral-950/85 rounded-lg overflow-hidden relative">
+    <div v-if="mode !== 'edit'" class="w-full h-full bg-neutral-950/85 rounded-lg overflow-hidden relative" :style="viewStyle">
       <div v-if="loading" class="w-full h-full flex items-center justify-center text-white/50 text-sm">加载中...</div>
       <div v-else-if="error" class="w-full h-full flex items-center justify-center text-white/40 text-xs px-4 text-center">{{ error }}</div>
       <div v-else-if="!stageId" class="w-full h-full flex items-center justify-center text-white/40 text-xs">未绑定排名赛赛段</div>
@@ -12,43 +12,49 @@
           <span class="text-white/50 text-[10px] flex-none">{{ publishScope === 'TOP_N' ? `前 ${advanceCount} 名` : '全部排名' }}</span>
         </div>
 
-        <!-- 多圈多列:每圈一列并排,展示全部选手按排名排序 -->
-        <div class="flex-1 min-h-0 flex gap-2 p-2 items-stretch">
-          <div
-            v-for="col in columns"
-            :key="col.zone"
-            class="flex-1 min-w-0 border border-white/10 rounded-lg flex flex-col min-h-0 overflow-hidden"
-          >
-            <div class="px-2.5 py-1.5 border-b border-white/10 flex-none">
-              <span class="text-white/60 text-[11px] font-bold tracking-wider truncate">{{ col.title }}</span>
-            </div>
-            <div class="flex-1 min-h-0 overflow-y-auto p-1.5 space-y-1 scrollbar-hide">
-              <div v-for="p in col.ranked" :key="p.competitorId" class="px-1 py-1 rounded">
-                <div class="flex items-center gap-1.5 text-[11px] leading-tight">
-                  <span class="w-5 h-5 flex-none rounded flex items-center justify-center text-[10px] font-black font-mono"
-                    :class="p.rankInMatch == null ? 'bg-neutral-800 text-neutral-500' : rankBadgeClass(p.rankInMatch)">
-                    {{ p.rankInMatch ?? '–' }}
-                  </span>
-                  <span class="flex-1 truncate text-white">{{ name(p) }}</span>
-                  <span v-if="stageShowScore && scoreDisplay !== 'DETAIL'" class="text-white/60 font-mono flex-none">{{ score(p) }}</span>
-                  <span class="text-white/45 font-mono flex-none">No.{{ number(p) }}</span>
-                </div>
-                <!-- 维度模式:总分 + 各维度分(赛段配置 scoreDisplay=DETAIL) -->
-                <div v-if="stageShowScore && scoreDisplay === 'DETAIL'" class="flex flex-wrap gap-1 pl-6 pt-0.5">
-                  <span
-                    v-for="d in dimsOf(p)"
-                    :key="d.key"
-                    class="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-white/60 font-mono"
+        <!-- 表格展示:每圈一张表,列为 名次/选手/各维度/总分/号码 -->
+        <div class="flex-1 min-h-0 overflow-y-auto p-2 scrollbar-hide">
+          <div v-for="col in columns" :key="col.zone" class="mb-3">
+            <div v-if="columns.length > 1" class="text-white/60 text-[11px] font-bold mb-1">{{ col.title }}</div>
+            <table class="w-full text-[11px] border-collapse">
+              <thead>
+                <tr class="text-left text-white/50 border-b border-white/10">
+                  <th class="py-1.5 px-2 font-bold text-left">号码</th>
+                  <th class="py-1.5 px-2 font-bold">选手</th>
+                  <th
+                    v-if="stageShowScore && scoreDisplay === 'DETAIL' && tableDims.length"
+                    v-for="d in tableDims"
+                    :key="'h-' + d.key"
+                    class="py-1.5 px-2 font-bold"
                   >
-                    {{ d.name || d.key }} {{ d.score == null ? '–' : Number(d.score).toFixed(1) }}
-                  </span>
-                  <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono font-bold">
-                    总分 {{ score(p) }}
-                  </span>
-                </div>
-              </div>
-              <div v-if="!col.ranked.length" class="text-white/30 text-[10px] text-center py-2">待定</div>
-            </div>
+                    {{ d.name || d.key }}
+                  </th>
+                  <th v-if="stageShowScore" class="py-1.5 px-2 font-bold text-right">总分</th>
+                  <th class="py-1.5 px-2 font-bold text-right">名次</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="p in col.ranked" :key="p.competitorId" class="border-b border-white/5">
+                  <td class="py-1.5 px-2 text-left text-white/45 font-mono">No.{{ number(p) }}</td>
+                  <td class="py-1.5 px-2 text-white truncate max-w-[160px]">{{ name(p) }}</td>
+                  <td
+                    v-if="stageShowScore && scoreDisplay === 'DETAIL' && tableDims.length"
+                    v-for="d in tableDims"
+                    :key="'v-' + p.competitorId + '-' + d.key"
+                    class="py-1.5 px-2 font-mono text-white/70"
+                  >
+                    {{ dimScore(p, d.key) }}
+                  </td>
+                  <td v-if="stageShowScore" class="py-1.5 px-2 text-right font-mono font-bold text-amber-400">{{ score(p) }}</td>
+                  <td class="py-1.5 px-2 text-right">
+                    <span class="font-black font-mono" :class="rankClass(p.rankInMatch)">{{ p.rankInMatch ?? '–' }}</span>
+                  </td>
+                </tr>
+                <tr v-if="!col.ranked.length">
+                  <td colspan="99" class="py-3 text-center text-white/30">待定</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -64,8 +70,23 @@
           only-mode="RANK"
           @update:model-value="$emit('update:stageId', $event)"
         />
+        <div class="mt-3">
+          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">透明度</label>
+          <div class="flex items-center gap-3">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              :value="opacity ?? 100"
+              class="flex-1 accent-amber-500"
+              @input="$emit('update:opacity', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ opacity ?? 100 }}%</span>
+          </div>
+        </div>
         <p class="text-[10px] text-neutral-600 mt-2">
-          展示排名赛(多维度打分)的选手排名,分圈时每圈一列;是否显示分数由赛段配置决定,手动/批量公布模式下公布前自动隐藏。
+          展示排名赛(多维度打分)的选手排名,以表格展示,分圈时每圈一张表;是否显示分数由赛段配置决定,手动/批量公布模式下公布前自动隐藏。
         </p>
       </section>
     </div>
@@ -73,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import StageSelector from '../stages/StageSelector.vue';
 import { getStage, getStageRankDetail } from '@/api/game/stage';
@@ -86,9 +107,11 @@ const props = defineProps<{
   stageId?: string | number | null;
   mode?: 'view' | 'edit';
   tournamentId?: string | number | null;
+  opacity?: number;
 }>();
 const emit = defineEmits<{
   'update:stageId': [v: string | number | null];
+  'update:opacity': [v: number];
 }>();
 
 const route = useRoute();
@@ -98,6 +121,13 @@ const tournamentId = () => props.tournamentId ?? qid(route.query.id) ?? qid(rout
 const loading = ref(false);
 const loadedOnce = ref(false);
 const error = ref('');
+
+/** 透明度 0-100 → 0-1,未配置时默认不透明 */
+const viewStyle = computed(() => {
+  const v = Number.isFinite(Number(props.opacity)) ? Number(props.opacity) : 100;
+  return { opacity: Math.max(0, Math.min(100, v)) / 100 };
+});
+
 const stageName = ref('');
 const advanceCount = ref(0);
 const stageShowScore = ref(true);
@@ -253,12 +283,29 @@ const numOf = (p: any) => {
 const score = (p: any) => (p?.scoreValue == null ? '–' : Number(p.scoreValue).toFixed(1));
 const dimsOf = (p: any) => dimsByComp.value[String(p.competitorId)] || [];
 
-/** 前三名徽章配色 */
-const rankBadgeClass = (rank: number) => {
-  if (rank === 1) return 'bg-amber-500 text-neutral-900';
-  if (rank === 2) return 'bg-neutral-300 text-neutral-900';
-  if (rank === 3) return 'bg-orange-700/80 text-white';
-  return 'bg-neutral-800 text-neutral-400';
+/** 表格维度列头:取第一个有维度分的选手配置(同赛段各选手维度一致) */
+const tableDims = computed(() => {
+  for (const col of columns.value) {
+    for (const p of col.ranked) {
+      const ds = dimsOf(p);
+      if (ds.length) return ds;
+    }
+  }
+  return [];
+});
+
+/** 某选手某维度分 */
+const dimScore = (p: any, key: string) => {
+  const d = dimsOf(p).find((x: any) => x.key === key);
+  return d == null || d.score == null ? '–' : Number(d.score).toFixed(1);
+};
+
+/** 名次配色:前三名高亮 */
+const rankClass = (rank: number | null) => {
+  if (rank === 1) return 'text-amber-400';
+  if (rank === 2) return 'text-neutral-300';
+  if (rank === 3) return 'text-orange-400';
+  return 'text-neutral-500';
 };
 
 onMounted(() => {

@@ -429,7 +429,7 @@ const defaultConfigs: Record<StageMode, any> = {
 
 const stageTypes = [
   { mode: StageMode.KNOCKOUT, label: '淘汰赛', description: '单败淘汰制', icon: Trophy },
-  { mode: StageMode.AUDITION, label: '选拔赛', description: '海选晋级', icon: Mic },
+  { mode: StageMode.AUDITION, label: '海选赛', description: '海选晋级', icon: Mic },
   { mode: StageMode.ARENA, label: '擂台赛', description: 'SEVEN TO SMOKE', icon: Target },
   { mode: StageMode.RANK, label: '排名赛', description: '多维度打分排名', icon: ListOrdered }
 ];
@@ -437,7 +437,7 @@ const stageTypes = [
 const stageModeLabels: Record<string, string> = {
   [StageMode.KNOCKOUT]: '淘汰赛',
   [StageMode.GROUP]: '小组赛',
-  [StageMode.AUDITION]: '选拔赛',
+  [StageMode.AUDITION]: '海选赛',
   [StageMode.ARENA]: '擂台赛',
   [StageMode.RANK]: '排名赛'
 };

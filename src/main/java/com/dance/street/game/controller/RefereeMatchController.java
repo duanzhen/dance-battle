@@ -144,7 +144,7 @@ public class RefereeMatchController {
                     .eq(TMatch::getStageId, stage.getId())
                     .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
         }
-        // 选拔赛/排名赛兜底：若赛段已开始但无场次，自动生成
+        // 海选赛/排名赛兜底：若赛段已开始但无场次，自动生成
         if (matches.isEmpty() && perCompetitorStage) {
             long total = matchMapper.selectCount(
                 Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stage.getId()));
@@ -165,7 +165,7 @@ public class RefereeMatchController {
                     matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
                         .in(TMatchRound::getMatchId, autoMatchIds));
                 }
-                log.info("选拔赛赛段[{}]自动补救生成对阵", stage.getId());
+                log.info("海选赛赛段[{}]自动补救生成对阵", stage.getId());
             }
             matches = matchMapper.selectList(
                 Wrappers.<TMatch>lambdaQuery()
@@ -402,7 +402,7 @@ public class RefereeMatchController {
         Map<Long, java.math.BigDecimal> refereeScores = new java.util.HashMap<>();
         List<TRoundScore> myScores;
         if (perCompetitorStage) {
-            // 选拔赛/排名赛逐选手打分分布在各自轮次,跨本场全部轮次聚合该裁判的打分
+            // 海选赛/排名赛逐选手打分分布在各自轮次,跨本场全部轮次聚合该裁判的打分
             List<Long> roundIds = matchRoundMapper.selectList(
                     Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
                 .stream().map(TMatchRound::getId).toList();

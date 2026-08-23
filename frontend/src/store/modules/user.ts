@@ -2,7 +2,7 @@ import { to } from 'await-to-js';
 import { getToken, removeToken, setToken } from '@/utils/auth';
 import { login as loginApi, logout as logoutApi } from '@/api/login';
 import { LoginData } from '@/api/types';
-import defAva from '@/assets/images/profile.jpg';
+import defAva from '@/assets/images/profile.png';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 

@@ -107,9 +107,9 @@
           </div>
         </div>
 
-        <!-- 选拔赛配置 -->
+        <!-- 海选赛配置 -->
         <div v-if="selectedStageMode === StageMode.AUDITION" class="config-section">
-          <h4 class="section-title">选拔赛配置</h4>
+          <h4 class="section-title">海选赛配置</h4>
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-sm text-neutral-400 mb-1">海选规模</label>
@@ -222,7 +222,7 @@ const stageTypes = [
   },
   {
     mode: StageMode.AUDITION,
-    label: '选拔赛',
+    label: '海选赛',
     description: '海选晋级',
     icon: Mic
   },

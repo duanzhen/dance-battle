@@ -104,7 +104,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         List<Long> competitorIds = parts.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
 
-        // 选拔赛/排名赛(AUDITION/RANK): 多裁判累计打分,不即时结算。重复提交以最新为准(先删旧再写新)
+        // 海选赛/排名赛(AUDITION/RANK): 多裁判累计打分,不即时结算。重复提交以最新为准(先删旧再写新)
         boolean isAudition = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
         boolean isRank = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
         boolean perCompetitor = isAudition || isRank;
@@ -132,7 +132,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             List<MatchScoreResult> accumulated = scoredMatchService.accumulateScores(match, stage, bo);
             return buildVo(match.getId(), StageConstants.MATCH_GAMING, accumulated);
         }
-        // 选拔赛/排名赛:逐选手 upsert(逐个提交/回改互不影响),提交后立即累计回显,不结算
+        // 海选赛/排名赛:逐选手 upsert(逐个提交/回改互不影响),提交后立即累计回显,不结算
         if (perCompetitor) {
             List<TMatchRound> auditionRounds = matchRoundMapper.selectList(
                 Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()));
@@ -780,7 +780,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     }
 
     /**
-     * 选拔赛累计打分:从已写入的 TRoundScore 重新汇总每个参赛方的总分并回写 participant。
+     * 海选赛累计打分:从已写入的 TRoundScore 重新汇总每个参赛方的总分并回写 participant。
      * 比赛场次保持 GAMING,不结算。管理员最终通过 completeStage 结算排名。
      */
     private void accumulateAuditionScores(TMatch match, List<Long> competitorIds) {
@@ -909,7 +909,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     }
 
     /**
-     * 选拔赛加载当前累计结果(用于裁判端实时回显)。
+     * 海选赛加载当前累计结果(用于裁判端实时回显)。
      */
     private List<MatchScoreResult> loadAuditionResults(TMatch match, List<Long> competitorIds) {
         List<TMatchParticipant> parts = participantMapper.selectList(

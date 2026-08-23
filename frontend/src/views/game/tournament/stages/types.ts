@@ -13,7 +13,7 @@ export enum ConfigMode {
 export enum StageMode {
   KNOCKOUT = 'KNOCKOUT', // 淘汰赛
   GROUP = 'GROUP', // 小组赛
-  AUDITION = 'AUDITION', // 选拔赛
+  AUDITION = 'AUDITION', // 海选赛
   ARENA = 'ARENA', // 擂台赛
   RANK = 'RANK' // 排名赛
 }
@@ -51,7 +51,7 @@ export interface GroupConfig {
   format: MatchFormat;
 }
 
-// 选拔赛配置
+// 海选赛配置
 export interface AuditionConfig {
   scale: number; // 海选规模
   advanceCondition: string; // 晋级条件

@@ -166,12 +166,12 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         boolean isAudition = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
         boolean isRank = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
-        // 选拔赛/排名赛:逐选手轮次,允许跳过显式初始化(兜底:自动初始化)
+        // 海选赛/排名赛:逐选手轮次,允许跳过显式初始化(兜底:自动初始化)
         boolean perCompetitorRound = isAudition || isRank;
         if (!perCompetitorRound && !Long.valueOf(1L).equals(stage.getIsInitialized())) {
             throw new ServiceException("赛段尚未初始化,请先 initialize");
         }
-        // 选拔赛/排名赛允许跳过显式初始化(兜底:自动初始化)
+        // 海选赛/排名赛允许跳过显式初始化(兜底:自动初始化)
         if (perCompetitorRound && !Long.valueOf(1L).equals(stage.getIsInitialized())) {
             InitializeStageBo initBo = new InitializeStageBo();
             initBo.setStageId(stage.getId());
@@ -215,7 +215,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 ? rc.getScoring().getMatchMode() : MatchModeEnum.STANDARD.getCode();
         }
 
-        // 按种子顺位取参赛方(选拔赛按签到号码顺序)
+        // 按种子顺位取参赛方(海选赛按签到号码顺序)
         LambdaQueryWrapper<TCompetitor> cq = Wrappers.lambdaQuery();
         cq.eq(TCompetitor::getStageId, stage.getId());
         if (perCompetitorRound) {
@@ -268,7 +268,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             matchMapper.insert(m);
             matchKeyToId.put(matchKey(mp.getRound(), mp.getMatchIndex()), m.getId());
 
-            // 选拔赛/排名赛:每个选手一个轮次,按上场顺序
+            // 海选赛/排名赛:每个选手一个轮次,按上场顺序
             if (perCompetitorRound) {
                 int seq = 1;
                 for (SlotPlan slot : mp.getSlots()) {
@@ -301,7 +301,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
 
-        // 第二遍:按下游引用回填 promotion_rule(用真实 matchId)。选拔赛跳过,由 completeStage 结算晋级
+        // 第二遍:按下游引用回填 promotion_rule(用真实 matchId)。海选赛跳过,由 completeStage 结算晋级
         if (!perCompetitorRound) {
             for (MatchPlan mp : sorted) {
                 PromotionTarget target = new PromotionTarget();
@@ -1174,7 +1174,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 throw new ServiceException("仍有 {} 场对决进行中,请先完成或重启后再结束赛段", gaming);
             }
         } else if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
-            // 选拔赛:最终结算,聚合所有裁判打分并排名晋级。之后场次变 SETTLED
+            // 海选赛:最终结算,聚合所有裁判打分并排名晋级。之后场次变 SETTLED
             settleAuditionStage(stage);
             // 检查是否还有加赛场次未完成
             long tbUnfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
@@ -1435,7 +1435,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     }
 
     /**
-     * 选拔赛结算:取赛场所有参赛方的当前总分(由多裁判累计提交后写在 participant.scoreValue),
+     * 海选赛结算:取赛场所有参赛方的当前总分(由多裁判累计提交后写在 participant.scoreValue),
      * 按分数降序排名,前 advanceCount 名标 ADVANCE,其余标 ELIMINATED。
      */
     private void settleAuditionStage(TStage stage) {
@@ -1553,7 +1553,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             mUpd.setId(match.getId());
             mUpd.setStatus(StageConstants.MATCH_SETTLED);
             matchMapper.updateById(mUpd);
-            log.info("选拔赛场次[{}]结算:晋级名额已满,{}名同分选手淘汰", match.getId(), sortedCids.size());
+            log.info("海选赛场次[{}]结算:晋级名额已满,{}名同分选手淘汰", match.getId(), sortedCids.size());
             return;
         }
 
@@ -1590,7 +1590,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 mUpd.setId(match.getId());
                 mUpd.setStatus(StageConstants.MATCH_SETTLED);
                 matchMapper.updateById(mUpd);
-                log.info("选拔赛场次[{}]出现{}名同分选手,已创建加赛", match.getId(), tiedAtCutoff.size());
+                log.info("海选赛场次[{}]出现{}名同分选手,已创建加赛", match.getId(), tiedAtCutoff.size());
                 return;
             }
         }
@@ -1609,7 +1609,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         mUpd.setStatus(StageConstants.MATCH_SETTLED);
         matchMapper.updateById(mUpd);
 
-        log.info("选拔赛场次[{}]已结算,共{}名选手,晋级{}名", match.getId(), sortedCids.size(),
+        log.info("海选赛场次[{}]已结算,共{}名选手,晋级{}名", match.getId(), sortedCids.size(),
             Math.min(remaining, sortedCids.size()));
     }
 

@@ -12,13 +12,11 @@ import org.dromara.common.core.exception.ServiceException;
 @AllArgsConstructor
 public enum StageModeEnum {
 
-    AUDITION("AUDITION", "选拔赛"),
+    AUDITION("AUDITION", "海选赛"),
     KNOCKOUT("KNOCKOUT", "淘汰赛"),
     ARENA("ARENA", "擂台赛"),
-    
     GROUP("GROUP", "小组赛"),
     RANK("RANK", "排名赛");
-
 
 
     private final String code;

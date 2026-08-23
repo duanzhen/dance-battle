@@ -119,7 +119,7 @@
       </div>
 
       <div v-if="!simple" :class="props.tournament ? 'col-span-2' : ''">
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">设计稿尺寸</label>
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5">屏幕尺寸</label>
         <div class="flex items-center gap-2">
           <div class="relative flex-1 min-w-0">
             <input
@@ -275,7 +275,7 @@ onUnmounted(() => window.removeEventListener('resize', updateWidth));
 const form = reactive({
   name: '', // 赛事名称
   coverImage: '', // 封面图片 URL
-  status: 0, // 0:筹备 1:进行中 2:结束
+  status: 1, // 0:筹备 1:进行中 2:结束
   logicalWidth: 1920, // 设计稿宽度
   logicalHeight: 1080, // 设计稿高度
   themeConfig: '', // 主题配置 JSON 字符串
@@ -297,19 +297,19 @@ const templates = [
   {
     code: 'AUDITION_32',
     label: '32人淘汰赛',
-    tag: '推荐',
+    tag: '海选32强',
     stages: ['海选', '32强', '16强', '8强', '半决赛', '决赛']
   },
   {
     code: 'AUDITION_16',
     label: '16人淘汰赛',
-    tag: '精简',
+    tag: '海选16强',
     stages: ['海选', '16强', '8强', '半决赛', '决赛']
   },
   {
     code: 'AUDITION_ARENA',
     label: '32人擂台赛',
-    tag: '擂台',
+    tag: '海选32-8强Seven To Smoke',
     stages: ['海选', '32强', '16强', '擂台赛']
   }
 ];

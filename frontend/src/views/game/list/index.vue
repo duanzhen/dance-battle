@@ -4,9 +4,12 @@
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 bg-amber-500 rounded-lg flex items-center justify-center shadow-lg shadow-amber-500/20">
-            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+            <img
+              :src="logoFlat"
+              alt="无败"
+              class="w-5 h-5 object-contain"
+              style="filter: brightness(0) invert(1);"
+            />
           </div>
           <span class="font-bold text-xl tracking-tight text-white">赛事管理</span>
         </div>
@@ -233,6 +236,7 @@ import { useUserStore } from '@/store/modules/user';
 import PasswordDialog from '@/components/PasswordDialog/index.vue';
 import TournamentForm from './TournamentForm.vue';
 import { listTournament } from '@/api/game/tournament';
+import logoFlat from '@/assets/logo/logo_flat.png';
 import { TournamentVO } from '@/api/game/tournament/types';
 
 const router = useRouter();

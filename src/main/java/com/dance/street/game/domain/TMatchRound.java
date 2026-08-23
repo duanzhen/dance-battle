@@ -43,7 +43,7 @@ public class TMatchRound extends TenantEntity {
     private Long roundSequence;
 
     /**
-     * 本轮出场选手(选拔赛用)
+     * 本轮出场选手(海选赛用)
      */
     private Long competitorId;
 

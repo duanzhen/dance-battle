@@ -137,7 +137,7 @@ CREATE TABLE `t_match_round` (
   `tournament_id` bigint NOT NULL,
   `match_id` bigint NOT NULL,
   `round_sequence` int NOT NULL,
-  `competitor_id` bigint DEFAULT NULL COMMENT '参赛方ID(选拔赛每人一轮)',
+  `competitor_id` bigint DEFAULT NULL COMMENT '参赛方ID(海选赛每人一轮)',
   `status` enum('PENDING','GAMING','SETTLED') NOT NULL DEFAULT 'PENDING',
   `create_by` bigint DEFAULT NULL COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',

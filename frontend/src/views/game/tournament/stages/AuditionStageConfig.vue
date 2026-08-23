@@ -1,7 +1,7 @@
 <template>
   <div class="stage-config">
     <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
-      <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-6 flex items-center gap-2"><Mic class="w-4 h-4" /> 选拔赛配置</h3>
+      <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-6 flex items-center gap-2"><Mic class="w-4 h-4" /> 海选赛配置</h3>
 
       <div class="space-y-6">
         <!-- INIT_DONE 模式: 只读展示 -->

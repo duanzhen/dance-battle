@@ -102,10 +102,11 @@
         z-index: 1002;
       }
 
-      #loader-logo svg {
+      #loader-logo img {
         width: 26px;
         height: 26px;
-        color: #fff;
+        object-fit: contain;
+        filter: brightness(0) invert(1);
       }
 
       @-webkit-keyframes spin {
@@ -221,9 +222,7 @@
       <div id="loader-wrapper">
         <div id="loader">
           <div id="loader-logo">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+            <img src="/src/assets/logo/logo_flat.png" alt="无败" />
           </div>
         </div>
         <div class="loader-section section-left"></div>

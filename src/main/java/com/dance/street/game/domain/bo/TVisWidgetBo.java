@@ -46,13 +46,13 @@ public class TVisWidgetBo extends BaseEntity {
     /**
      * BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING
      */
-    @NotBlank(message = "BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING不能为空", groups = { AddGroup.class, EditGroup.class })
+    @NotBlank(message = "BRACKET, SCOREBOARD, PLAYER_CARD, IMAGE, RANKING不能为空", groups = { AddGroup.class })
     private String type;
 
     /**
      * 
      */
-    @NotBlank(message = "不能为空", groups = { AddGroup.class, EditGroup.class })
+    @NotBlank(message = "不能为空", groups = { AddGroup.class })
     private String layoutConfig;
 
     /**

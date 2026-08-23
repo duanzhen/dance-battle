@@ -28,7 +28,7 @@ public class KnockoutConfig implements Serializable {
     /** 单轮模式(每轮一赛段):只生成 N/2 场,胜者全部晋级下一赛段;false/null=单赛段多轮完整 bracket */
     private Boolean singleRound;
 
-    /** 单轮配对模式:SEQUENTIAL(1-2、3-4 相邻)/ SEED(1-N、2-(N-1) 种子对位,选拔赛后首轮常用) */
+    /** 单轮配对模式:SEQUENTIAL(1-2、3-4 相邻)/ SEED(1-N、2-(N-1) 种子对位,海选赛后首轮常用) */
     private String pairingMode;
 
     /** 结果公布模式:AUTO(裁判判完自动公布)/ MANUAL(导播台确认后公布)/ DIRECTOR(导播台直接判定) */

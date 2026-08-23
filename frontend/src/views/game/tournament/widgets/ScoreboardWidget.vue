@@ -57,7 +57,7 @@
             @update:item="handleOptionUpdate"
           />
         </div>
-        <p class="text-[10px] text-neutral-600 mt-2">展示海选(选拔赛)晋级结果,分圈时每圈一列并排显示;开启"显示分数"后展示各参赛方总分。</p>
+        <p class="text-[10px] text-neutral-600 mt-2">展示海选(海选赛)晋级结果,分圈时每圈一列并排显示;开启"显示分数"后展示各参赛方总分。</p>
       </section>
     </div>
   </div>

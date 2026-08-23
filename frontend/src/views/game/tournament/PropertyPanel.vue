@@ -124,6 +124,7 @@
                   @update:stageId="handleUpdateProp('stageId', $event)"
                   @update:bgImage="handleUpdateProp('bgImage', $event)"
                   @update:showScore="handleUpdateProp('showScore', $event)"
+                  @update:opacity="handleUpdateProp('opacity', $event)"
                   @update:textColor="handleUpdateProp('textColor', $event)"
                   @update:borderColor="handleUpdateProp('borderColor', $event)"
                   @update:bgColor="handleUpdateProp('bgColor', $event)"
@@ -289,76 +290,90 @@
 
       <!-- 图层面板 -->
       <div v-show="activeTab === 'layers'" class="p-2">
-        <div class="space-y-1">
-          <div
-            v-for="(layer, idx) in reversedWidgets"
-            :key="layer.id"
-            :draggable="dragHandleId === layer.id"
-            @click="store.selectWidget(layer.id)"
-            @dragstart="onDragStart(layer.id)"
-            @dragover.prevent="dragOverIdx = idx"
-            @dragleave="dragOverIdx = null"
-            @drop.stop.prevent="onDrop(idx)"
-            @dragend="onDragEnd"
-            class="flex items-center gap-2 p-2 rounded group select-none transition-colors border"
-            :class="[
-              dragId === layer.id ? 'opacity-40 border-amber-500/50' : store.selectedWidgetId === layer.id ? 'bg-amber-500/10 border-amber-500/30' : 'border-transparent hover:bg-neutral-800',
-              dragOverIdx === idx && dragId !== layer.id ? 'border-t-2 border-amber-500' : ''
-            ]"
-          >
-            <button @click.stop="toggleVisible(layer)" class="bg-transparent text-neutral-600 hover:text-neutral-300 p-1">
-              <svg v-if="layer.visible !== 0 && layer.visible !== false" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 5 8.268 7.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                />
-              </svg>
-              <svg v-else class="w-3.5 h-3.5 text-neutral-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
-                />
-              </svg>
-            </button>
+        <div
+          ref="layerListRef"
+          class="relative"
+          @dragover.prevent="onListDragOver"
+          @drop.stop.prevent="onDrop"
+        >
+          <!-- 图层行:独立容器承载 space-y,指示线作为绝对定位兄弟,不会挤动行布局 -->
+          <div class="space-y-1">
+            <template v-for="(layer, idx) in reversedWidgets" :key="layer.id">
+              <div
+                data-layer-row
+                :draggable="dragHandleId === layer.id && !layer.locked"
+                @click="store.selectWidget(layer.id)"
+                @dragstart="onDragStart(layer.id)"
+                @dragend="onDragEnd"
+                class="flex items-center gap-2 p-2 rounded group select-none transition-colors border"
+                :class="[
+                  dragId === layer.id ? 'opacity-40 border-amber-500/50' : store.selectedWidgetId === layer.id ? 'bg-amber-500/10 border-amber-500/30' : 'border-transparent hover:bg-neutral-800'
+                ]"
+              >
+                <button @click.stop="toggleVisible(layer)" class="bg-transparent text-neutral-600 hover:text-neutral-300 p-1">
+                  <svg v-if="layer.visible !== 0 && layer.visible !== false" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 5 8.268 7.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    />
+                  </svg>
+                  <svg v-else class="w-3.5 h-3.5 text-neutral-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+                    />
+                  </svg>
+                </button>
 
-            <div class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-neutral-500 bg-transparent border border-neutral-700">
-              {{ layer.type.charAt(0) }}
-            </div>
+                <div class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-neutral-500 bg-transparent border border-neutral-700">
+                  {{ layer.type.charAt(0) }}
+                </div>
 
-            <span class="text-xs text-neutral-300 flex-1 truncate font-medium" :class="{ 'text-amber-500': store.selectedWidgetId === layer.id }">
-              {{ layer.name || layer.type }}
-            </span>
+                <span class="text-xs text-neutral-300 flex-1 truncate font-medium" :class="{ 'text-amber-500': store.selectedWidgetId === layer.id }">
+                  {{ layer.name || layer.type }}
+                </span>
 
-            <button @click.stop="toggleLock(layer)" class="bg-transparent text-neutral-600 hover:text-neutral-300 p-1">
-              <svg v-if="layer.locked" class="w-3 h-3 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                />
-              </svg>
-              <svg v-else class="w-3 h-3 opacity-0 group-hover:opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"
-                />
-              </svg>
-            </button>
-            <div class="flex flex-col opacity-0 group-hover:opacity-100 cursor-move" @mousedown.stop="dragHandleId = layer.id" @mouseup="dragHandleId = null">
-              <button @click.stop="moveLayer(layer, 'up')" class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none" title="上移图层">▲</button>
-              <button @click.stop="moveLayer(layer, 'down')" class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none" title="下移图层">▼</button>
-            </div>
+                <button @click.stop="toggleLock(layer)" class="bg-transparent text-neutral-600 hover:text-neutral-300 p-1">
+                  <svg v-if="layer.locked" class="w-3 h-3 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                    />
+                  </svg>
+                  <svg v-else class="w-3 h-3 opacity-0 group-hover:opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"
+                    />
+                  </svg>
+                </button>
+                <div class="flex flex-col opacity-0 group-hover:opacity-100 cursor-move" @mousedown.stop="dragHandleId = layer.id" @mouseup="dragHandleId = null">
+                  <button @click.stop="moveLayer(layer, 'up')" class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none" title="上移图层">▲</button>
+                  <button @click.stop="moveLayer(layer, 'down')" class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none" title="下移图层">▼</button>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="reversedWidgets.length === 0" class="text-center py-8 text-neutral-600 text-xs">暂无图层</div>
           </div>
 
-          <div v-if="reversedWidgets.length === 0" class="text-center py-8 text-neutral-600 text-xs">暂无图层</div>
+          <!-- 拖拽放置指示线:绝对定位覆盖,出现/消失不影响其他图层位置 -->
+          <div
+            v-if="dragId && dropLineTop != null"
+            class="absolute left-0 right-0 z-10 pointer-events-none"
+            :style="{ top: dropLineTop + 'px' }"
+          >
+            <div class="h-0.5 bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.8)]"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -569,8 +584,17 @@ const moveLayer = async (w, dir) => {
 
 // ===== 拖动排序(HTML5 draggable)=====
 const dragId = ref(null);
-const dragOverIdx = ref(null);
+const dropIndex = ref(null); // 悬停间隙:0..len(0=列表顶部, len=末尾)
+const dropLineTop = ref(null); // 指示线相对列表容器顶部的 Y(px),绝对定位不影响布局
 const dragHandleId = ref(null);
+const layerListRef = ref(null);
+
+/** 被拖拽控件当前所在下标(用于排除原位间隙) */
+const dragFromIdx = computed(() => {
+  if (!dragId.value) return -1;
+  return reversedWidgets.value.findIndex((w) => String(w.id) === String(dragId.value));
+});
+
 const onDragStart = (id) => {
   const w = store.currentScene?.widgets.find((x) => String(x.id) === String(id));
   if (w?.locked) {
@@ -579,28 +603,92 @@ const onDragStart = (id) => {
   }
   dragId.value = id;
 };
+
+/** 列表内拖动悬停:按鼠标所在行的上下半区实时计算插入间隙,并贴边自动滚动 */
+const onListDragOver = (e) => {
+  if (!dragId.value) return;
+  e.preventDefault();
+  const list = layerListRef.value;
+  const rows = list ? Array.from(list.querySelectorAll('[data-layer-row]')) : [];
+  const listRect = list.getBoundingClientRect();
+  let gap = rows.length; // 默认末尾
+  for (let i = 0; i < rows.length; i++) {
+    const rect = rows[i].getBoundingClientRect();
+    if (e.clientY < rect.top + rect.height / 2) {
+      gap = i;
+      break;
+    }
+  }
+  dropIndex.value = gap;
+  // 拖到控件自身所在间隙(落回原位)时不显示指示线
+  const from = dragFromIdx.value;
+  if (gap === from || gap === from + 1) {
+    dropLineTop.value = null;
+  } else {
+    dropLineTop.value = gapLineTop(rows, listRect, gap);
+  }
+  maybeAutoScroll(e, list);
+};
+
+/** 计算间隙在列表容器内的 Y 坐标:首行上方/行间中点/末尾下方 */
+const gapLineTop = (rows, listRect, gap) => {
+  let top;
+  if (rows.length === 0) {
+    top = 0;
+  } else if (gap === 0) {
+    const r0 = rows[0].getBoundingClientRect();
+    top = r0.top - listRect.top - 2;
+  } else if (gap === rows.length) {
+    const rn = rows[rows.length - 1].getBoundingClientRect();
+    top = rn.bottom - listRect.top + 2;
+  } else {
+    const prev = rows[gap - 1].getBoundingClientRect();
+    const next = rows[gap].getBoundingClientRect();
+    top = (prev.bottom + next.top) / 2 - listRect.top;
+  }
+  // 限制在容器可见范围内
+  return Math.max(0, Math.min(top, listRect.height - 2));
+};
+
+/** 拖到列表上下边缘时自动滚动,便于拖到长列表两端 */
+const maybeAutoScroll = (e, list) => {
+  const scroller = list?.closest('.custom-scrollbar-y');
+  if (!scroller) return;
+  const rect = scroller.getBoundingClientRect();
+  const threshold = 48;
+  if (e.clientY < rect.top + threshold) {
+    scroller.scrollTop -= 14;
+  } else if (e.clientY > rect.bottom - threshold) {
+    scroller.scrollTop += 14;
+  }
+};
+
 const onDragEnd = () => {
   dragId.value = null;
-  dragOverIdx.value = null;
+  dropIndex.value = null;
+  dropLineTop.value = null;
   dragHandleId.value = null;
 };
-const onDrop = async (targetIdx) => {
+
+const onDrop = async () => {
   const srcId = dragId.value;
-  if (!srcId) {
-    dragOverIdx.value = null;
-    return;
-  }
+  const gap = dropIndex.value;
+  onDragEnd();
+  if (!srcId || gap == null) return;
+
   const arr = [...reversedWidgets.value];
   const fromIdx = arr.findIndex((w) => String(w.id) === String(srcId));
-  if (fromIdx < 0 || fromIdx === targetIdx) {
-    onDragEnd();
-    return;
-  }
+  if (fromIdx < 0) return;
+
+  // 间隙换算为"移除后"的插入下标
+  let targetIdx = gap;
+  if (targetIdx > fromIdx) targetIdx -= 1;
+  if (targetIdx === fromIdx) return; // 落回原位,无需变更
+
   const [moved] = arr.splice(fromIdx, 1);
   arr.splice(targetIdx, 0, moved);
   if (arr.some((w) => w.locked)) {
     ElMessage.warning('存在已锁定的控件，请先解锁后再拖动排序');
-    onDragEnd();
     return;
   }
   const widgetIds = arr.map((w) => w.id);
@@ -609,7 +697,6 @@ const onDrop = async (targetIdx) => {
     await reorderWidgets(sceneId, widgetIds);
   } catch (e) {
     ElMessage.error('拖动排序失败');
-    onDragEnd();
     return;
   }
   // 前端按新顺序重排 z(arr 上 = z 大)
@@ -617,7 +704,6 @@ const onDrop = async (targetIdx) => {
     w.z = arr.length - i;
   });
   store.currentScene.widgets = [...store.currentScene.widgets];
-  onDragEnd();
 };
 
 // 全屏展示组件

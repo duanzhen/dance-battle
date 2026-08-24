@@ -18,11 +18,9 @@ import com.dance.street.game.domain.bo.AddGuestBo;
 import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
-import com.dance.street.game.domain.bo.InsertStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.bo.TCompetitorBo;
 import com.dance.street.game.domain.bo.TCompetitorMemberBo;
-import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
@@ -873,31 +871,31 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Transactional(rollbackFor = Exception.class)
     public TCompetitorVo addGuest(AddGuestBo bo) {
         TStage stage = mustGetStage(bo.getStageId());
-        // 嘉宾禁止加入海选(海选走签到/补签到流程)
+        // GUEST 禁止加入海选(海选走签到/补签到流程)
         if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
-            throw new ServiceException("海选赛段不支持嘉宾加入");
+            throw new ServiceException("海选赛段不支持添加 GUEST");
         }
         // 仅赛段规划/未开始态(DRAFT/PENDING)且未初始化可加入:
-        // 名单锁定(initialize)后对阵随之生成,中途加入的嘉宾将无法按抽签结果排位
+        // 名单锁定(initialize)后对阵随之生成,中途加入的 GUEST 将无法按抽签结果排位
         if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())
             && !StageConstants.STAGE_PENDING.equals(stage.getStatus())) {
-            throw new ServiceException("仅赛段规划/未开始状态(DRAFT/PENDING)可加入嘉宾,当前状态: {}", stage.getStatus());
+            throw new ServiceException("仅赛段规划/未开始状态(DRAFT/PENDING)可添加 GUEST,当前状态: {}", stage.getStatus());
         }
         if (Long.valueOf(1L).equals(stage.getIsInitialized())) {
-            throw new ServiceException("赛段已初始化,名单已锁定,无法再加入嘉宾");
+            throw new ServiceException("赛段已初始化,名单已锁定,无法再添加 GUEST");
         }
         if (bo.getName() == null || bo.getName().isBlank()) {
-            throw new ServiceException("嘉宾名称不能为空");
+            throw new ServiceException("GUEST 名称不能为空");
         }
 
-        // 1. 创建参赛单位:嘉宾标记 GUEST、种子排到队尾
+        // 1. 创建参赛单位:标记 GUEST;淘汰赛 SEED(首尾交叉)模式顶替前几名种子,其余模式排到队尾
         TCompetitorBo cbo = new TCompetitorBo();
         cbo.setTournamentId(stage.getTournamentId());
         cbo.setStageId(stage.getId());
         cbo.setType(bo.getType() == null ? 0L : bo.getType());
         cbo.setName(bo.getName().trim());
         cbo.setNumber(StringUtils.isNotBlank(bo.getNumber()) ? bo.getNumber().trim() : nextGuestNumber(stage));
-        cbo.setSeedRank(nextSeedRank(stage));
+        cbo.setSeedRank(seedRankForGuest(stage));
         cbo.setRemark("GUEST");
         TCompetitorVo vo = competitorService.insertByBo(cbo);
         Long competitorId = vo.getId();
@@ -916,124 +914,13 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             competitorMemberService.insertByBo(mbo);
         }
 
-        // 3. 不自动挂入任何场次:嘉宾先进入参赛方池,由导播按外部抽签结果设定种子顺序,
+        // 3. 不自动挂入任何场次:GUEST 先进入参赛方池,由导播按外部抽签结果设定种子顺序,
         //    之后 initialize → generateMatches 会连同既有晋级者一起生成对阵
-        //    (嘉宾胜出即按赛段晋级名额正常占位)
+        //    (GUEST 胜出即按赛段晋级名额正常占位)
 
-        log.info("嘉宾[{}](id={})加入赛段[{}]({})", bo.getName().trim(), competitorId, stage.getId(), stage.getStageMode());
+        log.info("GUEST[{}](id={})加入赛段[{}]({})", bo.getName().trim(), competitorId, stage.getId(), stage.getStageMode());
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
         return vo;
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public TStageVo insertGuestStage(InsertStageBo bo) {
-        TStage a = mustGetStage(bo.getStageId());
-        if (StageConstants.STAGE_DISCARD.equals(a.getStatus())) {
-            throw new ServiceException("赛段[{}]已取消,不能在其后插入赛段", a.getName());
-        }
-        Long bId = a.getNextStageId();
-        if (bId == null) {
-            throw new ServiceException("赛段[{}]已是最后一环,其后无需插入赛段", a.getName());
-        }
-        TStage b = stageMapper.selectById(bId);
-        if (b == null) {
-            throw new ServiceException("赛段[{}]的下一赛段不存在", a.getName());
-        }
-        // 幂等:下一赛段已是插入的嘉宾赛段时拒绝重复插入
-        if (StageConstants.GUEST_INSERT_REMARK.equals(b.getRemark())) {
-            throw new ServiceException("赛段[{}]后已插入过嘉宾赛段,不可重复插入", a.getName());
-        }
-        // 窗口校验:下一赛段必须干净(无参赛方、未生成对阵、未结束),即"干净才让插"
-        long compCnt = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, b.getId()));
-        if (compCnt > 0) {
-            throw new ServiceException("下一赛段[{}]已接收参赛方,无法插入嘉宾赛段(请在晋级发生前插入)", b.getName());
-        }
-        long matchCnt = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, b.getId()));
-        if (matchCnt > 0) {
-            throw new ServiceException("下一赛段[{}]已生成对阵,无法插入嘉宾赛段", b.getName());
-        }
-        if (StageConstants.STAGE_SETTLED.equals(b.getStatus())
-            || StageConstants.STAGE_DISCARD.equals(b.getStatus())) {
-            throw new ServiceException("下一赛段[{}]已结束,无法插入嘉宾赛段", b.getName());
-        }
-
-        // 晋级名额:默认取原下一赛段起始人数,可由导播显式指定
-        long advance = bo.getAdvanceCount() != null && bo.getAdvanceCount() > 0
-            ? bo.getAdvanceCount()
-            : (b.getTeamCountStart() != null && b.getTeamCountStart() > 0 ? b.getTeamCountStart() : 0L);
-        if (advance <= 0) {
-            throw new ServiceException("无法确定晋级名额,请显式指定 advanceCount");
-        }
-        long start = a.getTeamCountEnd() != null ? a.getTeamCountEnd() : 0L;
-
-        TStageBo sb = new TStageBo();
-        sb.setTournamentId(a.getTournamentId());
-        sb.setName(bo.getName().trim());
-        sb.setStageMode(StageModeEnum.KNOCKOUT.getCode());
-        sb.setTeamCountStart(start);
-        sb.setTeamCountEnd(advance);
-        sb.setStatus(StageConstants.STAGE_DRAFT);
-        sb.setIsInitialized(0L);
-        sb.setRemark(StageConstants.GUEST_INSERT_REMARK);
-        sb.setPrevStageId(a.getId());
-        sb.setNextStageId(b.getId());
-        sb.setRuleConfig(buildGuestStageRuleConfig(start, advance));
-        // 复用赛段服务的链表维护:自动把 A.next 指向新赛段、B.prev 指向新赛段
-        TStageVo vo = stageService.insertByBo(sb);
-        log.info("插入嘉宾赛段[{}](id={})于赛段[{}]与[{}]之间,晋级名额={}", vo.getName(), vo.getId(), a.getName(), b.getName(), advance);
-        tournamentEventNotifier.notify(a.getTournamentId(), vo.getId(), null, "stage");
-        return vo;
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void removeGuestStage(Long stageId) {
-        TStage s = mustGetStage(stageId);
-        if (!StageConstants.GUEST_INSERT_REMARK.equals(s.getRemark())) {
-            throw new ServiceException("仅支持撤销插入的嘉宾赛段");
-        }
-        if (StageConstants.STAGE_SETTLED.equals(s.getStatus())
-            || StageConstants.STAGE_DISCARD.equals(s.getStatus())) {
-            throw new ServiceException("赛段[{}]已结束,无法撤销插入", s.getName());
-        }
-        long started = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stageId)
-            .ne(TMatch::getStatus, StageConstants.MATCH_PENDING));
-        if (started > 0) {
-            throw new ServiceException("赛段[{}]已有场次开始,无法撤销插入", s.getName());
-        }
-
-        // 清理赛段数据:打分明细 → 轮次 → 参赛记录 → 场次 → 参赛方(含成员关联)
-        List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stageId).select(TMatch::getId))
-            .stream().map(TMatch::getId).toList();
-        if (!matchIds.isEmpty()) {
-            List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                    .in(TMatchRound::getMatchId, matchIds).select(TMatchRound::getId))
-                .stream().map(TMatchRound::getId).toList();
-            if (!roundIds.isEmpty()) {
-                roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
-            }
-            matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds));
-            participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds));
-            matchMapper.delete(Wrappers.<TMatch>lambdaQuery().in(TMatch::getId, matchIds));
-        }
-        List<Long> compIds = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, stageId).select(TCompetitor::getId))
-            .stream().map(TCompetitor::getId).toList();
-        if (!compIds.isEmpty()) {
-            competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()
-                .in(TCompetitorMember::getCompetitorId, compIds));
-            competitorMapper.delete(Wrappers.<TCompetitor>lambdaQuery().in(TCompetitor::getId, compIds));
-        }
-
-        // 删除赛段并恢复链表(A→B),复用赛段服务的前后节点重连
-        stageService.deleteWithValidByIds(List.of(stageId), true);
-        log.info("撤销插入的嘉宾赛段[{}](id={})", s.getName(), stageId);
-        tournamentEventNotifier.notify(s.getTournamentId(), stageId, null, "stage");
     }
 
     @Override
@@ -1068,15 +955,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         log.info("赛段[{}]按外部抽签结果设定{}个参赛方种子顺序", stage.getId(), order.size());
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
         return order.size();
-    }
-
-    /** 嘉宾赛段默认规则配置:单轮淘汰、按种子顺序相邻配对(SEQUENTIAL),胜者按名额晋级下一赛段 */
-    private String buildGuestStageRuleConfig(long start, long advance) {
-        return "{\"mode\":\"KNOCKOUT\",\"format\":\"BO1\","
-            + "\"scoring\":{\"type\":\"WIN_LOSS_DRAW\",\"matchMode\":\"STANDARD\"},"
-            + "\"knockout\":{\"teamsCount\":" + start
-            + ",\"pairingMode\":\"SEQUENTIAL\",\"singleRound\":true,\"advanceCount\":" + advance + "},"
-            + "\"transition\":{\"mode\":\"AUTO\",\"reshuffle\":false}}";
     }
 
     /** 追加参赛方:仅新增 participant,复用场次已有轮次(淘汰赛/小组赛一个场次一个通用轮次) */
@@ -1137,25 +1015,83 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .max().orElse(0L) + 1L;
     }
 
-    /** 嘉宾选手号:留空时按本赛段最大数字型选手号 +1 生成,前缀 G 与常规选手区分 */
+    /** GUEST 选手号:留空时按本赛段最大数字型选手号 +1 生成,前缀 G 与常规选手区分 */
     private String nextGuestNumber(TStage stage) {
-        long maxNum = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+        List<String> numbers = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, stage.getId())
                 .select(TCompetitor::getNumber))
             .stream().map(TCompetitor::getNumber)
-            .filter(n -> n != null && n.matches("\\d+"))
-            .mapToLong(Long::parseLong)
-            .max().orElse(0L);
+            .filter(java.util.Objects::nonNull)
+            .toList();
+        // 同时统计纯数字号与已有 G 前缀号,避免重复(如第二个 GUEST 仍是 G1)
+        long maxNum = 0L;
+        for (String n : numbers) {
+            if (n.matches("\\d+")) {
+                maxNum = Math.max(maxNum, Long.parseLong(n));
+            } else if (n.matches("G\\d+")) {
+                maxNum = Math.max(maxNum, Long.parseLong(n.substring(1)));
+            }
+        }
         return "G" + (maxNum + 1);
     }
 
-    /** 下一可用种子顺位(嘉宾排到队尾) */
+    /** 下一可用种子顺位(GUEST 排到队尾) */
     private long nextSeedRank(TStage stage) {
         return competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, stage.getId())
                 .select(TCompetitor::getSeedRank))
             .stream().mapToLong(c -> c.getSeedRank() == null ? 0L : c.getSeedRank())
             .max().orElse(0L) + 1L;
+    }
+
+    /**
+     * GUEST 种子位:
+     * <p>淘汰赛 SEED(首尾交叉,1-16、2-15)模式下,GUEST 顶替前几名——按加入顺序占据 1..G,
+     * 原有参赛者种子顺延(保持相对顺序);其余模式仍排到队尾,由导播按抽签结果手动调整。</p>
+     */
+    private long seedRankForGuest(TStage stage) {
+        if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode()) && isSeedPairing(stage)) {
+            List<TCompetitor> all = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stage.getId())
+                .select(TCompetitor::getId, TCompetitor::getSeedRank, TCompetitor::getRemark));
+            long guestCount = 0L;
+            for (TCompetitor c : all) {
+                if ("GUEST".equals(c.getRemark())) {
+                    guestCount++;
+                }
+            }
+            // 原有参赛者(非 GUEST)种子顺延 +1,保持相对顺序;GUEST 自身保持 1..G 不参与顺延
+            for (TCompetitor c : all) {
+                if (!"GUEST".equals(c.getRemark()) && c.getSeedRank() != null) {
+                    TCompetitor upd = new TCompetitor();
+                    upd.setId(c.getId());
+                    upd.setSeedRank(c.getSeedRank() + 1);
+                    competitorMapper.updateById(upd);
+                }
+            }
+            return guestCount + 1L;
+        }
+        return nextSeedRank(stage);
+    }
+
+    /** 是否首尾交叉(SEED)配对:优先取 ruleConfig.knockout.pairingMode;未配置时按与 generateMatches 相同的推断 */
+    private boolean isSeedPairing(TStage stage) {
+        String pairingMode = null;
+        try {
+            RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+            if (rc != null && rc.getKnockout() != null) {
+                pairingMode = rc.getKnockout().getPairingMode();
+            }
+        } catch (Exception ignored) {
+            // 配置解析失败按未配置处理
+        }
+        if (StringUtils.isNotBlank(pairingMode)) {
+            return "SEED".equalsIgnoreCase(pairingMode);
+        }
+        TStage prev = stage.getPrevStageId() != null ? stageMapper.selectById(stage.getPrevStageId()) : null;
+        return prev != null
+            && (StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
+                || StageModeEnum.RANK.getCode().equals(prev.getStageMode()));
     }
 
     @Override
@@ -1237,6 +1173,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (existed > 0) {
             return 0;
         }
+        // 下一赛段可能已有开赛前提前加入的 GUEST(无来源):晋级者种子顺延排在 GUEST 之后,保持 finalRank 相对顺序
+        long guestOffset = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, nextStageId));
 
         List<TCompetitor> advancers = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
             .eq(TCompetitor::getStageId, stage.getId())
@@ -1272,9 +1211,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             if (override != null) {
                 seed = override;
             } else if (!reshuffle && src.getFinalRank() != null) {
-                seed = src.getFinalRank();
+                seed = src.getFinalRank() + guestOffset;
             } else {
-                while (usedSeeds.contains(nextFreeSeed)) {
+                while (usedSeeds.contains(nextFreeSeed) || nextFreeSeed <= guestOffset) {
                     nextFreeSeed++;
                 }
                 seed = nextFreeSeed++;

@@ -8,22 +8,16 @@
     class="player-dialog"
     append-to-body
   >
-
     <div class="space-y-5 py-2">
       <!-- 头像上传区域 -->
       <div>
         <label class="block text-sm font-medium text-neutral-400 mb-2">选手头像</label>
-        <PortraitMatting
-          ref="mattingRef"
-          v-model="formData.avatar"
-        />
+        <PortraitMatting ref="mattingRef" v-model="formData.avatar" />
       </div>
 
       <!-- 选手名称 -->
       <div>
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">
-          选手名称 <span class="text-red-500">*</span>
-        </label>
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5"> 选手名称 <span class="text-red-500">*</span> </label>
         <input
           v-model="formData.name"
           type="text"
@@ -71,10 +65,7 @@
             class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-400 text-xs font-medium"
           >
             {{ tag }}
-            <button
-              @click="removeTag(index)"
-              class="hover:text-amber-300 transition-colors"
-            >
+            <button @click="removeTag(index)" class="hover:text-amber-300 transition-colors">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -114,12 +105,11 @@
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
             ></path>
           </svg>
-          {{ submitting ? '提交中...' : (isEdit ? '保存' : '添加') }}
+          {{ submitting ? '提交中...' : isEdit ? '保存' : '添加' }}
         </button>
       </div>
     </template>
   </el-dialog>
-
 </template>
 
 <script setup lang="ts">
@@ -182,7 +172,7 @@ const formData = ref<{
   remark: ''
 });
 
-const commonTags = ['种子', '外卡', '队长', '替补', '新人'];
+const commonTags = ['种子', 'GUEST', '队长', '替补', '新人'];
 
 // 标签操作
 const handleTagAdd = () => {

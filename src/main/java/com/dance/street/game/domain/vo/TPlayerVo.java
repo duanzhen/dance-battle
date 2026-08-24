@@ -70,7 +70,7 @@ public class TPlayerVo implements Serializable {
 
 
     /**
-     * 标签: ["种子", "外卡"]
+     * 标签: ["种子", "GUEST"]
      */
     @ExcelProperty(value = "标签")
     private String tags;

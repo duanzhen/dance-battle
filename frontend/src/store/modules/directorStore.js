@@ -633,7 +633,8 @@ export const useDirectorStore = defineStore('director', () => {
 
     if (type === 'RANKING') {
       defaultName = `排名展示 ${currentScene.value.widgets.length + 1}`;
-      dataConfig = { stageId: null, opacity: 100 };
+      // opacity = 遮罩不透明度(0-100),默认 85 与旧版 bg-neutral-950/85 视觉一致
+      dataConfig = { stageId: null, opacity: 85 };
       defaultWidth = 800;
       defaultHeight = 600;
     }

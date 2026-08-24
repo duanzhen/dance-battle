@@ -93,48 +93,24 @@ export const getArenaOverview = (stageId: string | number) => {
 };
 
 /**
- * 嘉宾加入赛段(除海选外任意赛段,赛段中间态 PENDING/GAMING 可加)
+ * GUEST 加入赛段(除海选外任意赛段,赛段规划/未开始态 DRAFT/PENDING 且未初始化时可加;
+ * 仅创建参赛单位进入 GUEST 池,不自动挂入场次,由导播排定种子顺序后 initialize 生成对阵)
  * @param stageId 赛段ID
  * @param data { name, type?, number?, playerId? }
  */
-export const addStageGuest = (stageId: string | number, data: {
-  name: string;
-  type?: number;
-  number?: string;
-  playerId?: string | number;
-}) => {
+export const addStageGuest = (
+  stageId: string | number,
+  data: {
+    name: string;
+    type?: number;
+    number?: string;
+    playerId?: string | number;
+  }
+) => {
   return request({
     url: '/game/stage/' + stageId + '/guest',
     method: 'post',
     data
-  });
-};
-
-/**
- * 插入嘉宾赛段:在指定赛段与其下一赛段之间插入淘汰赛赛段并变轨
- * (仅当下一赛段干净——无参赛方、未生成对阵、未结束时允许)
- * @param data { stageId, name, advanceCount? }
- */
-export const insertGuestStage = (data: {
-  stageId: string | number;
-  name: string;
-  advanceCount?: number;
-}): AxiosPromise<StageVO> => {
-  return request({
-    url: '/game/stage/insert-guest-stage',
-    method: 'post',
-    data
-  });
-};
-
-/**
- * 撤销插入的嘉宾赛段(未开始时允许,清理数据并恢复原链表)
- * @param stageId 嘉宾赛段ID
- */
-export const removeGuestStage = (stageId: string | number) => {
-  return request({
-    url: '/game/stage/guest-stage/' + stageId,
-    method: 'delete'
   });
 };
 

@@ -54,7 +54,7 @@ public class TPlayerBo extends BaseEntity {
     private Long competitorId;
 
     /**
-     * 标签: ["种子", "外卡"]
+     * 标签: ["种子", "GUEST"]
      */
     private String tags;
 

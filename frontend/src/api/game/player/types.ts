@@ -48,7 +48,7 @@ export interface PlayerVO {
   } | null;
 
   /**
-   * 标签: ["种子", "外卡"]
+   * 标签: ["种子", "GUEST"]
    */
   tags: string;
 
@@ -85,7 +85,7 @@ export interface PlayerForm extends BaseEntity {
   idCard?: string | number;
 
   /**
-   * 标签: ["种子", "外卡"]
+   * 标签: ["种子", "GUEST"]
    */
   tags?: string;
 
@@ -122,7 +122,7 @@ export interface PlayerQuery extends PageQuery {
   idCard?: string | number;
 
   /**
-   * 标签: ["种子", "外卡"]
+   * 标签: ["种子", "GUEST"]
    */
   tags?: string;
 

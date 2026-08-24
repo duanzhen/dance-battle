@@ -28,7 +28,6 @@ import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.AddGuestBo;
-import com.dance.street.game.domain.bo.InsertStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.service.ITStageService;
@@ -243,40 +242,18 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 嘉宾加入:除海选外任意赛段,在赛段中间态(PENDING/GAMING)加入;
-     * 已生成对阵时按赛制自动挂入未结算场次(淘汰赛/小组赛),擂台赛由轮转队列自动纳入。
+     * GUEST 加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入;
+     * 仅创建参赛单位进入 GUEST 池,不自动挂入任何场次;由导播按外部抽签结果设定种子顺序后,
+     * initialize → generateMatches 生成对阵(GUEST 胜出即占晋级名额)。
      */
     @SaCheckPermission("game:stage:edit")
-    @Log(title = "赛段嘉宾", businessType = BusinessType.INSERT)
+    @Log(title = "赛段 GUEST", businessType = BusinessType.INSERT)
     @RepeatSubmit()
     @PostMapping("/{stageId}/guest")
     public R<TCompetitorVo> addGuest(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
                                      @Validated @RequestBody AddGuestBo bo) {
         bo.setStageId(stageId);
         return R.ok(tStageLifecycleService.addGuest(bo));
-    }
-
-    /**
-     * 插入嘉宾赛段:在指定赛段与其下一赛段之间插入淘汰赛赛段并变轨
-     * (仅当下一赛段干净——无参赛方、未生成对阵、未结束时允许)
-     */
-    @SaCheckPermission("game:stage:edit")
-    @Log(title = "插入嘉宾赛段", businessType = BusinessType.INSERT)
-    @RepeatSubmit()
-    @PostMapping("/insert-guest-stage")
-    public R<TStageVo> insertGuestStage(@Validated @RequestBody InsertStageBo bo) {
-        return R.ok(tStageLifecycleService.insertGuestStage(bo));
-    }
-
-    /**
-     * 撤销插入的嘉宾赛段(未开始时允许,清理数据并恢复原链表)
-     */
-    @SaCheckPermission("game:stage:edit")
-    @Log(title = "撤销嘉宾赛段", businessType = BusinessType.DELETE)
-    @DeleteMapping("/guest-stage/{stageId}")
-    public R<Void> removeGuestStage(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId) {
-        tStageLifecycleService.removeGuestStage(stageId);
-        return R.ok();
     }
 
     /**

@@ -337,8 +337,15 @@ public class TStageServiceImpl implements ITStageService {
         if (oldPrevId != null) {
             TStage prevStage = baseMapper.selectById(oldPrevId);
             if (prevStage != null && Objects.equals(prevStage.getNextStageId(), oldId)) {
-                prevStage.setNextStageId(oldNextId);
-                baseMapper.updateById(prevStage);
+                if (oldNextId == null) {
+                    // updateById 会跳过 null 字段,清空链接需用显式 set
+                    baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+                        .eq(TStage::getId, oldPrevId)
+                        .set(TStage::getNextStageId, null));
+                } else {
+                    prevStage.setNextStageId(oldNextId);
+                    baseMapper.updateById(prevStage);
+                }
             }
         }
 
@@ -346,8 +353,15 @@ public class TStageServiceImpl implements ITStageService {
         if (oldNextId != null) {
             TStage nextStage = baseMapper.selectById(oldNextId);
             if (nextStage != null && Objects.equals(nextStage.getPrevStageId(), oldId)) {
-                nextStage.setPrevStageId(oldPrevId);
-                baseMapper.updateById(nextStage);
+                if (oldPrevId == null) {
+                    // updateById 会跳过 null 字段,清空链接需用显式 set
+                    baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+                        .eq(TStage::getId, oldNextId)
+                        .set(TStage::getPrevStageId, null));
+                } else {
+                    nextStage.setPrevStageId(oldPrevId);
+                    baseMapper.updateById(nextStage);
+                }
             }
         }
     }
@@ -392,8 +406,15 @@ public class TStageServiceImpl implements ITStageService {
             if (prevId != null) {
                 TStage prevStage = baseMapper.selectById(prevId);
                 if (prevStage != null && Objects.equals(prevStage.getNextStageId(), stage.getId())) {
-                    prevStage.setNextStageId(nextId);
-                    baseMapper.updateById(prevStage);
+                    if (nextId == null) {
+                        // updateById 会跳过 null 字段,清空链接需用显式 set
+                        baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+                            .eq(TStage::getId, prevId)
+                            .set(TStage::getNextStageId, null));
+                    } else {
+                        prevStage.setNextStageId(nextId);
+                        baseMapper.updateById(prevStage);
+                    }
                 }
             }
 
@@ -401,8 +422,15 @@ public class TStageServiceImpl implements ITStageService {
             if (nextId != null) {
                 TStage nextStage = baseMapper.selectById(nextId);
                 if (nextStage != null && Objects.equals(nextStage.getPrevStageId(), stage.getId())) {
-                    nextStage.setPrevStageId(prevId);
-                    baseMapper.updateById(nextStage);
+                    if (prevId == null) {
+                        // updateById 会跳过 null 字段,清空链接需用显式 set
+                        baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+                            .eq(TStage::getId, nextId)
+                            .set(TStage::getPrevStageId, null));
+                    } else {
+                        nextStage.setPrevStageId(prevId);
+                        baseMapper.updateById(nextStage);
+                    }
                 }
             }
         }

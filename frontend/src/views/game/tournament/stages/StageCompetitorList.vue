@@ -4,16 +4,6 @@
     <div class="flex-none px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
       <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
       <div class="flex items-center gap-3 text-xs">
-        <el-button
-          type="warning"
-          size="small"
-          class="!h-7 !px-3 !text-xs"
-          :disabled="!canAddGuest"
-          :title="guestBtnTitle"
-          @click="openGuestDialog"
-        >
-          添加嘉宾
-        </el-button>
         <span class="text-neutral-500">共</span>
         <span class="text-amber-500 font-mono">{{ competitors.length }}</span>
         <span class="text-neutral-500">名</span>
@@ -56,8 +46,10 @@
         >
           <div class="flex items-center gap-4">
             <!-- 种子排名 -->
-            <div class="flex-shrink-0 w-12 h-12 rounded-lg bg-gradient-to-br flex items-center justify-center"
-                 :class="getSeedRankClass(competitor.seedRank)">
+            <div
+              class="flex-shrink-0 w-12 h-12 rounded-lg bg-gradient-to-br flex items-center justify-center"
+              :class="getSeedRankClass(competitor.seedRank)"
+            >
               <span class="text-lg font-bold">{{ competitor.seedRank || '-' }}</span>
             </div>
 
@@ -65,20 +57,25 @@
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-1">
                 <span class="text-sm font-medium text-white truncate">{{ competitor.name }}</span>
-                <span v-if="competitor.type === 1"
-                      class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                <span
+                  v-if="competitor.type === 1"
+                  class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                >
                   队伍
                 </span>
-                <span v-else
-                      class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-green-500/10 text-green-500 border border-green-500/20">
+                <span v-else class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-green-500/10 text-green-500 border border-green-500/20">
                   个人
                 </span>
-                <span v-if="isGuest(competitor)"
-                      class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                  嘉宾
+                <span
+                  v-if="isGuest(competitor)"
+                  class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/30"
+                >
+                  GUEST
                 </span>
-                <span v-if="isGuest(competitor) && !props.isInitialized"
-                      class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-neutral-600/10 text-neutral-400 border border-neutral-600/30">
+                <span
+                  v-if="isGuest(competitor) && !props.isInitialized"
+                  class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-neutral-600/10 text-neutral-400 border border-neutral-600/30"
+                >
                   待排位
                 </span>
               </div>
@@ -89,8 +86,7 @@
 
             <!-- 结果状态 -->
             <div v-if="competitor.outcomeStatus" class="flex-shrink-0">
-              <span class="px-2 py-1 rounded text-xs font-medium"
-                    :class="getOutcomeStatusClass(competitor.outcomeStatus)">
+              <span class="px-2 py-1 rounded text-xs font-medium" :class="getOutcomeStatusClass(competitor.outcomeStatus)">
                 {{ getOutcomeStatusText(competitor.outcomeStatus) }}
               </span>
             </div>
@@ -98,8 +94,7 @@
             <!-- 最终排名 -->
             <div v-if="competitor.finalRank" class="flex-shrink-0 w-16 text-center">
               <div class="text-xs text-neutral-500">排名</div>
-              <div class="text-lg font-bold"
-                   :class="getFinalRankClass(competitor.finalRank)">
+              <div class="text-lg font-bold" :class="getFinalRankClass(competitor.finalRank)">
                 {{ competitor.finalRank }}
               </div>
             </div>
@@ -107,34 +102,6 @@
         </div>
       </div>
     </div>
-
-    <!-- 添加嘉宾弹窗 -->
-    <el-dialog
-      v-model="guestDialogVisible"
-      title="添加嘉宾"
-      width="420px"
-      append-to-body
-      :close-on-click-modal="false"
-    >
-      <el-form label-width="72px" @submit.prevent>
-        <el-form-item label="名称" required>
-          <el-input v-model="guestForm.name" placeholder="嘉宾名称" maxlength="50" />
-        </el-form-item>
-        <el-form-item label="类型">
-          <el-radio-group v-model="guestForm.type">
-            <el-radio :value="0">个人</el-radio>
-            <el-radio :value="1">队伍</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="选手号">
-          <el-input v-model="guestForm.number" placeholder="留空自动生成(G+序号)" maxlength="20" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button size="small" @click="guestDialogVisible = false">取消</el-button>
-        <el-button size="small" type="warning" :loading="guestSubmitting" @click="handleAddGuest">确认加入</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -142,7 +109,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { listCompetitor } from '@/api/game/competitor';
-import { addStageGuest, setStageSeedOrder } from '@/api/game/stage';
+import { setStageSeedOrder } from '@/api/game/stage';
 import { CompetitorVO } from '@/api/game/competitor/types';
 
 // Props
@@ -157,23 +124,10 @@ const props = defineProps<{
 const loading = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
 
-// 海选赛段不支持嘉宾加入
-const isAudition = computed(() => props.stageMode === 'AUDITION');
+// GUEST 可加入/可排位窗口:赛段未初始化且处于规划/未开始态(DRAFT/PENDING)
+const canArrange = computed(() => !props.isInitialized && (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING'));
 
-// 嘉宾可加入/可排位窗口:赛段未初始化且处于规划/未开始态(DRAFT/PENDING)
-const canArrange = computed(() =>
-  !props.isInitialized
-  && (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING')
-);
-const canAddGuest = computed(() => !isAudition.value && canArrange.value);
-const guestBtnTitle = computed(() => {
-  if (isAudition.value) return '海选赛段不支持嘉宾加入';
-  if (props.isInitialized) return '赛段已初始化,名单已锁定,无法再加入嘉宾';
-  if (props.stageStatus !== 'DRAFT' && props.stageStatus !== 'PENDING') return '仅赛段规划/未开始状态(DRAFT/PENDING)可加入嘉宾';
-  return '嘉宾加入后按外部抽签结果拖动排序';
-});
-
-// 嘉宾标记:remark == GUEST(由后端 addGuest 写入)
+// GUEST 标记:remark == GUEST(由后端 addGuest 写入)
 const isGuest = (competitor: CompetitorVO) => competitor.remark === 'GUEST';
 
 // 拖拽排序:按外部抽签结果调整参赛方种子顺序
@@ -212,7 +166,10 @@ const saveSeedOrder = async () => {
   if (!props.stageId || competitors.value.length === 0 || savingOrder.value) return;
   savingOrder.value = true;
   try {
-    await setStageSeedOrder(props.stageId, competitors.value.map((c) => c.id));
+    await setStageSeedOrder(
+      props.stageId,
+      competitors.value.map((c) => c.id)
+    );
     ElMessage.success('已按抽签结果保存顺序');
     await loadCompetitors();
   } catch (error) {
@@ -221,39 +178,6 @@ const saveSeedOrder = async () => {
     await loadCompetitors();
   } finally {
     savingOrder.value = false;
-  }
-};
-
-// 添加嘉宾弹窗
-const guestDialogVisible = ref(false);
-const guestSubmitting = ref(false);
-const guestForm = ref({ name: '', type: 0, number: '' });
-
-const openGuestDialog = () => {
-  guestForm.value = { name: '', type: 0, number: '' };
-  guestDialogVisible.value = true;
-};
-
-const handleAddGuest = async () => {
-  if (!guestForm.value.name.trim()) {
-    ElMessage.warning('请输入嘉宾名称');
-    return;
-  }
-  guestSubmitting.value = true;
-  try {
-    await addStageGuest(props.stageId, {
-      name: guestForm.value.name.trim(),
-      type: guestForm.value.type,
-      number: guestForm.value.number.trim() || undefined
-    });
-    ElMessage.success('嘉宾已加入赛段');
-    guestDialogVisible.value = false;
-    loadCompetitors();
-  } catch (error) {
-    console.error('添加嘉宾失败:', error);
-    ElMessage.error((error as any)?.message || '添加嘉宾失败');
-  } finally {
-    guestSubmitting.value = false;
   }
 };
 
@@ -319,9 +243,13 @@ const getFinalRankClass = (rank: number) => {
 };
 
 // 监听 stageId 变化
-watch(() => props.stageId, () => {
-  loadCompetitors();
-}, { immediate: true });
+watch(
+  () => props.stageId,
+  () => {
+    loadCompetitors();
+  },
+  { immediate: true }
+);
 
 // 组件挂载时加载数据
 onMounted(() => {

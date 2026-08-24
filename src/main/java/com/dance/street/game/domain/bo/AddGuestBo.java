@@ -8,11 +8,11 @@ import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * 嘉宾加入请求业务对象。
+ * GUEST 加入请求业务对象。
  *
- * <p>嘉宾可在除海选外的任意赛段、赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入:
- * 服务端仅创建参赛单位进入嘉宾池,不自动挂入场次;由导播按外部抽签结果设定种子顺序后,
- * initialize → generateMatches 生成对阵,嘉宾与正赛选手同池竞技、胜出即占晋级名额。</p>
+ * <p>GUEST 可在除海选外的任意赛段、赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入:
+ * 服务端仅创建参赛单位进入 GUEST 池,不自动挂入场次;由导播按外部抽签结果设定种子顺序后,
+ * initialize → generateMatches 生成对阵,GUEST 与正赛选手同池竞技、胜出即占晋级名额。</p>
  *
  * @author duane
  */
@@ -29,9 +29,9 @@ public class AddGuestBo implements Serializable {
     private Long stageId;
 
     /**
-     * 嘉宾展示名称
+     * GUEST 展示名称
      */
-    @NotBlank(message = "嘉宾名称不能为空")
+    @NotBlank(message = "GUEST 名称不能为空")
     private String name;
 
     /**

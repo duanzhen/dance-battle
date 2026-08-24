@@ -228,7 +228,6 @@
         />
       </div>
     </div>
-
   </div>
 </template>
 
@@ -236,12 +235,7 @@
 import { ref, computed, markRaw, onMounted } from 'vue';
 import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
-import {
-  listStage,
-  addStage as addStageApi,
-  updateStage as updateStageApi,
-  delStage as delStageApi
-} from '@/api/game/stage';
+import { listStage, addStage as addStageApi, updateStage as updateStageApi, delStage as delStageApi } from '@/api/game/stage';
 import { StageVO, StageForm } from '@/api/game/stage/types';
 import StageSidebar from './stages/StageSidebar.vue';
 import TransitionConfig from './TransitionConfig.vue';
@@ -321,7 +315,7 @@ const loadStages = async (keepSelection: boolean = false) => {
     if (loadedStages.length > 0) {
       // 创建 ID 到 Stage 的映射
       const stageMap = new Map<string, Stage>();
-      loadedStages.forEach(stage => stageMap.set(stage.id, stage));
+      loadedStages.forEach((stage) => stageMap.set(stage.id, stage));
 
       // 找到头节点（prevStageId 为 null 的节点）
       let headStage: Stage | null = null;
@@ -370,10 +364,16 @@ const loadStages = async (keepSelection: boolean = false) => {
       stages.value = loadedStages;
     }
 
-    // 如果需要保留选中状态且当前选中的赛段还存在，则保持选中
-    if (keepSelection && currentSelection && currentSelection.type === 'STAGE') {
-      const stillExists = stages.value.some((s) => String(s.id) === currentSelection.id);
-      if (stillExists) {
+    // 需要保留选中状态时:赛段按 id 保持,转场按索引保持(仅当索引仍有效)
+    if (keepSelection && currentSelection) {
+      if (currentSelection.type === 'STAGE') {
+        const stillExists = stages.value.some((s) => String(s.id) === currentSelection.id);
+        if (stillExists) {
+          selection.value = currentSelection;
+        } else if (stages.value.length > 0) {
+          selection.value = { type: 'STAGE', id: String(stages.value[0].id) };
+        }
+      } else if (currentSelection.type === 'TRANSITION' && currentSelection.id < stages.value.length - 1) {
         selection.value = currentSelection;
       } else if (stages.value.length > 0) {
         selection.value = { type: 'STAGE', id: String(stages.value[0].id) };
@@ -413,11 +413,20 @@ const defaultConfigs: Record<StageMode, any> = {
   [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
   [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' },
   [StageMode.RANK]: {
-    mode: 'RANK', scale: 32, advanceCount: 16, circles: 1,
-    publishMode: 'AUTO', publishScope: 'ALL', showScore: true, scoreDisplay: 'TOTAL',
+    mode: 'RANK',
+    scale: 32,
+    advanceCount: 16,
+    circles: 1,
+    publishMode: 'AUTO',
+    publishScope: 'ALL',
+    showScore: true,
+    scoreDisplay: 'TOTAL',
     scoring: {
-      type: 'MULTI_DIM', matchMode: 'RANKING',
-      refereeAggregateRule: 'AVG', aggregateRule: 'SUM', trimRatio: 0.1,
+      type: 'MULTI_DIM',
+      matchMode: 'RANKING',
+      refereeAggregateRule: 'AVG',
+      aggregateRule: 'SUM',
+      trimRatio: 0.1,
       dimensions: [
         { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
         { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
@@ -576,7 +585,7 @@ const canCompleteCreate = computed(() => {
       return parsed.challengerCount > 0 && parsed.maxChallenges > 0;
     }
     if (selectedCreateMode.value === StageMode.RANK) {
-      return parsed.scale > 0 && parsed.advanceCount > 0 && (parsed.scoring?.dimensions?.length > 0);
+      return parsed.scale > 0 && parsed.advanceCount > 0 && parsed.scoring?.dimensions?.length > 0;
     }
     return true;
   } catch (e) {
@@ -609,11 +618,20 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
       [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' },
       [StageMode.RANK]: {
-        mode: 'RANK', scale: 32, advanceCount: 16, circles: 1,
-        publishMode: 'AUTO', publishScope: 'ALL', showScore: true, scoreDisplay: 'TOTAL',
+        mode: 'RANK',
+        scale: 32,
+        advanceCount: 16,
+        circles: 1,
+        publishMode: 'AUTO',
+        publishScope: 'ALL',
+        showScore: true,
+        scoreDisplay: 'TOTAL',
         scoring: {
-          type: 'MULTI_DIM', matchMode: 'RANKING',
-          refereeAggregateRule: 'AVG', aggregateRule: 'SUM', trimRatio: 0.1,
+          type: 'MULTI_DIM',
+          matchMode: 'RANKING',
+          refereeAggregateRule: 'AVG',
+          aggregateRule: 'SUM',
+          trimRatio: 0.1,
           dimensions: [
             { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
             { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },

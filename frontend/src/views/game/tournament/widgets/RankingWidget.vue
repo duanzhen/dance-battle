@@ -1,22 +1,24 @@
 <template>
   <div class="w-full h-full">
     <!-- 查看模式:排名赛排行榜,按圈分列展示全部选手排名 -->
-    <div v-if="mode !== 'edit'" class="w-full h-full bg-neutral-950/85 rounded-lg overflow-hidden relative" :style="viewStyle">
-      <div v-if="loading" class="w-full h-full flex items-center justify-center text-white/50 text-sm">加载中...</div>
-      <div v-else-if="error" class="w-full h-full flex items-center justify-center text-white/40 text-xs px-4 text-center">{{ error }}</div>
-      <div v-else-if="!stageId" class="w-full h-full flex items-center justify-center text-white/40 text-xs">未绑定排名赛赛段</div>
-      <div v-else class="w-full h-full flex flex-col">
+    <div v-if="mode !== 'edit'" ref="viewRef" class="w-full h-full rounded-lg overflow-hidden relative">
+      <!-- 遮罩层:透明度仅作用于深色底,文字与表格内容保持不透明 -->
+      <div class="absolute inset-0 rounded-lg bg-neutral-950" :style="maskStyle"></div>
+      <div v-if="loading" class="relative w-full h-full flex items-center justify-center text-white/50" :style="fz(15)">加载中...</div>
+      <div v-else-if="error" class="relative w-full h-full flex items-center justify-center text-white/40 px-4 text-center" :style="fz(13)">{{ error }}</div>
+      <div v-else-if="!stageId" class="relative w-full h-full flex items-center justify-center text-white/40" :style="fz(13)">未绑定排名赛赛段</div>
+      <div v-else class="relative w-full h-full flex flex-col">
         <!-- 标题栏 -->
         <div class="px-3 py-2 border-b border-white/10 flex items-center justify-between flex-none">
-          <span class="text-white font-bold text-sm truncate">{{ stageName || '排名展示' }}</span>
-          <span class="text-white/50 text-[10px] flex-none">{{ publishScope === 'TOP_N' ? `前 ${advanceCount} 名` : '全部排名' }}</span>
+          <span class="text-white font-bold truncate" :style="fz(15)">{{ stageName || '排名展示' }}</span>
+          <span class="text-white/50 flex-none" :style="fz(11)">{{ publishScope === 'TOP_N' ? `前 ${advanceCount} 名` : '全部排名' }}</span>
         </div>
 
         <!-- 表格展示:每圈一张表,列为 名次/选手/各维度/总分/号码 -->
         <div class="flex-1 min-h-0 overflow-y-auto p-2 scrollbar-hide">
           <div v-for="col in columns" :key="col.zone" class="mb-3">
-            <div v-if="columns.length > 1" class="text-white/60 text-[11px] font-bold mb-1">{{ col.title }}</div>
-            <table class="w-full text-[11px] border-collapse">
+            <div v-if="columns.length > 1" class="text-white/60 font-bold mb-1" :style="fz(12)">{{ col.title }}</div>
+            <table class="w-full border-collapse" :style="fz(12)">
               <thead>
                 <tr class="text-left text-white/50 border-b border-white/10">
                   <th class="py-1.5 px-2 font-bold text-left">号码</th>
@@ -71,22 +73,22 @@
           @update:model-value="$emit('update:stageId', $event)"
         />
         <div class="mt-3">
-          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">透明度</label>
+          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">遮罩透明度</label>
           <div class="flex items-center gap-3">
             <input
               type="range"
               min="0"
               max="100"
               step="5"
-              :value="opacity ?? 100"
+              :value="maskTransparency"
               class="flex-1 accent-amber-500"
-              @input="$emit('update:opacity', Number(($event.target as HTMLInputElement).value))"
+              @input="$emit('update:opacity', 100 - Number(($event.target as HTMLInputElement).value))"
             />
-            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ opacity ?? 100 }}%</span>
+            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ maskTransparency }}%</span>
           </div>
         </div>
         <p class="text-[10px] text-neutral-600 mt-2">
-          展示排名赛(多维度打分)的选手排名,以表格展示,分圈时每圈一张表;是否显示分数由赛段配置决定,手动/批量公布模式下公布前自动隐藏。
+          展示排名赛(多维度打分)的选手排名,以表格展示,分圈时每圈一张表;是否显示分数由赛段配置决定,手动/批量公布模式下公布前自动隐藏。遮罩透明度仅作用于深色背景,不影响文字与表格内容。
         </p>
       </section>
     </div>
@@ -118,15 +120,44 @@ const route = useRoute();
 const qid = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? v : null);
 const tournamentId = () => props.tournamentId ?? qid(route.query.id) ?? qid(route.query.tournamentId) ?? null;
 
+/** 查看模式容器:用于测量实际渲染尺寸 */
+const viewRef = ref<HTMLElement | null>(null);
+let resizeObserver: ResizeObserver | null = null;
+
+/** 字号缩放:以默认组件尺寸 800x600 为基准,大组件放大、小组件缩小,限制在 0.6~2.5 */
+const scale = ref(1);
+const fz = (base: number) => ({
+  fontSize: `${Math.round(base * scale.value)}px`,
+  lineHeight: `${Math.round(base * scale.value * 1.4)}px`
+});
+
+const startObserve = () => {
+  resizeObserver?.disconnect();
+  if (!viewRef.value) return;
+  resizeObserver = new ResizeObserver((entries) => {
+    const r = entries[0]?.contentRect;
+    if (!r) return;
+    const s = Math.min(r.width / 800, r.height / 600);
+    scale.value = Math.max(0.6, Math.min(2.5, s));
+  });
+  resizeObserver.observe(viewRef.value);
+};
+
 const loading = ref(false);
 const loadedOnce = ref(false);
 const error = ref('');
 
-/** 透明度 0-100 → 0-1,未配置时默认不透明 */
-const viewStyle = computed(() => {
-  const v = Number.isFinite(Number(props.opacity)) ? Number(props.opacity) : 100;
-  return { opacity: Math.max(0, Math.min(100, v)) / 100 };
+/** 遮罩不透明度 0-100(dataConfig.opacity),默认 85 与旧版 bg-neutral-950/85 视觉一致 */
+const maskOpacity = computed(() => {
+  const v = Number.isFinite(Number(props.opacity)) ? Number(props.opacity) : 85;
+  return Math.max(0, Math.min(100, v));
 });
+
+/** 滑块方向:遮罩透明度 = 100 - 不透明度,右滑更透明 */
+const maskTransparency = computed(() => Math.round(100 - maskOpacity.value));
+
+/** 遮罩层样式:只作用于深色背景,内容保持不透明 */
+const maskStyle = computed(() => ({ opacity: maskOpacity.value / 100 }));
 
 const stageName = ref('');
 const advanceCount = ref(0);
@@ -310,11 +341,20 @@ const rankClass = (rank: number | null) => {
 
 onMounted(() => {
   loadData();
+  startObserve();
   subscribeTournamentEvents(tournamentId(), handleTournamentEvent);
 });
 onUnmounted(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
   unsubscribeTournamentEvents(tournamentId(), handleTournamentEvent);
 });
+
+// 编辑/查看模式切换时重新测量(编辑模式无 viewRef)
+watch(
+  () => props.mode,
+  () => startObserve()
+);
 
 watch(
   () => [props.stageId, props.tournamentId],

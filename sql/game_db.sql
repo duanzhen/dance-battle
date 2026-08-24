@@ -163,7 +163,7 @@ CREATE TABLE `t_player` (
   `avatar` varchar(255) DEFAULT NULL,
   `id_card` varchar(50) DEFAULT NULL COMMENT '身份唯一标识',
   `competitor_id` bigint DEFAULT NULL COMMENT '首赛段参赛者',
-  `tags` json DEFAULT NULL COMMENT '标签: ["种子", "外卡"]',
+  `tags` json DEFAULT NULL COMMENT '标签: ["种子", "GUEST"]',
   `create_by` bigint DEFAULT NULL COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_by` bigint DEFAULT NULL COMMENT '更新者',

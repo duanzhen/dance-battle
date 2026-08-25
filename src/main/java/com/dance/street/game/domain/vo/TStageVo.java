@@ -123,5 +123,10 @@ public class TStageVo implements Serializable {
     @ExcelProperty(value = "备注")
     private String remark;
 
+    /**
+     * 是否等待中间态确认晋级(导播台用):上一赛段已结算且存在待确认晋级者,
+     * 本赛段尚未接收晋级者时为 true,此时不可开始赛段
+     */
+    private Boolean awaitingAdvancement;
 
 }

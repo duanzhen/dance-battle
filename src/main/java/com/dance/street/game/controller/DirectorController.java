@@ -3,16 +3,23 @@ package com.dance.street.game.controller;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.TCompetitor;
+import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.TTournamentVo;
+import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.interceptor.DirectorAuthInterceptor;
+import com.dance.street.game.mapper.TCompetitorMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITTournamentService;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.domain.R;
@@ -40,6 +47,8 @@ public class DirectorController {
     private final ITMatchService matchService;
     private final ITStageLifecycleService stageLifecycleService;
     private final ITMatchResultService matchResultService;
+    private final TStageMapper stageMapper;
+    private final TCompetitorMapper competitorMapper;
 
     /**
      * 获取当前认证赛事信息(名称等)
@@ -61,7 +70,42 @@ public class DirectorController {
         }
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tournamentId);
-        return R.ok(stageService.queryList(bo));
+        List<TStageVo> stages = stageService.queryList(bo);
+        enrichAwaitingAdvancement(stages);
+        return R.ok(stages);
+    }
+
+    /**
+     * 标记「等待中间态确认晋级」:与后端 startStage 的守卫一致——
+     * 上一赛段已 SETTLED 且存在晋级者/同分待定,但本赛段尚未接收带来源参赛方。
+     * 导播端据此前置提示并在管理端确认前禁用「开始赛段」。
+     */
+    private void enrichAwaitingAdvancement(List<TStageVo> stages) {
+        if (stages == null) {
+            return;
+        }
+        for (TStageVo stage : stages) {
+            if (stage.getPrevStageId() == null) {
+                continue;
+            }
+            TStage prev = stageMapper.selectById(stage.getPrevStageId());
+            if (prev == null || !StageConstants.STAGE_SETTLED.equals(prev.getStatus())) {
+                continue;
+            }
+            long confirmed = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stage.getId())
+                .isNotNull(TCompetitor::getSourceCompetitorId));
+            if (confirmed > 0) {
+                continue;
+            }
+            long srcAdvance = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, prev.getId())
+                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
+            long srcPending = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, prev.getId())
+                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
+            stage.setAwaitingAdvancement(srcAdvance > 0 || srcPending > 0);
+        }
     }
 
     /**

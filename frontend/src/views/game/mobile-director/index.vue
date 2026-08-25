@@ -150,7 +150,12 @@
               v-if="currentStage && !canStart && (currentStage.status === 'DRAFT' || currentStage.status === 'PENDING')"
               class="mt-3 text-[10px] text-neutral-500 leading-relaxed"
             >
-              上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
+              <template v-if="currentStage.awaitingAdvancement">
+                上一赛段已结束，晋级选手需先在管理端「中间态」确认晋级；确认后「开始赛段」将自动可用。
+              </template>
+              <template v-else>
+                上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
+              </template>
             </p>
 
             <div
@@ -161,14 +166,16 @@
                 点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，败者自动排到队尾。
               </p>
               <p v-else class="text-[10px] text-blue-400/70">
-                点击「开始赛段」将自动完成：确认晋级选手 → 初始化 → 生成对阵；淘汰赛场次保持待开始，需逐场点「开始」。
+                晋级选手需先在管理端「中间态」确认；确认后点击「开始赛段」将自动初始化并生成对阵，淘汰赛场次保持待开始、逐场点「开始」。
               </p>
             </div>
             <div v-if="currentStage.status === 'GAMING'" class="mt-3 p-3 rounded-lg bg-green-500/5 border border-green-500/10">
               <p class="text-[10px] text-green-400/70">赛段正在进行中，裁判可录入比分。完成后点击"完成赛段"结算排名。</p>
             </div>
             <div v-if="currentStage.status === 'SETTLED'" class="mt-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10">
-              <p class="text-[10px] text-amber-400/70">赛段已结算，晋级选手已自动推入下一赛段。</p>
+              <p class="text-[10px] text-amber-400/70">
+                赛段已结算。晋级选手需在管理端「中间态」确认晋级后写入下一赛段，确认前下一赛段无法开始。
+              </p>
             </div>
           </div>
         </div>
@@ -486,6 +493,7 @@ interface Stage {
   teamCountEnd: number;
   status: string;
   isInitialized: boolean;
+  awaitingAdvancement?: boolean;
   prevStageId: string | null;
   nextStageId: string | null;
 }
@@ -547,6 +555,8 @@ const prevStage = computed(() => {
 const canStart = computed(() => {
   if (!currentStage.value) return false;
   if (currentStage.value.status !== 'DRAFT' && currentStage.value.status !== 'PENDING') return false;
+  // 上一赛段已结束但晋级者尚未在管理端中间态确认:禁止开始
+  if (currentStage.value.awaitingAdvancement) return false;
   return !prevStage.value || prevStage.value.status === 'SETTLED';
 });
 
@@ -590,6 +600,7 @@ const loadStages = async () => {
       teamCountEnd: item.teamCountEnd,
       status: item.status,
       isInitialized: item.isInitialized === 1,
+      awaitingAdvancement: !!item.awaitingAdvancement,
       prevStageId: safeId(item.prevStageId),
       nextStageId: safeId(item.nextStageId)
     }));

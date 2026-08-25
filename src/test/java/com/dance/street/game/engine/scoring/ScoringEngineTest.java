@@ -5,6 +5,7 @@ import com.dance.street.game.engine.common.DimensionConfig;
 import com.dance.street.game.engine.common.OutcomeScore;
 import com.dance.street.game.engine.common.ScoringConfig;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
+import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +15,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * ScoringEngine 端到端策略测试:三种打分模式 + 同分并列。
@@ -64,19 +66,45 @@ class ScoringEngineTest {
     }
 
     @Test
-    void winLossDraw_noWinnerKeepsUnjudgedOutcomeNull() {
-        // 没有胜者时不触发 1v1 兜底:未判定参赛方得 0 分,outcome 保持 null
+    void winLossDraw_emptyOrPartialSubmissionRejected() {
+        // 1v1 完整性校验:空提交 / 单边 DRAW / 单边 LOSS 均属无效判罚,必须拒绝
         ScoringConfig cfg = new ScoringConfig();
 
         MatchScoreInput input = MatchScoreInput.builder()
             .matchMode(MatchModeEnum.STANDARD)
             .scoringConfig(cfg)
             .competitorIds(List.of(1L, 2L))
+            .directOutcomes(Map.of())
+            .build();
+        assertThrows(ServiceException.class, () -> engine.compute(input));
+
+        // 单边 DRAW:不得被静默当成获胜
+        input.setDirectOutcomes(Map.of(1L, "DRAW"));
+        assertThrows(ServiceException.class, () -> engine.compute(input));
+
+        // 单边 LOSS:不得产生双方并列第 1 后把败者当胜者
+        input.setDirectOutcomes(Map.of(1L, "LOSS"));
+        assertThrows(ServiceException.class, () -> engine.compute(input));
+
+        // 胜+平:自相矛盾
+        input.setDirectOutcomes(Map.of(1L, "WIN", 2L, "DRAW"));
+        assertThrows(ServiceException.class, () -> engine.compute(input));
+    }
+
+    @Test
+    void winLossDraw_bothDrawAllowed() {
+        ScoringConfig cfg = new ScoringConfig();
+
+        MatchScoreInput input = MatchScoreInput.builder()
+            .matchMode(MatchModeEnum.STANDARD)
+            .scoringConfig(cfg)
+            .competitorIds(List.of(1L, 2L))
+            .directOutcomes(Map.of(1L, "DRAW", 2L, "DRAW"))
             .build();
 
         List<MatchScoreResult> results = engine.compute(input);
-        assertResult(find(results, 1L), bd(0), 1, null);
-        assertResult(find(results, 2L), bd(0), 1, null);
+        assertResult(find(results, 1L), bd("0.5"), 1, "DRAW");
+        assertResult(find(results, 2L), bd("0.5"), 1, "DRAW");
     }
 
     // ---------------- VOTING: 总分制 ----------------

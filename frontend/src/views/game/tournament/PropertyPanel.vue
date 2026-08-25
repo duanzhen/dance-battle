@@ -1,40 +1,42 @@
 <template>
   <div class="flex flex-col h-full bg-neutral-900 border-l border-neutral-800">
-    <!-- 选项卡按钮 -->
-    <div class="flex border-b border-neutral-800">
-      <!-- 组件按钮 - 仅在选中组件时显示 -->
-      <button
-        v-if="widget"
-        @click="activeTab = 'widget'"
-        :class="[
-          'flex-1 py-3 text-xs font-bold border-b-2 transition-colors bg-neutral-800/50',
-          activeTab === 'widget' ? 'text-amber-500 border-amber-500' : 'text-neutral-500 border-transparent hover:text-neutral-300'
-        ]"
-      >
-        组件
-      </button>
+    <!-- 选项卡按钮:整体长条圆角矩形,内部接缝直角(全局 button 默认 8px 圆角需 rounded-none 覆盖) -->
+    <div class="border-b border-neutral-800 p-1.5">
+      <div class="flex rounded-lg overflow-hidden bg-neutral-800/60">
+        <!-- 组件按钮 - 仅在选中组件时显示 -->
+        <button
+          v-if="widget"
+          @click="activeTab = 'widget'"
+          :class="[
+            'flex-1 py-2.5 text-xs font-bold rounded-none transition-colors bg-transparent',
+            activeTab === 'widget' ? 'text-amber-500' : 'text-neutral-500 hover:text-neutral-300'
+          ]"
+        >
+          组件
+        </button>
 
-      <!-- 场景按钮 -->
-      <button
-        @click="activeTab = 'scene'"
-        :class="[
-          'flex-1 py-3 text-xs font-bold border-b-2 transition-colors bg-neutral-800/50',
-          activeTab === 'scene' ? 'text-amber-500 border-amber-500' : 'text-neutral-500 border-transparent hover:text-neutral-300'
-        ]"
-      >
-        场景
-      </button>
+        <!-- 场景按钮 -->
+        <button
+          @click="activeTab = 'scene'"
+          :class="[
+            'flex-1 py-2.5 text-xs font-bold rounded-none transition-colors bg-transparent',
+            activeTab === 'scene' ? 'text-amber-500' : 'text-neutral-500 hover:text-neutral-300'
+          ]"
+        >
+          场景
+        </button>
 
-      <!-- 图层按钮 -->
-      <button
-        @click="activeTab = 'layers'"
-        :class="[
-          'flex-1 py-3 text-xs font-bold border-b-2 transition-colors bg-neutral-800/50',
-          activeTab === 'layers' ? 'text-amber-500 border-amber-500' : 'text-neutral-500 border-transparent hover:text-neutral-300'
-        ]"
-      >
-        图层
-      </button>
+        <!-- 图层按钮 -->
+        <button
+          @click="activeTab = 'layers'"
+          :class="[
+            'flex-1 py-2.5 text-xs font-bold rounded-none transition-colors bg-transparent',
+            activeTab === 'layers' ? 'text-amber-500' : 'text-neutral-500 hover:text-neutral-300'
+          ]"
+        >
+          图层
+        </button>
+      </div>
     </div>
 
     <div class="flex-1 overflow-y-auto custom-scrollbar-y">

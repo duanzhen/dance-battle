@@ -15,9 +15,12 @@ import org.springframework.stereotype.Service;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.domain.TPlayer;
+import com.dance.street.game.domain.TRefereeStage;
+import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -32,9 +35,14 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
+import com.dance.street.game.mapper.TRefereeStageMapper;
+import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITStageService;
+
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -53,8 +61,11 @@ public class TStageServiceImpl implements ITStageService {
     private final TStageMapper baseMapper;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
+    private final TMatchRoundMapper matchRoundMapper;
     private final TCompetitorMapper competitorMapper;
     private final TCompetitorMemberMapper competitorMemberMapper;
+    private final TRoundScoreMapper roundScoreMapper;
+    private final TRefereeStageMapper refereeStageMapper;
     private final TPlayerMapper playerMapper;
 
     /**
@@ -374,11 +385,49 @@ public class TStageServiceImpl implements ITStageService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
+        if (ids == null || ids.isEmpty()) {
+            return false;
+        }
         if(isValid){
             // 在删除前重新连接链表
             reconnectChainBeforeDelete(ids);
         }
+        // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
+        List<Long> stageIds = ids.stream().map(Long::valueOf).toList();
+        List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                .in(TMatch::getStageId, stageIds)
+                .select(TMatch::getId))
+            .stream().map(TMatch::getId).toList();
+        if (!matchIds.isEmpty()) {
+            List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                    .in(TMatchRound::getMatchId, matchIds)
+                    .select(TMatchRound::getId))
+                .stream().map(TMatchRound::getId).toList();
+            if (!roundIds.isEmpty()) {
+                roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                    .in(TRoundScore::getRoundId, roundIds));
+            }
+            participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
+                .in(TMatchParticipant::getMatchId, matchIds));
+            matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
+                .in(TMatchRound::getMatchId, matchIds));
+            matchMapper.delete(Wrappers.<TMatch>lambdaQuery()
+                .in(TMatch::getStageId, stageIds));
+        }
+        List<Long> compIds = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .in(TCompetitor::getStageId, stageIds)
+                .select(TCompetitor::getId))
+            .stream().map(TCompetitor::getId).toList();
+        if (!compIds.isEmpty()) {
+            competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()
+                .in(TCompetitorMember::getCompetitorId, compIds));
+            competitorMapper.delete(Wrappers.<TCompetitor>lambdaQuery()
+                .in(TCompetitor::getStageId, stageIds));
+        }
+        refereeStageMapper.delete(Wrappers.<TRefereeStage>lambdaQuery()
+            .in(TRefereeStage::getStageId, stageIds));
         return baseMapper.deleteByIds(ids) > 0;
     }
 
@@ -600,12 +649,15 @@ public class TStageServiceImpl implements ITStageService {
         vo.setStageName(stage.getName());
         vo.setStageMode(stage.getStageMode());
 
-        // 本赛段已有参赛方(已初始化/晋级写入):直接按真实种子返回
+        // 本赛段已有参赛方:已初始化或已写入晋级者时视为真实名单(GENERATED);
+        // 仅提前加入 GUEST(未初始化、未确认晋级)时仍进入 PREVIEW,与上一赛段晋级者合并展示
         List<TCompetitor> own = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
             .eq(TCompetitor::getStageId, stage.getId())
             .orderByAsc(TCompetitor::getSeedRank)
             .orderByAsc(TCompetitor::getId));
-        if (!own.isEmpty()) {
+        boolean initialized = Long.valueOf(1L).equals(stage.getIsInitialized());
+        boolean hasConfirmedAdvancer = own.stream().anyMatch(c -> c.getSourceCompetitorId() != null);
+        if (!own.isEmpty() && (initialized || hasConfirmedAdvancer)) {
             vo.setStatus("GENERATED");
             vo.setSeededCompetitors(own.stream().map(c -> toPreSeed(c, (long) own.indexOf(c) + 1, null)).toList());
             return vo;
@@ -630,6 +682,11 @@ public class TStageServiceImpl implements ITStageService {
             .eq(TCompetitor::getStageId, prev.getId())
             .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
         if (advancers.isEmpty()) {
+            // 上一赛段尚无晋级者:仅返回已提前加入的参赛方(如 GUEST)
+            if (!own.isEmpty()) {
+                vo.setSeededCompetitors(own.stream()
+                    .map(c -> toPreSeed(c, c.getSeedRank(), null)).toList());
+            }
             vo.setStatus("WAIT_PREV");
             return vo;
         }
@@ -669,22 +726,28 @@ public class TStageServiceImpl implements ITStageService {
             : Math.max(advancers.size(), prevMatches.size());
         totalSlots = Math.max(1, totalSlots);
         PreBracketVo.PreSeed[] seedArr = new PreBracketVo.PreSeed[totalSlots];
-        List<PreBracketVo.PreSeed> extras = new ArrayList<>();
-        for (TCompetitor c : advancers) {
-            PreBracketVo.PreSeed s = toPreSeed(c, null, sourceMatch.get(c.getId()));
-            if (c.getFinalRank() != null && c.getFinalRank() > 0 && c.getFinalRank() <= totalSlots) {
-                s.setSeedRank(c.getFinalRank());
-                seedArr[c.getFinalRank().intValue() - 1] = s;
-            } else {
-                extras.add(s);
+        // 已提前加入的参赛方(通常为 GUEST)先按种子位占位;晋级者只填充剩余空位,
+        // 超出计划规模的晋级者不进入(GUEST 顶替前几名种子,原晋级者按 finalRank 顺序顺延)
+        for (TCompetitor g : own) {
+            long r = g.getSeedRank() != null ? g.getSeedRank() : 0L;
+            if (r >= 1L && r <= totalSlots) {
+                seedArr[(int) (r - 1L)] = toPreSeed(g, r, null);
             }
         }
-        for (int i = 0; i < seedArr.length && !extras.isEmpty(); i++) {
-            if (seedArr[i] == null) {
-                PreBracketVo.PreSeed s = extras.remove(0);
-                s.setSeedRank((long) (i + 1));
-                seedArr[i] = s;
+        // 晋级者严格按 finalRank 顺序填充空位:GUEST 占位后顺延,超出计划规模的晋级者不进入
+        // (淘汰赛承接胜者时 finalRank=场次位置,顺序填充与位置保留等价)
+        int cursor = 0;
+        for (TCompetitor c : advancers) {
+            while (cursor < seedArr.length && seedArr[cursor] != null) {
+                cursor++;
             }
+            if (cursor >= seedArr.length) {
+                break; // 名额已满
+            }
+            PreBracketVo.PreSeed s = toPreSeed(c, null, sourceMatch.get(c.getId()));
+            s.setSeedRank((long) (cursor + 1));
+            seedArr[cursor] = s;
+            cursor++;
         }
         List<PreBracketVo.PreSeed> seeds = new ArrayList<>();
         for (PreBracketVo.PreSeed s : seedArr) {
@@ -718,6 +781,7 @@ public class TStageServiceImpl implements ITStageService {
                 PreBracketVo.PrePair p = new PreBracketVo.PrePair();
                 p.setPosition(i + 1);
                 p.setZone(i < half ? "LEFT" : "RIGHT");
+                // SEED 标准种子摆位(与 KnockoutGenerator.SEED_LAYOUT 一致):第 i 场 = layout[2i] vs layout[2i+1]
                 int leftPos = layout[2 * i];
                 int rightPos = layout[2 * i + 1];
                 p.setLeft(leftPos <= seedArr.length ? seedArr[leftPos - 1] : null);

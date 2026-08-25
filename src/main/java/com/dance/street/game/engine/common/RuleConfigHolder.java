@@ -15,7 +15,7 @@ import java.io.Serializable;
  *   "mode": "KNOCKOUT", "format": "BO1",
  *   "knockout": { "template":"QUARTER_FINAL", "teamsCount":8, "advanceCount":4 },
  *   "scoring":  { "type":"MULTI_DIM", "matchMode":"RANKING", ... },
- *   "transition": { "mode":"AUTO", "reshuffle":false }
+ *   "transition": { "seedOverrides": {...} }
  * }
  * </pre>
  */

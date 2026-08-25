@@ -1,8 +1,11 @@
 <template>
-  <div class="h-full flex flex-col bg-[#0a0a0a] rounded-xl border border-neutral-800 overflow-hidden">
+  <div class="h-full flex flex-col bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden">
     <!-- 头部 -->
     <div class="flex-none px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
-      <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
+      <div class="flex items-center gap-2">
+        <Users class="w-4 h-4 text-neutral-400" />
+        <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
+      </div>
       <div class="flex items-center gap-3 text-xs">
         <span class="text-neutral-500">共</span>
         <span class="text-amber-500 font-mono">{{ competitors.length }}</span>
@@ -108,6 +111,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { Users } from 'lucide-vue-next';
 import { listCompetitor } from '@/api/game/competitor';
 import { setStageSeedOrder } from '@/api/game/stage';
 import { CompetitorVO } from '@/api/game/competitor/types';

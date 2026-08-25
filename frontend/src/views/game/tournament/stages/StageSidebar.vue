@@ -2,9 +2,10 @@
   <div class="stage-sidebar">
     <!-- 头部 -->
     <div class="px-6 py-4 border-b border-neutral-800">
-      <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">
-        通用配置
-      </h3>
+      <div class="flex items-center gap-2">
+        <Settings class="w-4 h-4 text-neutral-400" />
+        <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">通用配置</h3>
+      </div>
     </div>
 
     <!-- 正常模式: 编辑已有赛段 -->
@@ -169,7 +170,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
-import { ChevronDown } from 'lucide-vue-next';
+import { ChevronDown, Settings } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import { initializeStage, generateMatches, startStage, completeStage, calculateAdvancement } from '@/api/game/stage/lifecycle';
 import { listReferee } from '@/api/game/referee';

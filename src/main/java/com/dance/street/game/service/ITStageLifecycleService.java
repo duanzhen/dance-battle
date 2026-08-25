@@ -62,7 +62,7 @@ public interface ITStageLifecycleService {
     /** 擂台赛总览:轮转队列(含积分)与当前对决 */
     ArenaOverviewVo getArenaOverview(Long stageId);
 
-    /** 赛段 GAMING→SETTLED(需所有场次已结算);AUTO 模式自动触发晋级 */
+    /** 赛段 GAMING→SETTLED(需所有场次已结算);结算后仅产出晋级者/排名,由导播台在中间态「确认晋级」 */
     void completeStage(Long stageId);
 
     /** 计算晋级:从已结算赛段取晋级者,在下一赛段创建新参赛方。返回晋级人数(幂等:已晋级返回 0) */

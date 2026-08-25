@@ -170,7 +170,8 @@
         <div class="flex gap-4">
           <!-- 左侧:专用配置 -->
           <div class="w-[900px] flex-shrink-0">
-            <div class="mb-4">
+            <!-- 参赛选手列表限高,内部滚动,避免把下方赛段配置顶出屏幕 -->
+            <div class="mb-4 h-[min(38vh,420px)]">
               <StageCompetitorList
                 :key="'comp-' + currentStage.id"
                 :stage-id="currentStage.id"

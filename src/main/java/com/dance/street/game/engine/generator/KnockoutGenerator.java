@@ -95,7 +95,8 @@ public class KnockoutGenerator implements StageGenerator {
             m.setDisplayRow(i);
             m.setDisplayZone(i < r1Count / 2 ? "LEFT" : "RIGHT");
             m.setFinalMatch(true);
-            // 配对模式:SEQUENTIAL=1-2、3-4(相邻);SEED=标准 bracket 种子位(1-N、4-(N/2+1)…,强种子分散)
+            // 配对模式:SEQUENTIAL=1-2、3-4(相邻);SEED=标准种子摆位(SEED_LAYOUT 写死的赛事约定:
+            // 16 人 = (1,16),(8,9),(5,12),(4,13),(3,14),(6,11),(7,10),(2,15),头尾交叉分散强种子)
             int seedA = seedPairing ? layout[2 * i] : (2 * i + 1);
             int seedB = seedPairing ? layout[2 * i + 1] : (2 * i + 2);
             // SEED 摆位:同一场两个种子上下位置随机,保持配对不变

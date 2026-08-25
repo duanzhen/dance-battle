@@ -24,8 +24,8 @@ public class AddGuestBo implements Serializable {
 
     /**
      * 加入的赛段ID
+     * (由 Controller 从路径变量注入,请求体可不传;保留字段供服务层使用)
      */
-    @NotNull(message = "赛段ID不能为空")
     private Long stageId;
 
     /**
@@ -48,5 +48,15 @@ public class AddGuestBo implements Serializable {
      * 关联选手ID(可选,提供后关联参赛成员,头像/选手信息可展示)
      */
     private Long playerId;
+
+    /**
+     * GUEST 落位模式:AUTO(自动:SEED 淘汰赛顶前,其余队尾) / FRONT(顶前) / TAIL(队尾) / SPECIFIED(指定种子位)
+     */
+    private String placement;
+
+    /**
+     * 指定种子位(placement=SPECIFIED 时必填,1-based;已有参赛方自动顺延)
+     */
+    private Long seedRank;
 
 }

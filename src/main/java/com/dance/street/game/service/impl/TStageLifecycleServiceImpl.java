@@ -37,7 +37,6 @@ import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
-import com.dance.street.game.engine.common.enums.TransitionModeEnum;
 import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.generator.BracketPlan;
 import com.dance.street.game.engine.generator.MatchPlan;
@@ -189,6 +188,18 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             rc.setRandomSplit(randomSplit);
         }
         StageModeEnum mode = StageModeEnum.fromCode(stage.getStageMode());
+        // 单赛段多轮淘汰赛(未开启单轮模式)结算后只有冠军可晋级到下一赛段:
+        // 每场败者都会被标记淘汰,advanceCount 大于 1 的配置会被静默忽略,这里直接拒绝生成
+        if (StageModeEnum.KNOCKOUT.equals(mode)
+            && rc != null && rc.getKnockout() != null
+            && !Boolean.TRUE.equals(rc.getKnockout().getSingleRound())
+            && rc.getKnockout().getAdvanceCount() != null
+            && rc.getKnockout().getAdvanceCount() > 1) {
+            throw new ServiceException(
+                "单赛段多轮淘汰赛(未开启单轮模式)结算后仅冠军可晋级;当前配置晋级 {} 人,"
+                    + "如需 {} 人晋级到下一赛段请开启「单轮模式(每轮一赛段)」",
+                rc.getKnockout().getAdvanceCount(), rc.getKnockout().getAdvanceCount());
+        }
         // 承接上一淘汰赛胜者:按胜者位置顺序配对(SEQUENTIAL),不受本赛段 SEED 配置影响;
         // 从海选赛进入的淘汰赛,未显式配置时默认标准种子对位(1-16、2-15)
         if (StageModeEnum.KNOCKOUT.equals(mode)
@@ -225,7 +236,11 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 保留原始种子位置:按 seedRank 落位,跳过场次/缺位留空,避免后续胜者抢占被跳过场次的位置
         long maxSeed = comps.stream().map(TCompetitor::getSeedRank).filter(Objects::nonNull)
             .mapToLong(Long::longValue).max().orElse(0L);
-        int slotCount = (int) Math.max(comps.size(), Math.min(maxSeed, 4096L));
+        // 淘汰赛按赛段计划规模(teamCountStart)兜底:人数不足时仍生成完整 bracket,缺位以轮空结算,
+        // 与预排(prebracket)及前端对战树预览保持一致;其余赛制不受影响
+        long plannedSlots = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())
+            && stage.getTeamCountStart() != null ? stage.getTeamCountStart() : 0L;
+        int slotCount = (int) Math.max(Math.max(comps.size(), Math.min(maxSeed, 4096L)), Math.min(plannedSlots, 4096L));
         List<Long> seededIds = new ArrayList<>(Collections.nCopies(slotCount, null));
         int nextFree = 0;
         for (TCompetitor c : comps) {
@@ -289,6 +304,11 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
 
             for (SlotPlan slot : mp.getSlots()) {
+                // 轮空位(无参赛方):不落 participant 行,由 settleByeMatches 按真实人数判断单/双边轮空
+                // (t_match_participant.competitor_id 为 NOT NULL,不能插入 null 占位)
+                if (slot.getCompetitorId() == null) {
+                    continue;
+                }
                 TMatchParticipant p = new TMatchParticipant();
                 p.setTournamentId(stage.getTournamentId());
                 p.setMatchId(m.getId());
@@ -486,6 +506,12 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             if (real.size() >= 2) {
                 continue; // 正常对决,不处理
             }
+            // 0 参赛者的场次:仅首轮视为双边轮空可结算;后续轮次是等待上游胜者填入的占位,
+            // 不能按轮空结算,否则整条淘汰链会在开赛瞬间塌掉
+            if (real.isEmpty()
+                && m.getDisplayCol() != null && m.getDisplayCol() > 1L) {
+                continue;
+            }
             if (real.size() == 1) {
                 TMatchParticipant winner = real.get(0);
                 TMatchParticipant upd = new TMatchParticipant();
@@ -516,12 +542,33 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             markCompetitorAdvance(winnerCompetitorId, match);
         } else if (StageConstants.ACTION_ADVANCE.equals(winnerTarget.getAction())
             && winnerTarget.getTargetMatchId() != null && winnerTarget.getTargetSlot() != null) {
-            TMatchParticipant pUpd = new TMatchParticipant();
-            pUpd.setCompetitorId(winnerCompetitorId);
-            participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .eq(TMatchParticipant::getMatchId, winnerTarget.getTargetMatchId())
-                .eq(TMatchParticipant::getDisplaySlotIndex, winnerTarget.getTargetSlot().longValue()));
+            fillDownstreamSlot(match, winnerTarget.getTargetMatchId(),
+                winnerTarget.getTargetSlot().longValue(), winnerCompetitorId);
         }
+    }
+
+    /**
+     * 胜者填入下游场次占位:占位行已存在(旧版预建)则更新;
+     * 不存在(当前生成对阵时空槽不落 participant 行)则补插。
+     */
+    private void fillDownstreamSlot(TMatch sourceMatch, Long targetMatchId, Long targetSlot, Long winnerCompetitorId) {
+        TMatchParticipant pUpd = new TMatchParticipant();
+        pUpd.setCompetitorId(winnerCompetitorId);
+        int affected = participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
+            .eq(TMatchParticipant::getMatchId, targetMatchId)
+            .eq(TMatchParticipant::getDisplaySlotIndex, targetSlot));
+        if (affected > 0) {
+            return;
+        }
+        TMatchParticipant np = new TMatchParticipant();
+        np.setTenantId(sourceMatch.getTenantId());
+        np.setTournamentId(sourceMatch.getTournamentId());
+        np.setMatchId(targetMatchId);
+        np.setCompetitorId(winnerCompetitorId);
+        np.setDisplaySlotIndex(targetSlot);
+        np.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
+        participantMapper.insert(np);
+        log.info("胜者[{}]补插到下游场次[{}]占位(slot={})", winnerCompetitorId, targetMatchId, targetSlot);
     }
 
     /** 轮空胜者晋级标记:finalRank=场次位置(与正常结算一致),outcomeStatus=ADVANCE */
@@ -744,19 +791,24 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             if (!StageConstants.STAGE_SETTLED.equals(prev.getStatus())) {
                 throw new ServiceException("上一赛段[{}]尚未结束,无法开始本赛段", prev.getName());
             }
-            // 开始赛段即正式确认上一赛段晋级选手(预排 → 本赛段参赛方)
-            CalculateAdvancementBo ab = new CalculateAdvancementBo();
-            ab.setStageId(prev.getId());
-            // 应用中间态手动调整的种子覆盖(ruleConfig.transition.seedOverrides)
-            RuleConfigHolder prevRc = RuleConfigParser.parse(prev.getRuleConfig());
-            if (prevRc != null && prevRc.getTransition() != null
-                && prevRc.getTransition().getSeedOverrides() != null
-                && !prevRc.getTransition().getSeedOverrides().isEmpty()) {
-                ab.setSeedOverrides(prevRc.getTransition().getSeedOverrides());
+            // 所有流转必须经过中间态:上一赛段已结束但本赛段尚未接收晋级者时,禁止直接开赛
+            long confirmed = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stageId)
+                .isNotNull(TCompetitor::getSourceCompetitorId));
+            if (confirmed == 0) {
+                // 源赛段确实没有可确认对象(无晋级者且无同分待定)时,允许直接开始,
+                // 避免「全员淘汰 / 无晋级名额 / 目标赛段仅 GUEST 直入」等场景死锁
+                long srcAdvance = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                    .eq(TCompetitor::getStageId, prev.getId())
+                    .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
+                long srcPending = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                    .eq(TCompetitor::getStageId, prev.getId())
+                    .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
+                if (srcAdvance > 0 || srcPending > 0) {
+                    throw new ServiceException(
+                        "上一赛段[{}]已结束,请先在中间态「确认晋级」后再开始本赛段", prev.getName());
+                }
             }
-            calculateAdvancement(ab);
-            // 晋级写入后重新读取本赛段(参赛方/状态可能已变化)
-            stage = mustGetStage(stageId);
         }
         // 一键开赛:无对阵时自动初始化(如未初始化)并生成对阵,淘汰赛/小组赛/海选均适用
         long exist = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stageId));
@@ -799,6 +851,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .orderByAsc(TMatch::getDisplayCol)
             .orderByAsc(TMatch::getId));
         for (int i = 0; i < matches.size(); i++) {
+            // 轮空已自动结算的场次保持 SETTLED,不重置回 PENDING
+            if (StageConstants.MATCH_SETTLED.equals(matches.get(i).getStatus())) {
+                continue;
+            }
             String targetStatus = singleActive
                 ? StageConstants.MATCH_PENDING
                 : StageConstants.MATCH_GAMING;
@@ -887,15 +943,25 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (bo.getName() == null || bo.getName().isBlank()) {
             throw new ServiceException("GUEST 名称不能为空");
         }
+        // 中间态调整结果必须符合下一赛段计划规模:轮空占位也算参赛者,实际人数不得超过 teamCountStart
+        long plan = stage.getTeamCountStart() != null && stage.getTeamCountStart() > 0 ? stage.getTeamCountStart() : 0L;
+        long existing = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stage.getId()));
+        if (plan > 0 && existing + 1 > plan) {
+            throw new ServiceException("赛段计划 {} 人(轮空占位也算参赛者),当前已有 {} 人,无法继续添加 GUEST",
+                plan, existing);
+        }
 
-        // 1. 创建参赛单位:标记 GUEST;淘汰赛 SEED(首尾交叉)模式顶替前几名种子,其余模式排到队尾
+        // 1. 创建参赛单位:标记 GUEST;按落位模式分配种子(顶前/队尾/指定种子位)
+        String placement = StringUtils.upperCase(StringUtils.trimToEmpty(bo.getPlacement()));
+        Long specifiedSeed = "SPECIFIED".equals(placement) ? bo.getSeedRank() : null;
         TCompetitorBo cbo = new TCompetitorBo();
         cbo.setTournamentId(stage.getTournamentId());
         cbo.setStageId(stage.getId());
         cbo.setType(bo.getType() == null ? 0L : bo.getType());
         cbo.setName(bo.getName().trim());
         cbo.setNumber(StringUtils.isNotBlank(bo.getNumber()) ? bo.getNumber().trim() : nextGuestNumber(stage));
-        cbo.setSeedRank(seedRankForGuest(stage));
+        cbo.setSeedRank(seedRankForGuest(stage, placement, specifiedSeed));
         cbo.setRemark("GUEST");
         TCompetitorVo vo = competitorService.insertByBo(cbo);
         Long competitorId = vo.getId();
@@ -1045,12 +1111,42 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     }
 
     /**
-     * GUEST 种子位:
-     * <p>淘汰赛 SEED(首尾交叉,1-16、2-15)模式下,GUEST 顶替前几名——按加入顺序占据 1..G,
-     * 原有参赛者种子顺延(保持相对顺序);其余模式仍排到队尾,由导播按抽签结果手动调整。</p>
+     * GUEST 种子位,按落位模式:
+     * <ul>
+     *   <li>FRONT:顶前——按加入顺序占据 1..G,原有参赛者种子顺延(保持相对顺序)</li>
+     *   <li>TAIL:队尾——排在当前最后</li>
+     *   <li>SPECIFIED:指定种子位——落在指定位置,已有种子 >= 该位置者顺延</li>
+     *   <li>AUTO:淘汰赛 SEED(首尾交叉)顶前,其余队尾</li>
+     * </ul>
      */
-    private long seedRankForGuest(TStage stage) {
-        if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode()) && isSeedPairing(stage)) {
+    private long seedRankForGuest(TStage stage, String placement, Long specified) {
+        if ("SPECIFIED".equals(placement)) {
+            if (specified == null || specified < 1L) {
+                throw new ServiceException("指定种子位需为正整数");
+            }
+            long plan = stage.getTeamCountStart() != null && stage.getTeamCountStart() > 0
+                ? stage.getTeamCountStart() : Long.MAX_VALUE;
+            if (specified > plan) {
+                throw new ServiceException("指定种子位[{}]超出赛段计划规模[{}]", specified, plan);
+            }
+            List<TCompetitor> all = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stage.getId())
+                .select(TCompetitor::getId, TCompetitor::getSeedRank));
+            for (TCompetitor c : all) {
+                if (c.getSeedRank() != null && c.getSeedRank() >= specified) {
+                    TCompetitor upd = new TCompetitor();
+                    upd.setId(c.getId());
+                    upd.setSeedRank(c.getSeedRank() + 1);
+                    competitorMapper.updateById(upd);
+                }
+            }
+            return specified;
+        }
+        boolean front = "FRONT".equals(placement);
+        if ("AUTO".equals(placement) || StringUtils.isBlank(placement)) {
+            front = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode()) && isSeedPairing(stage);
+        }
+        if (front) {
             List<TCompetitor> all = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, stage.getId())
                 .select(TCompetitor::getId, TCompetitor::getSeedRank, TCompetitor::getRemark));
@@ -1148,7 +1244,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         stageMapper.updateById(stage);
         refereeSseNotifier.notifyStage(stageId, "stage");
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
-        // 不再自动晋级:裁判判完仅出预排,由导播台点击下一赛段「开始赛段」时正式确认选手
+        // 不再自动晋级:裁判判完仅出预排/晋级者,由导播台在中间态「确认晋级」时正式写入下一赛段
     }
 
     @Override
@@ -1173,10 +1269,21 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (existed > 0) {
             return 0;
         }
-        // 下一赛段可能已有开赛前提前加入的 GUEST(无来源):晋级者种子顺延排在 GUEST 之后,保持 finalRank 相对顺序
-        long guestOffset = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, nextStageId));
-
+        // 中间态编排必须先于生成对阵:下一赛段已生成对阵时,晋级者无法挂入,拒绝确认
+        long nextMatchCount = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, nextStageId));
+        if (nextMatchCount > 0) {
+            throw new ServiceException("下一赛段[{}]已生成对阵,请先清除对阵后再确认晋级", next.getName());
+        }
+        // 排名赛同分待定必须先在中间态裁决:源赛段仍残留 PENDING(待定)参赛方时拒绝确认,避免被静默跳过
+        long pendingInSource = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stage.getId())
+            .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
+        if (pendingInSource > 0) {
+            throw new ServiceException(
+                "源赛段[{}]仍有 {} 名同分待定参赛方未裁决,请先在中间态处理后再确认晋级",
+                stage.getName(), pendingInSource);
+        }
         List<TCompetitor> advancers = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
             .eq(TCompetitor::getStageId, stage.getId())
             .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode())
@@ -1184,43 +1291,60 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (advancers.isEmpty()) {
             return 0;
         }
+        // finalRank 空值排最后,保证截取前 N 名时顺序与预排一致
+        advancers.sort(Comparator
+            .comparing((TCompetitor c) -> c.getFinalRank() == null ? Long.MAX_VALUE : c.getFinalRank())
+            .thenComparing(TCompetitor::getId));
+        // 中间态调整结果必须符合下一赛段计划规模:现有参赛方(GUEST) + 本次晋级者不得超过 teamCountStart(轮空占位也算)。
+        // 超出剩余名额时按 finalRank 顺序只接收前 N 名(GUEST 已顶替前几名种子,其余晋级者顺延)
+        long nextPlan = next.getTeamCountStart() != null && next.getTeamCountStart() > 0
+            ? next.getTeamCountStart() : 0L;
+        long existingInNext = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, nextStageId));
+        if (nextPlan > 0 && advancers.size() > nextPlan - existingInNext) {
+            int accepted = (int) Math.max(0L, nextPlan - existingInNext);
+            log.info("赛段[{}]晋级者 {} 人超出下一赛段[{}]剩余名额 {} 人,按 finalRank 取前 {} 名",
+                stage.getId(), advancers.size(), next.getName(), nextPlan - existingInNext, accepted);
+            if (accepted == 0) {
+                return 0;
+            }
+            advancers = new ArrayList<>(advancers.subList(0, accepted));
+        }
 
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        boolean reshuffle = rc != null && rc.getTransition() != null
-            && Boolean.TRUE.equals(rc.getTransition().getReshuffle());
         Map<Long, Long> overrides = bo.getSeedOverrides();
 
         List<TCompetitor> ordered = new ArrayList<>(advancers);
-        if (reshuffle) {
-            Collections.shuffle(ordered);
-        }
-        // 保留原始场次位置(finalRank)作为下一赛段种子位,跳过场次留空不压缩
-        Set<Long> usedSeeds = new HashSet<>();
-        if (!reshuffle) {
-            for (TCompetitor src : ordered) {
-                if (src.getFinalRank() != null) {
-                    usedSeeds.add(src.getFinalRank());
+        // 已有参赛方(通常为提前加入的 GUEST)占用的种子位;晋级者按 finalRank 顺序填充剩余空位,
+        // 保持相对顺序且不与 GUEST 冲突(预排 seedOverrides 为绝对位置,优先生效)
+        Set<Long> occupiedSeeds = new HashSet<>();
+        competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, nextStageId)
+                .select(TCompetitor::getSeedRank))
+            .forEach(c -> {
+                if (c.getSeedRank() != null) {
+                    occupiedSeeds.add(c.getSeedRank());
                 }
-            }
-        }
+            });
         long nextFreeSeed = 1L;
         for (int i = 0; i < ordered.size(); i++) {
             TCompetitor src = ordered.get(i);
             Long override = overrides == null ? null : overrides.get(src.getId());
             long seed;
             if (override != null) {
+                if (occupiedSeeds.contains(override)) {
+                    throw new ServiceException(
+                        "种子覆盖位[{}]已被占用(已有参赛方或其他晋级者),请先在中间态调整预排位置", override);
+                }
                 seed = override;
-            } else if (!reshuffle && src.getFinalRank() != null) {
-                seed = src.getFinalRank() + guestOffset;
             } else {
-                while (usedSeeds.contains(nextFreeSeed) || nextFreeSeed <= guestOffset) {
+                while (occupiedSeeds.contains(nextFreeSeed)) {
                     nextFreeSeed++;
                 }
                 seed = nextFreeSeed++;
             }
-            usedSeeds.add(seed);
+            occupiedSeeds.add(seed);
             TCompetitor nc = new TCompetitor();
-            // 裁判端提交触发自动晋级时无登录租户上下文,需显式带租户,否则 tenant_id 插入报错
+            // 显式带租户,避免无登录租户上下文(如裁判端/直连调用)时 tenant_id 插入报错
             nc.setTenantId(stage.getTenantId());
             nc.setTournamentId(stage.getTournamentId());
             nc.setStageId(next.getId());
@@ -1228,6 +1352,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             nc.setType(src.getType());
             nc.setName(src.getName());
             nc.setNumber(src.getNumber());
+            // 保留 GUEST 标记等备注,链式赛段中 GUEST 晋级后仍保持身份标识
+            nc.setRemark(src.getRemark());
             nc.setSeedRank(seed);
             nc.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
             competitorMapper.insert(nc);
@@ -1270,21 +1396,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
         return 1;
-    }
-
-    private void triggerAutoAdvancement(TStage stage) {
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        TransitionConfig tc = rc != null ? rc.getTransition() : null;
-        String mode = TransitionModeEnum.fromCode(tc != null ? tc.getMode() : null).getCode();
-        if (!TransitionModeEnum.AUTO.getCode().equals(mode)) {
-            return;
-        }
-        if (resolveNextStageId(stage) == null) {
-            return;
-        }
-        CalculateAdvancementBo ab = new CalculateAdvancementBo();
-        ab.setStageId(stage.getId());
-        calculateAdvancement(ab);
     }
 
     private Long resolveNextStageId(TStage stage) {

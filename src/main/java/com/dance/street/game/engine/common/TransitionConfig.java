@@ -17,12 +17,6 @@ public class TransitionConfig implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    /** 转场模式,见 TransitionModeEnum,默认 AUTO */
-    private String mode;
-    /** 是否重新抽签(false 则按上赛段 finalRank 作为种子) */
-    private Boolean reshuffle;
-    /** 是否允许替补更换 */
-    private Boolean allowSubstitutions;
     /** 目标赛段ID(可选,默认取本赛段 nextStageId) */
     private Long targetStageId;
 

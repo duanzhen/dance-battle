@@ -208,6 +208,8 @@ public class TMatchVo implements Serializable {
         private String leftName;
         /** 本轮右方参赛者名 */
         private String rightName;
+        /** 本轮胜方:LEFT/RIGHT/DRAW(全票平或票数持平);未决为 null */
+        private String winnerSide;
         /** 本轮各裁判判罚明细(按裁判固定一行) */
         private List<RefereeVoteInfo> refereeVotes;
     }

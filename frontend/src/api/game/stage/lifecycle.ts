@@ -67,7 +67,7 @@ export const startStage = (id: string | number) => {
   });
 };
 
-/** 完成赛段:GAMING→SETTLED(AUTO 模式自动晋级) */
+/** 完成赛段:GAMING→SETTLED(结算后需在中间态「确认晋级」) */
 export const completeStage = (id: string | number) => {
   return request({
     url: '/game/stage/' + id + '/complete',
@@ -84,9 +84,10 @@ export const startNextArenaMatch = (id: string | number) => {
 };
 
 /** 计算晋级(MANUAL 模式显式触发),返回晋级人数 */
-export const calculateAdvancement = (id: string | number): AxiosPromise<number> => {
+export const calculateAdvancement = (id: string | number, data?: { seedOverrides?: Record<string, number> }): AxiosPromise<number> => {
   return request({
     url: '/game/stage/' + id + '/calculate-advancement',
-    method: 'post'
+    method: 'post',
+    data: data || {}
   });
 };

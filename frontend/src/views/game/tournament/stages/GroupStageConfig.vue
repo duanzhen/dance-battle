@@ -152,9 +152,12 @@
           <!-- 打分与转场配置 -->
           <ScoringTransitionConfig
             :scoring="config.scoring"
-            :transition="config.transition"
-            @update:scoring="(v) => { config.scoring = v; handleUpdate(); }"
-            @update:transition="(v) => { config.transition = v; handleUpdate(); }"
+            @update:scoring="
+              (v) => {
+                config.scoring = v;
+                handleUpdate();
+              }
+            "
           />
 
           <!-- 预览 -->
@@ -204,8 +207,16 @@ const config = ref<GroupConfig & { headToHeadFirst?: boolean; tiebreakerPlayoff?
   format: 'BO1',
   headToHeadFirst: true,
   tiebreakerPlayoff: false,
-  scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD', aggregateRule: 'SUM', refereeAggregateRule: 'AVG', trimRatio: 0.1, dimensions: [], outcomeRules: { winScore: 1, drawScore: 0.5, lossScore: 0 } },
-  transition: { mode: 'AUTO', reshuffle: false }
+  scoring: {
+    type: 'WIN_LOSS_DRAW',
+    matchMode: 'STANDARD',
+    aggregateRule: 'SUM',
+    refereeAggregateRule: 'AVG',
+    trimRatio: 0.1,
+    dimensions: [],
+    outcomeRules: { winScore: 1, drawScore: 0.5, lossScore: 0 }
+  },
+  transition: {}
 });
 
 // 计算总队伍数

@@ -105,6 +105,10 @@ export const addStageGuest = (
     type?: number;
     number?: string;
     playerId?: string | number;
+    /** GUEST 落位模式:AUTO(自动:SEED 淘汰赛顶前,其余队尾)/FRONT(顶前)/TAIL(队尾)/SPECIFIED(指定种子位) */
+    placement?: string;
+    /** placement=SPECIFIED 时的种子位(1-based) */
+    seedRank?: number;
   }
 ) => {
   return request({

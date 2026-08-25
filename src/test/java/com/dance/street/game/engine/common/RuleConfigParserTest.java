@@ -31,7 +31,7 @@ class RuleConfigParserTest {
                 ],
                 "outcomeRules": { "winScore": 1, "drawScore": 0.5, "lossScore": 0 }
               },
-              "transition": { "mode": "AUTO", "reshuffle": false }
+              "transition": {}
             }
             """;
 
@@ -48,8 +48,6 @@ class RuleConfigParserTest {
         assertEquals(2, holder.getScoring().getDimensions().size());
         // BigDecimal 数值比较(0.5 反序列化后精度可能不同,用 compareTo)
         assertEquals(0, new BigDecimal("0.5").compareTo(holder.getScoring().getDimensions().get(0).getWeight()));
-        assertEquals("AUTO", holder.getTransition().getMode());
-
         // 往返:再序列化后解析,关键字段保持
         String json2 = RuleConfigParser.toJson(holder);
         RuleConfigHolder holder2 = RuleConfigParser.parse(json2);

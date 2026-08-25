@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * 验证 MySQL 不可达时数据源自动回退 SQLite,以及关闭开关/已是 SQLite 时不改动。
+ * SQLite 连接会统一补齐 date_class=text 时间参数(与 README/建表脚本 TEXT 日期列一致)。
  * 探测地址用 127.0.0.1:1(连接必失败),避免依赖外部 MySQL。
  */
 class SqliteFallbackEnvironmentPostProcessorTest {
@@ -15,13 +16,15 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         new SqliteFallbackEnvironmentPostProcessor();
 
     @Test
-    void keepsSqliteUrlUnchanged() {
+    void appendsDateParamsToSqliteUrl() {
         MockEnvironment env = new MockEnvironment()
             .withProperty("spring.datasource.url", "jdbc:sqlite:/tmp/game.db");
 
         processor.postProcessEnvironment(env, null);
 
-        assertEquals("jdbc:sqlite:/tmp/game.db", env.getProperty("spring.datasource.url"));
+        assertEquals(
+            "jdbc:sqlite:/tmp/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            env.getProperty("spring.datasource.url"));
     }
 
     @Test
@@ -47,7 +50,9 @@ class SqliteFallbackEnvironmentPostProcessorTest {
 
         processor.postProcessEnvironment(env, null);
 
-        assertEquals("jdbc:sqlite:/tmp/fallback.db", env.getProperty("spring.datasource.url"));
+        assertEquals(
+            "jdbc:sqlite:/tmp/fallback.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            env.getProperty("spring.datasource.url"));
     }
 
     @Test
@@ -57,6 +62,8 @@ class SqliteFallbackEnvironmentPostProcessorTest {
 
         processor.postProcessEnvironment(env, null);
 
-        assertEquals("jdbc:sqlite:./data/game.db", env.getProperty("spring.datasource.url"));
+        assertEquals(
+            "jdbc:sqlite:./data/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            env.getProperty("spring.datasource.url"));
     }
 }

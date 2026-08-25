@@ -235,8 +235,11 @@ public class TStageController extends BaseController {
     @Log(title = "计算晋级", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
     @PostMapping("/{id}/calculate-advancement")
-    public R<Integer> calculateAdvancement(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
-        CalculateAdvancementBo bo = new CalculateAdvancementBo();
+    public R<Integer> calculateAdvancement(@NotNull(message = "赛段ID不能为空") @PathVariable Long id,
+                                           @RequestBody(required = false) CalculateAdvancementBo bo) {
+        if (bo == null) {
+            bo = new CalculateAdvancementBo();
+        }
         bo.setStageId(id);
         return R.ok(tStageLifecycleService.calculateAdvancement(bo));
     }

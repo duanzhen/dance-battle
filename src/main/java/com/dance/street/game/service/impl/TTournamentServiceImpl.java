@@ -24,6 +24,16 @@ import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.TVisSceneVo;
 import com.dance.street.game.domain.TTournament;
+import com.dance.street.game.domain.TPlayer;
+import com.dance.street.game.domain.TReferee;
+import com.dance.street.game.domain.TRefereeStage;
+import com.dance.street.game.domain.TVisScene;
+import com.dance.street.game.domain.TVisWidget;
+import com.dance.street.game.mapper.TPlayerMapper;
+import com.dance.street.game.mapper.TRefereeMapper;
+import com.dance.street.game.mapper.TRefereeStageMapper;
+import com.dance.street.game.mapper.TVisSceneMapper;
+import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITStageService;
@@ -50,6 +60,11 @@ import java.util.Collection;
 public class TTournamentServiceImpl implements ITTournamentService {
 
     private final TTournamentMapper baseMapper;
+    private final TPlayerMapper playerMapper;
+    private final TRefereeMapper refereeMapper;
+    private final TRefereeStageMapper refereeStageMapper;
+    private final TVisSceneMapper visSceneMapper;
+    private final TVisWidgetMapper visWidgetMapper;
     private final ITStageService stageService;
     private final ITVisSceneService visSceneService;
     private final ITVisWidgetService visWidgetService;
@@ -424,7 +439,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
             return "{\"mode\":\"AUDITION\",\"format\":\"BO1\",\"circles\":1,"
                 + "\"scoring\":{\"type\":\"TOTAL_SCORE\",\"matchMode\":\"VOTING\","
                 + "\"aggregateRule\":\"SUM\",\"refereeAggregateRule\":\"SUM\"},"
-                + "\"transition\":{\"mode\":\"AUTO\",\"reshuffle\":false},"
+                + "\"transition\":{},"
                 + "\"advanceCount\":" + d.end() + "}";
         }
         if ("ARENA".equals(d.mode())) {
@@ -435,13 +450,13 @@ public class TTournamentServiceImpl implements ITTournamentService {
                 + "\"maxChallenges\":3,\"challengeOrder\":\"RANDOM\","
                 + "\"winStreakBonus\":10,\"defenseBonus\":5,"
                 + "\"allowDefenderRest\":true,\"allowRechallenge\":false,\"timeoutReplacement\":true,"
-                + "\"transition\":{\"mode\":\"AUTO\",\"reshuffle\":false}}";
+                + "\"transition\":{}}";
         }
         return "{\"mode\":\"KNOCKOUT\",\"format\":\"BO1\","
             + "\"scoring\":{\"type\":\"WIN_LOSS_DRAW\",\"matchMode\":\"STANDARD\"},"
             + "\"knockout\":{\"teamsCount\":" + d.start()
             + ",\"pairingMode\":\"SEED\",\"singleRound\":true,\"advanceCount\":" + d.end() + "},"
-            + "\"transition\":{\"mode\":\"AUTO\",\"reshuffle\":false}}";
+            + "\"transition\":{}}";
     }
 
     /**
@@ -473,10 +488,35 @@ public class TTournamentServiceImpl implements ITTournamentService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
+        if (ids == null || ids.isEmpty()) {
+            return false;
+        }
         if(isValid){
             //TODO 做一些业务上的校验,判断是否需要校验
         }
+        List<Long> tids = ids.stream().map(Long::valueOf).toList();
+        // 级联删除:赛段及其关联(场次/参赛方/打分/裁判关联)→ 可视化场景与控件 → 裁判 → 选手
+        for (Long tid : tids) {
+            TStageBo q = new TStageBo();
+            q.setTournamentId(tid);
+            List<TStageVo> stages = stageService.queryList(q);
+            if (!stages.isEmpty()) {
+                stageService.deleteWithValidByIds(
+                    stages.stream().map(TStageVo::getId).toList(), false);
+            }
+        }
+        visWidgetMapper.delete(Wrappers.<TVisWidget>lambdaQuery()
+            .in(TVisWidget::getTournamentId, tids));
+        visSceneMapper.delete(Wrappers.<TVisScene>lambdaQuery()
+            .in(TVisScene::getTournamentId, tids));
+        refereeStageMapper.delete(Wrappers.<TRefereeStage>lambdaQuery()
+            .in(TRefereeStage::getTournamentId, tids));
+        refereeMapper.delete(Wrappers.<TReferee>lambdaQuery()
+            .in(TReferee::getTournamentId, tids));
+        playerMapper.delete(Wrappers.<TPlayer>lambdaQuery()
+            .in(TPlayer::getTournamentId, tids));
         return baseMapper.deleteByIds(ids) > 0;
     }
 

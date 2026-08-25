@@ -553,12 +553,25 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             markCompetitorAdvance(winner.getCompetitorId(), match);
         } else if (StageConstants.ACTION_ADVANCE.equals(winnerTarget.getAction())
             && winnerTarget.getTargetMatchId() != null && winnerTarget.getTargetSlot() != null) {
-            // 填入下游场次占位
+            // 填入下游场次占位:占位行缺失时补插(生成对阵时空槽不落 participant 行)
             TMatchParticipant pUpd = new TMatchParticipant();
             pUpd.setCompetitorId(winner.getCompetitorId());
-            participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
+            int affected = participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
                 .eq(TMatchParticipant::getMatchId, winnerTarget.getTargetMatchId())
                 .eq(TMatchParticipant::getDisplaySlotIndex, winnerTarget.getTargetSlot().longValue()));
+            if (affected == 0) {
+                TMatchParticipant np = new TMatchParticipant();
+                np.setTenantId(match.getTenantId());
+                np.setTournamentId(match.getTournamentId());
+                np.setMatchId(winnerTarget.getTargetMatchId());
+                np.setCompetitorId(winner.getCompetitorId());
+                np.setDisplaySlotIndex(winnerTarget.getTargetSlot().longValue());
+                np.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
+                participantMapper.insert(np);
+                log.info("场次[{}]胜者[{}]补插到下游场次[{}]占位(slot={})",
+                    match.getId(), winner.getCompetitorId(), winnerTarget.getTargetMatchId(),
+                    winnerTarget.getTargetSlot().longValue());
+            }
         }
     }
 

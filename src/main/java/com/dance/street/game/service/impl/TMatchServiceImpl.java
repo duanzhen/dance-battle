@@ -72,7 +72,13 @@ public class TMatchServiceImpl implements ITMatchService {
      */
     @Override
     public TMatchVo queryById(Long id){
-        return baseMapper.selectVoById(id);
+        TMatchVo vo = baseMapper.selectVoById(id);
+        // 与列表一致:补齐左右方名称/胜负、裁判判罚(refereeVotes)、各轮判罚明细(roundVotes),
+        // 供大屏「当前场次」等实时展示每个裁判的红蓝判罚与最终结果
+        if (vo != null) {
+            fillMatchNames(List.of(vo));
+        }
+        return vo;
     }
 
     /**
@@ -515,6 +521,36 @@ public class TMatchServiceImpl implements ITMatchService {
                     refVotes.add(ref);
                 }
                 rv.setRefereeVotes(refVotes);
+                // 本轮胜方:与结算口径一致(左胜票>右胜票=LEFT,反之 RIGHT,否则 DRAW);
+                // 全部裁判判完才定论;无判罚记录的已结算场次以场次胜者为该轮胜方
+                int leftWins = 0, rightWins = 0;
+                for (TRoundScore v : votes) {
+                    if (v.getScore() == null) {
+                        continue;
+                    }
+                    if (v.getScore().compareTo(java.math.BigDecimal.ONE) == 0) {
+                        if (Objects.equals(v.getCompetitorId(), rLeft)) {
+                            leftWins++;
+                        } else if (Objects.equals(v.getCompetitorId(), rRight)) {
+                            rightWins++;
+                        }
+                    }
+                }
+                long votedRefs = votes.stream().map(TRoundScore::getRefereeId)
+                    .filter(Objects::nonNull).distinct().count();
+                String winnerSide = null;
+                if (!assigned.isEmpty() && votedRefs >= assigned.size()) {
+                    winnerSide = leftWins > rightWins ? "LEFT"
+                        : rightWins > leftWins ? "RIGHT" : "DRAW";
+                }
+                if (winnerSide == null && StageConstants.MATCH_SETTLED.equals(vo.getStatus())) {
+                    if (Boolean.TRUE.equals(vo.getLeftWin())) {
+                        winnerSide = "LEFT";
+                    } else if (Boolean.TRUE.equals(vo.getRightWin())) {
+                        winnerSide = "RIGHT";
+                    }
+                }
+                rv.setWinnerSide(winnerSide);
                 roundVotes.add(rv);
             }
             vo.setRoundVotes(roundVotes);

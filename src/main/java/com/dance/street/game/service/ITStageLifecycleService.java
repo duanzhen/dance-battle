@@ -69,7 +69,13 @@ public interface ITStageLifecycleService {
     ArenaOverviewVo getArenaOverview(Long stageId);
 
     /** 赛段 GAMING→SETTLED(需所有场次已结算);结算后仅产出晋级者/排名,由导播台在中间态「确认晋级」 */
-    void completeStage(Long stageId);
+    /**
+     * 完成赛段:GAMING→SETTLED(结算后需在中间态「确认晋级」)。
+     *
+     * @return 结算后的赛段状态:SETTLED=已正常完成;GAMING=存在未完成场次(如海选二海/加赛),
+     *         赛段保持进行中,需完成剩余判罚后再次调用。
+     */
+    String completeStage(Long stageId);
 
     /**
      * 回退到草稿:清除赛段已生成的全部场次(级联轮次/参赛明细/打分),参赛方回退待定,

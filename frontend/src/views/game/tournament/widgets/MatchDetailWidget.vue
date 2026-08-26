@@ -2,113 +2,127 @@
   <div class="w-full h-full">
     <!-- 查看模式:自动匹配当前进行中(GAMING)场次,否则透明 -->
     <div v-if="mode !== 'edit'" class="w-full h-full">
-      <div
-        v-if="match"
-        class="w-full h-full relative bg-cover bg-center flex items-center justify-between px-[5%]"
-        :style="bgImage ? { backgroundImage: `url(${bgImage})` } : { backgroundColor: '#0a0a0a' }"
-      >
-        <!-- 顶部信息:赛段 · 场次 · 轮次 -->
-        <div class="absolute top-[4%] left-0 right-0 flex items-center justify-center gap-2 text-white/90">
-          <span class="text-[clamp(9px,1.2vw,18px)] font-bold tracking-wider text-amber-400/90">{{ stageName || '当前场次' }}</span>
-          <span class="opacity-50">·</span>
-          <span class="text-[clamp(9px,1.2vw,18px)] font-bold">{{ match.name }}</span>
-          <span v-if="roundSeq" class="text-[clamp(8px,1vw,14px)] text-white/60 font-mono">R{{ roundSeq }}</span>
-        </div>
-
-        <!-- 左方 -->
-        <div class="flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center">
-          <img v-if="leftAvatar" :src="leftAvatar" class="h-[46%] max-w-full w-auto object-contain" @error="onImgError" />
-          <div v-else class="h-[46%] w-full"></div>
-          <span
-            class="font-bold text-[clamp(12px,2vw,30px)] drop-shadow text-center truncate w-full"
-            :class="leftLead ? 'text-amber-400' : 'text-white'"
-            :title="leftName"
-            >{{ leftName }}</span
-          >
-          <span v-if="leftOutcome" class="text-[clamp(8px,1vw,14px)] font-bold" :class="leftLead ? 'text-green-400' : 'text-white/60'">
-            {{ outcomeText(leftOutcome) }}
-          </span>
-        </div>
-
-        <!-- 中间:比分 -->
-        <div class="flex flex-col items-center gap-2 px-4">
-          <div class="flex items-center gap-4 text-white font-mono font-black drop-shadow">
-            <span class="text-[clamp(20px,3.5vw,56px)]" :class="leftLead ? 'text-amber-400' : ''">{{ leftScore }}</span>
-            <span class="opacity-50 text-[clamp(16px,2.5vw,40px)]">:</span>
-            <span class="text-[clamp(20px,3.5vw,56px)]" :class="rightLead ? 'text-amber-400' : ''">{{ rightScore }}</span>
+      <Transition name="fade" @after-leave="onCelebrationFadeDone">
+        <div
+          v-if="match"
+          :key="match?.id"
+          class="w-full h-full relative bg-cover bg-center flex items-center justify-between px-[5%]"
+          :style="bgImage ? { backgroundImage: `url(${bgImage})` } : { backgroundColor: '#0a0a0a' }"
+        >
+          <!-- 顶部信息:赛段 · 场次 · 轮次 -->
+          <div class="absolute top-[4%] left-0 right-0 flex items-center justify-center gap-2 text-white/90">
+            <span class="text-[clamp(9px,1.2vw,18px)] font-bold tracking-wider text-amber-400/90">{{ stageName || '当前场次' }}</span>
+            <span class="opacity-50">·</span>
+            <span class="text-[clamp(9px,1.2vw,18px)] font-bold">{{ match.name }}</span>
+            <span v-if="roundSeq" class="text-[clamp(8px,1vw,14px)] text-white/60 font-mono">R{{ roundSeq }}</span>
           </div>
-          <!-- 最终结果 -->
-          <div v-if="finalVerdict" class="px-4 py-1 rounded-full border font-bold text-[clamp(10px,1.3vw,18px)]" :class="finalVerdictClass">
-            {{ finalVerdict }}
-          </div>
-        </div>
 
-        <!-- 右方 -->
-        <div class="flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center">
-          <img v-if="rightAvatar" :src="rightAvatar" class="h-[46%] max-w-full w-auto object-contain" @error="onImgError" />
-          <div v-else class="h-[46%] w-full"></div>
-          <span
-            class="font-bold text-[clamp(12px,2vw,30px)] drop-shadow text-center truncate w-full"
-            :class="rightLead ? 'text-amber-400' : 'text-white'"
-            :title="rightName"
-            >{{ rightName }}</span
-          >
-          <span v-if="rightOutcome" class="text-[clamp(8px,1vw,14px)] font-bold" :class="rightLead ? 'text-green-400' : 'text-white/60'">
-            {{ outcomeText(rightOutcome) }}
-          </span>
-        </div>
-
-        <!-- 底部:裁判判罚(每个裁判红/蓝/平/未判)+ 各轮判罚明细 -->
-        <div v-if="showVotePanel" class="absolute bottom-[2.5%] left-1/2 -translate-x-1/2 w-[94%] max-w-[1700px] flex flex-col items-center gap-1.5">
-          <!-- 胜场汇总:谁赢的轮次多谁获胜(平局轮不计) -->
+          <!-- 左方 -->
           <div
-            v-if="roundWins.left + roundWins.right > 0"
-            class="px-4 py-1 rounded-full bg-black/60 border border-white/10 backdrop-blur text-[clamp(8px,0.9vw,13px)] font-bold"
+            class="player-col flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center"
+            :class="{ celebrating: celebration.active }"
+            :style="playerClass('LEFT')"
           >
-            <span class="text-red-400">红 {{ roundWins.left }} 胜</span>
-            <span class="text-white/40 mx-2">·</span>
-            <span class="text-blue-400">蓝 {{ roundWins.right }} 胜</span>
-            <template v-if="roundWins.draw > 0">
+            <img v-if="leftAvatar" :src="leftAvatar" class="h-[46%] max-w-full w-auto object-contain" @error="onImgError" />
+            <div v-else class="h-[46%] w-full"></div>
+            <span
+              class="font-bold text-[clamp(12px,2vw,30px)] drop-shadow text-center truncate w-full"
+              :class="leftLead ? 'text-amber-400' : 'text-white'"
+              :title="leftName"
+              >{{ leftName }}</span
+            >
+            <span v-if="leftOutcome" class="text-[clamp(8px,1vw,14px)] font-bold" :class="leftLead ? 'text-green-400' : 'text-white/60'">
+              {{ outcomeText(leftOutcome) }}
+            </span>
+          </div>
+
+          <!-- 中间:比分 -->
+          <div class="flex flex-col items-center gap-2 px-4">
+            <div class="flex items-center gap-4 text-white font-mono font-black drop-shadow">
+              <span class="text-[clamp(20px,3.5vw,56px)]" :class="leftLead ? 'text-amber-400' : ''">{{ leftScore }}</span>
+              <span class="opacity-50 text-[clamp(16px,2.5vw,40px)]">:</span>
+              <span class="text-[clamp(20px,3.5vw,56px)]" :class="rightLead ? 'text-amber-400' : ''">{{ rightScore }}</span>
+            </div>
+            <!-- 最终结果 -->
+            <div v-if="finalVerdict" class="px-4 py-1 rounded-full border font-bold text-[clamp(10px,1.3vw,18px)]" :class="finalVerdictClass">
+              {{ finalVerdict }}
+            </div>
+          </div>
+
+          <!-- 右方 -->
+          <div
+            class="player-col flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center"
+            :class="{ celebrating: celebration.active }"
+            :style="playerClass('RIGHT')"
+          >
+            <img v-if="rightAvatar" :src="rightAvatar" class="h-[46%] max-w-full w-auto object-contain" @error="onImgError" />
+            <div v-else class="h-[46%] w-full"></div>
+            <span
+              class="font-bold text-[clamp(12px,2vw,30px)] drop-shadow text-center truncate w-full"
+              :class="rightLead ? 'text-amber-400' : 'text-white'"
+              :title="rightName"
+              >{{ rightName }}</span
+            >
+            <span v-if="rightOutcome" class="text-[clamp(8px,1vw,14px)] font-bold" :class="rightLead ? 'text-green-400' : 'text-white/60'">
+              {{ outcomeText(rightOutcome) }}
+            </span>
+          </div>
+
+          <!-- 底部:裁判判罚(每个裁判红/蓝/平/未判)+ 各轮判罚明细 -->
+          <div
+            v-if="showVotePanel"
+            class="absolute bottom-[2.5%] left-1/2 -translate-x-1/2 w-[94%] max-w-[1700px] flex flex-col items-center gap-1.5"
+          >
+            <!-- 胜场汇总:谁赢的轮次多谁获胜(平局轮不计) -->
+            <div
+              v-if="roundWins.left + roundWins.right > 0"
+              class="px-4 py-1 rounded-full bg-black/60 border border-white/10 backdrop-blur text-[clamp(8px,0.9vw,13px)] font-bold"
+            >
+              <span class="text-red-400">红 {{ roundWins.left }} 胜</span>
               <span class="text-white/40 mx-2">·</span>
-              <span class="text-neutral-400">平 {{ roundWins.draw }} 轮</span>
-            </template>
-          </div>
-          <div
-            v-for="(r, ri) in voteRounds"
-            :key="r.roundId ?? ri"
-            class="w-full rounded-xl bg-black/60 border border-white/10 backdrop-blur px-4 py-1.5"
-          >
-            <div class="flex items-center justify-center gap-1.5 flex-wrap">
-              <span class="text-[clamp(8px,0.9vw,13px)] font-bold flex-none" :class="r.status === 'SETTLED' ? 'text-white/60' : 'text-amber-400'">
-                R{{ r.roundSequence }} · {{ roundStatusText(r) }}
-              </span>
-              <span v-if="r.winnerSide" class="text-[clamp(8px,0.9vw,13px)] font-bold flex-none" :class="roundWinnerClass(r.winnerSide)">
-                {{ roundWinnerText(r.winnerSide) }}
-              </span>
-              <span class="w-px h-3 bg-white/15 flex-none"></span>
-              <span class="text-[clamp(8px,0.9vw,13px)] text-white/70 font-semibold flex-none">{{ r.leftName }}</span>
-              <span
-                v-for="ref in r.refereeVotes || []"
-                :key="ref.refereeId"
-                class="flex items-center gap-1 px-2 py-0.5 rounded-md text-[clamp(8px,0.9vw,13px)] font-bold border"
-                :class="voteChipClass(ref.vote)"
-              >
-                <span class="max-w-[7vw] truncate">{{ ref.refereeName }}</span>
-                <span>{{ voteText(ref.vote) }}</span>
-              </span>
-              <span class="text-[clamp(8px,0.9vw,13px)] text-white/70 font-semibold flex-none">{{ r.rightName }}</span>
-              <span v-if="!(r.refereeVotes || []).length" class="text-[clamp(8px,0.9vw,13px)] text-white/40">无裁判分配</span>
+              <span class="text-blue-400">蓝 {{ roundWins.right }} 胜</span>
+              <template v-if="roundWins.draw > 0">
+                <span class="text-white/40 mx-2">·</span>
+                <span class="text-neutral-400">平 {{ roundWins.draw }} 轮</span>
+              </template>
             </div>
-            <!-- 本轮票数与判定 -->
-            <div v-if="roundVoteCounts(r).total > 0" class="flex items-center justify-center gap-3 mt-0.5 text-[clamp(8px,0.9vw,13px)] font-mono">
-              <span class="text-red-400">红 {{ roundVoteCounts(r).left }}</span>
-              <span class="text-blue-400">蓝 {{ roundVoteCounts(r).right }}</span>
-              <span class="text-neutral-400">平 {{ roundVoteCounts(r).draw }}</span>
-              <span class="text-white/50">已判 {{ roundVoteCounts(r).voted }}/{{ roundVoteCounts(r).total }}</span>
+            <div
+              v-for="(r, ri) in voteRounds"
+              :key="r.roundId ?? ri"
+              class="w-full rounded-xl bg-black/60 border border-white/10 backdrop-blur px-4 py-1.5"
+            >
+              <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                <span class="text-[clamp(8px,0.9vw,13px)] font-bold flex-none" :class="r.status === 'SETTLED' ? 'text-white/60' : 'text-amber-400'">
+                  R{{ r.roundSequence }} · {{ roundStatusText(r) }}
+                </span>
+                <span v-if="r.winnerSide" class="text-[clamp(8px,0.9vw,13px)] font-bold flex-none" :class="roundWinnerClass(r.winnerSide)">
+                  {{ roundWinnerText(r.winnerSide) }}
+                </span>
+                <span class="w-px h-3 bg-white/15 flex-none"></span>
+                <span class="text-[clamp(8px,0.9vw,13px)] text-white/70 font-semibold flex-none">{{ r.leftName }}</span>
+                <span
+                  v-for="ref in r.refereeVotes || []"
+                  :key="ref.refereeId"
+                  class="flex items-center gap-1 px-2 py-0.5 rounded-md text-[clamp(8px,0.9vw,13px)] font-bold border"
+                  :class="voteChipClass(ref.vote)"
+                >
+                  <span class="max-w-[7vw] truncate">{{ ref.refereeName }}</span>
+                  <span>{{ voteText(ref.vote) }}</span>
+                </span>
+                <span class="text-[clamp(8px,0.9vw,13px)] text-white/70 font-semibold flex-none">{{ r.rightName }}</span>
+                <span v-if="!(r.refereeVotes || []).length" class="text-[clamp(8px,0.9vw,13px)] text-white/40">无裁判分配</span>
+              </div>
+              <!-- 本轮票数与判定 -->
+              <div v-if="roundVoteCounts(r).total > 0" class="flex items-center justify-center gap-3 mt-0.5 text-[clamp(8px,0.9vw,13px)] font-mono">
+                <span class="text-red-400">红 {{ roundVoteCounts(r).left }}</span>
+                <span class="text-blue-400">蓝 {{ roundVoteCounts(r).right }}</span>
+                <span class="text-neutral-400">平 {{ roundVoteCounts(r).draw }}</span>
+                <span class="text-white/50">已判 {{ roundVoteCounts(r).voted }}/{{ roundVoteCounts(r).total }}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </Transition>
     </div>
 
     <!-- 编辑模式:仅配置背景图 -->
@@ -137,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
+import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import AssetUpload from './common/AssetUpload.vue';
 import { getStageFlow } from '@/api/game/stage';
@@ -162,10 +176,62 @@ const compMap = ref<Record<string, any>>({});
 let lastStageId: string | null = null;
 let lastMatchId: string | null = null;
 
+/** 获胜动画状态:结算后保留场次播 2 秒动画,停 1 秒后淡出(由 Transition 完成)再切换 */
+const celebration = reactive({ active: false, winner: null as 'LEFT' | 'RIGHT' | null });
+let celebrationTimer: ReturnType<typeof setTimeout> | null = null;
+/** 动画+停顿结束后允许切换场次(淡出期间保持获胜姿态,淡出完成后再复位) */
+let celebrationSwitchReady = false;
+/** 已播过获胜动画的场次ID:防止动画结束后重新检测到同一场次导致死循环 */
+let celebratedMatchId: string | null = null;
+
+/** 获胜动画:胜者放大并向中间靠,败者缩小向边缘退 */
+const playerClass = (side: 'LEFT' | 'RIGHT') => {
+  if (!celebration.active || !celebration.winner) return {};
+  if (celebration.winner === side) {
+    const dir = side === 'LEFT' ? 1 : -1;
+    return { transform: `translateX(${dir * 16}vw) scale(1.18)`, zIndex: 2 };
+  }
+  const dir = side === 'LEFT' ? -1 : 1;
+  return { transform: `translateX(${dir * 12}vw) scale(0.75)`, opacity: 0.65 };
+};
+
+/** 播放获胜动画:2 秒动画 → 停 1 秒 → 淡出(1 秒)→ 切换到新场次 */
+const startCelebration = (winner: 'LEFT' | 'RIGHT') => {
+  celebration.active = true;
+  celebration.winner = winner;
+  celebrationSwitchReady = false;
+  celebratedMatchId = match.value?.id != null ? String(match.value.id) : null;
+  if (celebrationTimer) clearTimeout(celebrationTimer);
+  // 2 秒动画 → 停 1 秒 → 允许切场,由 Transition 淡出(约 1 秒)
+  celebrationTimer = setTimeout(() => {
+    celebrationSwitchReady = true;
+    celebrationTimer = null;
+    loadData();
+    // 兜底:无论 Transition 是否触发,1.5 秒后强制复位动画状态
+    celebrationTimer = setTimeout(() => {
+      celebration.active = false;
+      celebration.winner = null;
+      celebrationSwitchReady = false;
+      celebrationTimer = null;
+    }, 1500);
+  }, 3000);
+};
+
+/** 淡出动画结束后复位获胜姿态(此时元素已不可见,不会产生回弹) */
+const onCelebrationFadeDone = () => {
+  if (!celebration.active) return;
+  if (celebrationTimer) clearTimeout(celebrationTimer);
+  celebrationTimer = null;
+  celebration.active = false;
+  celebration.winner = null;
+  celebrationSwitchReady = false;
+};
+
 const qid = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? v : null);
 const tournamentId = computed(() => props.tournamentId ?? qid(route.query.id) ?? qid(route.query.tournamentId) ?? null);
 
 const loadData = async () => {
+  if (celebration.active && !celebrationSwitchReady) return;
   if (!tournamentId.value) {
     match.value = null;
     matchDetail.value = null;
@@ -187,6 +253,22 @@ const loadData = async () => {
       return;
     }
     const current = data?.currentMatch;
+    // 获胜动画:之前展示的场次已不在进行中(被结算/切走),且结算明细带胜者时,
+    // 先保留该场数据播放动画,动画结束后再切换,避免结果一出就消失
+    if (current?.id !== match.value?.id && match.value && celebratedMatchId !== String(match.value.id)) {
+      try {
+        const md: any = await getMatch(match.value.id);
+        const detail = md.data || null;
+        const winnerSide = detail?.leftWin === true ? 'LEFT' : detail?.rightWin === true ? 'RIGHT' : null;
+        if (winnerSide) {
+          matchDetail.value = detail;
+          startCelebration(winnerSide);
+          return;
+        }
+      } catch (e) {
+        // 结算明细拉取失败时走正常切换,不阻塞刷新
+      }
+    }
     if (!current) {
       match.value = null;
       matchDetail.value = null;
@@ -232,6 +314,8 @@ onMounted(() => {
   subscribeTournamentEvents(tournamentId.value, handleTournamentEvent);
 });
 onUnmounted(() => {
+  if (celebrationTimer) clearTimeout(celebrationTimer);
+  celebrationTimer = null;
   unsubscribeTournamentEvents(tournamentId.value, handleTournamentEvent);
 });
 
@@ -379,3 +463,23 @@ const outcomeText = (o: string) =>
     ELIMINATED: '淘汰'
   })[o] || '';
 </script>
+
+<style scoped>
+/* 场次出现/消失:淡入淡出,避免透明度瞬间跳变 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 1s ease-in-out;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 获胜动画:胜者/败者位移与缩放过渡(2 秒),缓启缓停(ease-in-out) */
+.player-col.celebrating {
+  transition:
+    transform 2s cubic-bezier(0.45, 0, 0.55, 1),
+    opacity 1.5s ease-in-out;
+  will-change: transform, opacity;
+}
+</style>

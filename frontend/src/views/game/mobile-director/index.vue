@@ -2,7 +2,7 @@
   <div class="fixed inset-0 bg-neutral-950 text-neutral-200 font-sans flex flex-col overflow-hidden select-none">
     <header class="h-12 bg-neutral-900 border-b border-neutral-800 flex items-center px-4 shrink-0 z-20">
       <div class="flex-1 flex items-center gap-2 min-w-0">
-        <div class="w-5 h-5 bg-amber-500 rounded flex items-center justify-center font-bold text-[10px] text-neutral-900 shrink-0">G</div>
+        <img :src="logo" class="w-6 h-6 rounded object-contain shrink-0" alt="logo" />
         <span class="font-bold text-xs text-neutral-300 truncate">{{ tournamentName || '手机导播台' }}</span>
       </div>
       <!-- 中间秒表 -->
@@ -200,6 +200,12 @@
                 >
                   {{ match.status === 'SETTLED' ? '已结束' : match.status === 'GAMING' ? '进行中' : '待开始' }}
                 </span>
+                <span
+                  v-if="match.status === 'GAMING' && auditionAllScored(match)"
+                  class="text-[8px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30"
+                >
+                  已全部评完
+                </span>
               </div>
 
               <div class="space-y-1">
@@ -207,6 +213,18 @@
                   <div class="flex items-center justify-between gap-2">
                     <span class="text-[9px] text-neutral-500 w-12 flex-none">第{{ r.roundSequence }}轮</span>
                     <span class="text-xs font-bold text-neutral-300 flex-1 truncate">{{ r.competitorName || '待定' }}</span>
+                    <span
+                      v-if="r.outcomeStatus === 'ADVANCE'"
+                      class="text-[8px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 flex-none"
+                    >
+                      晋级
+                    </span>
+                    <span
+                      v-else-if="r.outcomeStatus === 'ELIMINATED'"
+                      class="text-[8px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 flex-none"
+                    >
+                      淘汰
+                    </span>
                     <span class="text-xs font-bold text-amber-400">{{ r.score ?? '-' }}</span>
                   </div>
                   <div v-if="r.refereeScores && r.refereeScores.length" class="flex justify-end gap-2 mt-0.5">
@@ -461,6 +479,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Layers, Play, CircleCheck, ChevronRight, Delete, Medal } from 'lucide-vue-next';
+import logo from '@/assets/logo/logo.png';
 import {
   setDirectorAuthKey,
   getDirectorTournament,
@@ -537,6 +556,7 @@ interface MatchRoundScore {
   competitorId?: string | number | null;
   competitorName?: string;
   score?: number | null;
+  outcomeStatus?: string | null;
   refereeScores?: { refereeId?: string | number; refereeName?: string; score?: number }[];
 }
 
@@ -575,6 +595,12 @@ const getStatusText = (status: string) => {
     'DISCARD': '已取消'
   };
   return map[status] || status;
+};
+
+/** 海选场次是否已全部评完(所有轮次都有分数;二海/加赛同样适用) */
+const auditionAllScored = (match: any): boolean => {
+  const rs = match?.roundScores || [];
+  return rs.length > 0 && rs.every((r: any) => r.score != null);
 };
 
 const safeId = (id: any): string | null => {
@@ -699,12 +725,15 @@ const handleComplete = async () => {
   if (!stage) return;
   if (!confirm(`确认完成赛段「${stage.name}」？所有比赛将被结算。`)) return;
   try {
-    await directorCompleteStage(stage.id);
+    const res: any = await directorCompleteStage(stage.id);
     await loadStages();
     await loadMatchesForStage(stage.id);
 
     const stillGaming = stages.value.some((s) => s.status === 'GAMING');
     isLive.value = stillGaming;
+    if (res?.data?.data?.status && res.data.data.status !== 'SETTLED') {
+      alert(stage.stageMode === 'AUDITION' ? '海选产生二海(同分加赛),完成二海判罚后才能结束赛段' : '赛段仍有未完成场次,完成全部判罚后才能结束赛段');
+    }
   } catch (e: any) {
     console.error('完成赛段失败:', e);
     alert(e?.message || '完成赛段失败');

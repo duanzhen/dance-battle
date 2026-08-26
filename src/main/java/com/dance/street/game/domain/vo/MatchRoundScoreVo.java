@@ -34,6 +34,9 @@ public class MatchRoundScoreVo implements Serializable {
     /** 本轮累计总分(所有裁判合计;未打分时为 null) */
     private BigDecimal score;
 
+    /** 本轮选手结果(结算后):ADVANCE=晋级 / ELIMINATED=淘汰 / PENDING=待定 */
+    private String outcomeStatus;
+
     /** 各裁判打分明细 */
     private List<RefereeScore> refereeScores;
 

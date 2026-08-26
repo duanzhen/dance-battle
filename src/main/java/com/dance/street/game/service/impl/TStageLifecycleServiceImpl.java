@@ -1069,13 +1069,39 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (bo.getName() == null || bo.getName().isBlank()) {
             throw new ServiceException("GUEST 名称不能为空");
         }
-        // 中间态调整结果必须符合下一赛段计划规模:轮空占位也算参赛者,实际人数不得超过 teamCountStart
+        // 中间态调整:GUEST 可挤掉名次靠后的已确认晋级者,总人数不超计划(轮空占位也算);
+        // GUEST 自身最多占满计划名额
         long plan = stage.getTeamCountStart() != null && stage.getTeamCountStart() > 0 ? stage.getTeamCountStart() : 0L;
-        long existing = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, stage.getId()));
-        if (plan > 0 && existing + 1 > plan) {
-            throw new ServiceException("赛段计划 {} 人(轮空占位也算参赛者),当前已有 {} 人,无法继续添加 GUEST",
-                plan, existing);
+        long guestCount = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stage.getId())
+            .eq(TCompetitor::getRemark, "GUEST"));
+        long confirmedAdvancers = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stage.getId())
+            .isNotNull(TCompetitor::getSourceCompetitorId));
+        if (plan > 0 && guestCount + 1 > plan) {
+            throw new ServiceException("GUEST 已占满赛段计划 {} 人,无法继续添加 GUEST", plan);
+        }
+        // 添加后总人数(已确认晋级者 + GUEST)超过计划时,挤掉名次靠后(种子号大)的已确认晋级者:
+        // 从下一赛段移除,并在来源赛段标记淘汰(晋级名单不再显示)
+        int needPush = (int) Math.max(0, guestCount + confirmedAdvancers + 1 - plan);
+        if (needPush > 0) {
+            List<TCompetitor> bottom = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stage.getId())
+                .isNotNull(TCompetitor::getSourceCompetitorId)
+                .orderByDesc(TCompetitor::getSeedRank)
+                .last("limit " + needPush));
+            for (TCompetitor c : bottom) {
+                if (c.getSourceCompetitorId() != null) {
+                    competitorMapper.update(null, Wrappers.<TCompetitor>lambdaUpdate()
+                        .set(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ELIMINATED.getCode())
+                        .eq(TCompetitor::getId, c.getSourceCompetitorId()));
+                }
+            }
+            if (!bottom.isEmpty()) {
+                competitorService.deleteWithValidByIds(
+                    bottom.stream().map(TCompetitor::getId).toList(), true);
+            }
+            log.info("赛段[{}]添加 GUEST 挤掉 {} 名已确认晋级者(名次靠后)", stage.getId(), bottom.size());
         }
 
         // 1. 创建参赛单位:标记 GUEST;按落位模式分配种子(顶前/队尾/指定种子位)
@@ -1421,7 +1447,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void completeStage(Long stageId) {
+    public String completeStage(Long stageId) {
         TStage stage = mustGetStage(stageId);
         if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
             throw new ServiceException("仅 GAMING 状态的赛段可完成,当前: {}", stage.getStatus());
@@ -1437,14 +1463,20 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             settleArenaStage(stage);
         } else if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
             // 海选赛:最终结算,聚合所有裁判打分并排名晋级。之后场次变 SETTLED
+            // 二海(同分加赛)未判罚(仍有选手一条分都没打)时禁止结束赛段;
+            // 弃权选手打 0 分(0 分不参与晋级)后即可正常结算
+            assertTiebreakersJudged(stageId);
             settleAuditionStage(stage);
             // 检查是否还有加赛场次未完成
             long tbUnfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
                 .eq(TMatch::getStageId, stageId)
                 .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
             if (tbUnfinished > 0) {
-                log.info("赛段[{}]存在{}场加赛未完成,等待加赛结束后再次结算", stageId, tbUnfinished);
-                return; // 不抛异常,等待加赛结束后再次调用 completeStage
+                // 海选出现二海(同分加赛):首次结算当场生成,赛段保持 GAMING,
+                // 必须等裁判完成二海判罚后再次调用 completeStage 才能结束赛段。
+                log.info("赛段[{}]存在{}场二海(同分加赛)未完成,赛段保持进行中,完成二海判罚后再结束",
+                    stageId, tbUnfinished);
+                return StageConstants.STAGE_GAMING;
             }
         } else if (StageModeEnum.RANK.getCode().equals(stage.getStageMode())) {
             // 排名赛:最终结算,按多维度总分排名晋级。晋级线上同分并列者保持 PENDING,
@@ -1455,7 +1487,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
             if (unfinished > 0) {
                 log.info("赛段[{}]存在{}场未结算,等待全部结算后再次完成", stageId, unfinished);
-                return;
+                return StageConstants.STAGE_GAMING;
             }
         } else {
             // 多裁判累计打分场次(VOTING/RANKING):先统一结算,再校验是否全部完成
@@ -1475,6 +1507,63 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         refereeSseNotifier.notifyStage(stageId, "stage");
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
         // 不再自动晋级:裁判判完仅出预排/晋级者,由导播台在中间态「确认晋级」时正式写入下一赛段
+        return StageConstants.STAGE_SETTLED;
+    }
+
+    /**
+     * 二海(同分加赛)守卫:加赛里还有选手未打分(未判罚)时,禁止结束赛段。
+     * 弃权按「打 0 分」处理(0 分不参与晋级),全部加赛选手有成绩记录后即可结算。
+     */
+    private void assertTiebreakersJudged(Long stageId) {
+        List<TMatch> tiebreakers = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .likeRight(TMatch::getRemark, "同分加赛")
+            .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
+        if (tiebreakers.isEmpty()) {
+            return;
+        }
+        List<Long> tbIds = tiebreakers.stream().map(TMatch::getId).toList();
+        List<TMatchParticipant> tbParts = participantMapper.selectList(
+            Wrappers.<TMatchParticipant>lambdaQuery()
+                .in(TMatchParticipant::getMatchId, tbIds)
+                .isNotNull(TMatchParticipant::getCompetitorId));
+        if (tbParts.isEmpty()) {
+            return;
+        }
+        List<Long> compIds = tbParts.stream()
+            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, TCompetitor> compMap = compIds.isEmpty() ? Map.of()
+            : competitorMapper.selectByIds(compIds).stream()
+                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+        List<Long> tbRoundIds = matchRoundMapper.selectList(
+                Wrappers.<TMatchRound>lambdaQuery()
+                    .in(TMatchRound::getMatchId, tbIds)
+                    .select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        Set<Long> judged = tbRoundIds.isEmpty() ? Set.of()
+            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                    .in(TRoundScore::getRoundId, tbRoundIds)
+                    .select(TRoundScore::getCompetitorId))
+                .stream()
+                .map(TRoundScore::getCompetitorId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        List<String> unjudged = new ArrayList<>();
+        for (TMatchParticipant p : tbParts) {
+            if (p.getCompetitorId() == null || judged.contains(p.getCompetitorId())) {
+                continue;
+            }
+            TCompetitor c = compMap.get(p.getCompetitorId());
+            // 已标记退赛(WITHDRAWN)的选手不参与判罚,不算未判罚
+            if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
+                continue;
+            }
+            unjudged.add(c != null ? c.getName() : ("选手" + p.getCompetitorId()));
+        }
+        if (!unjudged.isEmpty()) {
+            throw new ServiceException("海选存在二海(同分加赛)未完成判罚: {},请完成二海判罚后再结束赛段(弃权选手打 0 分,0 分不参与晋级)",
+                String.join(", ", unjudged));
+        }
     }
 
     /**
@@ -1993,29 +2082,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             matchMapper.updateById(mUpd);
             return;
         }
-        // 未打分守卫:从未被任何裁判打分的选手不允许随结算"0 分自动晋级",
-        // 需补打分或将缺席者标记退赛(WITHDRAWN)后再结算
-        List<Long> roundIds = matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        Map<Long, Long> scoreCountByCompetitor = roundIds.isEmpty() ? Map.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds)
-                    .select(TRoundScore::getCompetitorId))
-                .stream()
-                .filter(rs -> rs.getCompetitorId() != null)
-                .collect(Collectors.groupingBy(TRoundScore::getCompetitorId, Collectors.counting()));
-        List<String> unjudged = active.stream()
-            .map(p -> compMap.get(p.getCompetitorId()))
-            .filter(Objects::nonNull)
-            .filter(c -> !scoreCountByCompetitor.containsKey(c.getId()))
-            .map(TCompetitor::getName)
-            .toList();
-        if (!unjudged.isEmpty()) {
-            throw new ServiceException("圈内仍有 {} 名选手未打分(未标记退赛): {},请先完成打分或标记退赛后再结算",
-                unjudged.size(), unjudged);
-        }
-
         // 剩余晋级名额:按圈独立计算,加赛场次只争本圈尚未确定的晋级位
         String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
         int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
@@ -2036,6 +2102,15 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             return sb.compareTo(sa);
         });
 
+        // 0 分选手(弃权/缺席,含未打分)不参与晋级,也不参与同分加赛;
+        // 正分人数不足晋级名额时,剩余名额空缺(下一赛段对应位置轮空)
+        int positiveCount = 0;
+        for (Long cid : sortedCids) {
+            if (scores.get(cid).compareTo(java.math.BigDecimal.ZERO) > 0) {
+                positiveCount++;
+            }
+        }
+
         // 剩余名额已满,本场(加赛)所有人淘汰
         if (remaining <= 0) {
             for (int i = 0; i < sortedCids.size(); i++) {
@@ -2050,8 +2125,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             return;
         }
 
-        // 检测晋级线上的同分情况
-        if (remaining < sortedCids.size()) {
+        // 检测晋级线上的同分情况(仅正分选手参与;正分人数不足名额时直接晋级,不产生加赛)
+        if (remaining < positiveCount) {
             java.math.BigDecimal cutoffScore = scores.get(sortedCids.get(remaining - 1));
             // 统计与 cutoffScore 同分的所有选手
             List<Long> tiedAtCutoff = new ArrayList<>();
@@ -2088,22 +2163,28 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
 
-        // 无同分问题:正常结算
+        // 正常结算:0 分选手永不晋级;正分选手按分数从高到低取前 min(remaining, positiveCount) 名,
+        // 名额不足时剩余名额空缺(下一赛段轮空)
+        int advanced = 0;
         for (int i = 0; i < sortedCids.size(); i++) {
             Long cid = sortedCids.get(i);
-            boolean advance = i < remaining;
+            boolean eligible = scores.get(cid).compareTo(java.math.BigDecimal.ZERO) > 0;
+            boolean advance = eligible && advanced < remaining;
+            if (advance) {
+                advanced++;
+            }
             markAuditionResult(cid, advance ? OutcomeStatusEnum.ADVANCE.getCode() : OutcomeStatusEnum.ELIMINATED.getCode(),
                 (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match.getId());
         }
-        zoneAdvanced.put(zone, alreadyAdvanced + Math.min(remaining, sortedCids.size()));
+        zoneAdvanced.put(zone, alreadyAdvanced + advanced);
 
         TMatch mUpd = new TMatch();
         mUpd.setId(match.getId());
         mUpd.setStatus(StageConstants.MATCH_SETTLED);
         matchMapper.updateById(mUpd);
 
-        log.info("海选赛场次[{}]已结算,共{}名选手,晋级{}名", match.getId(), sortedCids.size(),
-            Math.min(remaining, sortedCids.size()));
+        log.info("海选赛场次[{}]已结算,共{}名选手,正分{}名,晋级{}名(0分选手不晋级)", match.getId(),
+            sortedCids.size(), positiveCount, advanced);
     }
 
     private void markAuditionResult(Long cid, String outcome, Long finalRank,

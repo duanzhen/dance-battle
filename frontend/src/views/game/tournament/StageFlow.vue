@@ -233,11 +233,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, markRaw, onMounted } from 'vue';
+import { ref, computed, markRaw, onMounted, onUnmounted } from 'vue';
 import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
 import { listStage, addStage as addStageApi, updateStage as updateStageApi, delStage as delStageApi } from '@/api/game/stage';
 import { StageVO, StageForm } from '@/api/game/stage/types';
+import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import StageSidebar from './stages/StageSidebar.vue';
 import TransitionConfig from './TransitionConfig.vue';
 import KnockoutStageConfig from './stages/KnockoutStageConfig.vue';
@@ -812,7 +813,26 @@ const insertStageAfter = (stageId: string) => {
 // --- 生命周期 ---
 onMounted(() => {
   loadStages();
+  const tid = route.query.id;
+  if (tid && !Array.isArray(tid)) {
+    // 订阅赛事事件通道:导播台/裁判端的赛程变动实时同步到管理端
+    subscribeTournamentEvents(tid, handleTournamentEvent);
+  }
 });
+
+onUnmounted(() => {
+  const tid = route.query.id;
+  if (tid && !Array.isArray(tid)) {
+    unsubscribeTournamentEvents(tid, handleTournamentEvent);
+  }
+});
+
+/** 赛事事件回调:重连补偿(null)或非纯打分事件时刷新赛段列表(loading 无视觉闪烁) */
+const handleTournamentEvent = (data: any) => {
+  if (!data || data.type !== 'scores') {
+    loadStages(true);
+  }
+};
 </script>
 
 <style scoped>

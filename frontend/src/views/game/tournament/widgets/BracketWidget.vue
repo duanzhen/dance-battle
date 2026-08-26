@@ -157,6 +157,8 @@ const isFinal = ref(false);
 const isSemi = ref(false);
 const stageModeError = ref(false);
 const stageMode = ref('');
+/** 上一赛段ID:预排/决赛来源解析依赖上一赛段,收到其事件时也需刷新 */
+const prevStageId = ref<string | number | null>(null);
 const prevZoneMap = ref<Record<string, string>>({});
 const stagePairingMode = ref('');
 const stageTeamCountStart = ref(0);
@@ -194,6 +196,7 @@ const loadData = async () => {
     competitors.value = [];
     matches.value = [];
     stageMode.value = '';
+    prevStageId.value = null;
     return;
   }
   if (!loadedOnce.value) {
@@ -204,10 +207,12 @@ const loadData = async () => {
     let stageInfo: any = null;
     try {
       stageInfo = await getStage(props.stageId);
+      prevStageId.value = stageInfo?.data?.prevStageId ?? null;
       stagePairingMode.value =
         JSON.parse(stageInfo?.data?.ruleConfig || '{}')?.knockout?.pairingMode || '';
       stageTeamCountStart.value = Number(stageInfo?.data?.teamCountStart) || 0;
     } catch (e) {
+      prevStageId.value = null;
       stagePairingMode.value = '';
       stageTeamCountStart.value = 0;
     }
@@ -288,9 +293,8 @@ const loadData = async () => {
     if (isFinal.value && matches.value.length === 1) {
       try {
         // 上一赛段(半决赛)按 displayZone 记录各参赛方来源:LEFT/RIGHT
-        const prevStageId = stageInfo?.data?.prevStageId;
-        if (prevStageId) {
-          const pm: any = await listMatch({ stageId: prevStageId, pageNum: 1, pageSize: 999 } as any);
+        if (prevStageId.value) {
+          const pm: any = await listMatch({ stageId: prevStageId.value, pageNum: 1, pageSize: 999 } as any);
           const prevMatches = pm?.data?.data || pm?.data || [];
           for (const m of prevMatches) {
             try {
@@ -672,9 +676,19 @@ watch(
   }
 );
 
-/** 事件回调:重连补偿(null)或事件属于本赛段时才刷新,避免无关事件触发全量拉取 */
+/** 事件回调:重连补偿(null)或事件属于本赛段/上一赛段(预排来源)时才刷新,避免无关事件触发全量拉取 */
 const handleTournamentEvent = (data: any) => {
-  if (!data || data.stageId == null || String(data.stageId) === String(props.stageId)) {
+  if (!data || data.stageId == null) {
+    loadData();
+    return;
+  }
+  const sid = String(data.stageId);
+  if (sid === String(props.stageId)) {
+    loadData();
+    return;
+  }
+  // 上一赛段事件改变预排结果:结算/重置/赛段推进等;单纯的分数(scores)不影响胜者名单,跳过
+  if (prevStageId.value != null && sid === String(prevStageId.value) && data.type !== 'scores') {
     loadData();
   }
 };

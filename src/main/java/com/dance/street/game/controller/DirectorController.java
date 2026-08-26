@@ -137,10 +137,11 @@ public class DirectorController {
      */
     @Log(title = "导播台完成赛段", businessType = BusinessType.UPDATE)
     @PutMapping("/stage/{id}/complete")
-    public R<Void> completeStage(@PathVariable("id") Long id, HttpServletRequest request) {
+    public R<java.util.Map<String, String>> completeStage(@PathVariable("id") Long id, HttpServletRequest request) {
         assertStageInTournament(currentTournament(request), id);
-        stageLifecycleService.completeStage(id);
-        return R.ok();
+        String status = stageLifecycleService.completeStage(id);
+        // 返回结算后赛段真实状态:SETTLED=已完成;GAMING=海选产生二海等,赛段保持进行中
+        return R.ok(java.util.Map.of("status", status));
     }
 
     /**

@@ -168,10 +168,25 @@ const loadData = async () => {
       }
       grouped.get(zone)!.push(m);
     });
+    // 主赛分映射:二海(同分加赛)只决定谁晋级,展示分数/名次仍用原海选分
+    const normalScoreByCid: Record<string, number | undefined> = {};
+    withParts.forEach((m: any) => {
+      if (String(m.remark || '').startsWith('同分加赛')) return;
+      (m.participants || []).forEach((p: any) => {
+        if (p.competitorId != null && p.scoreValue != null) {
+          normalScoreByCid[String(p.competitorId)] = Number(p.scoreValue);
+        }
+      });
+    });
     columns.value = order.map((zone, idx) => {
       // 只取晋级选手,按签到号码升序
       const advancers = (grouped.get(zone) || [])
         .flatMap((m: any) => (m.participants || []).filter((p: any) => p.outcomeStatus === 'ADVANCE' && p.competitorId != null))
+        .map((p: any) => ({
+          ...p,
+          // 二海选手沿用原海选分,不因二海高分改变排名展示
+          scoreValue: normalScoreByCid[String(p.competitorId)] ?? p.scoreValue
+        }))
         .sort((a: any, b: any) => numOf(a) - numOf(b));
       return {
         zone,

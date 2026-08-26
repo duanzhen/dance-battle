@@ -165,6 +165,18 @@ public class TStageServiceImpl implements ITStageService {
         // 校验数据
         validateLinkIds(update);
 
+        // 防悬挂状态:直接把赛段置为已结束时,要求所有场次必须已结算(与 completeStage 口径一致),
+        // 避免出现「赛段 SETTLED + 二海/场次 GAMING」的前端误写状态
+        if (update.getStatus() != null && StageConstants.STAGE_SETTLED.equals(update.getStatus())) {
+            long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, update.getId())
+                .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
+            if (unfinished > 0) {
+                throw new ServiceException("赛段仍有 {} 场未结算(如海选二海),不能直接标记为已结束,请通过「完成赛段」结算",
+                    unfinished);
+            }
+        }
+
         // 获取旧数据，用于清理原链表连接
         TStage oldStage = baseMapper.selectById(update.getId());
 

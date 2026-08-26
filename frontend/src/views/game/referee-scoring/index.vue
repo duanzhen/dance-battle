@@ -22,8 +22,8 @@
     <template v-else>
       <header class="h-12 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 shrink-0 z-20">
         <div class="flex items-center gap-2 min-w-0">
-          <div class="w-5 h-5 bg-amber-500 rounded flex items-center justify-center font-bold text-[10px] text-neutral-900 shrink-0">R</div>
-          <span class="text-xs text-neutral-400 truncate">{{ refereeName }}</span>
+          <img :src="logo" class="w-6 h-6 rounded object-contain shrink-0" alt="logo" />
+          <span class="text-sm font-bold text-neutral-200 truncate">{{ refereeName || '裁判' }}</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-[10px] text-neutral-500 hidden md:inline">{{ stageName }}</span>
@@ -382,7 +382,8 @@
                     {{ keypadSubmitting ? '提交中...' : '提交并下一个' }}
                   </button>
                 </div>
-                <p class="text-[9px] text-neutral-600 mt-2 text-center">提交后自动跳转下一位，已评分选手可点顶部重新修改</p>
+                <p class="text-[9px] text-neutral-600 mt-2 text-center">支持键盘输入分数（0-100，最多一位小数），回车确认提交；提交后自动跳转下一位</p>
+                <p v-if="auditionAllScored" class="text-[9px] font-bold text-amber-400/90 mt-1 text-center">本场选手已全部评完，等待导播台/管理端结束赛段后进入下一轮</p>
               </template>
             </div>
           </div>
@@ -571,6 +572,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Plus, Minus } from 'lucide-vue-next';
+import logo from '@/assets/logo/logo.png';
 import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore } from '@/api/game/referee/scoring';
 import { subscribeChannel } from '@/utils/sseChannel';
 
@@ -773,7 +775,40 @@ const clearKeypad = () => {
   keypadValue.value = '';
 };
 
+/** 海选键盘评分:数字键/小数点/退格输入,回车确认提交 */
+const isKeypadActive = computed(() => isPerCompetitor.value && !isRanking.value && !!keypadTarget.value && matchId.value != null);
+
+const onKeydown = (e: KeyboardEvent) => {
+  if (!isKeypadActive.value) return;
+  // 避免干扰排名赛等输入框/下拉框的键盘操作
+  const el = e.target as HTMLElement | null;
+  const tag = el?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+
+  const key = e.key;
+  if (/^[0-9]$/.test(key)) {
+    e.preventDefault();
+    pressKey(key);
+    return;
+  }
+  if (key === '.' || key === ',') {
+    e.preventDefault();
+    pressKey('.');
+    return;
+  }
+  if (key === 'Backspace') {
+    e.preventDefault();
+    pressKey('⌫');
+    return;
+  }
+  if (key === 'Enter') {
+    e.preventDefault();
+    confirmKeypad();
+  }
+};
+
 const confirmKeypad = async () => {
+  if (keypadSubmitting.value) return;
   const target = keypadTarget.value;
   if (!target || target.competitorId == null) return;
   const score = Number(keypadValue.value);
@@ -901,6 +936,13 @@ const myTotal = (competitorId: number): number => {
     .filter((s) => s.competitorId === competitorId)
     .reduce((sum, s) => sum + (s.score || 0), 0);
 };
+
+/** 海选逐选手打分:本场所有选手是否已被当前裁判评完(二海/加赛同样适用) */
+const auditionAllScored = computed(() => {
+  if (!isAudition.value || isRanking.value) return false;
+  const list = participants.value;
+  return list.length > 0 && list.every((p) => p.competitorId != null && myTotal(p.competitorId) > 0);
+});
 
 const buildPayload = () => {
   if (isStandard.value) {
@@ -1200,11 +1242,10 @@ const connectRefereeSse = (authKey: string, tid: number | string) => {
     key: `referee:${tid}:${authKey}`,
     buildUrl: () =>
       `${baseUrl}/tournament/event/sse?tournamentId=${encodeURIComponent(String(tid))}&authKey=${encodeURIComponent(authKey)}&clientid=${clientId}`,
-    onMessage: (data: any) => {
-      // 事件与当前赛段相关(或重连补偿 null)才刷新,避免无关事件全量拉取
-      if (!data || data.stageId == null || String(data.stageId) === String(stageId.value)) {
-        refresh();
-      }
+    onMessage: () => {
+      // 所有广播都触发 refresh:refresh 内部按上下文变化决定整页应用或仅合并累计分,
+      // 保证下一赛段场次开始/赛段切换等跨赛段事件也能被裁判端感知
+      refresh();
     },
     // 断线重连成功后全量刷新,补回错过的事件
     onRefresh: () => refresh()
@@ -1218,6 +1259,7 @@ onMounted(async () => {
     loading.value = false;
     return;
   }
+  window.addEventListener('keydown', onKeydown);
   setRefereeAuthKey(authKey as string);
   await loadData();
   // SSE 实时推送 + 断线重连补偿,无需轮询
@@ -1229,6 +1271,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
   unsubSse?.();
   unsubSse = null;
 });

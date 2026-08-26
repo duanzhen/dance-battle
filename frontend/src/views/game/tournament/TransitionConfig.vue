@@ -91,18 +91,19 @@
         class="space-y-4 border-t border-neutral-800 pt-6"
       >
         <div class="flex items-center justify-between">
-          <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">海选弃权 / 顶替</h4>
+          <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">晋级名单</h4>
           <span class="text-xs text-neutral-500">晋级者弃权后,可手动把名次靠下的淘汰者顶上来,或不顶替(对手轮空晋级)</span>
         </div>
 
         <div class="space-y-1.5">
           <div class="text-[11px] text-neutral-500 mb-1">晋级者</div>
           <div
-            v-for="c in auditionAdvancers"
+            v-for="c in auditionAdvancersVisible"
             :key="c.id"
             class="flex items-center gap-3 px-3 py-2 rounded-lg bg-black border border-neutral-800"
           >
             <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name }}</span>
+            <span class="text-[10px] font-mono text-amber-400 flex-none">{{ c.score != null ? c.score.toFixed(1) + ' 分' : '--' }}</span>
             <span class="text-[10px] text-neutral-600 flex-none">#{{ c.finalRank }}</span>
             <button
               @click="handleWithdraw(c)"
@@ -112,7 +113,7 @@
               弃权
             </button>
           </div>
-          <p v-if="auditionAdvancers.length === 0" class="text-[10px] text-neutral-600">暂无晋级者</p>
+          <p v-if="auditionAdvancersVisible.length === 0" class="text-[10px] text-neutral-600">暂无晋级者</p>
         </div>
 
         <div v-if="auditionWithdrawn.length > 0" class="space-y-1.5">
@@ -583,49 +584,22 @@
           </p>
         </div>
       </div>
-
-      <div class="space-y-4">
-        <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">间歇期设置</h4>
-        <div class="flex items-center gap-4">
-          <div class="flex-1">
-            <label class="text-xs text-neutral-500 mb-1 block">预计休息时长 (小时)</label>
-            <input
-              type="number"
-              v-model="config.breakDuration"
-              class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-            />
-          </div>
-          <div class="flex-1">
-            <label class="text-xs text-neutral-500 mb-1 block">下一阶段开始时间</label>
-            <input
-              type="datetime-local"
-              class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none [color-scheme:dark]"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div class="flex justify-end pt-2">
-        <button
-          @click="saveConfig"
-          :disabled="targetLocked || saving"
-          class="px-6 py-2.5 rounded-lg bg-amber-500 text-neutral-900 text-sm font-bold hover:bg-amber-400 disabled:opacity-50 transition-colors"
-        >
-          {{ saving ? '保存中...' : '保存转场配置' }}
-        </button>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { ArrowRight, SlidersHorizontal, Lock, UserPlus, Trash2 } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { getStage, updateStage, getStagePreBracket, adjustStageAdvancement, addStageGuest, setStageSeedOrder } from '@/api/game/stage';
+import { getStage, getStagePreBracket, adjustStageAdvancement, addStageGuest, setStageSeedOrder } from '@/api/game/stage';
 import { calculateAdvancement } from '@/api/game/stage/lifecycle';
 import { promoteReplacement } from '@/api/game/stage/lifecycle';
 import { listCompetitor, delCompetitor } from '@/api/game/competitor';
+import { listMatch } from '@/api/game/match';
+import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 // Props
 const props = defineProps<{
@@ -636,15 +610,9 @@ const props = defineProps<{
   transitionIndex: number;
 }>();
 
-// 转场配置数据
-const config = reactive({
-  breakDuration: 24
-});
-
 // 预排参赛者与保存状态
 const preStatus = ref('');
 const preSeeds = ref<any[]>([]);
-const saving = ref(false);
 const advSaving = ref(false);
 const confirmingAdvancement = ref(false);
 const pendingAdvancers = ref<any[]>([]);
@@ -666,6 +634,46 @@ const replacementByWithdrawn = reactive<Record<string, string | number | null>>(
 const withdrawing = ref(false);
 const promoting = ref(false);
 
+/** 海选总分:存在场次参赛方明细的 scoreValue 上,按 competitorId 建映射 */
+const loadAuditionScores = async (stageId: string | number): Promise<Map<string, number | null>> => {
+  const scoreMap = new Map<string, number | null>();
+  try {
+    const mr: any = await listMatch({ stageId, pageNum: 1, pageSize: 1000 } as any);
+    const matches = mr?.data?.data || mr?.data || [];
+    // 主赛分数优先:二海(同分加赛)只决定谁晋级,晋级名单的分数与名次仍用原海选分
+    const normalMatches = matches.filter((m: any) => !String(m.remark || '').startsWith('同分加赛'));
+    const tiebreakerMatches = matches.filter((m: any) => String(m.remark || '').startsWith('同分加赛'));
+    const loadParts = async (list: any[]) => {
+      const partsList = await Promise.all(
+        list.map(async (m: any) => {
+          try {
+            const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 999 } as any);
+            return pr?.data?.data || pr?.data || [];
+          } catch {
+            return [];
+          }
+        })
+      );
+      return partsList.flat();
+    };
+    // 先写主赛分
+    (await loadParts(normalMatches)).forEach((p: any) => {
+      if (p.competitorId != null) {
+        scoreMap.set(String(p.competitorId), p.scoreValue != null ? Number(p.scoreValue) : null);
+      }
+    });
+    // 二海分只兜底补缺(正常情况二海选手都在主赛里,不会覆盖原分)
+    (await loadParts(tiebreakerMatches)).forEach((p: any) => {
+      if (p.competitorId != null && !scoreMap.has(String(p.competitorId))) {
+        scoreMap.set(String(p.competitorId), p.scoreValue != null ? Number(p.scoreValue) : null);
+      }
+    });
+  } catch (e) {
+    console.warn('加载海选分数失败:', e);
+  }
+  return scoreMap;
+};
+
 /** 加载海选晋级者/已弃权者/可顶替淘汰者(按名次取前若干) */
 const loadAuditionWithdrawal = async () => {
   if (!isAuditionSource.value || sourceStage.value?.status !== 'SETTLED') {
@@ -682,9 +690,16 @@ const loadAuditionWithdrawal = async () => {
     ]);
     const adv = (advResp.data || (advResp as any).data || []) as any[];
     const rep = (repResp.data || (repResp as any).data || []) as any[];
+    const scoreMap = await loadAuditionScores(sid);
     auditionAdvancers.value = adv
       .filter((c) => c.outcomeStatus === 'ADVANCE')
-      .sort((a, b) => (a.finalRank || 9999) - (b.finalRank || 9999));
+      .map((c) => ({ ...c, score: scoreMap.get(String(c.id)) ?? null }))
+      .sort((a, b) => {
+        const sa = a.score == null ? -1 : a.score;
+        const sb = b.score == null ? -1 : b.score;
+        // 分数从高到低,同分按名次升序稳定排列
+        return sb - sa || (a.finalRank || 9999) - (b.finalRank || 9999);
+      });
     // WITHDRAWN 需单独查询
     const wdResp: any = await listCompetitor({ stageId: sid, outcomeStatus: 'WITHDRAWN', pageNum: 1, pageSize: 1000 } as any);
     auditionWithdrawn.value = (wdResp.data || (wdResp as any).data || []).filter((c: any) => c.outcomeStatus === 'WITHDRAWN');
@@ -764,8 +779,6 @@ const targetLocked = computed(() => {
   const status = targetStage.value?.status;
   return status != null && status !== 'DRAFT' && status !== 'PENDING';
 });
-
-const qid = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? v : null);
 
 const loadSourceConfig = async () => {
   try {
@@ -944,6 +957,16 @@ const draftRemovedIds = ref<string[]>([]);
 const draftDirty = ref(false);
 const directLoading = ref(false);
 
+/** 晋级名单:目标赛段已加/草稿中的 GUEST 会挤掉名次靠后的晋级者,只显示剩余名额内的晋级者 */
+const auditionAdvancersVisible = computed(() => {
+  const plan = Number(targetStage.value?.teamCountStart) || 0;
+  const guestCount = (draftParticipants.value || []).filter((c: any) => !c._removed && isGuestComp(c)).length;
+  const capacity = plan > 0 ? Math.max(0, plan - guestCount) : Number.MAX_SAFE_INTEGER;
+  return capacity <= 0
+    ? []
+    : auditionAdvancers.value.filter((c) => (c.finalRank ?? 9999) <= capacity);
+});
+
 /** 目标赛段模式:决定 GUEST 直入的落位方式 */
 const targetMode = computed(() => targetStage.value?.stageMode || '');
 const targetModeLabel = computed(() => modeLabelMap[targetMode.value] || targetMode.value || '—');
@@ -1103,9 +1126,18 @@ const addDirectGuest = () => {
   }
   const active = draftParticipants.value.filter((c) => !c._removed);
   const plan = Number(targetStage.value?.teamCountStart) || 0;
+  // 草稿已满时,新 GUEST 挤掉名次靠后的普通晋级者,总人数不超计划
   if (plan > 0 && active.length >= plan) {
-    ElMessage.warning(`赛段计划 ${plan} 人(轮空占位也算参赛者),无法继续添加 GUEST`);
-    return;
+    const bottom = [...active]
+      .filter((c) => c.remark !== 'GUEST' && !c._local)
+      // 草稿晋级者只有 seedRank(预排位次),按当前顺序最后一位挤掉,避免误伤第一名
+      .sort((a: any, b: any) => (b.seedRank ?? 9999) - (a.seedRank ?? 9999))[0];
+    if (!bottom) {
+      ElMessage.warning(`赛段计划 ${plan} 人已全部为 GUEST,无法继续添加`);
+      return;
+    }
+    draftParticipants.value = draftParticipants.value.map((c) => (c.id === bottom.id ? { ...c, _removed: true } : c));
+    ElMessage.info(`GUEST 将挤掉晋级者「${bottom.name}」`);
   }
   const rank = draftRankFor(active);
   if (rank == null) return;
@@ -1287,40 +1319,6 @@ const circlePreview = computed(() => {
 /** 擂台赛落位预览:初始队列 = 种子顺序(与 computeArenaQueue 一致) */
 const arenaQueuePreview = computed(() => sortedDirect.value.map((c, i) => ({ ...c, queueIndex: i + 1 })));
 
-const saveConfig = async () => {
-  if (!sourceStage.value) {
-    ElMessage.warning('转场配置尚未加载完成');
-    return;
-  }
-  saving.value = true;
-  try {
-    const s = sourceStage.value;
-    const rule = JSON.parse(s.ruleConfig || '{}');
-    rule.transition = { ...(rule.transition || {}) };
-    const formData: any = {
-      id: s.id,
-      tournamentId: s.tournamentId,
-      name: s.name,
-      stageMode: s.stageMode,
-      format: s.format || '',
-      teamCountStart: s.teamCountStart,
-      teamCountEnd: s.teamCountEnd,
-      status: s.status,
-      ruleConfig: JSON.stringify(rule),
-      isInitialized: s.isInitialized
-    };
-    if (qid(s.prevStageId) != null) formData.prevStageId = qid(s.prevStageId);
-    if (qid(s.nextStageId) != null) formData.nextStageId = qid(s.nextStageId);
-    await updateStage(formData);
-    ElMessage.success('转场配置已保存');
-  } catch (e: any) {
-    console.error('保存转场配置失败:', e);
-    ElMessage.error(e?.response?.data?.msg || '保存失败');
-  } finally {
-    saving.value = false;
-  }
-};
-
 const loadAll = () => {
   loadSourceConfig();
   loadPreBracket();
@@ -1341,7 +1339,40 @@ watch([() => props.sourceStageId, () => props.targetStageId], () => {
   loadAll();
 });
 
-onMounted(loadAll);
+const route = useRoute();
+const transitionTid = computed(() => {
+  const id = route.query.id ?? route.query.tournamentId;
+  return id && !Array.isArray(id) ? id : null;
+});
+
+/** 赛事事件回调:与本转场(source/target)相关或赛段级事件时刷新,晋级名单/预排实时同步 */
+const handleTournamentEvent = (data: any) => {
+  if (!data) {
+    loadAll();
+    return;
+  }
+  const sid = data.stageId != null ? String(data.stageId) : null;
+  const relevant =
+    data.type === 'stage' ||
+    (sourceStage.value != null && sid === String(sourceStage.value.id)) ||
+    (targetStage.value != null && sid === String(targetStage.value.id));
+  if (relevant) {
+    loadAll();
+  }
+};
+
+onMounted(() => {
+  loadAll();
+  if (transitionTid.value != null) {
+    subscribeTournamentEvents(transitionTid.value, handleTournamentEvent);
+  }
+});
+
+onUnmounted(() => {
+  if (transitionTid.value != null) {
+    unsubscribeTournamentEvents(transitionTid.value, handleTournamentEvent);
+  }
+});
 </script>
 
 <style scoped>

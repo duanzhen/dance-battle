@@ -102,7 +102,7 @@
           :disabled="lifecycleLoading"
           class="w-full py-2.5 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
         >
-          完成结算
+          完成赛段
         </button>
         <button
           v-if="localStage.status === 'SETTLED'"
@@ -285,7 +285,34 @@ const runLifecycle = async (fn: () => Promise<any>, successStatus?: string, succ
 const doInitialize = () => runLifecycle(() => initializeStage({ stageId: localStage.value.id }), 'PENDING', '初始化成功');
 const doGenerateMatches = () => runLifecycle(() => generateMatches({ stageId: localStage.value.id }), undefined, '对阵已生成');
 const doStart = () => runLifecycle(() => startStage(localStage.value.id), 'GAMING', '赛段已开始');
-const doComplete = () => runLifecycle(() => completeStage(localStage.value.id), 'SETTLED', '赛段已结算');
+const doComplete = async () => {
+  if (!localStage.value?.id) {
+    ElMessage.warning('请先保存赛段');
+    return;
+  }
+  lifecycleLoading.value = true;
+  try {
+    const res: any = await completeStage(localStage.value.id);
+    const status = res?.data?.status;
+    if (status === 'SETTLED') {
+      localStage.value.status = 'SETTLED';
+      ElMessage.success('赛段已完成');
+    } else {
+      // 海选产生二海(同分加赛):后端保持赛段 GAMING,不允许结束,需完成二海判罚后再次结算
+      ElMessage.warning(
+        localStage.value.stageMode === 'AUDITION'
+          ? '海选产生二海(同分加赛),完成二海判罚后才能结束赛段'
+          : '赛段仍有未完成场次,完成全部判罚后才能结束赛段'
+      );
+    }
+    emit('update', localStage.value);
+    emit('refresh');
+  } catch (e: any) {
+    ElMessage.error(e?.msg || e?.message || '操作失败');
+  } finally {
+    lifecycleLoading.value = false;
+  }
+};
 const doCalculateAdvancement = () => runLifecycle(() => calculateAdvancement(localStage.value.id), undefined, '晋级已计算');
 const doResetToDraft = async () => {
   if (!localStage.value?.id) return;

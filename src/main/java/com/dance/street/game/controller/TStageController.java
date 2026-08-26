@@ -203,9 +203,10 @@ public class TStageController extends BaseController {
     @Log(title = "完成赛段", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
     @PutMapping("/{id}/complete")
-    public R<Void> complete(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
-        tStageLifecycleService.completeStage(id);
-        return R.ok();
+    public R<java.util.Map<String, String>> complete(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        String status = tStageLifecycleService.completeStage(id);
+        // 返回结算后赛段真实状态:SETTLED=已完成;GAMING=海选产生二海等,赛段保持进行中
+        return R.ok(java.util.Map.of("status", status));
     }
 
     /**

@@ -219,15 +219,19 @@ public class TMatchServiceImpl implements ITMatchService {
         }
 
         List<Long> roundIds = rounds.stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
-        // 打分明细按选手归组(每轮 = 一名选手);历史写入把所有选手分挂在同一轮,不能按 roundId 归组
-        Map<Long, List<TRoundScore>> scoresByCompetitor = roundScoreMapper.selectList(
-                Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds))
+        List<TRoundScore> allScores = roundScoreMapper.selectList(
+            Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds))
             .stream()
             .filter(s -> s.getCompetitorId() != null)
+            .toList();
+        // 打分明细按轮次归组:常规海选每轮一名选手;二海(加赛)是单轮多选手共享轮次
+        Map<Long, List<TRoundScore>> scoresByRound = allScores.stream()
+            .collect(Collectors.groupingBy(TRoundScore::getRoundId));
+        // 兼容历史数据:早期写入把所有选手分挂在同一轮,按选手回退归组兜底
+        Map<Long, List<TRoundScore>> scoresByCompetitor = allScores.stream()
             .collect(Collectors.groupingBy(TRoundScore::getCompetitorId));
 
-        List<Long> refereeIds = scoresByCompetitor.values().stream()
-            .flatMap(List::stream)
+        List<Long> refereeIds = allScores.stream()
             .map(TRoundScore::getRefereeId).filter(Objects::nonNull).distinct().toList();
         Map<Long, String> refereeNameById = refereeIds.isEmpty() ? Map.of()
             : refereeMapper.selectByIds(refereeIds).stream()
@@ -245,38 +249,78 @@ public class TMatchServiceImpl implements ITMatchService {
 
             List<MatchRoundScoreVo> roundScores = new ArrayList<>();
             for (TMatchRound r : roundList) {
-                MatchRoundScoreVo item = new MatchRoundScoreVo();
-                item.setRoundId(r.getId());
-                item.setRoundSequence(r.getRoundSequence());
-                item.setCompetitorId(r.getCompetitorId());
-                item.setCompetitorName(r.getCompetitorId() == null ? null : nameById.get(r.getCompetitorId()));
-
-                List<MatchRoundScoreVo.RefereeScore> refScores = new ArrayList<>();
-                BigDecimal sum = BigDecimal.ZERO;
-                List<TRoundScore> rs = scoresByCompetitor.get(r.getCompetitorId());
-                if (rs != null) {
-                    for (TRoundScore s : rs) {
-                        if (s.getScore() == null) {
+                List<TRoundScore> roundScoresOfRound = scoresByRound.getOrDefault(r.getId(), List.of());
+                Set<Long> matchRoundIds = roundList.stream()
+                    .map(TMatchRound::getId).filter(Objects::nonNull).collect(Collectors.toSet());
+                // 二海(加赛):轮次未绑定选手,单轮共享多名选手评分,按参赛方逐人展示(与海选主赛一致)
+                if (r.getCompetitorId() == null) {
+                    for (TMatchParticipant p : byMatch.getOrDefault(vo.getId(), List.of())) {
+                        if (p.getCompetitorId() == null) {
                             continue;
                         }
-                        sum = sum.add(s.getScore());
-                        MatchRoundScoreVo.RefereeScore ref = new MatchRoundScoreVo.RefereeScore();
-                        ref.setRefereeId(s.getRefereeId());
-                        ref.setRefereeName(s.getRefereeId() == null ? null : refereeNameById.get(s.getRefereeId()));
-                        ref.setScore(s.getScore());
-                        refScores.add(ref);
+                        roundScores.add(buildAuditionRoundItem(r, p.getCompetitorId(),
+                            roundScoresOfRound.stream()
+                                .filter(s -> Objects.equals(s.getCompetitorId(), p.getCompetitorId()))
+                                .toList(),
+                            nameById, participantByCid, refereeNameById));
                     }
+                    continue;
                 }
-                // 总分优先取参与方累计分(与海选结算口径一致),无累计时用裁判分求和兜底
-                TMatchParticipant p = participantByCid.get(r.getCompetitorId());
-                BigDecimal total = p != null && p.getScoreValue() != null ? p.getScoreValue()
-                    : refScores.isEmpty() ? null : sum;
-                item.setScore(total);
-                item.setRefereeScores(refScores.isEmpty() ? null : refScores);
-                roundScores.add(item);
+                // 常规海选:取本轮该选手评分;本轮无分时回退到同场其他轮次(兼容历史单轮写入)
+                List<TRoundScore> rs = roundScoresOfRound.stream()
+                    .filter(s -> Objects.equals(s.getCompetitorId(), r.getCompetitorId()))
+                    .toList();
+                if (rs.isEmpty()) {
+                    rs = scoresByCompetitor.getOrDefault(r.getCompetitorId(), List.of()).stream()
+                        .filter(s -> matchRoundIds.contains(s.getRoundId()))
+                        .toList();
+                }
+                roundScores.add(buildAuditionRoundItem(r, r.getCompetitorId(), rs,
+                    nameById, participantByCid, refereeNameById));
             }
             vo.setRoundScores(roundScores);
         }
+    }
+
+    /**
+     * 构建海选单轮评分项:总分优先取参与方累计分(与海选结算口径一致),无累计时用裁判分求和兜底;
+     * 结算后带出结果状态(晋级/淘汰),供导播台在确认晋级前展示二海晋级者。
+     */
+    private MatchRoundScoreVo buildAuditionRoundItem(TMatchRound r, Long competitorId,
+                                                     List<TRoundScore> scores,
+                                                     Map<Long, String> nameById,
+                                                     Map<Long, TMatchParticipant> participantByCid,
+                                                     Map<Long, String> refereeNameById) {
+        MatchRoundScoreVo item = new MatchRoundScoreVo();
+        item.setRoundId(r.getId());
+        item.setRoundSequence(r.getRoundSequence());
+        item.setCompetitorId(competitorId);
+        item.setCompetitorName(competitorId == null ? null : nameById.get(competitorId));
+
+        List<MatchRoundScoreVo.RefereeScore> refScores = new ArrayList<>();
+        BigDecimal sum = BigDecimal.ZERO;
+        if (scores != null) {
+            for (TRoundScore s : scores) {
+                if (s.getScore() == null) {
+                    continue;
+                }
+                sum = sum.add(s.getScore());
+                MatchRoundScoreVo.RefereeScore ref = new MatchRoundScoreVo.RefereeScore();
+                ref.setRefereeId(s.getRefereeId());
+                ref.setRefereeName(s.getRefereeId() == null ? null : refereeNameById.get(s.getRefereeId()));
+                ref.setScore(s.getScore());
+                refScores.add(ref);
+            }
+        }
+        TMatchParticipant p = competitorId == null ? null : participantByCid.get(competitorId);
+        BigDecimal total = p != null && p.getScoreValue() != null ? p.getScoreValue()
+            : refScores.isEmpty() ? null : sum;
+        item.setScore(total);
+        item.setRefereeScores(refScores.isEmpty() ? null : refScores);
+        if (p != null && p.getOutcomeStatus() != null) {
+            item.setOutcomeStatus(p.getOutcomeStatus());
+        }
+        return item;
     }
 
     /**

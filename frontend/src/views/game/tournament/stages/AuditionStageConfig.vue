@@ -39,6 +39,9 @@
             <div v-if="(config.circles || 1) > 1" class="text-sm text-neutral-400 mt-1">
               分 {{ config.circles }} 圈并行，每圈约 {{ Math.ceil(config.scale / config.circles) }} 人、晋级 {{ Math.floor(config.advanceCount / config.circles) }} 人
             </div>
+            <div v-if="(config.circles || 1) > 1 && hasCircleQuotas" class="text-sm text-neutral-400 mt-1">
+              每圈晋级：{{ config.circleAdvanceCounts.join(' / ') }}（合计 {{ totalQuota }} 人）
+            </div>
             <div class="text-xs text-neutral-500 mt-2">晋级率：{{ ((config.advanceCount / config.scale) * 100).toFixed(1) }}%</div>
           </div>
         </template>
@@ -106,7 +109,33 @@
               </div>
             </div>
             <p v-if="(config.circles || 1) > 1" class="text-[11px] text-neutral-500 mt-2">
-              分 {{ config.circles }} 圈并行进行，每圈约 {{ Math.ceil(config.scale / config.circles) }} 人、晋级 {{ Math.floor(config.advanceCount / config.circles) }} 人（请确保晋级名额可被圈数整除）
+              分 {{ config.circles }} 圈并行进行，每圈约 {{ Math.ceil(config.scale / config.circles) }} 人，可分别配置每圈晋级人数
+            </p>
+          </div>
+
+          <!-- 每圈晋级人数(分圈时可独立配置) -->
+          <div v-if="(config.circles || 1) > 1" class="bg-black border border-neutral-700 rounded-lg p-4">
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-xs text-neutral-500">每圈晋级人数</label>
+              <span class="text-[11px] text-neutral-600">合计 {{ totalQuota }} / {{ config.advanceCount }}</span>
+            </div>
+            <div class="grid gap-2" :style="{ gridTemplateColumns: `repeat(${Math.min(circleCount, 4)}, minmax(0, 1fr))` }">
+              <div v-for="(_, i) in circleCount" :key="i">
+                <label class="text-[10px] text-neutral-600 block mb-1">第 {{ i + 1 }} 圈</label>
+                <input
+                  type="number"
+                  v-model.number="config.circleAdvanceCounts[i]"
+                  :min="0"
+                  class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                  @input="handleUpdate"
+                />
+              </div>
+            </div>
+            <p v-if="totalQuota !== config.advanceCount" class="text-[11px] text-amber-500/80 mt-2">
+              每圈合计与总名额不一致，结算按每圈配置为准
+            </p>
+            <p v-if="currentMode === ConfigMode.NORMAL && localStage.status === 'PENDING'" class="text-[11px] text-amber-500/80 mt-2">
+              赛段已生成对阵，修改圈数/每圈名额后请在「流程操作」中重新点击「生成对阵」生效
             </p>
           </div>
 
@@ -165,6 +194,9 @@
             <div v-if="(config.circles || 1) > 1" class="text-sm text-neutral-400 mt-1">
               分 {{ config.circles }} 圈并行，每圈约 {{ Math.ceil(config.scale / config.circles) }} 人、晋级 {{ Math.floor(config.advanceCount / config.circles) }} 人
             </div>
+            <div v-if="(config.circles || 1) > 1 && hasCircleQuotas" class="text-sm text-neutral-400 mt-1">
+              每圈晋级：{{ config.circleAdvanceCounts.join(' / ') }}（合计 {{ totalQuota }} 人）
+            </div>
             <div class="text-xs text-neutral-500 mt-2">晋级率：{{ ((config.advanceCount / config.scale) * 100).toFixed(1) }}%</div>
           </div>
         </template>
@@ -206,8 +238,51 @@ const config = ref<any>({
   advanceByRank: false,
   judgeVote: false,
   maxScore: 100,
-  passingScore: 60
+  passingScore: 60,
+  circleAdvanceCounts: []
 });
+
+// 分圈数量
+const circleCount = computed(() => Math.max(1, config.value.circles || 1));
+
+// 是否已配置每圈晋级名额
+const hasCircleQuotas = computed(
+  () => circleCount.value > 1 && Array.isArray(config.value.circleAdvanceCounts)
+    && config.value.circleAdvanceCounts.length === circleCount.value
+);
+
+// 每圈名额合计
+const totalQuota = computed(() => {
+  if (hasCircleQuotas.value) {
+    return config.value.circleAdvanceCounts.reduce((s: number, n: number) => s + (Number(n) || 0), 0);
+  }
+  return config.value.advanceCount;
+});
+
+// 圈数变化时同步每圈名额数组(保留已配置值,新增位用均分值补齐)
+const syncCircleQuotas = () => {
+  const n = circleCount.value;
+  if (n <= 1) {
+    config.value.circleAdvanceCounts = [];
+    return;
+  }
+  const current = Array.isArray(config.value.circleAdvanceCounts)
+    ? [...config.value.circleAdvanceCounts]
+    : [];
+  const base = Math.max(0, Math.floor((config.value.advanceCount || 0) / n));
+  const rem = Math.max(0, (config.value.advanceCount || 0) % n);
+  if (current.length === 0) {
+    for (let i = 0; i < n; i++) {
+      current.push(base + (i < rem ? 1 : 0));
+    }
+  } else {
+    while (current.length < n) {
+      current.push(base);
+    }
+    current.length = n;
+  }
+  config.value.circleAdvanceCounts = current;
+};
 
 // 解析配置
 const parseConfig = () => {
@@ -228,9 +303,13 @@ const serializeConfig = () => {
 
 // 更新处理
 const handleUpdate = () => {
+  if (circleCount.value > 1 && hasCircleQuotas.value) {
+    localStage.value.teamCountEnd = totalQuota.value;
+  } else {
+    localStage.value.teamCountEnd = config.value.advanceCount;
+  }
   localStage.value.ruleConfig = serializeConfig();
   localStage.value.teamCountStart = config.value.scale;
-  localStage.value.teamCountEnd = config.value.advanceCount;
   emit('update', localStage.value);
 };
 
@@ -244,9 +323,19 @@ watch(
   { deep: true }
 );
 
+// 圈数变化:重建每圈名额数组并触发保存
+watch(
+  () => config.value.circles,
+  () => {
+    syncCircleQuotas();
+    handleUpdate();
+  }
+);
+
 // 初始化
 onMounted(() => {
   parseConfig();
+  syncCircleQuotas();
 });
 </script>
 

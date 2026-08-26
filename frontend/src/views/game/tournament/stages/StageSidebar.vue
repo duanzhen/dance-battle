@@ -112,6 +112,15 @@
         >
           计算晋级
         </button>
+        <button
+          v-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'"
+          @click="doResetToDraft"
+          :disabled="lifecycleLoading"
+          title="清除已生成的对阵,回到规划态重新排种子/生成"
+          class="w-full py-2 text-xs font-medium rounded-lg border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/40 hover:bg-amber-500/5 transition-colors disabled:opacity-50"
+        >
+          重置为草稿
+        </button>
       </div>
 
       <!-- 裁判组 -->
@@ -171,8 +180,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import { ChevronDown, Settings } from 'lucide-vue-next';
-import { ElMessage } from 'element-plus';
-import { initializeStage, generateMatches, startStage, completeStage, calculateAdvancement } from '@/api/game/stage/lifecycle';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { initializeStage, generateMatches, startStage, completeStage, calculateAdvancement, resetStageToDraft } from '@/api/game/stage/lifecycle';
 import { listReferee } from '@/api/game/referee';
 import { getStageRefereeIds, assignStageReferees } from '@/api/game/refereeStage';
 import { StageData, StageMode } from './types';
@@ -278,6 +287,19 @@ const doGenerateMatches = () => runLifecycle(() => generateMatches({ stageId: lo
 const doStart = () => runLifecycle(() => startStage(localStage.value.id), 'GAMING', '赛段已开始');
 const doComplete = () => runLifecycle(() => completeStage(localStage.value.id), 'SETTLED', '赛段已结算');
 const doCalculateAdvancement = () => runLifecycle(() => calculateAdvancement(localStage.value.id), undefined, '晋级已计算');
+const doResetToDraft = async () => {
+  if (!localStage.value?.id) return;
+  try {
+    await ElMessageBox.confirm(
+      '将清除本赛段已生成的对阵/轮次/打分，参赛方回退待定，可重新排种子并生成对阵。确定重置为草稿吗？',
+      '重置为草稿',
+      { type: 'warning', confirmButtonText: '确定重置', cancelButtonText: '取消' }
+    );
+  } catch {
+    return; // 用户取消
+  }
+  runLifecycle(() => resetStageToDraft(localStage.value.id), 'DRAFT', '已重置为草稿');
+};
 
 // ===== 裁判分配 =====
 const refereeList = ref<{ id: string | number; name: string }[]>([]);

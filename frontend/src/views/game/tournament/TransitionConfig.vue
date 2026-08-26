@@ -85,6 +85,64 @@
         </div>
       </div>
 
+      <!-- 海选弃权/顶替(结算后、确认晋级前) -->
+      <div
+        v-if="isAuditionSource && sourceStage?.status === 'SETTLED' && !advancementConfirmed"
+        class="space-y-4 border-t border-neutral-800 pt-6"
+      >
+        <div class="flex items-center justify-between">
+          <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">海选弃权 / 顶替</h4>
+          <span class="text-xs text-neutral-500">晋级者弃权后,可手动把名次靠下的淘汰者顶上来,或不顶替(对手轮空晋级)</span>
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="text-[11px] text-neutral-500 mb-1">晋级者</div>
+          <div
+            v-for="c in auditionAdvancers"
+            :key="c.id"
+            class="flex items-center gap-3 px-3 py-2 rounded-lg bg-black border border-neutral-800"
+          >
+            <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name }}</span>
+            <span class="text-[10px] text-neutral-600 flex-none">#{{ c.finalRank }}</span>
+            <button
+              @click="handleWithdraw(c)"
+              :disabled="withdrawing"
+              class="px-2 py-1 text-[10px] rounded border border-red-900/30 text-red-400 hover:bg-red-900/10 disabled:opacity-40"
+            >
+              弃权
+            </button>
+          </div>
+          <p v-if="auditionAdvancers.length === 0" class="text-[10px] text-neutral-600">暂无晋级者</p>
+        </div>
+
+        <div v-if="auditionWithdrawn.length > 0" class="space-y-1.5">
+          <div class="text-[11px] text-neutral-500 mb-1">已弃权(可顶替)</div>
+          <div
+            v-for="w in auditionWithdrawn"
+            :key="w.id"
+            class="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-500/5 border border-red-900/30"
+          >
+            <span class="flex-1 min-w-0 text-sm text-neutral-400 line-through truncate">{{ w.name }}</span>
+            <select
+              v-model="replacementByWithdrawn[w.id]"
+              class="bg-black border border-neutral-700 rounded px-2 py-1 text-xs text-white"
+            >
+              <option :value="null">不顶替(对手轮空晋级)</option>
+              <option v-for="r in auditionReplacements" :key="r.id" :value="r.id">
+                {{ r.name }} #{{ r.finalRank }}
+              </option>
+            </select>
+            <button
+              @click="handlePromote(w)"
+              :disabled="promoting"
+              class="px-2 py-1 text-[10px] rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-40"
+            >
+              顶替
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 下一赛段参赛方:上一赛段晋级者与新增 GUEST 统一落位(与预排逻辑一致) -->
       <div class="space-y-4 border-t border-neutral-800 pt-6">
         <div class="flex items-center justify-between">
@@ -566,6 +624,7 @@ import { ArrowRight, SlidersHorizontal, Lock, UserPlus, Trash2 } from 'lucide-vu
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { getStage, updateStage, getStagePreBracket, adjustStageAdvancement, addStageGuest, setStageSeedOrder } from '@/api/game/stage';
 import { calculateAdvancement } from '@/api/game/stage/lifecycle';
+import { promoteReplacement } from '@/api/game/stage/lifecycle';
 import { listCompetitor, delCompetitor } from '@/api/game/competitor';
 
 // Props
@@ -596,6 +655,100 @@ const targetStage = ref<any>(null);
 /** 来源赛段是否为排名赛(同分待定晋级调整仅排名赛需要) */
 const isRankSource = computed(() => sourceStage.value?.stageMode === 'RANK');
 
+/** 来源赛段是否为海选(弃权/顶替调整) */
+const isAuditionSource = computed(() => sourceStage.value?.stageMode === 'AUDITION');
+
+// 海选弃权/顶替状态
+const auditionAdvancers = ref<any[]>([]);
+const auditionWithdrawn = ref<any[]>([]);
+const auditionReplacements = ref<any[]>([]);
+const replacementByWithdrawn = reactive<Record<string, string | number | null>>({});
+const withdrawing = ref(false);
+const promoting = ref(false);
+
+/** 加载海选晋级者/已弃权者/可顶替淘汰者(按名次取前若干) */
+const loadAuditionWithdrawal = async () => {
+  if (!isAuditionSource.value || sourceStage.value?.status !== 'SETTLED') {
+    auditionAdvancers.value = [];
+    auditionWithdrawn.value = [];
+    auditionReplacements.value = [];
+    return;
+  }
+  try {
+    const sid = sourceStage.value.id;
+    const [advResp, repResp] = await Promise.all([
+      listCompetitor({ stageId: sid, outcomeStatus: 'ADVANCE', pageNum: 1, pageSize: 1000 } as any),
+      listCompetitor({ stageId: sid, outcomeStatus: 'ELIMINATED', pageNum: 1, pageSize: 1000 } as any)
+    ]);
+    const adv = (advResp.data || (advResp as any).data || []) as any[];
+    const rep = (repResp.data || (repResp as any).data || []) as any[];
+    auditionAdvancers.value = adv
+      .filter((c) => c.outcomeStatus === 'ADVANCE')
+      .sort((a, b) => (a.finalRank || 9999) - (b.finalRank || 9999));
+    // WITHDRAWN 需单独查询
+    const wdResp: any = await listCompetitor({ stageId: sid, outcomeStatus: 'WITHDRAWN', pageNum: 1, pageSize: 1000 } as any);
+    auditionWithdrawn.value = (wdResp.data || (wdResp as any).data || []).filter((c: any) => c.outcomeStatus === 'WITHDRAWN');
+    auditionReplacements.value = rep
+      .filter((c) => c.outcomeStatus === 'ELIMINATED')
+      .sort((a, b) => (a.finalRank || 9999) - (b.finalRank || 9999));
+    auditionWithdrawn.value.forEach((w: any) => {
+      if (replacementByWithdrawn[w.id] === undefined) {
+        replacementByWithdrawn[w.id] = null;
+      }
+    });
+  } catch (error) {
+    console.warn('加载海选弃权/顶替信息失败:', error);
+    auditionAdvancers.value = [];
+    auditionWithdrawn.value = [];
+    auditionReplacements.value = [];
+  }
+};
+
+/** 晋级者弃权(不顶替,对手轮空晋级) */
+const handleWithdraw = async (c: any) => {
+  if (!sourceStage.value) return;
+  try {
+    await ElMessageBox.confirm(`确认「${c.name}」弃权?弃权后不再占用晋级名额,可另行顶替。`, '海选弃权', {
+      type: 'warning', confirmButtonText: '确认弃权', cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+  withdrawing.value = true;
+  try {
+    await promoteReplacement(sourceStage.value.id, { withdrawnCompetitorId: c.id });
+    ElMessage.success(`「${c.name}」已弃权`);
+    await loadAuditionWithdrawal();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '弃权失败');
+  } finally {
+    withdrawing.value = false;
+  }
+};
+
+/** 顶替:用所选淘汰者替换已弃权者(选"不顶替"则仅提示) */
+const handlePromote = async (w: any) => {
+  if (!sourceStage.value) return;
+  const replacementId = replacementByWithdrawn[w.id];
+  if (!replacementId) {
+    ElMessage.info('已选择不顶替,对手将在淘汰赛中轮空晋级');
+    return;
+  }
+  promoting.value = true;
+  try {
+    await promoteReplacement(sourceStage.value.id, {
+      withdrawnCompetitorId: w.id,
+      replacementCompetitorId: replacementId
+    });
+    ElMessage.success('顶替晋级完成');
+    await loadAuditionWithdrawal();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '顶替失败');
+  } finally {
+    promoting.value = false;
+  }
+};
+
 const modeLabelMap: Record<string, string> = {
   AUDITION: '海选赛',
   KNOCKOUT: '淘汰赛',
@@ -621,6 +774,7 @@ const loadSourceConfig = async () => {
     const rule = JSON.parse(sourceStage.value.ruleConfig || '{}');
     const t = rule.transition || {};
     await loadPendingAdvancers();
+    await loadAuditionWithdrawal();
   } catch {
     console.warn('加载转场配置失败');
   }

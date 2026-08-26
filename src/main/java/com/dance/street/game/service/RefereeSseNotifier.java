@@ -52,7 +52,7 @@ public class RefereeSseNotifier {
             // 注意:雪花ID超 JS 安全整数,必须序列化为字符串,否则前端 JSON.parse 后精度丢失
             StringBuilder sb = new StringBuilder("{\"type\":\"").append(type)
                 .append("\",\"tournamentId\":\"").append(stage.getTournamentId()).append('"')
-                .append("\",\"stageId\":\"").append(stageId).append('"');
+                .append(",\"stageId\":\"").append(stageId).append('"');
             if (matchId != null) {
                 sb.append(",\"matchId\":\"").append(matchId).append('"');
             }

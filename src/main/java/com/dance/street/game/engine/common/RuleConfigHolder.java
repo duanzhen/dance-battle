@@ -41,6 +41,12 @@ public class RuleConfigHolder implements Serializable {
     /** 海选分圈数(mode=AUDITION 时使用,1=不分圈,全场一场) */
     private Integer circles;
 
+    /**
+     * 每圈晋级人数(mode=AUDITION 分圈时可选):按圈顺序(ZONE-1..n)逐圈配置晋级名额,
+     * 各圈可不相同;未配置时按 advanceCount 均分并校验可整除。长度不足的圈回退均分值。
+     */
+    private java.util.List<Integer> circleAdvanceCounts;
+
     /** 分圈方式:true=随机抽取分场(签到后随机分到各圈场次),false=按号码顺序均分(仅生成时使用,不入库) */
     private Boolean randomSplit;
 

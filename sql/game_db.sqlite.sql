@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS `t_competitor_member` (
 
 CREATE INDEX IF NOT EXISTS `idx_comp` ON `t_competitor_member` (`competitor_id`);
 CREATE INDEX IF NOT EXISTS `idx_player` ON `t_competitor_member` (`player_id`);
+-- 同一参赛方内同一选手唯一(防并发签到/重复 JOIN 产生重复成员)
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_competitor_member` ON `t_competitor_member` (`competitor_id`, `player_id`);
 
 --
 -- Table structure for table `t_match`
@@ -205,6 +207,8 @@ CREATE TABLE IF NOT EXISTS `t_round_score` (
   `remark` TEXT,
   PRIMARY KEY (`id`)
 );
+-- 同一轮次同一裁判同一选手同一维度唯一(防并发重复提交/重复投票)
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_round_score` ON `t_round_score` (`round_id`, `referee_id`, `competitor_id`, `dimension`);
 
 --
 -- Table structure for table `t_stage`

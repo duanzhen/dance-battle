@@ -116,6 +116,37 @@
       </div>
       </div>
 
+      <!-- 分圈落位(海选/排名赛分圈且已生成对阵时,线下抽签可手动选圈) -->
+      <div v-if="circleList.length > 1" class="bg-neutral-800/50 rounded-lg p-3 border border-neutral-700">
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5">分圈落位</label>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            @click="selectedMatchId = null"
+            class="rounded-lg border px-3 py-2 text-left transition-all"
+            :class="selectedMatchId === null
+              ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+              : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'"
+          >
+            <div class="text-xs font-bold">自动分配</div>
+            <div class="text-[10px] text-neutral-500 mt-0.5">按各圈剩余名额择优</div>
+          </button>
+          <button
+            v-for="circle in circleList"
+            :key="circle.matchId"
+            @click="selectedMatchId = circle.matchId"
+            class="rounded-lg border px-3 py-2 text-left transition-all"
+            :class="selectedMatchId === circle.matchId
+              ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+              : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'"
+          >
+            <div class="text-xs font-bold">{{ circle.name }}</div>
+            <div class="text-[10px] text-neutral-500 mt-0.5">
+              当前 {{ circle.count }} 人<template v-if="circle.quota !== null"> / 名额 {{ circle.quota }}</template>
+            </div>
+          </button>
+        </div>
+      </div>
+
       <!-- 选中信息:常显,避免弹窗高度变化闪烁 -->
       <div class="bg-neutral-800/50 rounded-lg p-3 border border-neutral-700">
         <div class="text-sm">
@@ -178,6 +209,9 @@ import { PlayerVO } from '@/api/game/player/types';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { listCompetitor } from '@/api/game/competitor';
 import { checkInPlayer } from '@/api/game/player';
+import { getStage } from '@/api/game/stage';
+import { listMatch } from '@/api/game/match';
+import { listMatchParticipant } from '@/api/game/matchParticipant';
 import PortraitMatting from './PortraitMatting.vue';
 
 const props = defineProps<{
@@ -205,6 +239,55 @@ const mattingRef = ref<InstanceType<typeof PortraitMatting> | null>(null);
 
 const numberSlots = ref<{ number: number; competitor: CompetitorVO | null }[]>([]);
 const slotListRef = ref<HTMLElement | null>(null);
+const circleList = ref<{ matchId: string | number; name: string; count: number; quota: number | null }[]>([]);
+const selectedMatchId = ref<string | number | null>(null);
+
+// 加载分圈信息:赛段配置(circles/circleAdvanceCounts)+ 各圈当前人数(仅海选/排名赛分圈且已生成对阵时)
+const loadCircleInfo = async () => {
+  circleList.value = [];
+  selectedMatchId.value = null;
+  try {
+    const stageRes = await getStage(props.stageId);
+    const stage = stageRes.data || (stageRes as any).data;
+    const mode = stage?.stageMode;
+    if (!mode || (mode !== 'AUDITION' && mode !== 'RANK')) {
+      return;
+    }
+    let circles = 0;
+    let quotas: number[] = [];
+    try {
+      const rc = JSON.parse(stage?.ruleConfig || '{}');
+      circles = Math.max(1, Number(rc.circles) || 1);
+      quotas = Array.isArray(rc.circleAdvanceCounts) ? rc.circleAdvanceCounts.map(Number) : [];
+    } catch {
+      // 忽略解析失败,不展示分圈信息
+    }
+    if (circles <= 1) {
+      return;
+    }
+    const matchRes = await listMatch({ stageId: props.stageId } as any);
+    const matches = (matchRes.data || (matchRes as any).data || []) as any[];
+    const ordered = [...matches].sort(
+      (a, b) => (Number(a.displayRow) || 0) - (Number(b.displayRow) || 0)
+    );
+    const list: typeof circleList.value = [];
+    for (let i = 0; i < ordered.length; i++) {
+      const m = ordered[i];
+      const parts = await listMatchParticipant({ matchId: m.id } as any);
+      const participants = (parts.data || (parts as any).data || []) as any[];
+      list.push({
+        matchId: m.id,
+        name: m.displayZone ? `第${String(m.displayZone).replace('ZONE-', '')}圈` : m.name || `圈${i + 1}`,
+        count: participants.length,
+        quota: quotas.length > i && quotas[i] >= 0 ? quotas[i] : null
+      });
+    }
+    circleList.value = list;
+  } catch (error) {
+    console.warn('加载分圈信息失败:', error);
+    circleList.value = [];
+  }
+};
 
 // 滚动到第一个空闲号码(只滚动号码列表容器,不影响页面)
 const scrollToFirstFreeSlot = async () => {
@@ -329,7 +412,8 @@ const handleSubmit = async () => {
       competitorNumber: String(selectedSlot.value.number),
       competitorId: selectedSlot.value.competitor?.id,
       name: playerName.value.trim(),
-      avatar: playerAvatar.value
+      avatar: playerAvatar.value,
+      matchId: selectedMatchId.value ?? undefined
     });
 
     ElMessage.success('签到成功');
@@ -351,6 +435,7 @@ const open = (player?: PlayerVO | null) => {
   isEditing.value = false;
   visible.value = true;
   loadCompetitors();
+  loadCircleInfo();
 };
 
 const handleClose = () => {

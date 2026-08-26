@@ -35,10 +35,16 @@ public interface ITStageLifecycleService {
     int settleByeMatches(Long stageId);
 
     /**
-     * 海选/排名赛赛段进行中补签到:把新参赛方挂入当前人数最少的圈场次(新增 participant + round),
-     * 保证其可被裁判打分并参与最终结算。仅 AUDITION/RANK + GAMING 且已生成场次时生效,否则为空操作。
+     * 海选/排名赛补签到:把新参赛方挂入圈场次(新增 participant + round),保证可被裁判打分并参与结算。
+     * 分圈且配置了每圈名额时,按"剩余名额余量"择优落圈;否则挂入人数最少的圈。
+     * AUDITION/RANK + GAMING/PENDING 且已生成场次时生效,尚未生成场次时为空操作(后续生成会纳入)。
      */
     void appendStageCompetitor(Long stageId, Long competitorId);
+
+    /**
+     * 同上,但显式指定目标圈场次(签到弹窗手动选圈)。目标圈须为未结算的正式圈。
+     */
+    void appendStageCompetitor(Long stageId, Long competitorId, Long targetMatchId);
 
     /**
      * GUEST 加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入。
@@ -65,6 +71,12 @@ public interface ITStageLifecycleService {
     /** 赛段 GAMING→SETTLED(需所有场次已结算);结算后仅产出晋级者/排名,由导播台在中间态「确认晋级」 */
     void completeStage(Long stageId);
 
+    /**
+     * 回退到草稿:清除赛段已生成的全部场次(级联轮次/参赛明细/打分),参赛方回退待定,
+     * isInitialized 归零、状态置 DRAFT,可重新排种子/生成对阵。仅 DRAFT/PENDING 状态可用。
+     */
+    void resetStageToDraft(Long stageId);
+
     /** 计算晋级:从已结算赛段取晋级者,在下一赛段创建新参赛方。返回晋级人数(幂等:已晋级返回 0) */
     int calculateAdvancement(CalculateAdvancementBo bo);
 
@@ -73,6 +85,18 @@ public interface ITStageLifecycleService {
      * (传入全部待定者即全部晋级,未选中的待定者标记淘汰)。返回调整的晋级人数。
      */
     int adjustAdvancement(Long stageId, List<Long> competitorIds);
+
+    /**
+     * 海选弃权/顶替(结算后、确认晋级前):
+     * <ul>
+     *   <li>仅传 withdrawnCompetitorId:标记晋级者弃权,其后的晋级者名次整体前移
+     *       (名额往前推;不顶替时末尾空位在淘汰赛中即轮空);</li>
+     *   <li>传 replacementCompetitorId:把任意被淘汰的选手顶替晋级,补齐到晋级名单末尾
+     *       (支持任意 被淘汰者→任意晋级者 的替换;顶替总数受晋级名额上限约束)。</li>
+     * </ul>
+     * 返回新晋级的顶替人数(仅弃权时返回 0)。
+     */
+    int promoteReplacement(Long stageId, Long withdrawnCompetitorId, Long replacementCompetitorId);
 
     /** 排名赛排名明细:按圈返回每位参赛者的总分与各维度聚合分(未公布时隐藏分数) */
     RankDetailVo getRankDetail(Long stageId);

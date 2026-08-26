@@ -1,5 +1,6 @@
 package com.dance.street.game.controller;
 
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.domain.R;
@@ -32,6 +33,7 @@ public class RefereeStageController {
     /**
      * 查询某赛段已分配的裁判ID列表
      */
+    @SaCheckPermission("game:refereeStage:list")
     @GetMapping("/referee-ids")
     public R<List<Long>> getRefereeIds(@RequestParam Long stageId) {
         return R.ok(refereeStageService.getRefereeIdsByStageId(stageId));
@@ -40,6 +42,7 @@ public class RefereeStageController {
     /**
      * 批量设置赛段裁判（全量替换）
      */
+    @SaCheckPermission("game:refereeStage:edit")
     @PostMapping("/assign")
     public R<Void> assignReferees(@Validated @RequestBody StageRefereeBo bo) {
         refereeStageService.assignReferees(bo);

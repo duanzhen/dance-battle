@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.time.Duration;
 
 /**
  * 比赛结果提交编排:写明细分 → ScoringEngine 算分算排名 → 回写 participant →
@@ -157,7 +158,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                         || se.getScore().compareTo(maxScore) > 0) {
                         throw new ServiceException("{}打分须在 0-{} 之间", isAudition ? "海选" : "维度", maxScore);
                     }
-                    // 只更新该裁判对该选手的打分,保留其他选手已提交的分数
+                    // 越界校验:只能给本场参赛方打分(海选/排名赛逐选手轮次);
+                    // 加赛场次等单轮共评场景无选手专属轮次,回退到当前轮
+                    if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
+                        throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
+                    }
                     TMatchRound target = roundByCompetitor.get(se.getCompetitorId());
                     if (target == null) {
                         target = mustGetRound(match);
@@ -208,6 +213,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         if (bo.getScores() != null && !bo.getScores().isEmpty()) {
             TMatchRound round = mustGetRound(match);
             for (ScoreEntryBo se : bo.getScores()) {
+                // 越界校验:只能给本场参赛方提交打分,避免向不相关选手写入脏数据
+                if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
+                    throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
+                }
                 TRoundScore rs = new TRoundScore();
                 rs.setTournamentId(match.getTournamentId());
                 rs.setRoundId(round.getId());
@@ -280,19 +289,53 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             Map<Long, String> aggregated = aggregateRefereeVotes(voteRound, competitorIds, assigned);
             if (aggregated == null) {
                 if (isArena) {
-                    // 擂台赛:票数持平不结算、不加轮,裁判重新投票直至分出胜负
-                    log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),擂台赛不允许平局,等待重新投票",
+                    // 擂台赛:票数持平不结算、不加轮,允许裁判重新投票但有次数上限,
+                    // 超过上限按多数票兜底裁决(仍持平则擂主/左侧 slot1 守擂成功),
+                    // 避免偶数裁判 1:1 平票时流程永久死锁
+                    String revoteKey = "arena:revote:" + match.getId();
+                    long revote = 1;
+                    try {
+                        revote = RedisUtils.incrAtomicValue(revoteKey);
+                        if (revote == 1) {
+                            RedisUtils.expire(revoteKey, Duration.ofHours(1));
+                        }
+                    } catch (Exception e) {
+                        log.warn("擂台重投计数失败,按首次处理: {}", e.getMessage());
+                    }
+                    if (revote < 3) {
+                        int leftWinsBefore = leftWinVotes(voteRound, competitorIds);
+                        int rightWinsBefore = rightWinVotes(voteRound, competitorIds);
+                        // 平票作废本轮投票:清空后裁判重新判罚,保证重投计数按"轮"而非按"提交次数"累计
+                        // (不清空时,下一轮第一名裁判提交即满足投票数触发聚合,2 名裁判会少算一轮)
+                        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                            .eq(TRoundScore::getRoundId, voteRound.getId())
+                            .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE));
+                        log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),擂台赛不允许平局,"
+                                + "本轮投票已作废,等待重新判罚(第{}轮,最多3轮)",
+                            match.getId(), leftWinsBefore, rightWinsBefore, revote);
+                        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
+                        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
+                        return buildVo(match.getId(), StageConstants.MATCH_GAMING, List.of());
+                    }
+                    Map<Long, String> fallback = new HashMap<>();
+                    if (leftWinVotes(voteRound, competitorIds) >= rightWinVotes(voteRound, competitorIds)) {
+                        fallback.put(competitorIds.get(0), MatchOutcomeEnum.WIN.getCode());
+                        fallback.put(competitorIds.get(1), MatchOutcomeEnum.LOSS.getCode());
+                    } else {
+                        fallback.put(competitorIds.get(0), MatchOutcomeEnum.LOSS.getCode());
+                        fallback.put(competitorIds.get(1), MatchOutcomeEnum.WIN.getCode());
+                    }
+                    aggregated = fallback;
+                    RedisUtils.deleteObject(revoteKey);
+                    log.warn("场次[{}]擂台赛重投{}次仍持平,兜底裁决: {}", match.getId(), revote, aggregated);
+                } else {
+                    // 票数持平(如 1红1蓝、1红1蓝1平):综合判定为平局,在当前场次下加赛一轮重新比
+                    log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),判定平局并加赛一轮",
                         match.getId(), leftWinVotes(voteRound, competitorIds), rightWinVotes(voteRound, competitorIds));
-                    refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
-                    tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
-                    return buildVo(match.getId(), StageConstants.MATCH_GAMING, List.of());
-                }
-                // 票数持平(如 1红1蓝、1红1蓝1平):综合判定为平局,在当前场次下加赛一轮重新比
-                log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),判定平局并加赛一轮",
-                    match.getId(), leftWinVotes(voteRound, competitorIds), rightWinVotes(voteRound, competitorIds));
-                aggregated = new HashMap<>();
-                for (Long cid : competitorIds) {
-                    aggregated.put(cid, MatchOutcomeEnum.DRAW.getCode());
+                    aggregated = new HashMap<>();
+                    for (Long cid : competitorIds) {
+                        aggregated.put(cid, MatchOutcomeEnum.DRAW.getCode());
+                    }
                 }
             }
             effectiveOutcomes = aggregated;
@@ -346,6 +389,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         mUpd.setId(match.getId());
         mUpd.setStatus(StageConstants.MATCH_SETTLED);
         matchMapper.updateById(mUpd);
+        // 场次已出结果,清理擂台重投计数,避免影响后续对决
+        RedisUtils.deleteObject("arena:revote:" + match.getId());
 
         // 全部轮次(含平局加赛轮)一并结算
         TMatchRound roundUpd = new TMatchRound();
@@ -411,6 +456,20 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 .eq(TMatch::getStatus, StageConstants.MATCH_GAMING)
                 .ne(TMatch::getId, match.getId()));
             for (TMatch other : otherGaming) {
+                // 防误操作丢票:其他进行中场次已有裁判提交判罚时拒绝切换,
+                // 要求先完成或显式重置,避免静默清空已投票
+                List<Long> otherRoundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                        .eq(TMatchRound::getMatchId, other.getId())
+                        .select(TMatchRound::getId))
+                    .stream().map(TMatchRound::getId).toList();
+                if (!otherRoundIds.isEmpty()) {
+                    long voted = roundScoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
+                        .in(TRoundScore::getRoundId, otherRoundIds));
+                    if (voted > 0) {
+                        throw new ServiceException(
+                            "场次[{}]已有裁判提交判罚,请先完成或重置该场次后再开始新场次", other.getId());
+                    }
+                }
                 clearMatchState(other, StageConstants.MATCH_PENDING);
                 refereeSseNotifier.notifyMatch(other.getStageId(), other.getId(), "match");
                 tournamentEventNotifier.notify(other.getTournamentId(), other.getStageId(), other.getId(), "match");
@@ -514,6 +573,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
         // 清掉本场 submit-result 的防重提交 key,重启后可立即重新判罚,避免 5 秒内重复提交被拦截
         RedisUtils.deleteKeys(GlobalConstants.REPEAT_SUBMIT_KEY + "/game/match/" + matchId + "/submit-result*");
+        // 清擂台重投计数,重新开始后重新计
+        RedisUtils.deleteObject("arena:revote:" + matchId);
         // 场次与轮次回目标状态
         TMatch mUpd = new TMatch();
         mUpd.setId(matchId);
@@ -893,6 +954,20 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds)
                 .isNotNull(TMatchParticipant::getCompetitorId));
+        if (parts.isEmpty()) {
+            return;
+        }
+        // 退赛选手不参与"全部打分完成"判定,否则 BATCH 模式会因退赛者从未打分而永远不自动公布
+        List<Long> partIds = parts.stream()
+            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+        java.util.Set<Long> withdrawn = partIds.isEmpty() ? java.util.Set.of()
+            : competitorMapper.selectByIds(partIds).stream()
+                .filter(c -> OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus()))
+                .map(TCompetitor::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        parts = parts.stream()
+            .filter(p -> p.getCompetitorId() == null || !withdrawn.contains(p.getCompetitorId()))
+            .toList();
         if (parts.isEmpty()) {
             return;
         }

@@ -29,6 +29,7 @@ import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.AddGuestBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
+import com.dance.street.game.domain.bo.PromoteReplacementBo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
@@ -208,6 +209,19 @@ public class TStageController extends BaseController {
     }
 
     /**
+     * 重置赛段为草稿:清除已生成对阵(级联轮次/参赛明细/打分),参赛方回退待定,
+     * isInitialized 归零,可重新排种子/生成对阵。仅 DRAFT/PENDING 状态可用。
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "重置赛段草稿", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{id}/reset-to-draft")
+    public R<Void> resetToDraft(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        tStageLifecycleService.resetStageToDraft(id);
+        return R.ok();
+    }
+
+    /**
      * 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾)。赛段须 GAMING 且无进行中对决。
      */
     @SaCheckPermission("game:stage:edit")
@@ -283,6 +297,25 @@ public class TStageController extends BaseController {
     public R<Integer> adjustAdvancement(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
                                         @RequestBody List<Long> competitorIds) {
         return R.ok(tStageLifecycleService.adjustAdvancement(stageId, competitorIds));
+    }
+
+    /**
+     * 海选弃权/顶替(结算后、确认晋级前):
+     * 仅传 withdrawnCompetitorId = 标记弃权,其后晋级者名次整体前移(不顶替时末尾空位即轮空);
+     * 传 replacementCompetitorId = 把任意被淘汰的选手顶替晋级,补齐到晋级名单末尾
+     * (支持任意 被淘汰者→任意晋级者 的替换)。
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "海选弃权顶替", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{stageId}/promote-replacement")
+    public R<Integer> promoteReplacement(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
+                                         @RequestBody(required = false) PromoteReplacementBo bo) {
+        if (bo == null) {
+            bo = new PromoteReplacementBo();
+        }
+        return R.ok(tStageLifecycleService.promoteReplacement(
+            stageId, bo.getWithdrawnCompetitorId(), bo.getReplacementCompetitorId()));
     }
 
     /**

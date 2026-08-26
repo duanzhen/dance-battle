@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { listVisScene, addVisScene, updateVisScene, delVisScene } from '@/api/game/visScene';
 import { listVisWidget, addVisWidget, updateVisWidget, delVisWidget } from '@/api/game/visWidget';
 import { projectSceneToScreen, clearScreenScene } from '@/api/game/screenControl';
+import { getTournamentAuthKey } from '@/api/game/tournament';
 import { subscribeScreenControl, unsubscribeScreenControl, unsubscribeAllScreens } from '@/utils/screenSse';
 
 export const useDirectorStore = defineStore('director', () => {
@@ -69,6 +70,9 @@ export const useDirectorStore = defineStore('director', () => {
 
   // 当前赛事 ID
   let currentTournamentId = null;
+
+  // 赛事导播专用凭证(屏幕控制 SSE/REST 均使用该凭证,不携带管理员 JWT)
+  const directorAuthKey = ref('');
 
   // ============================================
   // 计算属性
@@ -162,6 +166,8 @@ export const useDirectorStore = defineStore('director', () => {
         console.log('📭 该赛事暂无场景');
       }
 
+      // 获取赛事导播专用凭证(屏幕控制通道鉴权用)
+      await loadDirectorAuthKey();
       // 场景加载完成后，初始化所有屏幕的 SSE 订阅
       initializeScreensSubscriptions();
     } catch (error) {
@@ -336,6 +342,26 @@ export const useDirectorStore = defineStore('director', () => {
   // 屏幕管理（本地管理，不接入 API）
   // ============================================
 
+  // 获取赛事导播专用凭证
+  async function loadDirectorAuthKey() {
+    if (!currentTournamentId) {
+      directorAuthKey.value = '';
+      return '';
+    }
+    try {
+      const resp = await getTournamentAuthKey(currentTournamentId);
+      directorAuthKey.value = resp?.data?.authKey ?? resp?.data ?? '';
+      if (!directorAuthKey.value) {
+        console.warn('⚠️ 获取赛事导播凭证为空,屏幕控制功能不可用');
+      }
+      return directorAuthKey.value;
+    } catch (error) {
+      console.warn('⚠️ 获取赛事导播凭证失败,屏幕控制功能不可用:', error);
+      directorAuthKey.value = '';
+      return '';
+    }
+  }
+
   // 订阅单个屏幕的 SSE 控制通道
   function subscribeToScreenSSE(screenId) {
     if (!currentTournamentId) {
@@ -343,7 +369,12 @@ export const useDirectorStore = defineStore('director', () => {
       return;
     }
 
-    subscribeScreenControl(screenId, currentTournamentId, (message) => {
+    if (!directorAuthKey.value) {
+      console.warn(`[SSE] 缺少赛事导播凭证,跳过屏幕 ${screenId} 控制通道订阅`);
+      return;
+    }
+
+    subscribeScreenControl(screenId, currentTournamentId, directorAuthKey.value, (message) => {
       // 处理 SSE 消息
       handleScreenSSEMessage(screenId, message);
     });
@@ -430,8 +461,13 @@ export const useDirectorStore = defineStore('director', () => {
     try {
       // 如果屏幕有投射的场景，先清除投射（使用 projectSceneToScreen 并传递 sceneId: null）
       if (screen.currentSceneId) {
+        if (!directorAuthKey.value) {
+          await loadDirectorAuthKey();
+        }
         console.log(`📤 删除屏幕前先清除投射: screenId=${screenId}, sceneId=null`);
-        await projectSceneToScreen(screenId, null);
+        if (directorAuthKey.value) {
+          await projectSceneToScreen(screenId, null, currentTournamentId, directorAuthKey.value);
+        }
         console.log(`✅ 已清除屏幕 [${screen.name}] 的投射`);
       }
 
@@ -460,9 +496,15 @@ export const useDirectorStore = defineStore('director', () => {
     }
 
     try {
+      if (!directorAuthKey.value) {
+        await loadDirectorAuthKey();
+      }
+      if (!directorAuthKey.value) {
+        throw new Error('缺少赛事导播凭证,无法投射场景');
+      }
       // 调用后端 API
       console.log(`📤 向后端发送投射请求: screenId=${screenId}, sceneId=${sceneId}`);
-      await projectSceneToScreen(screenId, sceneId);
+      await projectSceneToScreen(screenId, sceneId, currentTournamentId, directorAuthKey.value);
 
       // 更新本地状态
       screen.currentSceneId = sceneId;
@@ -490,9 +532,15 @@ export const useDirectorStore = defineStore('director', () => {
     }
 
     try {
+      if (!directorAuthKey.value) {
+        await loadDirectorAuthKey();
+      }
+      if (!directorAuthKey.value) {
+        throw new Error('缺少赛事导播凭证,无法清除投射');
+      }
       // 调用后端 API
       console.log(`📤 向后端发送清除投射请求: screenId=${screenId}`);
-      await clearScreenScene(screenId);
+      await clearScreenScene(screenId, currentTournamentId, directorAuthKey.value);
 
       // 更新本地状态
       screen.currentSceneId = null;

@@ -12,8 +12,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * 手机导播台认证拦截器：从 Authorization header(或 SSE 的 query 参数)提取赛事 authKey，
  * 校验后把赛事信息存入 request attribute。与裁判端独立，使用赛事自己的 auth_key。
  *
- * <p>仅接受 {@code Authorization: Bearer <authKey>} 请求头,不使用 query 参数,
- * 避免 authKey 出现在 URL/访问日志。/game/director/** 下无 SSE 端点,无需 query 兜底。</p>
+ * <p>REST 接口仅接受 {@code Authorization: Bearer <authKey>} 请求头;
+ * 仅 SSE 连接(EventSource 无法自定义请求头)例外,允许 query 参数携带 authKey,
+ * 与裁判端保持一致。</p>
  *
  * @author duane
  */
@@ -48,12 +49,21 @@ public class DirectorAuthInterceptor implements HandlerInterceptor {
         return true;
     }
 
-    /** 认证凭证仅从 Authorization 头解析,不使用 query 参数 */
+    /** 解析认证凭证:普通接口仅接受 Authorization 头;SSE 连接(EventSource 无法自定义请求头)允许 query 参数。 */
     private String resolveAuthKey(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
             return authHeader.substring(BEARER_PREFIX.length()).trim();
         }
+        if (isSseRequest(request)) {
+            return request.getParameter("authKey");
+        }
         return null;
+    }
+
+    /** SSE 端点判定:EventSource 无法设置请求头,这些路径允许 authKey 走 query。 */
+    private boolean isSseRequest(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        return uri.endsWith("/sse") || uri.endsWith("/tournament/screen/control");
     }
 }

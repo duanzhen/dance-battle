@@ -305,7 +305,9 @@ const initConfig = () => {
         scale: 64,
         advanceCondition: 'score',
         advanceCount: 16,
-        format: 'BO1'
+        format: 'BO1',
+        circles: 1,
+        circleAdvanceCounts: []
       } as AuditionConfig;
       break;
     case StageMode.ARENA:

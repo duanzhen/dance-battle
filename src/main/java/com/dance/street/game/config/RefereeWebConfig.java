@@ -26,6 +26,8 @@ public class RefereeWebConfig implements WebMvcConfigurer {
             .order(0);
         registry.addInterceptor(directorAuthInterceptor)
             .addPathPatterns("/game/director/**")
+            .addPathPatterns("/tournament/screen/control")
+            .addPathPatterns("/tournament/screen/scene")
             .order(0);
     }
 }

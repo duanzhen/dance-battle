@@ -1,9 +1,9 @@
-import { getToken } from '@/utils/auth';
 import { subscribeChannel } from './sseChannel';
 
 // 屏幕控制通道:同一赛事的所有屏幕共享一条 SSE 连接(浏览器对同主机 HTTP/1.1
 // 并发连接数约 6 条,若每屏一条连接,控制页 5 屏 + 事件通道就达上限,
 // 监视器等新连接会阻塞整个页面的请求)。消息按 screenId 路由给对应订阅者。
+// 鉴权使用赛事导播专用凭证(authKey,与手机导播台一致),不再携带管理员 JWT。
 
 interface ScreenSub {
   onMessage: (data: any) => void;
@@ -32,12 +32,16 @@ function getTerminalId(tournamentId: string): string {
  * 订阅屏幕控制 SSE:同赛事所有屏幕共享一条连接,按 screenId 路由消息。
  * 同一屏幕重复订阅会先取消旧的。
  */
-export function subscribeScreenControl(screenId: string | number, tournamentId: string | number, onMessage: (data: any) => void) {
+export function subscribeScreenControl(screenId: string | number, tournamentId: string | number, authKey: string, onMessage: (data: any) => void) {
   const sid = String(screenId);
   const tid = String(tournamentId);
-  const token = getToken();
   const clientId = import.meta.env.VITE_APP_CLIENT_ID;
   const baseUrl = import.meta.env.VITE_APP_BASE_API;
+
+  if (!authKey) {
+    console.warn(`[SSE] 缺少赛事导播凭证,无法订阅屏幕 ${sid} 控制通道`);
+    return;
+  }
 
   let m = subs.get(tid);
   if (!m) {
@@ -58,7 +62,7 @@ export function subscribeScreenControl(screenId: string | number, tournamentId: 
       if (screenIds.length === 0) {
         return '';
       }
-      return `${baseUrl}/tournament/screen/control?Authorization=Bearer ${token}&clientid=${clientId}&screenIds=${encodeURIComponent(
+      return `${baseUrl}/tournament/screen/control?authKey=${encodeURIComponent(authKey)}&clientid=${clientId}&screenIds=${encodeURIComponent(
         screenIds.join(',')
       )}&terminalId=${getTerminalId(tid)}&tournamentId=${tid}`;
     },

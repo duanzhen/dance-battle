@@ -75,6 +75,14 @@ export const completeStage = (id: string | number) => {
   });
 };
 
+/** 重置赛段为草稿:清除已生成对阵,参赛方回退待定,可重新排种子/生成(仅 DRAFT/PENDING 可用) */
+export const resetStageToDraft = (id: string | number) => {
+  return request({
+    url: '/game/stage/' + id + '/reset-to-draft',
+    method: 'post'
+  });
+};
+
 /** 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾) */
 export const startNextArenaMatch = (id: string | number) => {
   return request({
@@ -89,5 +97,21 @@ export const calculateAdvancement = (id: string | number, data?: { seedOverrides
     url: '/game/stage/' + id + '/calculate-advancement',
     method: 'post',
     data: data || {}
+  });
+};
+
+/**
+ * 海选弃权/顶替(结算后、确认晋级前):
+ * 仅传 withdrawnCompetitorId=标记弃权,其后晋级者名次整体前移(不顶替时末尾空位即轮空);
+ * 传 replacementCompetitorId=把任意被淘汰的选手顶替晋级,补齐到晋级名单末尾。
+ */
+export const promoteReplacement = (
+  stageId: string | number,
+  data: { withdrawnCompetitorId?: string | number; replacementCompetitorId?: string | number }
+) => {
+  return request({
+    url: '/game/stage/' + stageId + '/promote-replacement',
+    method: 'post',
+    data
   });
 };

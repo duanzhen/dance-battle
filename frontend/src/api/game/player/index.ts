@@ -73,6 +73,8 @@ export const checkInPlayer = (data: {
   competitorId?: string | number;
   name?: string;
   avatar?: string;
+  /** 目标圈场次ID(海选/排名赛分圈、线下抽签指定圈时传;不传由系统自动择优) */
+  matchId?: string | number;
 }) => {
   return request({
     url: '/game/player/checkin',

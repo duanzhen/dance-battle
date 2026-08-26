@@ -57,6 +57,9 @@ export interface AuditionConfig {
   advanceCondition: string; // 晋级条件
   advanceCount: number; // 晋级名额
   format: MatchFormat;
+  circles?: number; // 分圈数(1=不分圈)
+  /** 每圈晋级人数(按圈顺序 ZONE-1..n,各圈可不相同;未配置按 advanceCount 均分) */
+  circleAdvanceCounts?: number[];
 }
 
 // 排名赛评分维度(可自定义,不写死)

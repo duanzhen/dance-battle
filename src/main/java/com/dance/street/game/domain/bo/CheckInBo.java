@@ -51,4 +51,10 @@ public class CheckInBo implements Serializable {
      */
     private String avatar;
 
+    /**
+     * 目标圈场次ID（可选）：海选/排名赛分圈且已生成对阵时，指定新选手挂入的圈；
+     * 不传则由系统按各圈剩余名额自动择优。
+     */
+    private Long matchId;
+
 }

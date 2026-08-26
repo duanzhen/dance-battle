@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.utils.StringUtils;
+import org.dromara.common.core.exception.ServiceException;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
@@ -64,6 +65,10 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     public List<MatchScoreResult> accumulateScores(TMatch match, TStage stage, SubmitResultBo bo) {
         TMatchRound round = mustGetRound(match);
         Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, match.getId()));
+        List<Long> competitorIds = parts.stream()
+            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
         // 重复提交以最新为准:先删该裁判本轮旧分
         roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaUpdate()
             .eq(TRoundScore::getRoundId, round.getId())
@@ -71,6 +76,10 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
 
         if (bo.getScores() != null && !bo.getScores().isEmpty()) {
             for (var se : bo.getScores()) {
+                // 越界校验:只能给本场参赛方提交打分,避免向不相关选手写入脏数据
+                if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
+                    throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
+                }
                 TRoundScore rs = new TRoundScore();
                 rs.setTournamentId(match.getTournamentId());
                 rs.setRoundId(round.getId());

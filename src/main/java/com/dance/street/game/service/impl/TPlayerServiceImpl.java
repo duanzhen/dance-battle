@@ -274,7 +274,8 @@ public class TPlayerServiceImpl implements ITPlayerService {
             // 海选/排名赛已开始(场次已生成):把新签到选手挂入当前人数最少的圈场次,可被裁判打分并参与结算
             if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())
                 || StageModeEnum.RANK.getCode().equals(firstStage.getStageMode())) {
-                stageLifecycleService.appendStageCompetitor(firstStage.getId(), competitorId);
+                // 线下抽签指定圈(matchId)时挂入指定圈,否则系统按各圈剩余名额自动择优
+                stageLifecycleService.appendStageCompetitor(firstStage.getId(), competitorId, bo.getMatchId());
             }
 
         } else if ("JOIN".equalsIgnoreCase(checkInType)) {

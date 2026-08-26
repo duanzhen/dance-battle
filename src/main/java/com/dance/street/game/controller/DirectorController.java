@@ -144,6 +144,17 @@ public class DirectorController {
     }
 
     /**
+     * 导播台重置赛段为草稿(排错/重抽签用):清除已生成对阵,参赛方回退待定,可重新生成。
+     */
+    @Log(title = "导播台重置赛段草稿", businessType = BusinessType.UPDATE)
+    @PostMapping("/stage/{id}/reset-to-draft")
+    public R<Void> resetStageToDraft(@PathVariable("id") Long id, HttpServletRequest request) {
+        assertStageInTournament(currentTournament(request), id);
+        stageLifecycleService.resetStageToDraft(id);
+        return R.ok();
+    }
+
+    /**
      * 擂台赛:创建并开始下一场对决
      */
     @Log(title = "导播台擂台下一场", businessType = BusinessType.UPDATE)

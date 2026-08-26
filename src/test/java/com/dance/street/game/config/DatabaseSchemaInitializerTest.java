@@ -59,7 +59,8 @@ class DatabaseSchemaInitializerTest {
         List<String> indexList = DatabaseSchemaInitializer.parseCreateIndexStatements(script);
 
         assertEquals(14, ddlList.size());
-        assertEquals(10, indexList.size());
+        // 10 个普通索引 + uk_competitor_member / uk_round_score 两个唯一索引
+        assertEquals(12, indexList.size());
         for (String index : indexList) {
             assertTrue(index.matches("(?is)^CREATE\\s+(UNIQUE\\s+)?INDEX.*"), "应为 CREATE INDEX 语句: " + index);
             assertFalse(index.matches("(?is)^CREATE\\s+TABLE.*"), "不应包含建表语句: " + index);

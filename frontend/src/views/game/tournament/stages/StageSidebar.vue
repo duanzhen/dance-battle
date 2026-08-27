@@ -21,25 +21,11 @@
         />
       </div>
 
-      <!-- 赛段状态 -->
+      <!-- 赛段状态:由流程操作自动流转,只读展示 -->
       <div>
         <label class="text-xs text-neutral-500 mb-2 block">赛段状态</label>
-        <div class="relative">
-          <select
-            v-model="localStage.status"
-            :disabled="!canEditStatus"
-            class="w-full bg-black border border-neutral-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
-            @change="handleUpdate"
-          >
-            <option value="DRAFT">规划中</option>
-            <option value="PENDING">未开始</option>
-            <option value="GAMING">进行中</option>
-            <option value="SETTLED">已结束</option>
-            <option value="DISCARD">已取消</option>
-          </select>
-          <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500">
-            <ChevronDown class="w-4 h-4" />
-          </div>
+        <div class="bg-black border border-neutral-800 rounded-lg p-2.5 text-sm font-bold" :class="statusTextClass">
+          {{ statusLabel }}
         </div>
       </div>
 
@@ -69,33 +55,23 @@
       <div class="pt-4 border-t border-neutral-800 space-y-2">
         <div class="text-xs text-neutral-500 mb-1">流程操作</div>
         <button
-          v-if="localStage.status === 'DRAFT'"
-          @click="doInitialize"
-          :disabled="lifecycleLoading"
+          v-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'"
+          @click="doStart"
+          :disabled="lifecycleLoading || !canStartStage"
+          :title="!canStartStage ? '上一赛段结束后方可开始本赛段' : '将自动初始化并生成对阵'"
           class="w-full py-2.5 text-sm font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50"
         >
-          初始化赛段
+          开始赛段
         </button>
-        <template v-if="localStage.status === 'PENDING'">
-          <button
-            @click="doGenerateMatches"
-            :disabled="lifecycleLoading"
-            class="w-full py-2.5 text-sm font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50"
-          >
-            生成对阵
-          </button>
-          <button
-            @click="doStart"
-            :disabled="lifecycleLoading || !canStartStage"
-            :title="!canStartStage ? '上一赛段结束后方可开始本赛段' : undefined"
-            class="w-full py-2.5 text-sm font-medium rounded-lg border border-amber-500 text-amber-500 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-          >
-            开始赛段
-          </button>
-          <p v-if="!canStartStage" class="text-[10px] text-neutral-500 leading-relaxed">
-            上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
-          </p>
-        </template>
+        <p
+          v-if="(localStage.status === 'DRAFT' || localStage.status === 'PENDING') && !canStartStage"
+          class="text-[10px] text-neutral-500 leading-relaxed"
+        >
+          上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
+        </p>
+        <p v-else-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'" class="text-[10px] text-neutral-500 leading-relaxed">
+          点击「开始赛段」将自动初始化并生成对阵。
+        </p>
         <button
           v-if="localStage.status === 'GAMING'"
           @click="doComplete"
@@ -111,15 +87,6 @@
           class="w-full py-2.5 text-sm font-medium rounded-lg border border-neutral-700 text-neutral-300 hover:bg-neutral-800 transition-colors disabled:opacity-50"
         >
           计算晋级
-        </button>
-        <button
-          v-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'"
-          @click="doResetToDraft"
-          :disabled="lifecycleLoading"
-          title="清除已生成的对阵,回到规划态重新排种子/生成"
-          class="w-full py-2 text-xs font-medium rounded-lg border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/40 hover:bg-amber-500/5 transition-colors disabled:opacity-50"
-        >
-          重置为草稿
         </button>
       </div>
 
@@ -179,9 +146,9 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
-import { ChevronDown, Settings } from 'lucide-vue-next';
+import { Settings } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { initializeStage, generateMatches, startStage, completeStage, calculateAdvancement, resetStageToDraft } from '@/api/game/stage/lifecycle';
+import { startStage, completeStage, calculateAdvancement } from '@/api/game/stage/lifecycle';
 import { listReferee } from '@/api/game/referee';
 import { getStageRefereeIds, assignStageReferees } from '@/api/game/refereeStage';
 import { StageData, StageMode } from './types';
@@ -224,9 +191,26 @@ const stageModeLabels: Record<string, string> = {
   [StageMode.RANK]: '排名赛'
 };
 
-// 是否可编辑状态 (规划中/未开始可编辑)
-const canEditStatus = computed(() => {
-  return localStage.value.status === 'DRAFT' || localStage.value.status === 'PENDING';
+// 赛段状态:由流程操作(开始赛段/完成赛段/计算晋级)自动流转,仅展示
+const statusLabel = computed(() => {
+  const map: Record<string, string> = {
+    DRAFT: '规划中',
+    PENDING: '未开始',
+    GAMING: '进行中',
+    SETTLED: '已结束',
+    DISCARD: '已取消'
+  };
+  return map[localStage.value.status] || localStage.value.status || '—';
+});
+const statusTextClass = computed(() => {
+  const map: Record<string, string> = {
+    DRAFT: 'text-neutral-400',
+    PENDING: 'text-amber-400',
+    GAMING: 'text-green-400',
+    SETTLED: 'text-neutral-300',
+    DISCARD: 'text-red-400'
+  };
+  return map[localStage.value.status] || 'text-neutral-400';
 });
 
 // 是否可删除 (GAMING 和 SETTLED 禁用)
@@ -282,9 +266,19 @@ const runLifecycle = async (fn: () => Promise<any>, successStatus?: string, succ
     lifecycleLoading.value = false;
   }
 };
-const doInitialize = () => runLifecycle(() => initializeStage({ stageId: localStage.value.id }), 'PENDING', '初始化成功');
-const doGenerateMatches = () => runLifecycle(() => generateMatches({ stageId: localStage.value.id }), undefined, '对阵已生成');
-const doStart = () => runLifecycle(() => startStage(localStage.value.id), 'GAMING', '赛段已开始');
+const doStart = async () => {
+  if (!localStage.value?.id) return;
+  try {
+    await ElMessageBox.confirm(`确认开始赛段「${localStage.value.name}」？将自动初始化并生成对阵。`, '开始赛段', {
+      type: 'warning',
+      confirmButtonText: '确认开始',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+  runLifecycle(() => startStage(localStage.value.id), 'GAMING', '赛段已开始');
+};
 const doComplete = async () => {
   if (!localStage.value?.id) {
     ElMessage.warning('请先保存赛段');
@@ -314,19 +308,6 @@ const doComplete = async () => {
   }
 };
 const doCalculateAdvancement = () => runLifecycle(() => calculateAdvancement(localStage.value.id), undefined, '晋级已计算');
-const doResetToDraft = async () => {
-  if (!localStage.value?.id) return;
-  try {
-    await ElMessageBox.confirm(
-      '将清除本赛段已生成的对阵/轮次/打分，参赛方回退待定，可重新排种子并生成对阵。确定重置为草稿吗？',
-      '重置为草稿',
-      { type: 'warning', confirmButtonText: '确定重置', cancelButtonText: '取消' }
-    );
-  } catch {
-    return; // 用户取消
-  }
-  runLifecycle(() => resetStageToDraft(localStage.value.id), 'DRAFT', '已重置为草稿');
-};
 
 // ===== 裁判分配 =====
 const refereeList = ref<{ id: string | number; name: string }[]>([]);
@@ -342,7 +323,7 @@ const savingReferees = ref(false);
 const loadRefereeList = async (tournamentId: string | number) => {
   try {
     const res = await listReferee({ tournamentId } as any);
-    refereeList.value = (res.data?.data || res.data || []).map((r: any) => ({ id: r.id, name: r.name }));
+    refereeList.value = ((res.data as any)?.data || (res.data as any) || []).map((r: any) => ({ id: r.id, name: r.name }));
   } catch {
     refereeList.value = [];
   }

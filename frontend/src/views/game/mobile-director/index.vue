@@ -181,10 +181,20 @@
         </div>
 
         <div v-if="matches.length > 0" class="mt-3">
+
           <h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2 px-1">
             {{ currentStage?.stageMode === 'AUDITION' ? '海选评分' : '场次' }}
           </h4>
-
+          <!-- 淘汰赛:左红右蓝指示点,与下方选手名字列对齐 -->
+          <div v-if="currentStage?.stageMode !== 'AUDITION'" class="flex items-center gap-2 mb-1.5 px-1">
+            <div class="flex-1 flex justify-center">
+              <span class="w-2 h-2 rounded-full bg-red-500"></span>
+            </div>
+            <span class="w-14"></span>
+            <div class="flex-1 flex justify-center">
+              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+            </div>
+          </div>
           <!-- 海选赛:圈(match) → 轮次(round) → 评分(支持分圈) -->
           <div v-if="currentStage?.stageMode === 'AUDITION'" class="space-y-2">
             <div v-for="match in matches" :key="match.id" class="bg-neutral-900 rounded-lg border border-neutral-800 p-3">
@@ -308,20 +318,50 @@
               </div>
               <div class="flex items-center gap-2">
                 <div class="flex-1 min-w-0 text-center">
+                  <div v-if="match.leftWin" class="mb-1 flex justify-center" title="胜者">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#f59e0b"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a2 2 0 0 1-1.943 1.484H6.796a2 2 0 0 1-1.943-1.484L2.019 6.02a.5.5 0 0 1 .798-.519l4.277 3.664a1 1 0 0 0 1.516-.294z"
+                      />
+                      <path d="M5 21h14" />
+                    </svg>
+                  </div>
                   <div class="text-xs font-bold truncate" :class="match.leftWin ? 'text-amber-400' : 'text-neutral-300'">
                     {{ match.leftName || '待定' }}
-                  </div>
-                  <div v-if="match.leftWin" class="mt-1 flex justify-center" title="胜者">
-                    <el-icon :size="18" color="#f59e0b"><Medal /></el-icon>
                   </div>
                 </div>
                 <span class="w-14 text-center text-[10px] text-neutral-600">VS</span>
                 <div class="flex-1 min-w-0 text-center">
+                  <div v-if="match.rightWin" class="mb-1 flex justify-center" title="胜者">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#f59e0b"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a2 2 0 0 1-1.943 1.484H6.796a2 2 0 0 1-1.943-1.484L2.019 6.02a.5.5 0 0 1 .798-.519l4.277 3.664a1 1 0 0 0 1.516-.294z"
+                      />
+                      <path d="M5 21h14" />
+                    </svg>
+                  </div>
                   <div class="text-xs font-bold truncate" :class="match.rightWin ? 'text-amber-400' : 'text-neutral-300'">
                     {{ match.rightName || '待定' }}
-                  </div>
-                  <div v-if="match.rightWin" class="mt-1 flex justify-center" title="胜者">
-                    <el-icon :size="18" color="#f59e0b"><Medal /></el-icon>
                   </div>
                 </div>
               </div>
@@ -478,7 +518,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Layers, Play, CircleCheck, ChevronRight, Delete, Medal } from 'lucide-vue-next';
+import { Layers, Play, CircleCheck, ChevronRight, Delete } from 'lucide-vue-next';
 import logo from '@/assets/logo/logo.png';
 import {
   setDirectorAuthKey,

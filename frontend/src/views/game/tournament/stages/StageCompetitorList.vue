@@ -109,15 +109,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Users } from 'lucide-vue-next';
 import { listCompetitor } from '@/api/game/competitor';
 import { setStageSeedOrder } from '@/api/game/stage';
 import { CompetitorVO } from '@/api/game/competitor/types';
+import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 // Props
 const props = defineProps<{
+  tournamentId?: string | number | null;
   stageId: string | number;
   stageMode?: string;
   stageStatus?: string;
@@ -194,7 +196,7 @@ const loadCompetitors = async () => {
 
   loading.value = true;
   try {
-    const { data } = await listCompetitor({ stageId: props.stageId });
+    const { data } = await listCompetitor({ stageId: props.stageId, pageNum: 1, pageSize: 1000 });
     competitors.value = data || [];
     // 按种子排名排序
     competitors.value.sort((a, b) => (a.seedRank || 999) - (b.seedRank || 999));
@@ -258,7 +260,24 @@ watch(
 // 组件挂载时加载数据
 onMounted(() => {
   loadCompetitors();
+  // 订阅赛事事件:签到/弃权/顶替等参赛方变化实时刷新选手列表
+  if (props.tournamentId != null) {
+    subscribeTournamentEvents(props.tournamentId, handleTournamentEvent);
+  }
 });
+
+onUnmounted(() => {
+  if (props.tournamentId != null) {
+    unsubscribeTournamentEvents(props.tournamentId, handleTournamentEvent);
+  }
+});
+
+/** 赛事事件回调:重连补偿(null)或事件属于本赛段(签到/参赛方变化等)时刷新 */
+const handleTournamentEvent = (data: any) => {
+  if (!data || data.stageId == null || String(data.stageId) === String(props.stageId)) {
+    loadCompetitors();
+  }
+};
 </script>
 
 <style scoped>

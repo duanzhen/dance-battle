@@ -108,11 +108,8 @@
           <div>
             <label class="text-xs text-neutral-500 mb-2 block">晋级规则</label>
             <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
-              <label class="flex items-center justify-between">
-                <span class="text-sm text-neutral-300">启用种子队</span>
-                <input type="checkbox" v-model="config.enableSeeding" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-              </label>
-              <label class="flex items-center justify-between">
+              <!-- 第三名决赛仅在半决赛(4 队)出现;GUEST/种子相关配置在中间态处理 -->
+              <label v-if="config.teamsCount === 4" class="flex items-center justify-between">
                 <span class="text-sm text-neutral-300">第三名决赛</span>
                 <input type="checkbox" v-model="config.playThirdPlace" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
               </label>
@@ -120,17 +117,6 @@
                 <span class="text-sm text-neutral-300">单轮模式(每轮一赛段,胜者全晋级)</span>
                 <input type="checkbox" v-model="config.singleRound" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
               </label>
-              <div>
-                <span class="text-sm text-neutral-300 block mb-2">配对模式</span>
-                <select
-                  v-model="config.pairingMode"
-                  class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                  @change="handleUpdate"
-                >
-                  <option value="SEQUENTIAL">顺序(1-2、3-4 相邻)</option>
-                  <option value="SEED">种子对位(1-N、2-(N-1),首轮常用)</option>
-                </select>
-              </div>
               <div>
                 <span class="text-sm text-neutral-300 block mb-2">结果公布模式</span>
                 <select
@@ -195,10 +181,8 @@ const currentMode = computed(() => props.mode || ConfigMode.NORMAL);
 // 配置对象
 const config = ref<
   KnockoutConfig & {
-    enableSeeding?: boolean;
     playThirdPlace?: boolean;
     singleRound?: boolean;
-    pairingMode?: string;
     publishMode?: string;
     scoring?: any;
     transition?: any;
@@ -208,10 +192,8 @@ const config = ref<
   format: 'BO3',
   teamsCount: 32,
   advanceCount: 16,
-  enableSeeding: false,
   playThirdPlace: false,
   singleRound: false,
-  pairingMode: 'SEQUENTIAL',
   publishMode: 'AUTO',
   scoring: {
     type: 'WIN_LOSS_DRAW',
@@ -259,8 +241,8 @@ const parseConfig = () => {
       config.value.template = inferTemplate(config.value.teamsCount, config.value.advanceCount);
     }
     if (ko.singleRound !== undefined) config.value.singleRound = ko.singleRound;
-    if (ko.pairingMode !== undefined) config.value.pairingMode = ko.pairingMode;
     if (ko.publishMode !== undefined) config.value.publishMode = ko.publishMode;
+    if (ko.thirdPlaceMatch !== undefined) config.value.playThirdPlace = ko.thirdPlaceMatch;
     if (parsed.scoring) config.value.scoring = parsed.scoring;
     if (parsed.transition) config.value.transition = parsed.transition;
   } catch (e) {
@@ -289,8 +271,8 @@ const serializeConfig = () => {
       teamsCount: config.value.teamsCount,
       advanceCount: config.value.advanceCount,
       singleRound: config.value.singleRound,
-      pairingMode: config.value.pairingMode,
-      publishMode: config.value.publishMode
+      publishMode: config.value.publishMode,
+      thirdPlaceMatch: config.value.playThirdPlace
     },
     scoring: config.value.scoring,
     transition: config.value.transition

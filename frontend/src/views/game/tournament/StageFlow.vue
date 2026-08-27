@@ -174,6 +174,7 @@
             <div class="mb-4 h-[min(38vh,420px)]">
               <StageCompetitorList
                 :key="'comp-' + currentStage.id"
+                :tournament-id="tournamentId"
                 :stage-id="currentStage.id"
                 :stage-mode="currentStage.stageMode"
                 :stage-status="currentStage.status"

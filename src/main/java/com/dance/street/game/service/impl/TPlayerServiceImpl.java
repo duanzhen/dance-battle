@@ -31,6 +31,7 @@ import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITCompetitorMemberService;
 import com.dance.street.game.service.ITStageLifecycleService;
+import com.dance.street.game.service.TournamentEventNotifier;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -56,6 +57,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
     private final ITCompetitorMemberService competitorMemberService;
     private final TCompetitorMemberMapper competitorMemberMapper;
     private final ITStageLifecycleService stageLifecycleService;
+    private final TournamentEventNotifier tournamentEventNotifier;
 
     /**
      * 查询选手自然人
@@ -323,6 +325,9 @@ public class TPlayerServiceImpl implements ITPlayerService {
             player.setAvatar(bo.getAvatar().trim());
         }
         baseMapper.updateById(player);
+
+        // 签到成功:广播赛事事件,通知海选/排名赛参赛选手列表等页面实时更新
+        tournamentEventNotifier.notify(tournamentId, firstStage.getId(), null, "competitor");
 
         return baseMapper.selectVoById(playerId);
     }

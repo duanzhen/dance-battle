@@ -241,14 +241,15 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             throw new ServiceException("本场由导播台判定,裁判无需判罚");
         }
 
-        // 多裁判判罚投票(STANDARD):裁判端提交只记一票,全部裁判判完才统一结算
+        // 裁判判罚投票(STANDARD):裁判端提交只记一票并落库;
+        // 多名裁判时全部判完才统一结算,单名裁判提交后立即结算
         Map<Long, String> effectiveOutcomes = bo.getOutcomes();
-        boolean multiRefereeVote = MatchModeEnum.STANDARD.equals(mode)
+        boolean refereeVote = MatchModeEnum.STANDARD.equals(mode)
             && !perCompetitor
             && bo.getRefereeId() != null
             && !competitorIds.isEmpty()
-            && refereeStageService.getRefereeIdsByStageId(stage.getId()).size() > 1;
-        if (multiRefereeVote) {
+            && !refereeStageService.getRefereeIdsByStageId(stage.getId()).isEmpty();
+        if (refereeVote) {
             int assigned = refereeStageService.getRefereeIdsByStageId(stage.getId()).size();
             TMatchRound voteRound = mustGetRound(match);
             // 覆盖写本裁判本轮投票(WIN=1 / LOSS=0 / DRAW=0.5),不影响其他裁判

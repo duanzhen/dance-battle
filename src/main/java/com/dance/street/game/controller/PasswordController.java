@@ -32,7 +32,8 @@ public class PasswordController {
     @PostMapping("/changePassword")
     public R<Void> changePassword(@Validated @RequestBody ChangePasswordBody body) {
         loginAccountService.changePassword(body.getOldPassword(), body.getNewPassword());
-        return R.ok("密码修改成功,请重新登录");
+        // 登录凭证为无状态 JWT,改密后无需重新登录,前端留在当前页面直接使用
+        return R.ok("密码修改成功");
     }
 
     /**

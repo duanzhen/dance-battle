@@ -556,12 +556,26 @@ public class TMatchServiceImpl implements ITMatchService {
                 Long rRight = ordered.size() > 1 ? ordered.get(1) : null;
                 rv.setLeftName(rLeft == null ? null : nameById.get(rLeft));
                 rv.setRightName(rRight == null ? null : nameById.get(rRight));
+                // 单裁判赛事/历史数据:判罚可能未落库,已结算场次以场次胜者回显该裁判判罚,
+                // 保证导播台展开后仍能看到红/蓝判定(DIRECTOR 模式由导播台判定,不回显)
+                String fallbackVote = null;
+                if (votes.isEmpty()
+                    && StageConstants.MATCH_SETTLED.equals(vo.getStatus())
+                    && assigned.size() == 1
+                    && !"DIRECTOR".equalsIgnoreCase(vo.getPublishMode())) {
+                    if (Boolean.TRUE.equals(vo.getLeftWin())) {
+                        fallbackVote = "LEFT";
+                    } else if (Boolean.TRUE.equals(vo.getRightWin())) {
+                        fallbackVote = "RIGHT";
+                    }
+                }
                 List<TMatchVo.RefereeVoteInfo> refVotes = new ArrayList<>();
                 for (Long rid : assigned) {
                     TMatchVo.RefereeVoteInfo ref = new TMatchVo.RefereeVoteInfo();
                     ref.setRefereeId(rid);
                     ref.setRefereeName(refNameById.get(rid));
-                    ref.setVote(interpretVote(votes, rid, rLeft, rRight));
+                    String v = interpretVote(votes, rid, rLeft, rRight);
+                    ref.setVote(v != null ? v : fallbackVote);
                     refVotes.add(ref);
                 }
                 rv.setRefereeVotes(refVotes);

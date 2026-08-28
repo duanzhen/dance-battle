@@ -635,18 +635,27 @@ const handleSubmit = async (data: any) => {
       tags: Array.isArray(data.tags) ? JSON.stringify(data.tags) : data.tags
     };
 
+    let createdPlayer: PlayerVO | null = null;
     if (data.id) {
       // 编辑
       await updatePlayerApi(submitData);
       ElMessage.success('更新成功');
     } else {
       // 添加
-      await addPlayer(submitData);
+      const resp: any = await addPlayer(submitData);
+      // 接口返回创建后的选手(含 id),用于新增后直接进入签到弹窗
+      createdPlayer = resp?.data?.data ?? resp?.data ?? null;
       ElMessage.success('添加成功');
     }
     formVisible.value = false;
     currentPlayer.value = null;
     await refreshAll();
+
+    // 新增选手后直接弹出签到弹窗,免去在列表中查找刚添加的选手
+    if (createdPlayer?.id && props.tournamentId && firstStageId.value) {
+      currentCheckInPlayer.value = createdPlayer;
+      checkInDialogRef.value?.open(createdPlayer);
+    }
   } catch (error) {
     console.error('操作失败:', error);
     ElMessage.error(data.id ? '更新失败' : '添加失败');

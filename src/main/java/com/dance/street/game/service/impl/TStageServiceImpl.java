@@ -145,6 +145,10 @@ public class TStageServiceImpl implements ITStageService {
 
         // 更新链表中的相邻节点
         updateNeighborLinks(add);
+        // 插入赛段后联动调整源赛段晋级名额:
+        // 前驱赛段的 teamCountEnd 对齐到新赛段的 teamCountStart,
+        // 保证「前段选多少人 = 后段收多少人」;具体人选仍由中间态(预排/顶替/GUEST)对接
+        syncAdvanceCountFromNext(add.getPrevStageId(), add.getId());
 
         return MapstructUtils.convert(add, TStageVo.class);
     }
@@ -349,6 +353,69 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /**
+     * 联动调整源赛段晋级名额:插入/删除赛段后,把前驱赛段的 teamCountEnd(晋级名额)
+     * 对齐到后继赛段的 teamCountStart(容量),并同步 ruleConfig 中的晋级名额,
+     * 保证结算与预排读取到一致的值。仅对带晋级名额的赛制(海选/排名/淘汰)生效;
+     * 具体晋级人选仍由中间态(预排/顶替/GUEST)调整对接。
+     */
+    private void syncAdvanceCountFromNext(Long prevId, Long nextId) {
+        if (prevId == null || nextId == null) {
+            return;
+        }
+        TStage prev = baseMapper.selectById(prevId);
+        TStage next = baseMapper.selectById(nextId);
+        if (prev == null || next == null || next.getTeamCountStart() == null) {
+            return;
+        }
+        String mode = prev.getStageMode();
+        if (!StageModeEnum.AUDITION.getCode().equals(mode)
+            && !StageModeEnum.RANK.getCode().equals(mode)
+            && !StageModeEnum.KNOCKOUT.getCode().equals(mode)) {
+            return;
+        }
+        Long newEnd = next.getTeamCountStart();
+        if (Objects.equals(prev.getTeamCountEnd(), newEnd)) {
+            return;
+        }
+        Long oldEnd = prev.getTeamCountEnd();
+        prev.setTeamCountEnd(newEnd);
+        prev.setRuleConfig(patchAdvanceCount(prev.getRuleConfig(), mode, newEnd));
+        baseMapper.updateById(prev);
+        log.info("赛段[{}]({})晋级名额联动调整 {} → {} (对齐下一赛段[{}]容量)",
+            prev.getName(), mode, oldEnd, newEnd, next.getName());
+    }
+
+    /** 按赛制把 ruleConfig 中的晋级名额更新为指定值(与 teamCountEnd 权威字段保持一致) */
+    private String patchAdvanceCount(String ruleConfig, String mode, Long newEnd) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            Map<String, Object> rc = StringUtils.isBlank(ruleConfig)
+                ? new HashMap<>()
+                : mapper.readValue(ruleConfig, Map.class);
+            if (rc == null) {
+                rc = new HashMap<>();
+            }
+            if (StageModeEnum.KNOCKOUT.getCode().equals(mode)) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> ko = (Map<String, Object>) rc.get("knockout");
+                if (ko == null) {
+                    ko = new HashMap<>();
+                    rc.put("knockout", ko);
+                }
+                ko.put("advanceCount", newEnd);
+            } else {
+                // 海选/排名赛:顶层 advanceCount(与 readStageAdvanceCount 口径一致)
+                rc.put("advanceCount", newEnd);
+            }
+            rc.putIfAbsent("mode", mode);
+            return mapper.writeValueAsString(rc);
+        } catch (Exception e) {
+            log.warn("赛段晋级名额联动:ruleConfig 更新失败,仅更新 teamCountEnd: {}", e.getMessage());
+            return ruleConfig;
+        }
+    }
+
+    /**
      * 清理旧的链表连接
      */
     private void clearOldLinks(TStage oldStage) {
@@ -405,6 +472,14 @@ public class TStageServiceImpl implements ITStageService {
         if(isValid){
             // 在删除前重新连接链表
             reconnectChainBeforeDelete(ids);
+            // 删除赛段后联动调整源赛段晋级名额:
+            // 前驱赛段的 teamCountEnd 对齐到存活后继赛段的 teamCountStart(即被删赛段的 next),
+            // 例如删除 32→16 的 32强 后,海选晋级名额自动回到下一赛段容量
+            List<TStage> toDeleteStages = baseMapper.selectList(
+                Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids));
+            for (TStage st : toDeleteStages) {
+                syncAdvanceCountFromNext(st.getPrevStageId(), st.getNextStageId());
+            }
         }
         // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
         List<Long> stageIds = ids.stream().map(Long::valueOf).toList();

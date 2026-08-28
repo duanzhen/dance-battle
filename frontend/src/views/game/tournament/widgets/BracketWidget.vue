@@ -95,7 +95,17 @@
         <span class="section-title">样式配置</span>
         <div class="space-y-3 mt-2">
           <ColorInput label="文字颜色" :model-value="textColor || '#ffffff'" @update:model-value="$emit('update:textColor', $event)" />
-          <ColorInput label="边框颜色" :model-value="borderColor || '#404040'" @update:model-value="$emit('update:borderColor', $event)" />
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">边框颜色</span>
+              <button
+                v-if="borderColor"
+                class="text-[10px] text-neutral-500 hover:text-amber-400"
+                @click="$emit('update:borderColor', '')"
+              >设为透明</button>
+            </div>
+            <ColorInput :model-value="borderColor || '#404040'" @update:model-value="$emit('update:borderColor', $event)" />
+          </div>
           <div>
             <div class="flex items-center justify-between mb-1">
               <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">背景颜色</span>
@@ -141,8 +151,10 @@ defineEmits<{
 // 样式配置:通过 CSS 变量作用于全部对战卡;未配置时回退默认样式(白字/灰边/透明底)
 const bracketStyle = computed(() => ({
   '--bracket-text': props.textColor || undefined,
-  '--bracket-border': props.borderColor || undefined,
-  '--bracket-bg': props.bgColor || undefined
+  // 空字符串 = 用户点击「设为透明」,显式映射为 transparent,
+  // 否则空值会被 || 回退成默认色(灰边/黑底),达不到透明效果
+  '--bracket-border': props.borderColor === '' ? 'transparent' : props.borderColor || undefined,
+  '--bracket-bg': props.bgColor === '' ? 'transparent' : props.bgColor || undefined
 }));
 
 const loading = ref(false);

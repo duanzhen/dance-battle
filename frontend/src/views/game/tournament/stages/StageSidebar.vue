@@ -52,43 +52,7 @@
       </div>
 
       <!-- 流程生命周期操作 -->
-      <div class="pt-4 border-t border-neutral-800 space-y-2">
-        <div class="text-xs text-neutral-500 mb-1">流程操作</div>
-        <button
-          v-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'"
-          @click="doStart"
-          :disabled="lifecycleLoading || !canStartStage"
-          :title="!canStartStage ? '上一赛段结束后方可开始本赛段' : '将自动初始化并生成对阵'"
-          class="w-full py-2.5 text-sm font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50"
-        >
-          开始赛段
-        </button>
-        <p
-          v-if="(localStage.status === 'DRAFT' || localStage.status === 'PENDING') && !canStartStage"
-          class="text-[10px] text-neutral-500 leading-relaxed"
-        >
-          上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
-        </p>
-        <p v-else-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'" class="text-[10px] text-neutral-500 leading-relaxed">
-          点击「开始赛段」将自动初始化并生成对阵。
-        </p>
-        <button
-          v-if="localStage.status === 'GAMING'"
-          @click="doComplete"
-          :disabled="lifecycleLoading"
-          class="w-full py-2.5 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
-        >
-          完成赛段
-        </button>
-        <button
-          v-if="localStage.status === 'SETTLED'"
-          @click="doCalculateAdvancement"
-          :disabled="lifecycleLoading"
-          class="w-full py-2.5 text-sm font-medium rounded-lg border border-neutral-700 text-neutral-300 hover:bg-neutral-800 transition-colors disabled:opacity-50"
-        >
-          计算晋级
-        </button>
-      </div>
+       
 
       <!-- 裁判组 -->
       <div v-if="localStage.id" class="pt-4 border-t border-neutral-800 space-y-2">

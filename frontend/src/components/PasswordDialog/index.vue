@@ -126,7 +126,6 @@
 import { changePassword } from '@/api/login';
 import { ChangePasswordData } from '@/api/types';
 import { useUserStore } from '@/store/modules/user';
-import router from '@/router';
 
 const visible = ref(false);
 const submitting = ref(false);
@@ -200,14 +199,9 @@ const handleSubmit = () => {
       await changePassword(payload);
       visible.value = false;
       ElMessage.success(proxy.$t('passwordDialog.success'));
-      await userStore.logout();
-      router.replace({
-        path: '/login',
-        query: {
-          redirect: encodeURIComponent(router.currentRoute.value.fullPath || '/')
-        }
-      });
-      proxy?.$tab.closeAllPage();
+      // 改密后不踢下线:登录凭证为无状态 JWT,改密后依然有效,
+      // 直接留在当前页面,并同步"已非默认密码"状态,避免强制改密弹窗再次弹出
+      userStore.setDefaultPassword(false);
     } catch (e) {
       // 失败提示已由响应拦截器统一弹出,此处保持弹窗打开以便重试
     } finally {

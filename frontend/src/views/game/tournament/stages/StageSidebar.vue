@@ -80,14 +80,6 @@
         >
           完成赛段
         </button>
-        <button
-          v-if="localStage.status === 'SETTLED'"
-          @click="doCalculateAdvancement"
-          :disabled="lifecycleLoading"
-          class="w-full py-2.5 text-sm font-medium rounded-lg border border-neutral-700 text-neutral-300 hover:bg-neutral-800 transition-colors disabled:opacity-50"
-        >
-          计算晋级
-        </button>
       </div>
 
       <!-- 裁判组 -->

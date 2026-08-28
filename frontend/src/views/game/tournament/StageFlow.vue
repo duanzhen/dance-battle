@@ -220,7 +220,15 @@
         </div>
       </div>
 
-      <div v-else-if="selection.type === 'TRANSITION'" class="max-w-4xl mx-auto animate-fade-in">
+      <div
+        v-else-if="
+          selection.type === 'TRANSITION' &&
+          selection.id >= 0 &&
+          stages[selection.id] &&
+          stages[selection.id + 1]
+        "
+        class="max-w-4xl mx-auto animate-fade-in"
+      >
         <TransitionConfig
           :source-stage-id="stages[selection.id].id"
           :source-stage-name="stages[selection.id].name"
@@ -228,6 +236,16 @@
           :target-stage-name="stages[selection.id + 1].name"
           :transition-index="selection.id"
         />
+      </div>
+
+      <!-- 兜底:选中态异常或列表为空时给出空状态,避免界面卡死无响应 -->
+      <div v-else class="flex items-center justify-center h-full">
+        <div class="text-center">
+          <p class="text-neutral-500 mb-4">暂无赛段数据</p>
+          <button @click="addStage" class="px-6 py-2.5 bg-amber-500 text-neutral-900 rounded-lg font-medium hover:bg-amber-600 transition-colors">
+            创建第一个赛段
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -380,10 +398,15 @@ const loadStages = async (keepSelection: boolean = false) => {
         selection.value = currentSelection;
       } else if (stages.value.length > 0) {
         selection.value = { type: 'STAGE', id: String(stages.value[0].id) };
+      } else {
+        // 赛段列表为空时兜底复位,避免停留在 TRANSITION 导致渲染崩溃
+        selection.value = { type: 'STAGE', id: '' };
       }
     } else if (stages.value.length > 0) {
       // 默认选中第一个赛段
       selection.value = { type: 'STAGE', id: String(stages.value[0].id) };
+    } else {
+      selection.value = { type: 'STAGE', id: '' };
     }
   } catch (error) {
     console.error('❌ 加载赛段数据失败:', error);
@@ -525,6 +548,8 @@ const selectTransition = (index: number) => {
   if (isCreatingStage.value) {
     isCreatingStage.value = false;
   }
+  // 无效索引(列表变更后)直接忽略,避免渲染阶段访问 undefined
+  if (index < 0 || index >= stages.value.length - 1) return;
   selection.value = { type: 'TRANSITION', id: index };
 };
 

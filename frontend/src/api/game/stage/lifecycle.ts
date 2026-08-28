@@ -83,7 +83,7 @@ export const resetStageToDraft = (id: string | number) => {
   });
 };
 
-/** 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾) */
+/** 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾;平局时擂主与挑战者均排到队尾) */
 export const startNextArenaMatch = (id: string | number) => {
   return request({
     url: '/game/stage/' + id + '/arena-next',

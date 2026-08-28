@@ -361,9 +361,11 @@ const handleRandomSelect = () => {
     ElMessage.warning('没有可用的空闲号码');
     return;
   }
-  const randomIndex = Math.floor(Math.random() * availableSlots.length);
-  selectedSlot.value = availableSlots[randomIndex];
-  ElMessage.success(`已随机抽取号码 ${availableSlots[randomIndex].number}`);
+  // 只取有空位的最小的 10 个号码,在其中随机抽取(不足 10 个时取全部)
+  const candidates = availableSlots.slice(0, 10);
+  const randomIndex = Math.floor(Math.random() * candidates.length);
+  selectedSlot.value = candidates[randomIndex];
+  ElMessage.success(`已随机抽取号码 ${candidates[randomIndex].number}`);
 };
 
 const startEdit = () => {

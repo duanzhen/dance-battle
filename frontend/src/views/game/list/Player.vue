@@ -35,6 +35,11 @@
       <div class="flex items-center gap-2 min-w-0">
         <span class="text-xs text-neutral-500">管理参赛选手名单及战队归属</span>
         <span
+          class="px-2 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-[10px] text-neutral-300 flex items-center gap-1 flex-shrink-0"
+        >
+          选手 {{ playerStats.total }} · 已签到 {{ playerStats.checkedIn }}
+        </span>
+        <span
           v-if="auditionGaming"
           class="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded text-[10px] text-amber-500 flex items-center gap-1 flex-shrink-0"
         >
@@ -390,6 +395,13 @@ const auditionGaming = computed(() => {
   return !!info && info.stageMode === 'AUDITION' && info.status === 'GAMING';
 });
 
+// 选手数量与已签到数量
+const playerStats = computed(() => {
+  const total = players.value.length;
+  const checkedIn = players.value.filter(p => p.competitorId).length;
+  return { total, checkedIn };
+});
+
 // 仅分圈海选、赛段未开始时显示"随机抽取圈"
 const canRandomCircles = computed(() => {
   const info = firstStageInfo.value;
@@ -703,7 +715,13 @@ const doImport = async () => {
 
     const res = await importPlayers(formData);
     importResult.value = { success: true, msg: res.msg || res.data || '导入成功' };
+    ElMessage.success(importResult.value.msg);
     importFile.value = null;
+    if (fileInputRef.value) {
+      fileInputRef.value.value = '';
+    }
+    // 导入成功后关闭弹窗
+    showImportDialog.value = false;
     await refreshAll();
   } catch (e: any) {
     importResult.value = { success: false, msg: e?.msg || e?.message || '导入失败' };

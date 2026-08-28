@@ -94,12 +94,20 @@
               <Shield v-else class="w-5 h-5 text-neutral-500" />
             </div>
             <!-- 名字 -->
-            <input
-              v-model="referee.name"
-              @blur="updateReferee(referee)"
-              class="w-full bg-transparent text-center text-[11px] font-bold text-neutral-200 border-b border-transparent focus:border-amber-500 focus:outline-none py-0.5 transition-colors placeholder-neutral-600"
-              placeholder="裁判姓名"
-            />
+            <div class="w-full flex items-center justify-center gap-1">
+              <!-- 与右侧铅笔图标等宽的隐形占位,保证姓名左右居中 -->
+              <span class="w-2.5 shrink-0" aria-hidden="true"></span>
+              <input
+                v-model="referee.name"
+                :disabled="savingRefereeId === referee.id"
+                @keyup.enter="saveNameOnEnter"
+                @blur="saveRefereeName(referee)"
+                class="w-0 flex-1 min-w-0 bg-transparent text-center text-[11px] font-bold text-neutral-200 border-b border-transparent hover:border-neutral-700 focus:border-amber-500 focus:outline-none py-0.5 transition-colors placeholder-neutral-600 disabled:opacity-50 cursor-text"
+                placeholder="裁判姓名"
+                title="点击修改名字，回车或失焦保存"
+              />
+              <Pencil class="w-2.5 h-2.5 shrink-0 text-neutral-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
             <!-- 二维码 -->
             <button
               v-if="referee.authKey"
@@ -136,18 +144,12 @@
               <img
                 :src="qrCodeUrl"
                 alt="QR Code"
-                class="w-48 h-48"
+                class="w-48 h-48 cursor-pointer transition-transform hover:scale-105"
+                title="点击在浏览器新窗口打开"
+                @click="openQrInNewWindow"
               />
             </div>
-            <a
-              :href="qrScoringUrl"
-              target="_blank"
-              rel="noopener"
-              class="text-[11px] font-bold text-amber-400 hover:text-amber-300 underline underline-offset-2"
-            >
-              点开进入判罚页面（开发用）
-            </a>
-            <p class="text-[10px] text-neutral-500">手机扫描二维码，免登录直接进入判罚界面</p>
+            <p class="text-[10px] text-neutral-500">点击二维码在浏览器新窗口打开；手机扫码可直接进入判罚界面</p>
           </div>
           <div class="px-5 py-4 border-t border-neutral-800 flex justify-between items-center">
             <button
@@ -172,10 +174,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
-import { Gavel, Plus, Shield, QrCode, UserPlus } from 'lucide-vue-next';
+import { Gavel, Plus, Shield, QrCode, UserPlus, Pencil } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import { listReferee, addReferee as addRefereeApi, updateReferee as updateRefereeApi, regenerateRefereeAuthKey } from '@/api/game/referee';
-import { RefereeVO, RefereeForm } from '@/api/game/referee/types';
+import { RefereeVO } from '@/api/game/referee/types';
 import { ElMessage } from 'element-plus';
 import request from '@/utils/request';
 
@@ -204,6 +206,9 @@ const qrRefereeName = ref('');
 const qrScoringUrl = ref('');
 const qrRefereeId = ref<string | number>('');
 const resettingRefereeQr = ref(false);
+const savingRefereeId = ref<string | number | null>(null);
+// 名字保存前的备份,用于空名/失败时还原
+const refereeNameBackup = new Map<string | number, string>();
 
 const showQRCode = async (referee: RefereeVO) => {
   qrRefereeId.value = referee.id;
@@ -211,6 +216,11 @@ const showQRCode = async (referee: RefereeVO) => {
   qrScoringUrl.value = `${window.location.origin}/tournament/referee-scoring?authKey=${encodeURIComponent(referee.authKey)}`;
   qrCodeUrl.value = await QRCode.toDataURL(qrScoringUrl.value, { width: 240, margin: 2, color: { dark: '#000', light: '#fff' } });
   showQrDialog.value = true;
+};
+
+const openQrInNewWindow = () => {
+  if (!qrScoringUrl.value) return;
+  window.open(qrScoringUrl.value, '_blank', 'noopener');
 };
 
 // 重置裁判二维码(泄露后调用,旧凭证立即失效)
@@ -316,6 +326,8 @@ const loadReferees = async () => {
     loading.value = true;
     const response = await listReferee({ tournamentId: props.tournamentId } as any);
     referees.value = response.data || [];
+    refereeNameBackup.clear();
+    referees.value.forEach((r) => refereeNameBackup.set(r.id, r.name || ''));
   } catch (error) {
     console.error('加载裁判列表失败:', error);
     ElMessage.error('加载裁判列表失败');
@@ -330,26 +342,47 @@ const isRefereeActive = (referee: RefereeVO) => {
   return (Number(referee.assignedStageCount) > 0) || !!referee.permissions;
 };
 
-// 更新裁判
-const updateReferee = async (referee: RefereeVO) => {
+// 保存裁判名字:回车或失焦触发;空名/失败时还原并提示
+const saveRefereeName = async (referee: RefereeVO) => {
   if (!props.tournamentId) return;
+  const trimmed = (referee.name || '').trim();
+  if (!trimmed) {
+    referee.name = refereeNameBackup.get(referee.id) ?? referee.name;
+    ElMessage.warning('裁判姓名不能为空');
+    return;
+  }
+  if (trimmed === refereeNameBackup.get(referee.id)) {
+    referee.name = trimmed;
+    return;
+  }
+  if (savingRefereeId.value === referee.id) return;
+  savingRefereeId.value = referee.id;
+  const prevName = refereeNameBackup.get(referee.id) ?? trimmed;
+  referee.name = trimmed;
 
   try {
-    const updateData: RefereeForm = {
+    await updateRefereeApi({
       id: referee.id,
       tournamentId: props.tournamentId,
-      name: referee.name,
-      avatar: referee.avatar,
-      authKey: referee.authKey,
-      permissions: referee.permissions,
-      remark: referee.remark
-    };
-
-    await updateRefereeApi(updateData);
+      name: trimmed,
+      avatar: referee.avatar ?? null,
+      permissions: referee.permissions ?? null,
+      remark: referee.remark ?? null
+    });
+    refereeNameBackup.set(referee.id, trimmed);
+    ElMessage.success('裁判名字已保存');
   } catch (error) {
-    console.error('更新裁判失败:', error);
-    // ElMessage.error('更新失败'); // 注释掉避免每次失焦都弹提示
+    console.error('更新裁判名字失败:', error);
+    referee.name = prevName;
+    ElMessage.error('保存失败，名字已还原');
+  } finally {
+    savingRefereeId.value = null;
   }
+};
+
+// 回车触发失焦,由 blur 统一保存,避免重复提交
+const saveNameOnEnter = (e: KeyboardEvent) => {
+  (e.target as HTMLInputElement)?.blur();
 };
 
 // 监听tournamentId变化

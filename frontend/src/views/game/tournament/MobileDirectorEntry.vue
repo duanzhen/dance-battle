@@ -28,18 +28,17 @@
               赛事 <span class="text-amber-400 font-bold">{{ tournamentName || '未命名' }}</span> 扫码进入手机导播台
             </p>
             <div class="bg-white p-3 rounded-lg">
-              <img v-if="directorQrUrl" :src="directorQrUrl" alt="QR Code" class="w-48 h-48" />
+              <img
+                v-if="directorQrUrl"
+                :src="directorQrUrl"
+                alt="QR Code"
+                class="w-48 h-48 cursor-pointer transition-transform hover:scale-105"
+                title="点击在浏览器新窗口打开"
+                @click="openQrInNewWindow"
+              />
               <div v-else class="w-48 h-48 flex items-center justify-center text-neutral-500 text-xs">二维码加载中...</div>
             </div>
-            <a
-              :href="directorQrLink"
-              target="_blank"
-              rel="noopener"
-              class="text-[11px] font-bold text-amber-400 hover:text-amber-300 underline underline-offset-2"
-            >
-              点开进入手机导播台（开发用）
-            </a>
-            <p class="text-[10px] text-neutral-500">手机扫描二维码，使用赛事凭证免登录进入导播台</p>
+            <p class="text-[10px] text-neutral-500">点击二维码在浏览器新窗口打开；手机扫码可直接进入导播台</p>
           </div>
           <div class="px-5 py-4 border-t border-neutral-800 flex justify-between items-center">
             <button
@@ -120,6 +119,11 @@ const renderDirectorQr = (authKey: string) => {
       console.error('生成二维码失败:', err);
       directorQrUrl.value = '';
     });
+};
+
+const openQrInNewWindow = () => {
+  if (!directorQrLink.value) return;
+  window.open(directorQrLink.value, '_blank', 'noopener');
 };
 
 const closeDirectorQr = () => {

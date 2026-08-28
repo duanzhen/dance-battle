@@ -327,7 +327,9 @@ public class RefereeMatchController {
                 ri.setId(r.getId());
                 ri.setRoundSequence(r.getRoundSequence());
                 ri.setStatus(r.getStatus());
-                if (StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < mr.size() - 1) {
+                // 平局加赛轮仅存在于淘汰赛/擂台赛(胜负判罚产生后续轮次);
+                // 海选/排名赛逐选手各占一个轮次,不标记为平局
+                if (!perCompetitorStage && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < mr.size() - 1) {
                     ri.setOutcome("DRAW");
                 }
                 ris.add(ri);
@@ -355,8 +357,10 @@ public class RefereeMatchController {
         vo.setStageMatches(stageMatchInfos);
         vo.setStageOverview(stageOverview);
 
-        // 当前生效轮:取最新一轮(平局加赛/多轮制时即当前判罚轮)
-        TMatchRound currentRound = rounds.isEmpty() ? null : rounds.get(rounds.size() - 1);
+        // 当前生效轮:淘汰赛/擂台赛取最新一轮(平局加赛/多轮制时即当前判罚轮);
+        // 海选/排名赛逐选手轮次无平局语义,取第一轮作为展示轮
+        TMatchRound currentRound = rounds.isEmpty() ? null
+            : perCompetitorStage ? rounds.get(0) : rounds.get(rounds.size() - 1);
         if (currentRound != null) {
             RefereeRoundInfo roundInfo = new RefereeRoundInfo();
             roundInfo.setId(currentRound.getId());
@@ -372,8 +376,9 @@ public class RefereeMatchController {
             ri.setId(r.getId());
             ri.setRoundSequence(r.getRoundSequence());
             ri.setStatus(r.getStatus());
-            // 已结算且非最后一轮的轮次 = 平局加赛轮(只有平局才会产生后续轮次)
-            if (StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < rounds.size() - 1) {
+            // 已结算且非最后一轮的轮次 = 平局加赛轮(只有平局才会产生后续轮次);
+            // 海选/排名赛逐选手各占一个轮次,不标记为平局
+            if (!perCompetitorStage && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < rounds.size() - 1) {
                 ri.setOutcome("DRAW");
             }
             roundInfos.add(ri);

@@ -6,7 +6,7 @@
         <span class="font-bold text-xs text-neutral-300 truncate">{{ tournamentName || '手机导播台' }}</span>
       </div>
       <!-- 中间秒表 -->
-      <div class="flex-none flex items-center gap-2">
+      <div class="flex-none flex items-center gap-0.5">
         <button
           @click="toggleStopwatch"
           class="flex items-center gap-1.5 font-mono text-base font-black text-amber-400 tabular-nums leading-none bg-transparent border-0 cursor-pointer active:opacity-60 transition-opacity"
@@ -17,9 +17,9 @@
         <button
           @click="resetStopwatch"
           title="清空计时"
-          class="p-1 rounded text-neutral-600 hover:text-neutral-400 active:opacity-50 transition-colors bg-transparent border-0"
+          class="w-8 h-8 flex items-center justify-center rounded text-neutral-600 hover:text-neutral-400 hover:bg-neutral-800/70 active:opacity-50 transition-colors bg-transparent border-0 cursor-pointer"
         >
-          <el-icon :size="14"><Delete /></el-icon>
+          <el-icon :size="16"><TimerReset /></el-icon>
         </button>
       </div>
       <div class="flex-1 flex items-center justify-end gap-3">
@@ -163,7 +163,7 @@
               class="mt-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/10"
             >
               <p v-if="currentStage.stageMode === 'ARENA'" class="text-[10px] text-blue-400/70">
-                点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，败者自动排到队尾。
+                点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，胜者守擂、败者排到队尾，平局时擂主与挑战者均排到队尾。
               </p>
               <p v-else class="text-[10px] text-blue-400/70">
                 晋级选手需先在管理端「中间态」确认；确认后点击「开始赛段」将自动初始化并生成对阵，淘汰赛场次保持待开始、逐场点「开始」。
@@ -518,7 +518,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Layers, Play, CircleCheck, ChevronRight, Delete } from 'lucide-vue-next';
+import { Layers, Play, CircleCheck, ChevronRight, TimerReset } from 'lucide-vue-next';
 import logo from '@/assets/logo/logo.png';
 import {
   setDirectorAuthKey,
@@ -782,7 +782,7 @@ const handleComplete = async () => {
 
 /** 开始指定场次:跳过其他场次,先开始这一场 */
 const handleStartMatch = async (match: MatchInfo) => {
-  if (!confirm(`确认开始场次 #${match.id}？其他未开始的场次保持待开始。`)) return;
+  if (!confirm(`确认开始场次？其他未开始的场次保持待开始。`)) return;
   try {
     await directorStartMatch(match.id);
     await refreshMatches();
@@ -793,7 +793,7 @@ const handleStartMatch = async (match: MatchInfo) => {
   }
 };
 
-/** 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾) */
+/** 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾;平局时擂主与挑战者均排到队尾) */
 const handleArenaNext = async () => {
   const stage = currentStage.value;
   if (!stage) return;

@@ -54,7 +54,7 @@
                   :disabled="isLocked"
                   class="w-full bg-transparent text-sm font-bold text-white focus:outline-none border-b border-transparent focus:border-amber-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 />
-                <div class="text-[10px] text-neutral-500">ID: {{ widget.id }}</div>
+                <!-- <div class="text-[10px] text-neutral-500">ID: {{ widget.id }}</div> -->
               </div>
             </div>
 
@@ -300,11 +300,12 @@
         >
           <!-- 图层行:独立容器承载 space-y,指示线作为绝对定位兄弟,不会挤动行布局 -->
           <div class="space-y-1">
-            <template v-for="(layer, idx) in reversedWidgets" :key="layer.id">
+            <template v-for="layer in reversedWidgets" :key="layer.id">
               <div
                 data-layer-row
                 :draggable="dragHandleId === layer.id && !layer.locked"
                 @click="store.selectWidget(layer.id)"
+                @dblclick="openLayerWidget(layer)"
                 @dragstart="onDragStart(layer.id)"
                 @dragend="onDragEnd"
                 class="flex items-center gap-2 p-2 rounded group select-none transition-colors border"
@@ -434,10 +435,7 @@ const widgetProps = computed(() => {
 watch(
   () => store.selectedWidgetId,
   (newVal, oldVal) => {
-    if (newVal && oldVal === null) {
-      // 从未选中变为选中，切换到组件选项卡
-      activeTab.value = 'widget';
-    } else if (newVal === null && oldVal) {
+    if (newVal === null && oldVal) {
       // 从选中变为未选中，切换到场景选项卡
       activeTab.value = 'scene';
     }
@@ -550,6 +548,12 @@ const toggleLock = async (w) => {
   });
   // 触发缩略图更新
   emit('widgetUpdated');
+};
+
+// 双击图层:选中该组件并跳转到组件配置选项卡
+const openLayerWidget = (layer) => {
+  store.selectWidget(layer.id);
+  activeTab.value = 'widget';
 };
 
 // 图层排序:调后端原子交换(按场景加锁),成功后前端同步交换并强制刷新

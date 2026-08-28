@@ -43,7 +43,13 @@ export const addTournament = (data: TournamentForm) => {
  * 按模版创建赛事:自动创建赛事 + 赛段链 + 场景 + 对战树关联
  * @param data 赛事名称 + 模版编码
  */
-export const createTournamentByTemplate = (data: { name: string; templateCode: string; remark?: string; refereeCount?: number }) => {
+export const createTournamentByTemplate = (data: {
+  name: string;
+  templateCode: string;
+  remark?: string;
+  refereeCount?: number;
+  refereeNames?: string[];
+}) => {
   return request({
     url: '/game/tournament/create-by-template',
     method: 'post',

@@ -106,16 +106,12 @@
                   <div class="text-center mb-3">
                     <div class="text-[10px] text-neutral-500">本场判罚 · {{ selectedStageMatch.name }}</div>
                     <div class="text-[9px] text-neutral-600 mt-0.5">
-                      <template v-if="isArenaMode">擂台对决：选择左方胜 / 右方胜</template>
-                      <template v-else>第 {{ roundSeq }} 轮：选择左方胜 / 平局 / 右方胜</template>
+                      {{ isArenaMode ? '擂台对决' : '第 ' + roundSeq + ' 轮' }}：选择左方胜 / 平局 / 右方胜
                     </div>
                     <div v-if="voteProgress" class="text-[9px] text-amber-400/80 mt-1 font-bold">裁判已判 {{ voteProgress }}</div>
                     <div v-if="pendingPublish" class="text-[9px] text-amber-400 mt-1 font-bold">已判完，等待导播台公布结果</div>
                   </div>
-                  <div
-                    class="grid gap-2 items-stretch"
-                    :class="isArenaMode ? 'grid-cols-2' : 'grid-cols-[1fr_auto_1fr]'"
-                  >
+                  <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
                     <button
                       @click="submitKnockout('LEFT')"
                       :disabled="submitting"
@@ -125,7 +121,6 @@
                       <span class="truncate block max-w-[110px] mx-auto">{{ leftParticipant?.competitorName || '待定' }}</span>
                     </button>
                     <button
-                      v-if="!isArenaMode"
                       @click="submitKnockout('DRAW')"
                       :disabled="submitting"
                       class="px-8 py-5 rounded-xl text-lg font-black bg-neutral-800 text-neutral-200 border-2 border-neutral-600 active:bg-neutral-700 transition-colors disabled:opacity-40"
@@ -142,7 +137,7 @@
                     </button>
                   </div>
                   <p v-if="!isArenaMode" class="text-[9px] text-neutral-600 mt-2 text-center">判平局将自动新增一轮加赛</p>
-                  <p v-else class="text-[9px] text-neutral-600 mt-2 text-center">不允许判平；裁判意见持平时重新投票，直至分出胜负</p>
+                  <p v-else class="text-[9px] text-neutral-600 mt-2 text-center">判平后擂主与挑战者均排到队尾，下一场与后续参赛者依次对战</p>
                 </div>
               </template>
 
@@ -241,7 +236,7 @@
             <p class="text-[10px] text-neutral-500 mb-1">{{ matchName || ('场次 #' + matchId) }}</p>
             <p class="text-[9px] text-neutral-600">
               {{ matchMode }} / Round {{ roundSeq }}
-              <span v-if="roundSeq > 1" class="text-amber-400 font-bold">· 平局加赛轮</span>
+              <span v-if="!isPerCompetitor && roundSeq > 1" class="text-amber-400 font-bold">· 平局加赛轮</span>
             </p>
           </div>
 
@@ -889,7 +884,7 @@ const submitKnockout = async (side: 'LEFT' | 'DRAW' | 'RIGHT') => {
   submitting.value = true;
   try {
     await submitRefereeScore(matchId.value, { outcomes });
-    // 静默刷新:平局自动进入加赛轮;分出胜负后随下一场/赛段切换
+    // 静默刷新:淘汰赛平局自动进入加赛轮;擂台赛平局直接结算(双方排到队尾);分出胜负后随下一场/赛段切换
     await loadData(stageId.value ?? undefined, matchId.value ?? undefined, undefined, true);
   } catch (e: any) {
     console.error('提交判罚失败:', e);

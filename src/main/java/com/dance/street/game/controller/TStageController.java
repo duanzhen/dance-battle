@@ -223,7 +223,7 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾)。赛段须 GAMING 且无进行中对决。
+     * 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾、平局双方均排到队尾)。赛段须 GAMING 且无进行中对决。
      */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "擂台赛下一场", businessType = BusinessType.UPDATE)

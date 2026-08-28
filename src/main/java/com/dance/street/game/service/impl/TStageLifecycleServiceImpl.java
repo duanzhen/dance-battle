@@ -213,7 +213,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 从海选赛进入的淘汰赛,未显式配置时默认标准种子对位(1-16、2-15)
         if (StageModeEnum.KNOCKOUT.equals(mode)
             && rc != null && rc.getKnockout() != null) {
-            TStage prev = stage.getPrevStageId() != null ? stageMapper.selectById(stage.getPrevStageId()) : null;
+            // 与预排(getPreBracket)口径一致:prev_stage_id 缺失时按 next 指针反查上一赛段,
+            // 避免链表指针正常但 prev_stage_id 为空时误走 SEED 头尾交叉
+            TStage prev = resolvePrevStage(stage);
             if (prev != null && StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())) {
                 rc.getKnockout().setPairingMode("SEQUENTIAL");
             } else if (StringUtils.isBlank(rc.getKnockout().getPairingMode())
@@ -713,7 +715,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     /**
      * 擂台赛轮转队列:初始 = 签到顺序(seedRank),回放已结算对决重排。
-     * 每场对决:胜者留在队首,败者排到队尾,其余保持相对顺序。
+     * 每场对决:胜者留在队首,败者排到队尾,其余保持相对顺序;
+     * 平局时擂主(slot1)与挑战者(slot2)均排到队尾(保持原相对顺序)。
      */
     private List<Long> computeArenaQueue(Long stageId) {
         List<TCompetitor> comps = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
@@ -730,6 +733,38 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
                 .eq(TMatchParticipant::getMatchId, m.getId())
                 .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+            // 平局:擂主(slot1)与挑战者(slot2)均移到队尾,其余保持相对顺序
+            boolean isDraw = parts.stream().anyMatch(p -> p.getCompetitorId() != null
+                && MatchOutcomeEnum.DRAW.getCode().equals(p.getOutcomeStatus()));
+            if (isDraw) {
+                Long defender = null;
+                Long challenger = null;
+                for (TMatchParticipant p : parts) {
+                    if (p.getCompetitorId() == null) {
+                        continue;
+                    }
+                    if (p.getDisplaySlotIndex() != null && p.getDisplaySlotIndex() == 1L) {
+                        defender = p.getCompetitorId();
+                    } else if (p.getDisplaySlotIndex() != null && p.getDisplaySlotIndex() == 2L) {
+                        challenger = p.getCompetitorId();
+                    }
+                }
+                if (defender == null || challenger == null
+                    || !queue.contains(defender) || !queue.contains(challenger)) {
+                    // 异常数据(如中途改判/重启残留)跳过该场,保持当前队列
+                    continue;
+                }
+                List<Long> next = new ArrayList<>();
+                for (Long cid : queue) {
+                    if (!cid.equals(defender) && !cid.equals(challenger)) {
+                        next.add(cid);
+                    }
+                }
+                next.add(defender);
+                next.add(challenger);
+                queue = next;
+                continue;
+            }
             Long winner = null;
             Long loser = null;
             for (TMatchParticipant p : parts) {

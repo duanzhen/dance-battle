@@ -89,33 +89,43 @@
           only-mode="KNOCKOUT,ARENA"
           @update:model-value="$emit('update:stageId', $event)"
         />
-        <p class="text-[10px] text-neutral-600 mt-2">对战树绑定淘汰赛赛段为标准对战树(配对按 SEED 标准种子对位或 SEQUENTIAL 相邻配对,已生成场次胜者高亮);绑定擂台赛段时展示该赛段 8 强名单(标准种子摆位,仅供展示)。</p>
+        <!-- <p class="text-[10px] text-neutral-600 mt-2">对战树绑定淘汰赛赛段为标准对战树(配对按 SEED 标准种子对位或 SEQUENTIAL 相邻配对,已生成场次胜者高亮);绑定擂台赛段时展示该赛段 8 强名单(标准种子摆位,仅供展示)。</p> -->
       </section>
       <section>
         <span class="section-title">样式配置</span>
         <div class="space-y-3 mt-2">
           <ColorInput label="文字颜色" :model-value="textColor || '#ffffff'" @update:model-value="$emit('update:textColor', $event)" />
           <div>
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">边框颜色</span>
+            <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">边框颜色</span>
+            <div class="flex items-center gap-1.5">
+              <div class="flex-1 min-w-0">
+                <ColorInput :model-value="borderColor ?? '#404040'" @update:model-value="$emit('update:borderColor', $event)" />
+              </div>
               <button
-                v-if="borderColor"
-                class="text-[10px] text-neutral-500 hover:text-amber-400"
+                class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
+                :class="borderColor === '' ? 'text-amber-400 bg-amber-500/10' : 'text-neutral-500 hover:text-amber-400 hover:bg-neutral-800'"
+                title="设为透明"
                 @click="$emit('update:borderColor', '')"
-              >设为透明</button>
+              >
+                <Ban class="w-3.5 h-3.5" />
+              </button>
             </div>
-            <ColorInput :model-value="borderColor || '#404040'" @update:model-value="$emit('update:borderColor', $event)" />
           </div>
           <div>
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">背景颜色</span>
+            <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">背景颜色</span>
+            <div class="flex items-center gap-1.5">
+              <div class="flex-1 min-w-0">
+                <ColorInput :model-value="bgColor ?? '#000000'" @update:model-value="$emit('update:bgColor', $event)" />
+              </div>
               <button
-                v-if="bgColor"
-                class="text-[10px] text-neutral-500 hover:text-amber-400"
+                class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
+                :class="bgColor === '' ? 'text-amber-400 bg-amber-500/10' : 'text-neutral-500 hover:text-amber-400 hover:bg-neutral-800'"
+                title="设为透明"
                 @click="$emit('update:bgColor', '')"
-              >设为透明</button>
+              >
+                <Ban class="w-3.5 h-3.5" />
+              </button>
             </div>
-            <ColorInput :model-value="bgColor || '#000000'" @update:model-value="$emit('update:bgColor', $event)" />
           </div>
         </div>
       </section>
@@ -125,6 +135,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
+import { Ban } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
 import ColorInput from './common/ColorInput.vue';
 import { listMatch } from '@/api/game/match';

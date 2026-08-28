@@ -978,11 +978,14 @@ const targetRuleConfig = computed(() => {
     return {};
   }
 });
-/** 目标淘汰赛配对模式:优先取配置;未配置时按与后端 generateMatches 相同的推断(海选/排名后=SEED,其余=SEQUENTIAL) */
+/** 目标淘汰赛配对模式:与后端 generateMatches 口径一致——
+ *  承接上一淘汰赛胜者时强制 SEQUENTIAL(覆盖本赛段配置的 SEED);
+ *  否则优先取配置,未配置时按上一赛段推断(海选/排名后=SEED,其余=SEQUENTIAL) */
 const directPairingMode = computed(() => {
+  const prevMode = sourceStage.value?.stageMode;
+  if (prevMode === 'KNOCKOUT') return 'SEQUENTIAL';
   const m = targetRuleConfig.value?.knockout?.pairingMode;
   if (m) return String(m).toUpperCase();
-  const prevMode = sourceStage.value?.stageMode;
   return prevMode === 'AUDITION' || prevMode === 'RANK' ? 'SEED' : 'SEQUENTIAL';
 });
 const directGroupCount = computed(() => Number(targetRuleConfig.value?.group?.groupCount) || 1);

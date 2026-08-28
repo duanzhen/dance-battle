@@ -216,8 +216,13 @@ public class TTournamentServiceImpl implements ITTournamentService {
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
-        // 按表单选择自动创建裁判(普通创建无赛段,不绑定)
-        createRefereesIfNeeded(add.getId(), bo.getRefereeCount(), null);
+        // 按表单选择自动创建裁判(普通创建无赛段,不绑定);
+        // 优先按姓名列表创建,未传时回退按 refereeCount 生成默认名
+        if (bo.getRefereeNames() != null && !bo.getRefereeNames().isEmpty()) {
+            createRefereesIfNeeded(add.getId(), bo.getRefereeNames(), null);
+        } else {
+            createRefereesIfNeeded(add.getId(), bo.getRefereeCount(), null);
+        }
         return MapstructUtils.convert(add, TTournamentVo.class);
     }
 
@@ -267,6 +272,13 @@ public class TTournamentServiceImpl implements ITTournamentService {
         // 3. 场景:主视觉 + 对战
         TVisSceneVo mainScene = createScene(tid, "主视觉", 1L);
         TVisSceneVo bracketScene = createScene(tid, "对战", 2L);
+
+        // 3.5 背景图片 widget:主视觉场景一张、对战场景一张。
+        //     全屏占位(src 为空,由导播台在大屏编辑器里替换素材);
+        //     对战场景在插入对战树之前创建,服务端按 max+1 分配 zIndex,
+        //     背景为 1、对战树从 2 起,背景始终位于对战场景最底部图层。
+        insertBackgroundImage(tid, mainScene.getId(), "主视觉背景");
+        insertBackgroundImage(tid, bracketScene.getId(), "对战背景");
 
         // 4. 对战场景:每个淘汰赛赛段一个对战树 widget,统一「大框套小框」居中嵌套排版——
         //    外层(人数最多)最宽,内层逐级缩小,所有 widget 中心对齐画布中心 (960,540),
@@ -374,11 +386,16 @@ public class TTournamentServiceImpl implements ITTournamentService {
         visWidgetService.insertByBo(currentMatchWidget);
 
         // 6. 按表单选择自动创建裁判,并绑定到所有赛段
-        List<Long> refereeIds = createRefereesIfNeeded(tid, bo.getRefereeCount(),
-            stages.stream().map(TStageVo::getId).toList());
+        List<Long> stageIds = stages.stream().map(TStageVo::getId).toList();
+        List<Long> refereeIds;
+        if (bo.getRefereeNames() != null && !bo.getRefereeNames().isEmpty()) {
+            refereeIds = createRefereesIfNeeded(tid, bo.getRefereeNames(), stageIds);
+        } else {
+            refereeIds = createRefereesIfNeeded(tid, bo.getRefereeCount(), stageIds);
+        }
 
-        log.info("按模版[{}]创建赛事[{}]完成:{} 个赛段,{} 个对战树 widget,1 个当前场次 widget", bo.getTemplateCode(), tid,
-            stages.size(), idx);
+        log.info("按模版[{}]创建赛事[{}]完成:{} 个赛段,{} 个对战树 widget,1 个当前场次 widget,2 个背景图片 widget",
+            bo.getTemplateCode(), tid, stages.size(), idx);
         if (refereeIds != null && !refereeIds.isEmpty()) {
             log.info("按模版[{}]创建赛事[{}]完成:自动创建 {} 位裁判并绑定到 {} 个赛段", bo.getTemplateCode(), tid,
                 refereeIds.size(), stages.size());
@@ -387,7 +404,29 @@ public class TTournamentServiceImpl implements ITTournamentService {
     }
 
     /**
-     * 按 refereeCount 自动创建裁判;stageIds 非空时把裁判绑定到这些赛段。
+     * 模板背景图片 widget:全屏占位(素材 src 由导播台替换)。
+     * 先于同场景其他 widget 插入,保证位于最底部图层。
+     */
+    private void insertBackgroundImage(Long tournamentId, Long sceneId, String name) {
+        TVisWidgetBo wb = new TVisWidgetBo();
+        wb.setTournamentId(tournamentId);
+        wb.setSceneId(sceneId);
+        wb.setName(name);
+        wb.setType("IMAGE");
+        wb.setLayoutConfig("{}");
+        wb.setDataConfig("{\"src\":\"\",\"tournamentId\":\"" + tournamentId + "\"}");
+        wb.setRenderConfig("{}");
+        wb.setX(0L);
+        wb.setY(0L);
+        wb.setW(CANVAS_W);
+        wb.setH(CANVAS_H);
+        wb.setVisible(1L);
+        wb.setLocked(0L);
+        visWidgetService.insertByBo(wb);
+    }
+
+    /**
+     * 按 refereeCount 自动创建裁判(兼容旧参数,生成"裁判1..N"默认名)。
      *
      * @param tournamentId 赛事ID
      * @param refereeCount 裁判数量(空或≤0 不创建)
@@ -401,11 +440,45 @@ public class TTournamentServiceImpl implements ITTournamentService {
         if (refereeCount > 100) {
             throw new ServiceException("裁判数量最多 100 人");
         }
-        List<Long> refereeIds = new ArrayList<>();
+        List<String> names = new ArrayList<>();
         for (int i = 1; i <= refereeCount; i++) {
+            names.add("裁判" + i);
+        }
+        return createRefereesIfNeeded(tournamentId, names, stageIds);
+    }
+
+    /**
+     * 按姓名列表自动创建裁判;stageIds 非空时把裁判绑定到这些赛段。
+     * 姓名自动去空/去重并保持顺序,最多 100 人。
+     *
+     * @param tournamentId 赛事ID
+     * @param refereeNames 裁判姓名列表(空/null 不创建)
+     * @param stageIds     需要绑定的赛段ID列表(可为 null)
+     * @return 创建的裁判ID列表
+     */
+    private List<Long> createRefereesIfNeeded(Long tournamentId, List<String> refereeNames, List<Long> stageIds) {
+        if (refereeNames == null || refereeNames.isEmpty()) {
+            return List.of();
+        }
+        List<String> names = new ArrayList<>();
+        for (String name : refereeNames) {
+            String trimmed = name == null ? "" : name.trim();
+            if (trimmed.isEmpty() || names.contains(trimmed)) {
+                continue;
+            }
+            names.add(trimmed);
+        }
+        if (names.isEmpty()) {
+            return List.of();
+        }
+        if (names.size() > 100) {
+            throw new ServiceException("裁判最多 100 人");
+        }
+        List<Long> refereeIds = new ArrayList<>();
+        for (String name : names) {
             TRefereeBo rb = new TRefereeBo();
             rb.setTournamentId(tournamentId);
-            rb.setName("裁判" + i);
+            rb.setName(name);
             refereeService.insertByBo(rb);
             refereeIds.add(rb.getId());
         }

@@ -50,7 +50,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.time.Duration;
 
 /**
  * 比赛结果提交编排:写明细分 → ScoringEngine 算分算排名 → 回写 participant →
@@ -110,23 +109,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         boolean isRank = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
         boolean perCompetitor = isAudition || isRank;
         boolean isArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
-        // 擂台赛:1v1 分胜负,必须给出胜负判定、不允许判平
-        if (isArena) {
-            if (bo.getOutcomes() == null || bo.getOutcomes().isEmpty()) {
-                throw new ServiceException("擂台赛须提交胜负判定");
-            }
-            boolean hasWin = false;
-            for (String o : bo.getOutcomes().values()) {
-                if (o != null && MatchOutcomeEnum.WIN.getCode().equals(o)) {
-                    hasWin = true;
-                }
-                if (o != null && MatchOutcomeEnum.DRAW.getCode().equals(o)) {
-                    throw new ServiceException("擂台赛不允许判平,请选择红方或蓝方胜");
-                }
-            }
-            if (!hasWin) {
-                throw new ServiceException("擂台赛须选择一方获胜");
-            }
+        // 擂台赛:1v1 判胜负平,必须给出双方判定(胜+负 / 负+胜 / 平+平);
+        // 平局时双方均排到队尾,由 computeArenaQueue 回放处理
+        if (isArena && (bo.getOutcomes() == null || bo.getOutcomes().isEmpty())) {
+            throw new ServiceException("擂台赛须提交胜负或平局判定");
         }
         // 多裁判累计打分(VOTING/RANKING,非逐选手轮次):只累计不结算,由 completeStage 统一结算
         if (!perCompetitor && (mode == MatchModeEnum.VOTING || mode == MatchModeEnum.RANKING)) {
@@ -289,54 +275,15 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
             Map<Long, String> aggregated = aggregateRefereeVotes(voteRound, competitorIds, assigned);
             if (aggregated == null) {
-                if (isArena) {
-                    // 擂台赛:票数持平不结算、不加轮,允许裁判重新投票但有次数上限,
-                    // 超过上限按多数票兜底裁决(仍持平则擂主/左侧 slot1 守擂成功),
-                    // 避免偶数裁判 1:1 平票时流程永久死锁
-                    String revoteKey = "arena:revote:" + match.getId();
-                    long revote = 1;
-                    try {
-                        revote = RedisUtils.incrAtomicValue(revoteKey);
-                        if (revote == 1) {
-                            RedisUtils.expire(revoteKey, Duration.ofHours(1));
-                        }
-                    } catch (Exception e) {
-                        log.warn("擂台重投计数失败,按首次处理: {}", e.getMessage());
-                    }
-                    if (revote < 3) {
-                        int leftWinsBefore = leftWinVotes(voteRound, competitorIds);
-                        int rightWinsBefore = rightWinVotes(voteRound, competitorIds);
-                        // 平票作废本轮投票:清空后裁判重新判罚,保证重投计数按"轮"而非按"提交次数"累计
-                        // (不清空时,下一轮第一名裁判提交即满足投票数触发聚合,2 名裁判会少算一轮)
-                        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                            .eq(TRoundScore::getRoundId, voteRound.getId())
-                            .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE));
-                        log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),擂台赛不允许平局,"
-                                + "本轮投票已作废,等待重新判罚(第{}轮,最多3轮)",
-                            match.getId(), leftWinsBefore, rightWinsBefore, revote);
-                        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
-                        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
-                        return buildVo(match.getId(), StageConstants.MATCH_GAMING, List.of());
-                    }
-                    Map<Long, String> fallback = new HashMap<>();
-                    if (leftWinVotes(voteRound, competitorIds) >= rightWinVotes(voteRound, competitorIds)) {
-                        fallback.put(competitorIds.get(0), MatchOutcomeEnum.WIN.getCode());
-                        fallback.put(competitorIds.get(1), MatchOutcomeEnum.LOSS.getCode());
-                    } else {
-                        fallback.put(competitorIds.get(0), MatchOutcomeEnum.LOSS.getCode());
-                        fallback.put(competitorIds.get(1), MatchOutcomeEnum.WIN.getCode());
-                    }
-                    aggregated = fallback;
-                    RedisUtils.deleteObject(revoteKey);
-                    log.warn("场次[{}]擂台赛重投{}次仍持平,兜底裁决: {}", match.getId(), revote, aggregated);
-                } else {
-                    // 票数持平(如 1红1蓝、1红1蓝1平):综合判定为平局,在当前场次下加赛一轮重新比
-                    log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),判定平局并加赛一轮",
-                        match.getId(), leftWinVotes(voteRound, competitorIds), rightWinVotes(voteRound, competitorIds));
-                    aggregated = new HashMap<>();
-                    for (Long cid : competitorIds) {
-                        aggregated.put(cid, MatchOutcomeEnum.DRAW.getCode());
-                    }
+                // 票数持平(如 1红1蓝、1红1蓝1平):综合判定为平局。
+                // 淘汰赛在当前场次下加赛一轮重新比;擂台赛直接以平局结算,
+                // 擂主与挑战者均排到队尾,由 computeArenaQueue 回放处理
+                log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),判定平局{}",
+                    match.getId(), leftWinVotes(voteRound, competitorIds),
+                    rightWinVotes(voteRound, competitorIds), isArena ? "(擂台赛双方排到队尾)" : "并加赛一轮");
+                aggregated = new HashMap<>();
+                for (Long cid : competitorIds) {
+                    aggregated.put(cid, MatchOutcomeEnum.DRAW.getCode());
                 }
             }
             effectiveOutcomes = aggregated;

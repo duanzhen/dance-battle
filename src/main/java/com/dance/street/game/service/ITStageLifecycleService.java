@@ -62,7 +62,7 @@ public interface ITStageLifecycleService {
     /** 海选分圈随机抽取:把已签到选手随机均衡分配到各圈场次(可重抽,赛段未开始时) */
     List<CircleAssignVo> randomCircles(Long stageId);
 
-    /** 擂台赛:按轮转队列创建并开始下一场对决(胜者守擂、败者队尾)。赛段须 GAMING 且无进行中对决 */
+    /** 擂台赛:按轮转队列创建并开始下一场对决(胜者守擂、败者队尾、平局双方均排到队尾)。赛段须 GAMING 且无进行中对决 */
     void startNextArenaMatch(Long stageId);
 
     /** 擂台赛总览:轮转队列(含积分)与当前对决 */

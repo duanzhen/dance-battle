@@ -129,9 +129,9 @@
     <div v-else class="space-y-4 px-2 py-4">
       <section>
         <span class="section-title">当前场次属性</span>
-        <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-3">
+        <!-- <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-3">
           <p class="text-[10px] text-amber-400">仅淘汰赛赛段显示，自动关联当前进行(GAMING)的场次，无需手动绑定；SSE 实时刷新。</p>
-        </div>
+        </div> -->
         <div>
           <AssetUpload
             label="背景图片"
@@ -143,7 +143,7 @@
           />
         </div>
         <p class="text-[10px] text-neutral-600 mt-2">
-          显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像/实时比分，领先方高亮。非淘汰赛赛段或暂无进行中场次时控件保持透明。
+          <!-- 显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像/实时比分，领先方高亮。非淘汰赛赛段或暂无进行中场次时控件保持透明。 -->
         </p>
       </section>
     </div>

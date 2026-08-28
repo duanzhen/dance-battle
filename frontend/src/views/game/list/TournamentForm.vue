@@ -53,12 +53,12 @@
             </div>
           </div>
 
-          <div v-else class="text-center p-4">
+          <div v-else class="text-center pt-2.5 pb-0">
             <div
-              class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"
+              class="w-9 h-9 rounded-full bg-neutral-800 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"
             >
               <svg
-                class="w-5 h-5 text-neutral-400 group-hover:text-amber-500 transition-colors"
+                class="w-4 h-4 text-neutral-400 group-hover:text-amber-500 transition-colors"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -105,17 +105,41 @@
         </div>
       </div>
 
-      <div v-if="!props.tournament">
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">裁判数量</label>
-        <input
-          v-model.number="form.refereeCount"
-          type="number"
-          min="0"
-          max="100"
-          placeholder="0"
-          class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
-        />
-        <p class="text-[11px] text-neutral-600 mt-1">自动创建对应数量的裁判；按模版创建时会自动绑定到所有赛段</p>
+      <div v-if="!props.tournament" class="col-span-2">
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5">
+          裁判配置 <span class="text-red-500">*</span>
+        </label>
+        <div class="flex gap-2">
+          <el-select
+            v-model="form.refereeNames"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            :disabled="form.refereeNone"
+            popper-class="referee-config-no-dropdown"
+            :placeholder="form.refereeNone ? '暂无裁判' : '输入姓名添加裁判'"
+            class="flex-1 referee-config-select"
+            @change="handleRefereeConfigChange"
+          />
+          <button
+            type="button"
+            @click="toggleRefereeNone"
+            class="shrink-0 w-11 h-[42px] rounded-lg border flex items-center justify-center transition-colors"
+            :class="
+              form.refereeNone
+                ? 'bg-neutral-700 text-neutral-300 border-neutral-600 hover:bg-neutral-600'
+                : 'bg-neutral-950 text-neutral-500 border-neutral-800 hover:text-red-400 hover:border-red-900/50'
+            "
+            :title="form.refereeNone ? '已选择暂无裁判，点击取消' : '暂无裁判：无裁判时点击此按钮'"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+        <p class="text-[11px] text-neutral-600 mt-1">
+          输入姓名按快捷添加裁判,没有裁判时点击右侧 X 标记「暂无裁判」。
+        </p>
       </div>
 
       <div v-if="!simple" :class="props.tournament ? 'col-span-2' : ''">
@@ -234,6 +258,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { addTournament, updateTournament, createTournamentByTemplate } from '@/api/game/tournament';
 import request from '@/utils/request';
 import { ElMessage } from 'element-plus';
+import { X } from 'lucide-vue-next';
 
 const props = defineProps({
   modelValue: Boolean,
@@ -280,7 +305,8 @@ const form = reactive({
   logicalHeight: 1080, // 设计稿高度
   themeConfig: '', // 主题配置 JSON 字符串
   remark: '', // 备注
-  refereeCount: 0 // 自动创建裁判数量
+  refereeNames: [], // 裁判配置:裁判姓名列表
+  refereeNone: false // 裁判配置:是否标记「暂无裁判」
 });
 
 // 文件上传相关
@@ -364,12 +390,13 @@ const resetForm = () => {
   Object.assign(form, {
     name: '',
     coverImage: '',
-    status: 0,
+    status: 1,
     logicalWidth: 1920,
     logicalHeight: 1080,
     themeConfig: '',
     remark: '',
-    refereeCount: 0
+    refereeNames: [],
+    refereeNone: false
   });
   if (previewUrl.value && !previewUrl.value.startsWith('http')) {
     URL.revokeObjectURL(previewUrl.value);
@@ -402,11 +429,32 @@ watch(
   { immediate: true }
 );
 
+// 裁判配置:添加姓名时自动取消「暂无裁判」标记
+const handleRefereeConfigChange = (val) => {
+  form.refereeNames = val;
+  if (val.length > 0) {
+    form.refereeNone = false;
+  }
+};
+
+// 暂无裁判:点击输入框右侧 X 标记;再次点击取消
+const toggleRefereeNone = () => {
+  form.refereeNone = !form.refereeNone;
+  if (form.refereeNone) {
+    form.refereeNames = [];
+  }
+};
+
 // 提交表单
 const submitForm = async () => {
   // 验证必填字段
   if (!form.name) {
     ElMessage.warning('请输入赛事名称');
+    return;
+  }
+  // 裁判配置为必选项:要么添加至少一名裁判,要么点击右侧 X 标记「暂无裁判」
+  if (!props.tournament && !form.refereeNone && (!form.refereeNames || form.refereeNames.length === 0)) {
+    ElMessage.warning('请配置裁判：添加至少一名裁判，或点击右侧 X 标记「暂无裁判」');
     return;
   }
 
@@ -431,7 +479,7 @@ const submitForm = async () => {
         name: form.name,
         templateCode: selectedTemplate.value,
         remark: form.remark,
-        refereeCount: form.refereeCount || 0
+        refereeNames: form.refereeNames
       });
       ElMessage.success('赛事模版创建成功');
     } else {
@@ -530,5 +578,41 @@ const handleClose = () => {
 /* 兼容不支持 :has() 的浏览器 */
 :global(.tournament-dialog ~ .el-overlay) {
   background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* 裁判配置下拉:深色主题适配 */
+:global(.tournament-dialog .referee-config-select .el-select__wrapper) {
+  background-color: #0a0a0a;
+  box-shadow: 0 0 0 1px #262626 inset;
+  min-height: 42px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  transition: box-shadow 0.2s;
+}
+:global(.tournament-dialog .referee-config-select .el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px #404040 inset;
+}
+:global(.tournament-dialog .referee-config-select .el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px #f59e0b inset;
+}
+:global(.tournament-dialog .referee-config-select .el-select__wrapper.is-disabled) {
+  background-color: #171717;
+  box-shadow: 0 0 0 1px #333 inset;
+}
+:global(.tournament-dialog .referee-config-select .el-select__placeholder) {
+  color: #525252;
+}
+:global(.tournament-dialog .referee-config-select .el-tag) {
+  background-color: #262626;
+  border-color: #404040;
+  color: #e5e5e5;
+  border-radius: 6px;
+}
+:global(.tournament-dialog .referee-config-select .el-select__selection) {
+  gap: 4px;
+}
+/* 点击输入框不弹下拉:仅保留输入+回车快捷添加 */
+:global(.referee-config-no-dropdown) {
+  display: none !important;
 }
 </style>

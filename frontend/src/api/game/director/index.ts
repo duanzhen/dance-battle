@@ -69,7 +69,7 @@ export function directorCompleteStage(id: string | number) {
   });
 }
 
-/** 擂台赛:下一场 */
+/** 擂台赛:下一场(胜者守擂、败者排到队尾;平局时擂主与挑战者均排到队尾) */
 export function directorArenaNext(id: string | number) {
   return directorRequest({
     url: `/game/director/stage/${id}/arena-next`,

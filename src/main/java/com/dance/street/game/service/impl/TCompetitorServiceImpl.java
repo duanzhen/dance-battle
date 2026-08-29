@@ -22,10 +22,12 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.service.ITCompetitorService;
+import com.dance.street.game.service.TournamentEventNotifier;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +44,7 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
     private final TCompetitorMapper baseMapper;
     private final TCompetitorMemberMapper competitorMemberMapper;
     private final TPlayerMapper playerMapper;
+    private final TournamentEventNotifier tournamentEventNotifier;
 
     /**
      * 查询参赛单位
@@ -170,8 +173,44 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
     public TCompetitorVo updateByBo(TCompetitorBo bo) {
         TCompetitor update = MapstructUtils.convert(bo, TCompetitor.class);
         validEntityBeforeSave(update);
+        // 改名联动 + 广播:仅在参赛单位名称实际变化时触发
+        // (赛段配置内单独改名时传 syncPlayerName=false 跳过联动,广播仍保留)
+        boolean renamed = false;
+        if (update.getId() != null && StringUtils.isNotBlank(update.getName())) {
+            TCompetitor before = baseMapper.selectById(update.getId());
+            if (before != null && !Objects.equals(before.getName(), update.getName())) {
+                renamed = true;
+                if (!Boolean.FALSE.equals(bo.getSyncPlayerName())) {
+                    syncLinkedPlayerName(update.getId(), update.getName());
+                }
+            }
+        }
         baseMapper.updateById(update);
+        if (renamed) {
+            tournamentEventNotifier.notify(update.getTournamentId(), update.getStageId(), null, "competitor");
+        }
         return MapstructUtils.convert(update, TCompetitorVo.class);
+    }
+
+    /**
+     * 参赛单位改名联动:名下仅有一个选手时,同步更新该选手姓名。
+     * 队伍(多个选手)不联动,避免把队伍名覆盖到个人档案。
+     */
+    private void syncLinkedPlayerName(Long competitorId, String newName) {
+        List<TCompetitorMember> members = competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()
+            .eq(TCompetitorMember::getCompetitorId, competitorId));
+        if (members == null || members.size() != 1 || members.get(0).getPlayerId() == null) {
+            return;
+        }
+        Long playerId = members.get(0).getPlayerId();
+        TPlayer player = playerMapper.selectById(playerId);
+        if (player != null && !Objects.equals(player.getName(), newName)) {
+            TPlayer upd = new TPlayer();
+            upd.setId(playerId);
+            upd.setName(newName);
+            playerMapper.updateById(upd);
+            log.info("参赛单位[{}]改名[{}],名下唯一选手[{}]已联动改名", competitorId, newName, playerId);
+        }
     }
 
     /**

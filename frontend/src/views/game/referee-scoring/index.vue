@@ -573,6 +573,12 @@ import { subscribeChannel } from '@/utils/sseChannel';
 
 const route = useRoute();
 
+/** 兼容旧场次名 R{轮次}-M{场次},统一展示为 第{场次}场Round{轮次} */
+const fmtMatchName = (name?: string) => {
+  const m = /^R(\d+)-M(\d+)$/.exec(name || '');
+  return m ? `第${m[2]}场Round${m[1]}` : name || '';
+};
+
 const loading = ref(true);
 const error = ref('');
 const tournamentId = ref<number | string | null>(null);
@@ -1002,7 +1008,7 @@ const applyData = (data: any) => {
   stageMode.value = data?.stage?.stageMode || '';
   scoreType.value = data?.scoreType || '';
   matchId.value = data?.match?.id;
-  matchName.value = data?.match?.name || '';
+  matchName.value = fmtMatchName(data?.match?.name || '');
   matchMode.value = data?.match?.matchMode || 'STANDARD';
   roundSeq.value = data?.currentRound?.roundSequence || 1;
   currentRoundId.value = data?.currentRound?.id ?? null;
@@ -1015,19 +1021,19 @@ const applyData = (data: any) => {
   }));
   matches.value = (data?.matches || []).map((m: any) => ({
     id: m.id,
-    name: m.name,
+    name: fmtMatchName(m.name),
     status: m.status,
     matchMode: m.matchMode
   }));
   stageMatches.value = (data?.stageMatches || data?.matches || []).map((m: any) => ({
     id: m.id,
-    name: m.name,
+    name: fmtMatchName(m.name),
     status: m.status,
     matchMode: m.matchMode
   }));
   stageOverview.value = (data?.stageOverview || []).map((m: any) => ({
     id: m.id,
-    name: m.name,
+    name: fmtMatchName(m.name),
     status: m.status,
     matchMode: m.matchMode,
     rounds: m.rounds || [],
@@ -1138,19 +1144,19 @@ const mergeLive = (data: any) => {
   }));
   matches.value = (data?.matches || []).map((m: any) => ({
     id: m.id,
-    name: m.name,
+    name: fmtMatchName(m.name),
     status: m.status,
     matchMode: m.matchMode
   }));
   stageMatches.value = (data?.stageMatches || data?.matches || []).map((m: any) => ({
     id: m.id,
-    name: m.name,
+    name: fmtMatchName(m.name),
     status: m.status,
     matchMode: m.matchMode
   }));
   stageOverview.value = (data?.stageOverview || []).map((m: any) => ({
     id: m.id,
-    name: m.name,
+    name: fmtMatchName(m.name),
     status: m.status,
     matchMode: m.matchMode,
     rounds: m.rounds || [],

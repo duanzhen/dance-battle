@@ -88,7 +88,7 @@ public class KnockoutGenerator implements StageGenerator {
         List<MatchPlan> matches = new ArrayList<>();
         for (int i = 0; i < r1Count; i++) {
             MatchPlan m = new MatchPlan();
-            m.setName("R" + round + "-M" + (i + 1));
+            m.setName("第" + (i + 1) + "场Round" + round);
             m.setRound(1);
             m.setMatchIndex(i);
             m.setDisplayCol(1);
@@ -120,7 +120,7 @@ public class KnockoutGenerator implements StageGenerator {
 
     private MatchPlan baseMatch(int round, int index, int roundCount, int totalRounds) {
         MatchPlan m = new MatchPlan();
-        m.setName("R" + round + "-M" + (index + 1));
+        m.setName("第" + (index + 1) + "场Round" + round);
         m.setRound(round);
         m.setMatchIndex(index);
         m.setDisplayCol(round);

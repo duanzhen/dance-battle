@@ -59,7 +59,42 @@
             <!-- 选手信息 -->
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-1">
-                <span class="text-sm font-medium text-white truncate">{{ competitor.name }}</span>
+                <template v-if="editingId === competitor.id">
+                  <input
+                    v-model="editingName"
+                    autofocus
+                    maxlength="50"
+                    class="w-44 bg-neutral-800 border border-amber-500/40 rounded-md px-2 py-1 text-sm text-white outline-none focus:border-amber-500"
+                    @keydown.enter.prevent="saveRename"
+                    @keydown.esc.prevent="cancelRename"
+                  />
+                  <button
+                    class="flex-shrink-0 p-1 rounded text-green-500 hover:bg-green-500/10 disabled:opacity-40"
+                    title="保存"
+                    :disabled="savingRename"
+                    @click="saveRename"
+                  >
+                    <Check class="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    class="flex-shrink-0 p-1 rounded text-neutral-400 hover:bg-neutral-700/50 disabled:opacity-40"
+                    title="取消"
+                    :disabled="savingRename"
+                    @click="cancelRename"
+                  >
+                    <X class="w-3.5 h-3.5" />
+                  </button>
+                </template>
+                <template v-else>
+                  <span class="text-sm font-medium text-white truncate">{{ competitor.name }}</span>
+                  <button
+                    class="flex-shrink-0 p-1 rounded text-neutral-500 hover:text-amber-400 hover:bg-amber-500/10"
+                    title="改名"
+                    @click="startRename(competitor)"
+                  >
+                    <Pencil class="w-3.5 h-3.5" />
+                  </button>
+                </template>
                 <span
                   v-if="competitor.type === 1"
                   class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-500 border border-blue-500/20"
@@ -111,8 +146,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Users } from 'lucide-vue-next';
-import { listCompetitor } from '@/api/game/competitor';
+import { Users, Pencil, Check, X } from 'lucide-vue-next';
+import { listCompetitor, updateCompetitor } from '@/api/game/competitor';
 import { setStageSeedOrder } from '@/api/game/stage';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
@@ -129,6 +164,11 @@ const props = defineProps<{
 // 状态
 const loading = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
+
+// 行内改名状态
+const editingId = ref<string | number | null>(null);
+const editingName = ref('');
+const savingRename = ref(false);
 
 // GUEST 可加入/可排位窗口:赛段未初始化且处于规划/未开始态(DRAFT/PENDING)
 const canArrange = computed(() => !props.isInitialized && (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING'));
@@ -168,6 +208,38 @@ const onDragEnd = () => {
   dragIndex.value = null;
 };
 
+const startRename = (competitor: CompetitorVO) => {
+  editingId.value = competitor.id;
+  editingName.value = competitor.name || '';
+};
+
+const cancelRename = () => {
+  editingId.value = null;
+  editingName.value = '';
+};
+
+const saveRename = async () => {
+  const name = editingName.value.trim();
+  if (!name) {
+    ElMessage.warning('名称不能为空');
+    return;
+  }
+  if (editingId.value === null) return;
+  savingRename.value = true;
+  try {
+    // 赛段配置内单独改名:不联动同步名下唯一选手档案
+    await updateCompetitor({ id: editingId.value, name, syncPlayerName: false });
+    ElMessage.success('已保存');
+    cancelRename();
+    await loadCompetitors();
+  } catch (error) {
+    console.error('修改名称失败:', error);
+    ElMessage.error((error as any)?.msg || (error as any)?.message || '修改名称失败');
+  } finally {
+    savingRename.value = false;
+  }
+};
+
 const saveSeedOrder = async () => {
   if (!props.stageId || competitors.value.length === 0 || savingOrder.value) return;
   savingOrder.value = true;
@@ -195,6 +267,8 @@ const loadCompetitors = async () => {
   }
 
   loading.value = true;
+  editingId.value = null;
+  editingName.value = '';
   try {
     const { data } = await listCompetitor({ stageId: props.stageId, pageNum: 1, pageSize: 1000 });
     competitors.value = data || [];

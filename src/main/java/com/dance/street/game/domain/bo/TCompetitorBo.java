@@ -54,6 +54,11 @@ public class TCompetitorBo extends BaseEntity {
     private String name;
 
     /**
+     * 是否联动同步名下唯一选手姓名(默认联动;赛段配置内单独改名时传 false)
+     */
+    private Boolean syncPlayerName;
+
+    /**
      * 选手号
      */
     private String number;

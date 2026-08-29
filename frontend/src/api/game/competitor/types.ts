@@ -107,6 +107,11 @@ export interface CompetitorForm extends BaseEntity {
   name?: string;
 
   /**
+   * 是否联动同步名下唯一选手姓名(默认联动;赛段配置内单独改名时传 false)
+   */
+  syncPlayerName?: boolean;
+
+  /**
    * 本赛段初始种子顺位
    */
   seedRank?: number;

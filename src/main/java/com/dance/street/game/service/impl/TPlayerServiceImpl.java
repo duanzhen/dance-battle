@@ -19,10 +19,12 @@ import com.dance.street.game.domain.vo.TPlayerVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.TTournamentVo;
+import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
+import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.service.ITPlayerService;
@@ -37,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -52,6 +55,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
 
     private final TPlayerMapper baseMapper;
     private final ITCompetitorService competitorService;
+    private final TCompetitorMapper competitorMapper;
     private final ITTournamentService tournamentService;
     private final ITStageService stageService;
     private final ITCompetitorMemberService competitorMemberService;
@@ -178,8 +182,39 @@ public class TPlayerServiceImpl implements ITPlayerService {
     public TPlayerVo updateByBo(TPlayerBo bo) {
         TPlayer update = MapstructUtils.convert(bo, TPlayer.class);
         validEntityBeforeSave(update);
+        // 改名联动:选手姓名更新后,若其所属参赛单位名下只有这一个选手,同步更新参赛单位名称
+        if (update.getId() != null && StringUtils.isNotBlank(update.getName())) {
+            TPlayer before = baseMapper.selectById(update.getId());
+            if (before != null && before.getCompetitorId() != null
+                    && !Objects.equals(before.getName(), update.getName())) {
+                syncLinkedCompetitorName(before.getCompetitorId(), update.getName(), before.getId());
+            }
+        }
         baseMapper.updateById(update);
         return MapstructUtils.convert(update, TPlayerVo.class);
+    }
+
+    /**
+     * 选手改名联动:所属参赛单位名下仅有一个选手(且就是本人)时,同步更新参赛单位名称。
+     * 队伍(多个选手)不联动,避免个人改名覆盖队伍名。
+     */
+    private void syncLinkedCompetitorName(Long competitorId, String newName, Long playerId) {
+        List<TCompetitorMember> members = competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()
+            .eq(TCompetitorMember::getCompetitorId, competitorId));
+        if (members == null || members.size() != 1
+                || !Objects.equals(members.get(0).getPlayerId(), playerId)) {
+            return;
+        }
+        TCompetitor competitor = competitorMapper.selectById(competitorId);
+        if (competitor != null && !Objects.equals(competitor.getName(), newName)) {
+            TCompetitor upd = new TCompetitor();
+            upd.setId(competitorId);
+            upd.setName(newName);
+            competitorMapper.updateById(upd);
+            // 联动改名后广播,让裁判端/导播台等实时刷新
+            tournamentEventNotifier.notify(competitor.getTournamentId(), competitor.getStageId(), null, "competitor");
+            log.info("选手[{}]改名[{}],所属参赛单位[{}]已联动改名", playerId, newName, competitorId);
+        }
     }
 
     /**

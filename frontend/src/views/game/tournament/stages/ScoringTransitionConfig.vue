@@ -14,7 +14,7 @@
         </div>
 
         <!-- 判胜负平 -->
-        <template v-if="localScoring.type === 'WIN_LOSS_DRAW'">
+        <template v-if="localScoring.type === 'WIN_LOSS_DRAW' && false">
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="text-xs text-neutral-500 mb-1 block">胜积分</label>

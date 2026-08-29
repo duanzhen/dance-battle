@@ -4,9 +4,12 @@
 
 // 赛段配置模式
 export enum ConfigMode {
-  NORMAL = 'normal', // 普通模式: 所有配置项可编辑
-  INIT = 'init', // 初始化模式: 包含 init-only 字段
-  INIT_DONE = 'init-done' // 初始化完成模式: init-only 字段只读
+  /** 创建模式: 新建赛段时,创建配置 + 初始配置均可编辑 */
+  CREATE = 'create',
+  /** 初始配置模式: 赛段已创建、未开始,初始配置可编辑,创建配置锁定 */
+  INIT = 'init',
+  /** 开始后模式: 创建配置与初始配置均只读,仅开始后参数可编辑 */
+  STARTED = 'started'
 }
 
 // 赛段类型枚举
@@ -60,6 +63,8 @@ export interface AuditionConfig {
   circles?: number; // 分圈数(1=不分圈)
   /** 每圈晋级人数(按圈顺序 ZONE-1..n,各圈可不相同;未配置按 advanceCount 均分) */
   circleAdvanceCounts?: number[];
+  /** 每圈绑定的裁判ID列表(按圈顺序 ZONE-1..n,每圈可多个;未配置时生成对阵自动按 圈数=裁判数 1:1 或全部绑每圈) */
+  circleRefereeIds?: (string | number)[][];
 }
 
 // 排名赛评分维度(可自定义,不写死)
@@ -74,7 +79,6 @@ export interface RankDimension {
 export interface RankingConfig {
   scale: number; // 参赛人数
   advanceCount: number; // 晋级名额
-  circles: number; // 分圈数
   // 结果公布模式:AUTO=实时公布 / MANUAL=导播台手动公布 / BATCH=全部完成后一次性公布
   publishMode: 'AUTO' | 'MANUAL' | 'BATCH';
   // 公布范围:BATCH 使用,ALL=公布全部排名 / TOP_N=只公布前 N 名晋级名单
@@ -97,8 +101,7 @@ export enum ChallengeOrder {
 }
 
 export interface ArenaConfig {
-  defenderTeamId: string; // 守擂方ID
-  challengerCount: number; // 攻擂队伍数
+  scale: number; // 进入擂台赛总人数(擂主1人 + 攻擂N人)
   winStreakBonus: number; // 连胜奖励积分
   challengeOrder: ChallengeOrder; // 挑战顺序
   maxChallenges: number; // 最大挑战场次

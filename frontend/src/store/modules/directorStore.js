@@ -674,7 +674,7 @@ export const useDirectorStore = defineStore('director', () => {
 
     if (type === 'SCOREBOARD') {
       defaultName = `比分牌 ${currentScene.value.widgets.length + 1}`;
-      dataConfig = { stageId: null, showScore: true };
+      dataConfig = { stageId: null, showScore: true, fontSize: 12 };
       defaultWidth = 900;
       defaultHeight = 500;
     }

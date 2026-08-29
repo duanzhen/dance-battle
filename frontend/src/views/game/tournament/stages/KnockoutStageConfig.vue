@@ -4,8 +4,8 @@
       <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-6 flex items-center gap-2"><Trophy class="w-4 h-4" /> 淘汰赛配置</h3>
 
       <div class="space-y-6">
-        <!-- INIT_DONE 模式: 只读展示 -->
-        <template v-if="currentMode === ConfigMode.INIT_DONE">
+        <!-- STARTED 模式: 创建+初始配置只读展示 -->
+        <template v-if="currentMode === ConfigMode.STARTED">
           <!-- 模板信息 -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">淘汰赛模板</div>
@@ -41,24 +41,31 @@
           </div>
         </template>
 
-        <!-- INIT/NORMAL 模式: 可编辑 -->
+        <!-- CREATE/INIT 模式: 可编辑 -->
         <template v-else>
-          <!-- 基本信息 -->
-          <div>
-            <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
-            <select
-              v-model="config.format"
-              class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-              @change="handleUpdate"
-            >
-              <option value="BO1">BO1 (单局决胜)</option>
-              <option value="BO3">BO3 (三局两胜)</option>
-              <option value="BO5">BO5 (五局三胜)</option>
-            </select>
+          <!-- 创建配置(INIT 模式只读展示:创建后锁定) -->
+          <div v-if="currentMode === ConfigMode.INIT" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+            <div class="text-xs text-neutral-500 mb-3">创建配置（锁定）</div>
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <div class="text-xs text-neutral-500 mb-1">淘汰赛模板</div>
+                <div class="text-lg font-medium text-amber-500">{{ getTemplateLabel(config.template) }}</div>
+                <div class="text-[10px] text-neutral-600">{{ getTemplateDetail(config.template) }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-neutral-500 mb-1">参赛队伍数</div>
+                <div class="text-2xl font-bold text-white font-mono">{{ config.teamsCount }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-neutral-500 mb-1">晋级队伍数</div>
+                <div class="text-2xl font-bold text-white font-mono">{{ config.advanceCount }}</div>
+              </div>
+            </div>
           </div>
 
-          <!-- 模板选择 (INIT-ONLY) -->
-          <div v-if="currentMode === ConfigMode.INIT">
+          <!-- 模板选择 (创建配置,创建后锁定) -->
+          <div v-if="currentMode === ConfigMode.CREATE" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+            <div class="text-xs text-neutral-500 mb-3">创建配置</div>
             <label class="text-xs text-neutral-500 mb-2 block">淘汰赛模板</label>
             <div class="grid grid-cols-4 gap-3">
               <div
@@ -74,8 +81,8 @@
             </div>
           </div>
 
-          <!-- 队伍数量 (INIT-ONLY) -->
-          <div v-if="currentMode === ConfigMode.INIT" class="grid grid-cols-2 gap-6">
+          <!-- 队伍数量 (创建配置,创建后锁定) -->
+          <div v-if="currentMode === ConfigMode.CREATE" class="grid grid-cols-2 gap-6">
             <div>
               <label class="text-xs text-neutral-500 mb-2 block">参赛队伍数</label>
               <div class="relative">
@@ -104,51 +111,68 @@
             </div>
           </div>
 
-          <!-- 晋级规则 -->
-          <div>
-            <label class="text-xs text-neutral-500 mb-2 block">晋级规则</label>
-            <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
-              <!-- 第三名决赛仅在半决赛(4 队)出现;GUEST/种子相关配置在中间态处理 -->
-              <label v-if="config.teamsCount === 4" class="flex items-center justify-between">
-                <span class="text-sm text-neutral-300">第三名决赛</span>
-                <input type="checkbox" v-model="config.playThirdPlace" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-              </label>
-              <label class="flex items-center justify-between">
-                <span class="text-sm text-neutral-300">单轮模式(每轮一赛段,胜者全晋级)</span>
-                <input type="checkbox" v-model="config.singleRound" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-              </label>
-              <div>
-                <span class="text-sm text-neutral-300 block mb-2">结果公布模式</span>
-                <select
-                  v-model="config.publishMode"
-                  class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                  @change="handleUpdate"
-                >
-                  <option value="AUTO">自动公布(裁判判完即公布)</option>
-                  <option value="MANUAL">手动公布(导播台确认后公布)</option>
-                  <option value="DIRECTOR">导播台判定(裁判不判罚,导播台选胜负)</option>
-                </select>
+          <!-- INIT 模式: 创建配置只读 + 初始配置可编辑 -->
+          <template v-if="currentMode !== ConfigMode.CREATE">
+            <!-- 基本信息 -->
+            <div>
+              <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
+              <select
+                v-model="config.format"
+                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                @change="handleUpdate"
+              >
+                <option value="BO1">BO1 (单局决胜)</option>
+                <option value="BO3">BO3 (三局两胜)</option>
+                <option value="BO5">BO5 (五局三胜)</option>
+              </select>
+            </div>
+
+            <!-- 晋级规则 -->
+            <div>
+              <label class="text-xs text-neutral-500 mb-2 block">晋级规则</label>
+              <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
+                <!-- 第三名决赛仅在半决赛(4 队)出现;GUEST/种子相关配置在中间态处理 -->
+                <label v-if="config.teamsCount === 4" class="flex items-center justify-between">
+                  <span class="text-sm text-neutral-300">第三名决赛</span>
+                  <input type="checkbox" v-model="config.playThirdPlace" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
+                </label>
+                <label class="flex items-center justify-between">
+                  <span class="text-sm text-neutral-300">单轮模式(每轮一赛段,胜者全晋级)</span>
+                  <input type="checkbox" v-model="config.singleRound" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
+                </label>
+                <div>
+                  <span class="text-sm text-neutral-300 block mb-2">结果公布模式</span>
+                  <select
+                    v-model="config.publishMode"
+                    class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+                    @change="handleUpdate"
+                  >
+                    <option value="AUTO">自动公布(裁判判完即公布)</option>
+                    <option value="MANUAL">手动公布(导播台确认后公布)</option>
+                    <option value="DIRECTOR">导播台判定(裁判不判罚,导播台选胜负)</option>
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
 
-          <!-- 打分与转场配置 -->
-          <ScoringTransitionConfig
-            :scoring="config.scoring"
-            @update:scoring="
-              (v) => {
-                config.scoring = v;
-                handleUpdate();
-              }
-            "
-          />
+            <!-- 打分与转场配置 -->
+            <ScoringTransitionConfig
+              :scoring="config.scoring"
+              @update:scoring="
+                (v) => {
+                  config.scoring = v;
+                  handleUpdate();
+                }
+              "
+            />
 
-          <!-- 预览 -->
-          <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-            <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
-            <div class="text-sm text-neutral-300">{{ config.teamsCount }} 支队伍 → 单败淘汰 → {{ config.advanceCount }} 支队伍晋级</div>
-            <div class="text-xs text-neutral-500 mt-1">共需 {{ Math.ceil(Math.log2(config.teamsCount)) }} 轮比赛</div>
-          </div>
+            <!-- 预览 -->
+            <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+              <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
+              <div class="text-sm text-neutral-300">{{ config.teamsCount }} 支队伍 → 单败淘汰 → {{ config.advanceCount }} 支队伍晋级</div>
+              <div class="text-xs text-neutral-500 mt-1">共需 {{ Math.ceil(Math.log2(config.teamsCount)) }} 轮比赛</div>
+            </div>
+          </template>
         </template>
       </div>
     </div>
@@ -176,7 +200,7 @@ const emit = defineEmits<{
 const localStage = ref<StageData>({ ...props.stage });
 
 // 当前模式
-const currentMode = computed(() => props.mode || ConfigMode.NORMAL);
+const currentMode = computed(() => props.mode || ConfigMode.INIT);
 
 // 配置对象
 const config = ref<

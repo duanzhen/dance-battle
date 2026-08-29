@@ -141,7 +141,7 @@
                   v-if="getStageConfigComponent(selectedCreateMode)"
                   :is="getStageConfigComponent(selectedCreateMode)"
                   :stage="tempStage"
-                  :mode="ConfigMode.INIT"
+                  :mode="ConfigMode.CREATE"
                   @update="handleTempStageUpdate"
                 />
               </div>
@@ -221,12 +221,7 @@
       </div>
 
       <div
-        v-else-if="
-          selection.type === 'TRANSITION' &&
-          selection.id >= 0 &&
-          stages[selection.id] &&
-          stages[selection.id + 1]
-        "
+        v-else-if="selection.type === 'TRANSITION' && selection.id >= 0 && stages[selection.id] && stages[selection.id + 1]"
         class="max-w-4xl mx-auto animate-fade-in"
       >
         <TransitionConfig
@@ -437,12 +432,11 @@ const defaultConfigs: Record<StageMode, any> = {
   [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
   [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-  [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' },
+  [StageMode.ARENA]: { format: 'BO1', scale: 8, maxChallenges: 2, challengeOrder: 'RANDOM' },
   [StageMode.RANK]: {
     mode: 'RANK',
     scale: 32,
     advanceCount: 16,
-    circles: 1,
     publishMode: 'AUTO',
     publishScope: 'ALL',
     showScore: true,
@@ -512,14 +506,15 @@ const currentStage = computed(() => {
 // 计算当前配置模式
 const currentConfigMode = computed<ConfigMode>(() => {
   if (isCreatingStage.value) {
-    return ConfigMode.INIT;
+    return ConfigMode.CREATE;
   }
-
-  if (currentStage.value?.isInitialized) {
-    return ConfigMode.INIT_DONE;
+  // 赛段开始(进行中/已结束/已取消)后:创建+初始配置只读,仅开始后参数可编辑
+  const status = currentStage.value?.status;
+  if (status === 'GAMING' || status === 'SETTLED' || status === 'DISCARD') {
+    return ConfigMode.STARTED;
   }
-
-  return ConfigMode.NORMAL;
+  // 已创建但未开始(规划中/未开始):初始配置可继续修改
+  return ConfigMode.INIT;
 });
 
 // --- Action Methods ---
@@ -610,7 +605,7 @@ const canCompleteCreate = computed(() => {
       return parsed.scale > 0 && parsed.advanceCount > 0;
     }
     if (selectedCreateMode.value === StageMode.ARENA) {
-      return parsed.challengerCount > 0 && parsed.maxChallenges > 0;
+      return (parsed.scale > 0 || parsed.challengerCount > 0) && parsed.maxChallenges > 0;
     }
     if (selectedCreateMode.value === StageMode.RANK) {
       return parsed.scale > 0 && parsed.advanceCount > 0 && parsed.scoring?.dimensions?.length > 0;
@@ -644,12 +639,11 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
       [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-      [StageMode.ARENA]: { format: 'BO1', defenderTeamId: '', challengerCount: 4, maxChallenges: 2, challengeOrder: 'RANDOM' },
+      [StageMode.ARENA]: { format: 'BO1', scale: 8, maxChallenges: 2, challengeOrder: 'RANDOM' },
       [StageMode.RANK]: {
         mode: 'RANK',
         scale: 32,
         advanceCount: 16,
-        circles: 1,
         publishMode: 'AUTO',
         publishScope: 'ALL',
         showScore: true,

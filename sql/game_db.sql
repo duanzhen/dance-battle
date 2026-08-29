@@ -225,6 +225,32 @@ CREATE TABLE `t_referee_stage` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `t_match_referee`
+--
+
+DROP TABLE IF EXISTS `t_match_referee`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `t_match_referee` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `tenant_id` bigint NOT NULL COMMENT '租户ID',
+  `match_id` bigint NOT NULL COMMENT '场次ID(海选一圈一场)',
+  `referee_id` bigint NOT NULL COMMENT '裁判ID',
+  `tournament_id` bigint NOT NULL COMMENT '赛事ID(冗余,方便查询)',
+  `create_by` bigint DEFAULT NULL COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_match_referee` (`match_id`,`referee_id`),
+  KEY `idx_match_referee_match_id` (`match_id`),
+  KEY `idx_match_referee_referee_id` (`referee_id`),
+  KEY `idx_match_referee_tournament_id` (`tournament_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='裁判-场次(圈)关联表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `t_round_score`
 --
 

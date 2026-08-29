@@ -519,7 +519,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
             // 擂台赛:不生成对阵,开始后由导播台逐场创建对决;
             // 配置与前端 ArenaStageConfig 默认值对齐(后端当前仅读胜负结算,其余为展示/预留)
             return "{\"mode\":\"ARENA\",\"format\":\"BO1\","
-                + "\"challengerCount\":" + d.start() + ","
+                + "\"scale\":" + d.start() + ","
                 + "\"maxChallenges\":3,\"challengeOrder\":\"RANDOM\","
                 + "\"winStreakBonus\":10,\"defenseBonus\":5,"
                 + "\"allowDefenderRest\":true,\"allowRechallenge\":false,\"timeoutReplacement\":true,"

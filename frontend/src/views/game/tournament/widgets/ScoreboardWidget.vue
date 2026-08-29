@@ -1,38 +1,32 @@
 <template>
   <div class="w-full h-full">
     <!-- 查看模式:海选比分牌,按圈分列 -->
-    <div v-if="mode !== 'edit'" class="w-full h-full bg-neutral-950/85 rounded-lg overflow-hidden relative">
-      <div v-if="loading" class="w-full h-full flex items-center justify-center text-white/50 text-sm">加载中...</div>
-      <div v-else-if="error" class="w-full h-full flex items-center justify-center text-white/40 text-xs px-4 text-center">{{ error }}</div>
-      <div v-else-if="!stageId" class="w-full h-full flex items-center justify-center text-white/40 text-xs">未绑定海选赛段</div>
+    <div v-if="mode !== 'edit'" class="w-full h-full overflow-hidden relative">
+      <div v-if="loading" class="w-full h-full flex items-center justify-center text-white/50" :style="fz(1)">加载中...</div>
+      <div v-else-if="error" class="w-full h-full flex items-center justify-center text-white/40 px-4 text-center" :style="fz(0.85)">{{ error }}</div>
+      <div v-else-if="!stageId" class="w-full h-full flex items-center justify-center text-white/40" :style="fz(0.85)">未绑定海选赛段</div>
       <div v-else class="w-full h-full flex flex-col">
         <!-- 标题栏 -->
-        <div class="px-3 py-2 border-b border-white/10 flex items-center justify-between flex-none">
-          <span class="text-white font-bold text-sm truncate">{{ stageName || '海选比分牌' }}</span>
-          <span class="text-white/50 text-[10px] flex-none">晋级 {{ advanceCount }} 名</span>
+        <div class="px-3 py-2 flex items-center justify-between flex-none">
+          <span class="text-white font-bold truncate" :style="fz(1.2)">{{ stageName || '海选比分牌' }}</span>
+          <span class="text-white/50 flex-none" :style="fz(0.85)">晋级 {{ advanceCount }} 名</span>
         </div>
 
         <!-- 多圈多列:每圈一列并排,只展示晋级选手,按签到号码排序 -->
         <div class="flex-1 min-h-0 flex gap-2 p-2 items-stretch">
-          <div
-            v-for="col in columns"
-            :key="col.zone"
-            class="flex-1 min-w-0 border border-white/10 rounded-lg flex flex-col min-h-0 overflow-hidden"
-          >
-            <div class="px-2.5 py-1.5 border-b border-white/10 flex-none">
-              <span class="text-white/60 text-[11px] font-bold tracking-wider truncate">{{ col.title }}</span>
+          <div v-for="col in columns" :key="col.zone" class="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
+            <div class="px-2.5 py-1.5 flex-none">
+              <span v-if="columns.length > 1 && refereeNames.length" class="block text-white/35 truncate" :style="fz(0.7)"
+                >裁判: {{ colRefereeText(col) }}</span
+              >
             </div>
             <div class="flex-1 min-h-0 overflow-y-auto p-1.5 space-y-1 scrollbar-hide">
-              <div
-                v-for="p in col.advancers"
-                :key="p.competitorId"
-                class="flex items-center gap-1.5 px-1 py-1 text-[11px] leading-tight"
-              >
+              <div v-for="p in col.advancers" :key="p.competitorId" class="flex items-center gap-1.5 px-1 py-1" :style="fz(1)">
+                <span class="text-white/45 font-mono flex-none">No.{{ number(p) }}</span>
                 <span class="flex-1 truncate text-white">{{ name(p) }}</span>
                 <span v-if="showScore" class="text-white/60 font-mono flex-none">{{ score(p) }}</span>
-                <span class="text-white/45 font-mono flex-none">No.{{ number(p) }}</span>
               </div>
-              <div v-if="!col.advancers.length" class="text-white/30 text-[10px] text-center py-2">待定</div>
+              <div v-if="!col.advancers.length" class="text-white/30 text-center py-2" :style="fz(0.85)">待定</div>
             </div>
           </div>
         </div>
@@ -57,7 +51,12 @@
             @update:item="handleOptionUpdate"
           />
         </div>
-        <p class="text-[10px] text-neutral-600 mt-2">展示海选(海选赛)晋级结果,分圈时每圈一列并排显示;开启"显示分数"后展示各参赛方总分。</p>
+        <div class="mt-3">
+          <TextInput label="字号(px)" :model-value="String(fontSize ?? 12)" placeholder="12" @update:model-value="handleFontSizeUpdate" />
+        </div>
+        <p class="text-[10px] text-neutral-600 mt-2">
+          展示海选(海选赛)晋级结果,分圈时每圈一列并排显示;开启"显示分数"后展示各参赛方总分。字号按"晋级名单"整体缩放,大屏/人数多时可调大或调小。
+        </p>
       </section>
     </div>
   </div>
@@ -68,10 +67,14 @@ import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import StageSelector from '../stages/StageSelector.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
+import TextInput from './common/TextInput.vue';
 import { getStage } from '@/api/game/stage';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
+import { getStageRefereeIds } from '@/api/game/refereeStage';
+import { listReferee } from '@/api/game/referee';
+import { listMatchReferee } from '@/api/game/matchReferee';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 const props = defineProps<{
@@ -79,10 +82,12 @@ const props = defineProps<{
   mode?: 'view' | 'edit';
   tournamentId?: string | number | null;
   showScore?: boolean;
+  fontSize?: number;
 }>();
 const emit = defineEmits<{
   'update:stageId': [v: string | number | null];
   'update:showScore': [v: boolean];
+  'update:fontSize': [v: number];
 }>();
 
 const route = useRoute();
@@ -94,11 +99,36 @@ const loadedOnce = ref(false);
 const error = ref('');
 const stageName = ref('');
 const advanceCount = ref(0);
+const refereeNames = ref<string[]>([]);
+const circleReferees = ref<Record<string, string[]>>({});
 const compMap = ref<Record<string, any>>({});
-const columns = ref<{ zone: string; title: string; advancers: any[] }[]>([]);
+const columns = ref<{ zone: string; title: string; matchId: string | number | null; advancers: any[] }[]>([]);
+
+/** 列(圈)的裁判文本:优先按圈绑定,未绑定时回退到赛段裁判名单 */
+const colRefereeText = (col: any) => {
+  if (col?.matchId != null) {
+    const names = circleReferees.value[String(col.matchId)];
+    if (names && names.length) return names.join(' / ');
+  }
+  return refereeNames.value.length ? refereeNames.value.join(' / ') : '';
+};
 
 const handleOptionUpdate = (key: string, value: boolean) => {
   if (key === 'showScore') emit('update:showScore', value);
+};
+
+/** 字号缩放:以 fontSize(默认 12px)为基准,标题/列表按比例联动,限制在 6~80px */
+const fz = (ratio: number) => {
+  const base = Math.max(6, Math.min(80, Number(props.fontSize) || 12));
+  return {
+    fontSize: `${Math.round(base * ratio)}px`,
+    lineHeight: `${Math.round(base * ratio * 1.4)}px`
+  };
+};
+
+const handleFontSizeUpdate = (v: string) => {
+  const n = Number(v);
+  emit('update:fontSize', Number.isFinite(n) && n > 0 ? n : 12);
 };
 
 const loadData = async () => {
@@ -124,6 +154,43 @@ const loadData = async () => {
     }
     stageName.value = stage.name || '';
     advanceCount.value = Number(stage.teamCountEnd) || 0;
+    // 分圈展示用:该赛段已分配的裁判名单(裁判为赛段级分配,各圈一致)
+    try {
+      const ridResp: any = await getStageRefereeIds(props.stageId);
+      const ids = (ridResp?.data ?? []) as (string | number)[];
+      if (ids.length) {
+        const refResp: any = await listReferee({
+          tournamentId: tournamentId(),
+          pageNum: 1,
+          pageSize: 99
+        });
+        const refs = refResp?.data ?? [];
+        refereeNames.value = ids
+          .map((id) => refs.find((r: any) => String(r.id) === String(id)))
+          .filter(Boolean)
+          .map((r: any) => r.name);
+      } else {
+        refereeNames.value = [];
+      }
+    } catch (e) {
+      console.error('ScoreboardWidget 加载裁判失败', e);
+      refereeNames.value = [];
+    }
+    // 按圈绑定的裁判(海选分圈时每圈可一个/多个裁判)
+    try {
+      const mrResp: any = await listMatchReferee(props.stageId);
+      const rows = mrResp?.data ?? [];
+      const map: Record<string, string[]> = {};
+      rows.forEach((r: any) => {
+        if (r.matchId == null || !r.refereeName) return;
+        const k = String(r.matchId);
+        (map[k] = map[k] || []).push(r.refereeName);
+      });
+      circleReferees.value = map;
+    } catch (e) {
+      console.error('ScoreboardWidget 加载按圈裁判失败', e);
+      circleReferees.value = {};
+    }
 
     // 参赛方映射(名称/号码)
     try {
@@ -147,9 +214,7 @@ const loadData = async () => {
       matches.map(async (m: any) => {
         try {
           const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 99 } as any);
-          const parts = (pr?.data?.data || pr?.data || [])
-            .slice()
-            .sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+          const parts = (pr?.data?.data || pr?.data || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
           return { ...m, participants: parts };
         } catch {
           return { ...m, participants: [] };
@@ -179,8 +244,9 @@ const loadData = async () => {
       });
     });
     columns.value = order.map((zone, idx) => {
+      const zoneMatches = grouped.get(zone) || [];
       // 只取晋级选手,按签到号码升序
-      const advancers = (grouped.get(zone) || [])
+      const advancers = zoneMatches
         .flatMap((m: any) => (m.participants || []).filter((p: any) => p.outcomeStatus === 'ADVANCE' && p.competitorId != null))
         .map((p: any) => ({
           ...p,
@@ -191,6 +257,7 @@ const loadData = async () => {
       return {
         zone,
         title: order.length > 1 ? `第${idx + 1}圈` : '海选',
+        matchId: zoneMatches[0]?.id ?? null,
         advancers
       };
     });

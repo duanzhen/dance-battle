@@ -97,10 +97,6 @@
               <el-input-number v-model="config.scale" :min="2" :max="512" class="w-full" />
             </div>
             <div>
-              <label class="block text-sm text-neutral-400 mb-1">分圈数</label>
-              <el-input-number v-model="config.circles" :min="1" :max="config.scale" class="w-full" />
-            </div>
-            <div>
               <label class="block text-sm text-neutral-400 mb-1">晋级名额</label>
               <el-input-number v-model="config.advanceCount" :min="1" :max="config.scale - 1" class="w-full" />
             </div>
@@ -134,8 +130,8 @@
           <h4 class="section-title">擂台赛配置</h4>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm text-neutral-400 mb-1">攻擂队伍数</label>
-              <el-input-number v-model="config.challengerCount" :min="2" :max="32" class="w-full" />
+              <label class="block text-sm text-neutral-400 mb-1">进入擂台赛总人数</label>
+              <el-input-number v-model="config.scale" :min="2" :max="512" class="w-full" />
             </div>
             <div>
               <label class="block text-sm text-neutral-400 mb-1">最大挑战场次</label>
@@ -181,16 +177,7 @@
 import { ref, computed, watch } from 'vue';
 import { Trophy, Mic, Target } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
-import {
-  StageMode,
-  KnockoutTemplate,
-  KnockoutConfig,
-  GroupConfig,
-  AuditionConfig,
-  ArenaConfig,
-  RankingConfig,
-  StageTypeSelectEvent
-} from './types';
+import { StageMode, KnockoutTemplate, KnockoutConfig, GroupConfig, AuditionConfig, ArenaConfig, RankingConfig, StageTypeSelectEvent } from './types';
 
 // Props
 const props = defineProps<{
@@ -281,7 +268,6 @@ const initConfig = () => {
         mode: 'RANK',
         scale: 32,
         advanceCount: 16,
-        circles: 1,
         publishMode: 'AUTO',
         publishScope: 'ALL',
         showScore: true,
@@ -312,8 +298,7 @@ const initConfig = () => {
       break;
     case StageMode.ARENA:
       config.value = {
-        defenderTeamId: '',
-        challengerCount: 8,
+        scale: 8,
         winStreakBonus: 10,
         challengeOrder: 'RANDOM',
         maxChallenges: 3,

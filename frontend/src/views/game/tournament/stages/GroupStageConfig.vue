@@ -4,8 +4,8 @@
       <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-6 flex items-center gap-2"><Users class="w-4 h-4" /> 小组赛配置</h3>
 
       <div class="space-y-6">
-        <!-- INIT_DONE 模式: 只读展示 -->
-        <template v-if="currentMode === ConfigMode.INIT_DONE">
+        <!-- STARTED 模式: 创建+初始配置只读展示 -->
+        <template v-if="currentMode === ConfigMode.STARTED">
           <!-- 分组信息 -->
           <div class="grid grid-cols-3 gap-4">
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
@@ -40,28 +40,38 @@
           </div>
         </template>
 
-        <!-- INIT/NORMAL 模式: 可编辑 -->
+        <!-- CREATE/INIT 模式: 可编辑 -->
         <template v-else>
-          <!-- 基本信息 -->
-          <div>
-            <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
-            <select
-              v-model="config.format"
-              class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-              @change="handleUpdate"
-            >
-              <option value="BO1">BO1 (单局决胜)</option>
-              <option value="BO3">BO3 (三局两胜)</option>
-            </select>
-          </div>
+          <!-- 初始配置:比赛格式(仅非创建模式显示) -->
+          <template v-if="currentMode !== ConfigMode.CREATE">
+            <!-- 基本信息 -->
+            <div>
+              <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
+              <select
+                v-model="config.format"
+                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                @change="handleUpdate"
+              >
+                <option value="BO1">BO1 (单局决胜)</option>
+                <option value="BO3">BO3 (三局两胜)</option>
+              </select>
+            </div>
+          </template>
 
-          <!-- 分组设置 (INIT-ONLY) -->
-          <div v-if="currentMode === ConfigMode.INIT">
-            <label class="text-xs text-neutral-500 mb-2 block">分组设置</label>
+          <!-- 分组设置 (创建配置:分组数量/每组队伍数;初始配置:每组晋级数) -->
+          <div v-if="currentMode === ConfigMode.CREATE || currentMode === ConfigMode.INIT">
+            <div v-if="currentMode === ConfigMode.CREATE" class="text-xs text-neutral-500 mb-3">创建配置</div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-xs text-neutral-500">分组设置</label>
+              <span v-if="currentMode === ConfigMode.INIT" class="text-[10px] text-neutral-600">
+                分组数量/每组队伍数为创建配置,已锁定;每组晋级数可改
+              </span>
+            </div>
             <div class="grid grid-cols-3 gap-6">
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">分组数量</label>
                 <input
+                  v-if="currentMode === ConfigMode.CREATE"
                   type="number"
                   v-model.number="config.groupCount"
                   :min="2"
@@ -69,10 +79,12 @@
                   class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
                   @input="handleUpdate"
                 />
+                <div v-else class="text-2xl font-bold text-white font-mono">{{ config.groupCount }}</div>
               </div>
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">每组队伍数</label>
                 <input
+                  v-if="currentMode === ConfigMode.CREATE"
                   type="number"
                   v-model.number="config.teamsPerGroup"
                   :min="2"
@@ -80,6 +92,7 @@
                   class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
                   @input="handleUpdate"
                 />
+                <div v-else class="text-2xl font-bold text-white font-mono">{{ config.teamsPerGroup }}</div>
               </div>
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">每组晋级数</label>
@@ -95,78 +108,81 @@
             </div>
           </div>
 
-          <!-- 积分规则 -->
-          <div>
-            <label class="text-xs text-neutral-500 mb-2 block">积分规则</label>
-            <div class="bg-black border border-neutral-700 rounded-lg p-4">
-              <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="text-xs text-neutral-600 mb-1 block">胜积分</label>
-                  <input
-                    type="number"
-                    v-model.number="config.winPoints"
-                    :min="0"
-                    class="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                    @input="handleUpdate"
-                  />
-                </div>
-                <div>
-                  <label class="text-xs text-neutral-600 mb-1 block">平积分</label>
-                  <input
-                    type="number"
-                    v-model.number="config.drawPoints"
-                    :min="0"
-                    class="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                    @input="handleUpdate"
-                  />
-                </div>
-                <div>
-                  <label class="text-xs text-neutral-600 mb-1 block">负积分</label>
-                  <input
-                    type="number"
-                    v-model.number="config.lossPoints"
-                    :min="0"
-                    class="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                    @input="handleUpdate"
-                  />
+          <!-- 初始配置:积分规则/预览(仅非创建模式显示) -->
+          <template v-if="currentMode !== ConfigMode.CREATE">
+            <!-- 积分规则 -->
+            <div>
+              <label class="text-xs text-neutral-500 mb-2 block">积分规则</label>
+              <div class="bg-black border border-neutral-700 rounded-lg p-4">
+                <div class="grid grid-cols-3 gap-4">
+                  <div>
+                    <label class="text-xs text-neutral-600 mb-1 block">胜积分</label>
+                    <input
+                      type="number"
+                      v-model.number="config.winPoints"
+                      :min="0"
+                      class="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                      @input="handleUpdate"
+                    />
+                  </div>
+                  <div>
+                    <label class="text-xs text-neutral-600 mb-1 block">平积分</label>
+                    <input
+                      type="number"
+                      v-model.number="config.drawPoints"
+                      :min="0"
+                      class="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                      @input="handleUpdate"
+                    />
+                  </div>
+                  <div>
+                    <label class="text-xs text-neutral-600 mb-1 block">负积分</label>
+                    <input
+                      type="number"
+                      v-model.number="config.lossPoints"
+                      :min="0"
+                      class="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                      @input="handleUpdate"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- 同分处理 -->
-          <div>
-            <label class="text-xs text-neutral-500 mb-2 block">同分处理规则</label>
-            <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
-              <label class="flex items-center justify-between">
-                <span class="text-sm text-neutral-300">胜负关系优先</span>
-                <input type="checkbox" v-model="config.headToHeadFirst" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-              </label>
-              <label class="flex items-center justify-between">
-                <span class="text-sm text-neutral-300">加赛</span>
-                <input type="checkbox" v-model="config.tiebreakerPlayoff" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-              </label>
+            <!-- 同分处理 -->
+            <div>
+              <label class="text-xs text-neutral-500 mb-2 block">同分处理规则</label>
+              <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
+                <label class="flex items-center justify-between">
+                  <span class="text-sm text-neutral-300">胜负关系优先</span>
+                  <input type="checkbox" v-model="config.headToHeadFirst" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
+                </label>
+                <label class="flex items-center justify-between">
+                  <span class="text-sm text-neutral-300">加赛</span>
+                  <input type="checkbox" v-model="config.tiebreakerPlayoff" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
+                </label>
+              </div>
             </div>
-          </div>
 
-          <!-- 打分与转场配置 -->
-          <ScoringTransitionConfig
-            :scoring="config.scoring"
-            @update:scoring="
-              (v) => {
-                config.scoring = v;
-                handleUpdate();
-              }
-            "
-          />
+            <!-- 打分与转场配置 -->
+            <ScoringTransitionConfig
+              :scoring="config.scoring"
+              @update:scoring="
+                (v) => {
+                  config.scoring = v;
+                  handleUpdate();
+                }
+              "
+            />
 
-          <!-- 预览 -->
-          <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-            <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
-            <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 支队伍</div>
-            <div class="text-sm text-neutral-300 mt-1">总参赛：{{ totalTeams }} 支队伍 → 晋级：{{ totalAdvance }} 支队伍</div>
-            <div class="text-xs text-neutral-500 mt-2">每队比赛场次：{{ config.teamsPerGroup - 1 }} 场</div>
-          </div>
+            <!-- 预览 -->
+            <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+              <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
+              <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 支队伍</div>
+              <div class="text-sm text-neutral-300 mt-1">总参赛：{{ totalTeams }} 支队伍 → 晋级：{{ totalAdvance }} 支队伍</div>
+              <div class="text-xs text-neutral-500 mt-2">每队比赛场次：{{ config.teamsPerGroup - 1 }} 场</div>
+            </div>
+          </template>
         </template>
       </div>
     </div>
@@ -194,7 +210,7 @@ const emit = defineEmits<{
 const localStage = ref<StageData>({ ...props.stage });
 
 // 当前模式
-const currentMode = computed(() => props.mode || ConfigMode.NORMAL);
+const currentMode = computed(() => props.mode || ConfigMode.INIT);
 
 // 配置对象
 const config = ref<GroupConfig & { headToHeadFirst?: boolean; tiebreakerPlayoff?: boolean; scoring?: any; transition?: any }>({

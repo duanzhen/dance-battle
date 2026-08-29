@@ -41,17 +41,11 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [v: string | number | null] }>();
 
 const route = useRoute();
-const tid = computed(
-  () => props.tournamentId || (route.query.id as string | number) || (route.query.tournamentId as string | number)
-);
+const tid = computed(() => props.tournamentId || (route.query.id as string | number) || (route.query.tournamentId as string | number));
 
 const loading = ref(false);
 const stages = ref<any[]>([]);
-const filteredStages = computed(() =>
-  props.onlyMode
-    ? stages.value.filter((s) => props.onlyMode!.split(',').includes(s.stageMode))
-    : stages.value
-);
+const filteredStages = computed(() => (props.onlyMode ? stages.value.filter((s) => props.onlyMode!.split(',').includes(s.stageMode)) : stages.value));
 
 const load = async () => {
   if (!tid.value) return;
@@ -74,10 +68,18 @@ const onChange = (e: Event) => {
 };
 
 const modeMap: Record<string, string> = {
-  KNOCKOUT: '淘汰', GROUP: '小组', AUDITION: '选拔', ARENA: '擂台', RANK: '排名'
+  KNOCKOUT: '淘汰',
+  GROUP: '小组',
+  AUDITION: '选拔',
+  ARENA: '擂台',
+  RANK: '排名'
 };
 const statusMap: Record<string, string> = {
-  DRAFT: '规划中', PENDING: '未开始', GAMING: '进行中', SETTLED: '已结束', DISCARD: '已取消'
+  DRAFT: '规划中',
+  PENDING: '未开始',
+  GAMING: '进行中',
+  SETTLED: '已结束',
+  DISCARD: '已取消'
 };
 const modeLabel = (m?: string) => (m && modeMap[m]) || m || '';
 const statusLabel = (s?: string) => (s && statusMap[s]) || s || '';

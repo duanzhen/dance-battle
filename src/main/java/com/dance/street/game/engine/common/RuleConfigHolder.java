@@ -47,6 +47,9 @@ public class RuleConfigHolder implements Serializable {
      */
     private java.util.List<Integer> circleAdvanceCounts;
 
+    /** 海选分圈时每圈绑定的裁判ID列表(按圈顺序 ZONE-1..n,每圈可多个;未配置时生成对阵自动按 圈数=裁判数 1:1 或全部绑每圈) */
+    private java.util.List<java.util.List<Long>> circleRefereeIds;
+
     /** 分圈方式:true=随机抽取分场(签到后随机分到各圈场次),false=按号码顺序均分(仅生成时使用,不入库) */
     private Boolean randomSplit;
 

@@ -187,6 +187,29 @@ CREATE INDEX IF NOT EXISTS `idx_stage_id` ON `t_referee_stage` (`stage_id`);
 CREATE INDEX IF NOT EXISTS `idx_tournament_id` ON `t_referee_stage` (`tournament_id`);
 
 --
+-- Table structure for table `t_match_referee`
+--
+
+CREATE TABLE IF NOT EXISTS `t_match_referee` (
+  `id` INTEGER NOT NULL,
+  `tenant_id` INTEGER NOT NULL,
+  `match_id` INTEGER NOT NULL,
+  `referee_id` INTEGER NOT NULL,
+  `tournament_id` INTEGER NOT NULL,
+  `create_by` INTEGER,
+  `create_time` TEXT,
+  `update_by` INTEGER,
+  `update_time` TEXT,
+  `remark` TEXT,
+  PRIMARY KEY (`id`)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_match_referee` ON `t_match_referee` (`match_id`, `referee_id`);
+CREATE INDEX IF NOT EXISTS `idx_match_referee_match_id` ON `t_match_referee` (`match_id`);
+CREATE INDEX IF NOT EXISTS `idx_match_referee_referee_id` ON `t_match_referee` (`referee_id`);
+CREATE INDEX IF NOT EXISTS `idx_match_referee_tournament_id` ON `t_match_referee` (`tournament_id`);
+
+--
 -- Table structure for table `t_round_score`
 --
 

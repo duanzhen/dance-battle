@@ -10,6 +10,7 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TRoundScore;
@@ -50,12 +51,14 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITCompetitorMemberService;
 import com.dance.street.game.service.ITCompetitorService;
+import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITScoredMatchService;
@@ -91,6 +94,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final TCompetitorMemberMapper competitorMemberMapper;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
+    private final TMatchRefereeMapper matchRefereeMapper;
     private final TMatchRoundMapper matchRoundMapper;
     private final TPlayerMapper playerMapper;
     private final ScoringEngine scoringEngine = new ScoringEngine();
@@ -102,6 +106,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final ITScoredMatchService scoredMatchService;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
+    private final ITRefereeStageService refereeStageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -387,8 +392,66 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
 
+        // 海选分圈:生成对阵后自动绑定圈与裁判(优先按 ruleConfig.circleRefereeIds,未配置时圈数=裁判数则 1:1,否则全部绑每圈)
+        if (isAudition) {
+            autoAssignCircleReferees(stage);
+        }
+
         log.info("赛段[{}]生成对阵完成:bracketSize={}, 场次数={}", stage.getId(), plan.getBracketSize(), sorted.size());
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
+    }
+
+    /**
+     * 海选分圈后按圈绑定裁判(一圈可多裁判):
+     * 优先使用 ruleConfig.circleRefereeIds(按圈顺序,每圈可多个);
+     * 未配置时:圈数 = 赛段裁判数则按圈顺序 1:1,否则把赛段全部裁判绑到每个圈。
+     */
+    private void autoAssignCircleReferees(TStage stage) {
+        List<TMatch> circles = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .orderByAsc(TMatch::getDisplayRow)
+            .orderByAsc(TMatch::getId));
+        if (circles.isEmpty()) {
+            return;
+        }
+        // 幂等:重建前先清掉该批场次已有的圈-裁判绑定
+        List<Long> circleIds = circles.stream().map(TMatch::getId).toList();
+        matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery()
+            .in(TMatchReferee::getMatchId, circleIds));
+
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        List<List<Long>> cfg = rc != null ? rc.getCircleRefereeIds() : null;
+        boolean useConfig = cfg != null && cfg.size() == circles.size();
+        List<Long> stageRefereeIds = refereeStageService.getRefereeIdsByStageId(stage.getId());
+        if (!useConfig && stageRefereeIds.isEmpty()) {
+            return;
+        }
+        boolean oneToOne = !useConfig && circles.size() == stageRefereeIds.size();
+        int assignedCount = 0;
+        for (int i = 0; i < circles.size(); i++) {
+            List<Long> assigned;
+            if (useConfig) {
+                assigned = cfg.get(i) == null ? List.of() : cfg.get(i);
+            } else {
+                assigned = oneToOne ? List.of(stageRefereeIds.get(i)) : stageRefereeIds;
+            }
+            if (assigned.isEmpty()) {
+                continue;
+            }
+            for (Long refereeId : assigned) {
+                if (refereeId == null) {
+                    continue;
+                }
+                TMatchReferee mr = new TMatchReferee();
+                mr.setMatchId(circles.get(i).getId());
+                mr.setRefereeId(refereeId);
+                mr.setTournamentId(stage.getTournamentId());
+                matchRefereeMapper.insert(mr);
+                assignedCount++;
+            }
+        }
+        log.info("赛段[{}]海选{}圈绑定裁判完成,共{}条(useConfig={})",
+            stage.getId(), circles.size(), assignedCount, useConfig);
     }
 
     @Override
@@ -473,6 +536,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
         }
         participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds));
+        matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery().in(TMatchReferee::getMatchId, matchIds));
         matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds));
         matchMapper.delete(Wrappers.<TMatch>lambdaQuery().in(TMatch::getId, matchIds));
     }

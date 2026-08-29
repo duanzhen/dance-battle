@@ -208,21 +208,20 @@ services:
       LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
       # 服务端口:默认 80,修改后同时生效于容器内监听端口与宿主机映射
       SERVER_PORT: ${SERVER_PORT:-80}
-      # JWT 密钥:留空则首次运行自动生成并持久化到宿主机 ./data/jwt(挂载在 /var/tmp/jwt),重启复用
+      # JWT 密钥:留空则首次运行自动生成并持久化到宿主机 ./data/jwt(挂载在 /data/jwt),重启复用
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
-      JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/var/tmp/jwt/dance-game-jwt-secret.key}
-      # 上传文件路径(挂载到容器外,容器重建不丢)
-      FILE_UPLOAD_PATH: /app/upload
+      JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/data/jwt/dance-game-jwt-secret.key}
+      # 上传文件路径(统一放在 /data/upload,容器重建不丢)
+      FILE_UPLOAD_PATH: /data/upload
     volumes:
-      - app-upload:/app/upload
-      # JWT 密钥文件持久化到宿主机目录,容器重建不重新生成密钥(避免旧 token 全部失效)
-      - ./data/jwt:/var/tmp/jwt
+      # 应用数据统一挂载宿主机 ./data,容器内按子目录划分:
+      # /data/jwt(JWT 密钥,避免旧 token 失效)、/data/upload(上传文件)
+      - ./data:/data
     ports:
       - "${SERVER_PORT:-80}:${SERVER_PORT:-80}"
 
 volumes:
   mysql-data:
-  app-upload:
   redis-data:
 COMPOSE_EOF
 
@@ -246,8 +245,8 @@ SERVER_PORT=80
 # 显式设置后优先级最高,适用于多实例共享同一密钥等场景
 JWT_SECRET_KEY=
 
-# 自动生成密钥的持久化文件路径(宿主机目录挂载点,默认 Docker 内 /var/tmp/jwt)
-JWT_SECRET_FILE=/var/tmp/jwt/dance-game-jwt-secret.key
+# 自动生成密钥的持久化文件路径(宿主机目录挂载点,默认 Docker 内 /data/jwt)
+JWT_SECRET_FILE=/data/jwt/dance-game-jwt-secret.key
 ENV_EOF
 
     if [ ! -f "$dir/docker-compose.yml" ] || [ ! -f "$dir/.env" ]; then

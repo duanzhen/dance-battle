@@ -46,7 +46,7 @@ docker compose up -d --build
 - 构建并启动应用（等待 MySQL/Redis 健康检查通过后）
 
 > MySQL/Redis 仅暴露在 Compose 内部网络，不映射宿主机端口，只能由应用容器通过 `mysql` / `redis` 服务名访问。
-> JWT 密钥默认自动生成并持久化到宿主机 `./data/jwt`（容器内挂载于 `/var/tmp/jwt`），容器重建不更换密钥，旧登录态保持有效。
+> JWT 密钥默认自动生成并持久化到宿主机 `./data/jwt`（容器内挂载于 `/data/jwt`），容器重建不更换密钥，旧登录态保持有效。
 
 应用启动时会用 JDBC 做一次 schema 自检：数据库或业务表缺失时自动读取建表脚本补齐（MySQL 用 `sql/game_db.sql`，SQLite 用 `sql/game_db.sqlite.sql`；只补缺失的表/索引，不删不改已有数据）。因此即使绕过初始化脚本、直连已有实例，表结构也会自动就绪；可通过 `SCHEMA_INIT_ENABLED=false` 关闭。
 
@@ -92,7 +92,7 @@ Redis 未配置或连接失败时，应用会自动进入单机模式，无需�
 
 ### 单镜像运行与数据持久化
 
-镜像内已通过 `VOLUME` 声明 `/app/data`（SQLite + JWT 密钥）和 `/app/upload`（上传文件）两个挂载点。直接裸跑会自动回退 SQLite + 单机模式：
+镜像内已通过 `VOLUME` 声明统一的 `/data` 挂载点，内部按子目录划分：`/data/db`（SQLite 数据库）、`/data/jwt`（JWT 密钥）、`/data/upload`（上传文件）。直接裸跑会自动回退 SQLite + 单机模式：
 
 ```bash
 docker build -t dance-game-app:latest .
@@ -103,11 +103,11 @@ docker run -d --name dance-game -p 80:80 dance-game-app:latest
 
 ```bash
 docker run -d --name dance-game -p 80:80 \
-  -v app-data:/app/data -v app-upload:/app/upload \
+  -v app-data:/data \
   dance-game-app:latest
 ```
 
-JWT 密钥默认写入 `/app/data/jwt`（与 SQLite 数据库同卷），一个 `app-data` 卷即可同时持久化数据库与登录密钥，无需单独挂载。
+JWT 密钥默认写入 `/data/jwt`（与 SQLite 数据库同卷），一个 `app-data` 卷即可同时持久化数据库、密钥与上传文件，无需单独挂载。
 
 一条命令起单机并持久化（命名卷，容器删除重建不丢数据）：
 
@@ -125,7 +125,7 @@ docker compose -f docker-compose.standalone.yml up -d --build
 | `DB_USERNAME` | 空 | 数据库用户名（覆盖 `MYSQL_USER`） |
 | `DB_PASSWORD` | 空 | 数据库密码（覆盖 `MYSQL_PASSWORD`） |
 | `DB_FALLBACK_SQLITE` | `true` | MySQL 未配置/连接失败时自动回退 SQLite 文件库（`false` 关闭） |
-| `SQLITE_FALLBACK_URL` | `jdbc:sqlite:./data/game.db` | 自动回退时使用的 SQLite 连接（自动补齐时间参数） |
+| `SQLITE_FALLBACK_URL` | `jdbc:sqlite:./data/game.db`（Docker 镜像内默认为 `jdbc:sqlite:/data/db/game.db`） | 自动回退时使用的 SQLite 连接（自动补齐时间参数） |
 | `MYSQL_HOST` | `mysql` | MySQL 地址 |
 | `MYSQL_PORT` | `3306` | MySQL 端口 |
 | `MYSQL_DATABASE` | `game_db` | 数据库名 |
@@ -139,8 +139,8 @@ docker compose -f docker-compose.standalone.yml up -d --build
 | `LOGIN_PASSWORD` | `123456` | 系统登录密码 |
 | `SERVER_PORT` | `80`（Docker）/ `8080`（本地 jar） | 服务端口，修改后宿主机映射与容器内监听端口同步变更 |
 | `JWT_SECRET_KEY` | 空（自动生成） | JWT 签名密钥；显式设置后优先级最高，留空则首次运行随机生成并持久化到密钥文件 |
-| `JWT_SECRET_FILE` | `./data/jwt/dance-game-jwt-secret.key` | 自动生成的密钥持久化文件路径（Docker 单机下为 `/app/data/jwt/...`，与 SQLite 同卷；多实例 compose 下为 `/var/tmp/jwt/...`，挂载宿主机 `./data/jwt`） |
-| `FILE_UPLOAD_PATH` | `./upload`（Docker 内为 `/app/upload`） | 文件上传存储目录 |
+| `JWT_SECRET_FILE` | `./data/jwt/dance-game-jwt-secret.key` | 自动生成的密钥持久化文件路径（Docker 内统一为 `/data/jwt/...`，与 SQLite 同卷；compose 下挂载宿主机 `./data`） |
+| `FILE_UPLOAD_PATH` | `./upload`（Docker 内为 `/data/upload`） | 文件上传存储目录 |
 | `SCHEMA_INIT_ENABLED` | `true` | 启动时自动检查/创建数据库与表结构（JDBC 兜底，按数据源读取 `sql/game_db.sql` 或 `sql/game_db.sqlite.sql`） |
 
 ### 修改密码与重置

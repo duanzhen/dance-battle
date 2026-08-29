@@ -13,24 +13,23 @@ services:
     environment:
       TZ: Asia/Shanghai
       # 直接使用 SQLite 文件库(免 MySQL 探测,启动更快)
-      DB_URL: "jdbc:sqlite:/app/data/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS"
+      DB_URL: "jdbc:sqlite:/data/db/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS"
       # 显式单机模式(免 Redis 探测,SSE 本地广播、无分布式锁)
       REDIS_ENABLED: "false"
       LOGIN_USERNAME: ${LOGIN_USERNAME:-admin}
       LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
       SERVER_PORT: ${SERVER_PORT:-80}
-      # JWT 密钥:默认写入 /app/data/jwt(与 SQLite 同卷,持久化到 app-data),重启复用
+      # JWT 密钥:默认写入 /data/jwt(与 SQLite 同卷,持久化到 app-data),重启复用
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
-      JWT_SECRET_FILE: /app/data/jwt/dance-game-jwt-secret.key
-      # 上传文件路径(持久化到命名卷 app-upload)
-      FILE_UPLOAD_PATH: /app/upload
+      JWT_SECRET_FILE: /data/jwt/dance-game-jwt-secret.key
+      # 上传文件路径(统一放在 /data/upload)
+      FILE_UPLOAD_PATH: /data/upload
     volumes:
-      # 应用数据卷:SQLite 数据库(/app/data/game.db)+ JWT 密钥(/app/data/jwt)
-      - app-data:/app/data
-      - app-upload:/app/upload
+      # 应用数据统一挂载 app-data 命名卷,容器内按子目录划分:
+      # /data/db(SQLite 数据库)、/data/jwt(JWT 密钥)、/data/upload(上传文件)
+      - app-data:/data
     ports:
       - "${SERVER_PORT:-80}:${SERVER_PORT:-80}"
 
 volumes:
   app-data:
-  app-upload:

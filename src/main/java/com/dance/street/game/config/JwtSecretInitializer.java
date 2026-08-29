@@ -22,7 +22,7 @@ import java.util.Set;
  *
  * <p>密钥文件默认写入 ./data/jwt/dance-game-jwt-secret.key(可用 JWT_SECRET_FILE 覆盖),
  * 首次运行自动生成随机密钥并落盘,后续重启直接读取,保证无状态 JWT 在重启后不失效。
- * Docker 中默认落在 /app/data/jwt(与 SQLite 同卷),部署时挂载该卷持久化即可;
+ * Docker 中默认落在 /data/jwt(与 SQLite 同卷),部署时挂载该卷持久化即可;
  * 否则容器重建会重新生成密钥、旧 token 全部失效。</p>
  */
 @Slf4j

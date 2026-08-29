@@ -25,6 +25,7 @@ RUN mvn -B -Dmaven.test.skip=true package
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
+# 数据统一落在 /data 子目录(裸 docker run 时生效;compose 会再覆盖)
 ENV TZ=Asia/Shanghai \
     MYSQL_HOST=mysql \
     MYSQL_PORT=3306 \
@@ -36,18 +37,24 @@ ENV TZ=Asia/Shanghai \
     REDIS_PASSWORD= \
     LOGIN_USERNAME=admin \
     LOGIN_PASSWORD=123456 \
-    SERVER_PORT=80
+    SERVER_PORT=80 \
+    SQLITE_FALLBACK_URL=jdbc:sqlite:/data/db/game.db \
+    JWT_SECRET_FILE=/data/jwt/dance-game-jwt-secret.key \
+    FILE_UPLOAD_PATH=/data/upload
 
 COPY --from=build /app/target/game-0.0.1-SNAPSHOT.jar app.jar
 
 # ---------- 数据持久化 ----------
-# VOLUME 声明挂载点:单机模式下 SQLite 数据 + JWT 密钥(/app/data)与上传文件(/app/upload)
-# 容器重建后数据仍保留。JWT 密钥默认写入 /app/data/jwt(与数据库同卷),无需单独挂载。
+# VOLUME 声明挂载点:统一挂载 /data,内部按子目录划分:
+#   /data/db      SQLite 数据库文件(game.db)
+#   /data/jwt     JWT 密钥文件(dance-game-jwt-secret.key)
+#   /data/upload  上传文件
+# 容器重建后数据仍保留。子目录由应用启动时自动创建,无需单独挂载。
 # 注意:Dockerfile 只能声明匿名卷;匿名卷在容器删除后仍留在磁盘上,但新建容器不会自动复用。
 # 要可控的命名卷/宿主机目录持久化,请用:
-#   docker run -v app-data:/app/data -v app-upload:/app/upload ...
+#   docker run -v app-data:/data ...
 # 或直接使用 docker-compose.standalone.yml(已配好命名卷)。
-VOLUME ["/app/data", "/app/upload"]
+VOLUME ["/data"]
 
 EXPOSE 80
 ENTRYPOINT ["java", "-jar", "app.jar"]

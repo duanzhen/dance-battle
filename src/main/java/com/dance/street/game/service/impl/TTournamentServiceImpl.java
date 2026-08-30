@@ -243,7 +243,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
         tb.setStatus(0L);
         tb.setLogicalWidth(1920L);
         tb.setLogicalHeight(1080L);
-        tb.setThemeConfig("{\"bgColor\":\"#000000\",\"fontFamily\":\"Roboto\"}");
+        tb.setThemeConfig(StringUtils.isNotBlank(bo.getThemeConfig())
+            ? bo.getThemeConfig() : "{\"bgColor\":\"#000000\",\"fontFamily\":\"Roboto\"}");
         tb.setRemark(bo.getRemark());
         TTournamentVo tournament = insertByBo(tb);
         Long tid = tournament.getId();

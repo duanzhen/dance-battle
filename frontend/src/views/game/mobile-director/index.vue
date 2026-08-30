@@ -195,11 +195,11 @@
           <!-- 淘汰赛:左红右蓝指示点,与下方选手名字列对齐 -->
           <div v-if="currentStage?.stageMode !== 'AUDITION'" class="flex items-center gap-2 mb-1.5 px-1">
             <div class="flex-1 flex justify-center">
-              <span class="w-2 h-2 rounded-full bg-red-500"></span>
+              <span class="w-2 h-2 rounded-full" :class="sideDotClass('LEFT')"></span>
             </div>
             <span class="w-14"></span>
             <div class="flex-1 flex justify-center">
-              <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+              <span class="w-2 h-2 rounded-full" :class="sideDotClass('RIGHT')"></span>
             </div>
           </div>
           <!-- 海选赛:圈(match) → 轮次(round) → 评分(支持分圈) -->
@@ -377,14 +377,14 @@
               <div v-if="match.status === 'GAMING' && match.refereeVotes && match.refereeVotes.length" class="mt-2 space-y-1">
                 <div v-for="rv in match.refereeVotes" :key="rv.refereeId" class="flex items-center gap-2 text-[9px]">
                   <div class="flex-1 min-w-0 text-center">
-                    <span v-if="rv.vote === 'LEFT'" class="text-red-400 font-bold">{{ rv.refereeName || '裁判' }}</span>
+                    <span v-if="rv.vote === 'LEFT'" class="font-bold" :class="sideColorClass('LEFT')">{{ rv.refereeName || '裁判' }}</span>
                   </div>
                   <div class="w-14 text-center">
                     <span v-if="rv.vote === 'DRAW'" class="text-neutral-400 line-through decoration-neutral-500">{{ rv.refereeName || '裁判' }}</span>
                     <span v-else-if="!rv.vote" class="text-neutral-600">{{ rv.refereeName || '裁判' }}</span>
                   </div>
                   <div class="flex-1 min-w-0 text-center">
-                    <span v-if="rv.vote === 'RIGHT'" class="text-blue-400 font-bold">{{ rv.refereeName || '裁判' }}</span>
+                    <span v-if="rv.vote === 'RIGHT'" class="font-bold" :class="sideColorClass('RIGHT')">{{ rv.refereeName || '裁判' }}</span>
                   </div>
                 </div>
               </div>
@@ -397,9 +397,10 @@
                 <button
                   @click="handleDirectorJudge(match, 'LEFT')"
                   :disabled="actionLoading"
-                  class="py-2 rounded-lg text-[10px] font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30 transition-colors disabled:opacity-40"
+                  class="py-2 rounded-lg text-[10px] font-bold border transition-colors disabled:opacity-40"
+                  :class="sideButtonClass('LEFT')"
                 >
-                  红胜
+                  {{ sideLabel('LEFT') }}胜
                 </button>
                 <button
                   @click="handleDirectorJudge(match, 'DRAW')"
@@ -411,9 +412,10 @@
                 <button
                   @click="handleDirectorJudge(match, 'RIGHT')"
                   :disabled="actionLoading"
-                  class="py-2 rounded-lg text-[10px] font-bold bg-blue-600/15 text-blue-400 border border-blue-600/30 active:bg-blue-600/30 transition-colors disabled:opacity-40"
+                  class="py-2 rounded-lg text-[10px] font-bold border transition-colors disabled:opacity-40"
+                  :class="sideButtonClass('RIGHT')"
                 >
-                  蓝胜
+                  {{ sideLabel('RIGHT') }}胜
                 </button>
               </div>
 
@@ -485,7 +487,7 @@
                   <div v-if="r.refereeVotes && r.refereeVotes.length" class="space-y-1">
                     <div v-for="rv in r.refereeVotes" :key="rv.refereeId" class="flex items-center gap-2 text-[9px]">
                       <div class="flex-1 min-w-0 text-center">
-                        <span v-if="rv.vote === 'LEFT'" class="text-red-400 font-bold">{{ rv.refereeName || '裁判' }}</span>
+                        <span v-if="rv.vote === 'LEFT'" class="font-bold" :class="sideColorClass('LEFT')">{{ rv.refereeName || '裁判' }}</span>
                       </div>
                       <div class="w-14 flex-none text-center">
                         <span v-if="rv.vote === 'DRAW'" class="text-neutral-400 line-through decoration-neutral-500">{{
@@ -494,7 +496,7 @@
                         <span v-else-if="!rv.vote" class="text-neutral-600">{{ rv.refereeName || '裁判' }}</span>
                       </div>
                       <div class="flex-1 min-w-0 text-center">
-                        <span v-if="rv.vote === 'RIGHT'" class="text-blue-400 font-bold">{{ rv.refereeName || '裁判' }}</span>
+                        <span v-if="rv.vote === 'RIGHT'" class="font-bold" :class="sideColorClass('RIGHT')">{{ rv.refereeName || '裁判' }}</span>
                       </div>
                     </div>
                   </div>
@@ -588,6 +590,8 @@ import {
   directorPublishResult
 } from '@/api/game/director';
 import { getArenaOverview } from '@/api/game/stage';
+import { getTournament } from '@/api/game/tournament';
+import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 const route = useRoute();
@@ -597,6 +601,42 @@ const tournamentId = ref<string>('');
 const tournamentName = ref('');
 const loading = ref(false);
 const isLive = ref(false);
+/** 赛事级红蓝配色(当前场次/裁判列表 左红右蓝 或 右红左蓝) */
+const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
+let colorLoaded = false;
+const loadColorConfig = async () => {
+  if (colorLoaded || !tournamentId.value) return;
+  colorLoaded = true;
+  try {
+    const tr: any = await getTournament(tournamentId.value);
+    colorConfig.value = parseTournamentColorConfig(tr?.data?.themeConfig);
+  } catch (e) {
+    colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
+  }
+};
+const isLeftRed = computed(() => colorConfig.value.matchColorOrder !== 'BLUE_LEFT');
+/** LEFT/RIGHT 对应的红蓝文字色 */
+const sideColorClass = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red ? 'text-red-400' : 'text-blue-400';
+};
+/** LEFT/RIGHT 对应的红蓝文案 */
+const sideLabel = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red ? '红' : '蓝';
+};
+/** LEFT/RIGHT 对应的指示点颜色 */
+const sideDotClass = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red ? 'bg-red-500' : 'bg-blue-500';
+};
+/** LEFT/RIGHT 对应的判定按钮样式(红胜/蓝胜) */
+const sideButtonClass = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red
+    ? 'bg-red-600/15 text-red-400 border-red-600/30 active:bg-red-600/30'
+    : 'bg-blue-600/15 text-blue-400 border-blue-600/30 active:bg-blue-600/30';
+};
 
 interface Stage {
   id: string;
@@ -718,6 +758,7 @@ const loadStages = async () => {
   const id = route.query.id;
   if (!id || Array.isArray(id)) return;
   tournamentId.value = String(id);
+  await loadColorConfig();
   loading.value = true;
 
   try {

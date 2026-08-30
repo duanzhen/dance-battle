@@ -99,6 +99,14 @@ public interface ITStageLifecycleService {
     int calculateAdvancement(CalculateAdvancementBo bo);
 
     /**
+     * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名
+     *
+     * @param stageId  海选赛赛段ID
+     * @param response HTTP 响应(直接写 xlsx)
+     */
+    void exportAuditionResult(Long stageId, jakarta.servlet.http.HttpServletResponse response);
+
+    /**
      * 排名赛:同分并列导致晋级名额超限时,导播台在中间态手动指定晋级者
      * (传入全部待定者即全部晋级,未选中的待定者标记淘汰)。返回调整的晋级人数。
      */

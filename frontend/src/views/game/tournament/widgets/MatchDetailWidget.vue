@@ -78,9 +78,9 @@
               v-if="roundWins.left + roundWins.right > 0"
               class="px-4 py-1 rounded-full bg-black/60 border border-white/10 backdrop-blur text-[clamp(8px,0.9vw,13px)] font-bold"
             >
-              <span class="text-red-400">红 {{ roundWins.left }} 胜</span>
+              <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ roundWins.left }} 胜</span>
               <span class="text-white/40 mx-2">·</span>
-              <span class="text-blue-400">蓝 {{ roundWins.right }} 胜</span>
+              <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ roundWins.right }} 胜</span>
               <template v-if="roundWins.draw > 0">
                 <span class="text-white/40 mx-2">·</span>
                 <span class="text-neutral-400">平 {{ roundWins.draw }} 轮</span>
@@ -114,8 +114,8 @@
               </div>
               <!-- 本轮票数与判定 -->
               <div v-if="roundVoteCounts(r).total > 0" class="flex items-center justify-center gap-3 mt-0.5 text-[clamp(8px,0.9vw,13px)] font-mono">
-                <span class="text-red-400">红 {{ roundVoteCounts(r).left }}</span>
-                <span class="text-blue-400">蓝 {{ roundVoteCounts(r).right }}</span>
+                <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ roundVoteCounts(r).left }}</span>
+                <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ roundVoteCounts(r).right }}</span>
                 <span class="text-neutral-400">平 {{ roundVoteCounts(r).draw }}</span>
                 <span class="text-white/50">已判 {{ roundVoteCounts(r).voted }}/{{ roundVoteCounts(r).total }}</span>
               </div>
@@ -157,6 +157,8 @@ import AssetUpload from './common/AssetUpload.vue';
 import { getStageFlow } from '@/api/game/stage';
 import { getMatch } from '@/api/game/match';
 import { listCompetitor } from '@/api/game/competitor';
+import { getTournament } from '@/api/game/tournament';
+import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import { StageMode } from '../stages/types';
 
@@ -230,6 +232,31 @@ const onCelebrationFadeDone = () => {
 const qid = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? v : null);
 const tournamentId = computed(() => props.tournamentId ?? qid(route.query.id) ?? qid(route.query.tournamentId) ?? null);
 
+// ---- 赛事级红蓝配色(当前场次/裁判列表 左红右蓝 或 右红左蓝)----
+const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
+let colorLoaded = false;
+const loadColorConfig = async () => {
+  if (colorLoaded || !tournamentId.value) return;
+  colorLoaded = true;
+  try {
+    const tr: any = await getTournament(tournamentId.value);
+    colorConfig.value = parseTournamentColorConfig(tr?.data?.themeConfig);
+  } catch (e) {
+    colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
+  }
+};
+const isLeftRed = computed(() => colorConfig.value.matchColorOrder !== 'BLUE_LEFT');
+/** LEFT/RIGHT 对应的红蓝文字色 */
+const sideColorClass = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red ? 'text-red-400' : 'text-blue-400';
+};
+/** LEFT/RIGHT 对应的红蓝文案 */
+const sideLabel = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red ? '红' : '蓝';
+};
+
 const loadData = async () => {
   if (celebration.active && !celebrationSwitchReady) return;
   if (!tournamentId.value) {
@@ -237,6 +264,7 @@ const loadData = async () => {
     matchDetail.value = null;
     return;
   }
+  await loadColorConfig();
   try {
     // 用赛程流转接口定位当前进行中赛段及其场次(大屏投射窗口没有路由 id,依赖组件注入)
     const flow: any = await getStageFlow(tournamentId.value);
@@ -385,15 +413,16 @@ const showVotePanel = computed(() => {
   return (d.roundVotes || []).some((r: any) => (r.refereeVotes || []).length > 0) || (d.refereeVotes || []).length > 0;
 });
 
-const voteText = (v: string | null | undefined) => (v === 'LEFT' ? '红' : v === 'RIGHT' ? '蓝' : v === 'DRAW' ? '平' : '未判');
-const voteChipClass = (v: string | null | undefined) =>
-  v === 'LEFT'
-    ? 'bg-red-500/15 text-red-400 border-red-500/40'
-    : v === 'RIGHT'
-      ? 'bg-blue-500/15 text-blue-400 border-blue-500/40'
-      : v === 'DRAW'
-        ? 'bg-neutral-500/15 text-neutral-300 border-neutral-500/40'
-        : 'bg-neutral-800/60 text-neutral-500 border-neutral-800';
+const voteText = (v: string | null | undefined) =>
+  v === 'LEFT' ? sideLabel('LEFT') : v === 'RIGHT' ? sideLabel('RIGHT') : v === 'DRAW' ? '平' : '未判';
+const voteChipClass = (v: string | null | undefined) => {
+  if (v === 'LEFT' || v === 'RIGHT') {
+    const red = v === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+    return red ? 'bg-red-500/15 text-red-400 border-red-500/40' : 'bg-blue-500/15 text-blue-400 border-blue-500/40';
+  }
+  if (v === 'DRAW') return 'bg-neutral-500/15 text-neutral-300 border-neutral-500/40';
+  return 'bg-neutral-800/60 text-neutral-500 border-neutral-800';
+};
 
 const roundStatusText = (r: any) => {
   if (r.outcome === 'DRAW') return '平局加赛';
@@ -423,8 +452,8 @@ const roundVoteCounts = (r: any) => {
 };
 
 /** 本轮胜方文案与样式(后端 winnerSide:LEFT/RIGHT/DRAW) */
-const roundWinnerText = (s: string) => (s === 'LEFT' ? '红胜' : s === 'RIGHT' ? '蓝胜' : '平局');
-const roundWinnerClass = (s: string) => (s === 'LEFT' ? 'text-red-400' : s === 'RIGHT' ? 'text-blue-400' : 'text-neutral-400');
+const roundWinnerText = (s: string) => (s === 'LEFT' ? sideLabel('LEFT') + '胜' : s === 'RIGHT' ? sideLabel('RIGHT') + '胜' : '平局');
+const roundWinnerClass = (s: string) => (s === 'LEFT' ? sideColorClass('LEFT') : s === 'RIGHT' ? sideColorClass('RIGHT') : 'text-neutral-400');
 
 /** 胜场汇总:统计各轮胜方(平局轮不计入任何一方) */
 const roundWins = computed(() => {

@@ -1,12 +1,5 @@
 <template>
-  <el-dialog
-    v-model="visible"
-    :width="dialogWidth"
-    :before-close="handleClose"
-    destroy-on-close
-    class="tournament-dialog"
-    append-to-body
-  >
+  <el-dialog v-model="visible" :width="dialogWidth" :before-close="handleClose" destroy-on-close class="tournament-dialog" append-to-body>
     <template #header>
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
@@ -54,9 +47,7 @@
           </div>
 
           <div v-else class="text-center pt-2.5 pb-0">
-            <div
-              class="w-9 h-9 rounded-full bg-neutral-800 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform"
-            >
+            <div class="w-9 h-9 rounded-full bg-neutral-800 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
               <svg
                 class="w-4 h-4 text-neutral-400 group-hover:text-amber-500 transition-colors"
                 fill="none"
@@ -106,9 +97,7 @@
       </div>
 
       <div v-if="!props.tournament" class="col-span-2">
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">
-          裁判配置 <span class="text-red-500">*</span>
-        </label>
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5"> 裁判配置 <span class="text-red-500">*</span> </label>
         <div class="flex gap-2">
           <el-select
             v-model="form.refereeNames"
@@ -137,9 +126,7 @@
             <X class="w-4 h-4" />
           </button>
         </div>
-        <p class="text-[11px] text-neutral-600 mt-1">
-          输入姓名按快捷添加裁判,没有裁判时点击右侧 X 标记「暂无裁判」。
-        </p>
+        <p class="text-[11px] text-neutral-600 mt-1">输入姓名按快捷添加裁判,没有裁判时点击右侧 X 标记「暂无裁判」。</p>
       </div>
 
       <div v-if="!simple" :class="props.tournament ? 'col-span-2' : ''">
@@ -177,10 +164,71 @@
         ></textarea>
       </div>
 
+      <!-- 高级配置(默认折叠):赛事级红蓝配色,所有下属淘汰赛共享 -->
+      <div class="col-span-2 border-t border-neutral-800 pt-3">
+        <button type="button" @click="showAdvanced = !showAdvanced" class="w-full flex items-center justify-between py-2 text-left group">
+          <span class="text-sm font-bold text-neutral-300 group-hover:text-amber-400 transition-colors flex items-center gap-2">
+            <svg class="w-4 h-4 text-neutral-500 group-hover:text-amber-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            高级配置
+          </span>
+          <svg
+            class="w-4 h-4 text-neutral-500 group-hover:text-amber-400 transition-transform duration-200"
+            :class="showAdvanced ? 'rotate-180' : ''"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <div v-if="showAdvanced" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          <div>
+            <label class="block text-sm font-medium text-neutral-400 mb-1.5">对战树红蓝位置</label>
+            <select
+              v-model="form.bracketColorOrder"
+              class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all appearance-none text-sm"
+            >
+              <option value="RED_TOP">上红下蓝</option>
+              <option value="BLUE_TOP">上蓝下红</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-neutral-400 mb-1.5">场次与裁判列表红蓝位置</label>
+            <select
+              v-model="form.matchColorOrder"
+              class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all appearance-none text-sm"
+            >
+              <option value="RED_LEFT">左红右蓝</option>
+              <option value="BLUE_LEFT">右红左蓝</option>
+            </select>
+          </div>
+          <label
+            class="md:col-span-2 flex items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2.5 cursor-pointer"
+          >
+            <span>
+              <span class="block text-sm font-medium text-neutral-300">跳过中间态确认阶段</span>
+              <span class="block text-[11px] text-neutral-600 mt-0.5"> 开启后,上一个赛段完成时自动执行「确认晋级」,无需在中间态手动确认 </span>
+            </span>
+            <input type="checkbox" v-model="form.autoConfirmAdvancement" class="accent-amber-500 w-4 h-4 flex-none" />
+          </label>
+          <p class="md:col-span-2 text-[11px] text-neutral-600">该配置作用于本赛事所有淘汰赛的对战树、当前场次组件与裁判列表。</p>
+        </div>
+      </div>
+
       <!-- 按模版创建:自动生成赛段链 + 场景 + 对战树关联 -->
       <div v-if="!props.tournament" class="col-span-2 border-t border-neutral-800 pt-3">
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">按模版创建</label>
-        <p class="text-[11px] text-neutral-600 mb-3">点击模版先选中，再点底部「立即发布」即可创建赛段链（海选 + 淘汰赛）与两个场景（主视觉 / 对战），并自动关联对战树。</p>
+        <p class="text-[11px] text-neutral-600 mb-3">
+          点击模版先选中，再点底部「立即发布」即可创建赛段链（海选 + 淘汰赛）与两个场景（主视觉 / 对战），并自动关联对战树。
+        </p>
         <div class="grid grid-cols-1 gap-2">
           <button
             v-for="tpl in templates"
@@ -199,17 +247,14 @@
               <span class="flex items-center gap-1.5">
                 <span
                   class="text-[9px] px-2 py-0.5 rounded-full transition-colors"
-                  :class="selectedTemplate === tpl.code
-                    ? 'bg-amber-500/15 text-amber-400'
-                    : 'bg-neutral-800 text-neutral-400 group-hover:bg-amber-500/10 group-hover:text-amber-400'"
-                >{{ tpl.tag }}</span>
-                <svg
-                  v-if="selectedTemplate === tpl.code"
-                  class="w-4 h-4 text-amber-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+                  :class="
+                    selectedTemplate === tpl.code
+                      ? 'bg-amber-500/15 text-amber-400'
+                      : 'bg-neutral-800 text-neutral-400 group-hover:bg-amber-500/10 group-hover:text-amber-400'
+                  "
+                  >{{ tpl.tag }}</span
                 >
+                <svg v-if="selectedTemplate === tpl.code" class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
                 </svg>
               </span>
@@ -256,6 +301,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { addTournament, updateTournament, createTournamentByTemplate } from '@/api/game/tournament';
+import { parseTournamentThemeConfig } from '@/utils/tournamentColorConfig';
 import request from '@/utils/request';
 import { ElMessage } from 'element-plus';
 import { X } from 'lucide-vue-next';
@@ -306,7 +352,10 @@ const form = reactive({
   themeConfig: '', // 主题配置 JSON 字符串
   remark: '', // 备注
   refereeNames: [], // 裁判配置:裁判姓名列表
-  refereeNone: false // 裁判配置:是否标记「暂无裁判」
+  refereeNone: false, // 裁判配置:是否标记「暂无裁判」
+  bracketColorOrder: 'RED_TOP', // 对战树红蓝位置:上红下蓝 / 上蓝下红
+  matchColorOrder: 'RED_LEFT', // 当前场次/裁判列表红蓝位置:左红右蓝 / 右红左蓝
+  autoConfirmAdvancement: false // 跳过中间态确认阶段(默认关闭)
 });
 
 // 文件上传相关
@@ -317,6 +366,8 @@ const isSubmitting = ref(false);
 const isUploadingCover = ref(false);
 // 当前选中的模版编码(仅选中,点击「立即发布」才提交创建)
 const selectedTemplate = ref(null);
+// 高级配置区展开状态(默认折叠)
+const showAdvanced = ref(false);
 
 // 赛事模版:编码 → 展示信息(后端按编码创建赛段链/场景/对战树)
 const templates = [
@@ -396,7 +447,10 @@ const resetForm = () => {
     themeConfig: '',
     remark: '',
     refereeNames: [],
-    refereeNone: false
+    refereeNone: false,
+    bracketColorOrder: 'RED_TOP',
+    matchColorOrder: 'RED_LEFT',
+    autoConfirmAdvancement: false
   });
   if (previewUrl.value && !previewUrl.value.startsWith('http')) {
     URL.revokeObjectURL(previewUrl.value);
@@ -419,6 +473,10 @@ watch(
         themeConfig: newTournament.themeConfig || '',
         remark: newTournament.remark || ''
       });
+      const colorCfg = parseTournamentThemeConfig(newTournament.themeConfig);
+      form.bracketColorOrder = colorCfg.bracketColorOrder;
+      form.matchColorOrder = colorCfg.matchColorOrder;
+      form.autoConfirmAdvancement = colorCfg.autoConfirmAdvancement;
       // 设置预览图
       previewUrl.value = newTournament.coverImage || null;
     } else {
@@ -463,6 +521,10 @@ const submitForm = async () => {
   try {
     // 构建主题配置 JSON
     const themeConfig = form.themeConfig ? JSON.parse(form.themeConfig) : { bgColor: '#000000', fontFamily: 'Roboto' };
+    // 赛事级红蓝配色(所有下属淘汰赛共享)写入 themeConfig
+    themeConfig.bracketColorOrder = form.bracketColorOrder;
+    themeConfig.matchColorOrder = form.matchColorOrder;
+    themeConfig.autoConfirmAdvancement = !!form.autoConfirmAdvancement;
 
     const submitData = {
       ...form,
@@ -477,6 +539,7 @@ const submitForm = async () => {
       // 按模版创建:自动生成赛段链 + 场景 + 对战树关联
       await createTournamentByTemplate({
         name: form.name,
+        themeConfig: JSON.stringify(themeConfig),
         coverImage: form.coverImage,
         templateCode: selectedTemplate.value,
         remark: form.remark,

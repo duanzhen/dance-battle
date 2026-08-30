@@ -19,23 +19,36 @@
           </div>
         </div>
       </div>
-      <!-- 半决赛(4人2场):四个参赛者放在四角 -->
-      <div v-else-if="isSemi" class="w-full h-full flex items-stretch justify-between gap-2 px-2 py-2">
-        <div class="flex-none flex flex-col justify-between items-center min-h-0">
-          <div class="final-card" :class="{ 'final-win': semi.left?.top?.win }">
-            <span class="name" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
+      <!-- 半决赛(4人2场):四个参赛者放在四角;开启季军赛时底部中间显示季军 -->
+      <div v-else-if="isSemi" class="w-full h-full flex flex-col gap-2 px-2 py-2">
+        <div class="flex-1 flex items-stretch justify-between gap-2 min-h-0">
+          <div class="flex-none flex flex-col justify-between items-center min-h-0">
+            <div class="final-card" :class="{ 'final-win': semi.left?.top?.win }">
+              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
+            </div>
+            <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
+              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{
+                semi.left?.bottom?.name || ''
+              }}</span>
+            </div>
           </div>
-          <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
-            <span class="name" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
+          <div style="flex: 1; min-width: 0"></div>
+          <div class="flex-none flex flex-col justify-between items-center min-h-0">
+            <div class="final-card" :class="{ 'final-win': semi.right?.top?.win }">
+              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
+            </div>
+            <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
+              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{
+                semi.right?.bottom?.name || ''
+              }}</span>
+            </div>
           </div>
         </div>
-        <div style="flex: 1; min-width: 0"></div>
-        <div class="flex-none flex flex-col justify-between items-center min-h-0">
-          <div class="final-card" :class="{ 'final-win': semi.right?.top?.win }">
-            <span class="name" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
-          </div>
-          <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
-            <span class="name" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
+        <!-- 季军赛框:底部中间,显示季军(胜者) -->
+        <div v-if="thirdPlaceEnabled" class="flex-none flex justify-center min-h-0">
+          <div class="final-card third-place-card" :class="{ 'final-win': !!semi.third?.winner }">
+            <span class="third-place-label" :style="fz(0.65)">季军</span>
+            <span class="name" :style="fz(1)" :title="thirdPlaceText">{{ thirdPlaceText }}</span>
           </div>
         </div>
       </div>
@@ -56,10 +69,14 @@
         >
           <template v-for="(s, i) in leftSlots" :key="'l' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
-              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
+              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{
+                s.leftName || ''
+              }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
+              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{
+                s.rightName || ''
+              }}</span>
             </div>
           </template>
         </div>
@@ -72,10 +89,14 @@
         >
           <template v-for="(s, i) in rightSlots" :key="'r' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
-              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
+              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{
+                s.leftName || ''
+              }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
+              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{
+                s.rightName || ''
+              }}</span>
             </div>
           </template>
         </div>
@@ -98,7 +119,7 @@
         <span class="section-title">样式配置</span>
         <div class="space-y-3 mt-2">
           <ColorInput label="文字颜色" :model-value="textColor || '#000000'" @update:model-value="$emit('update:textColor', $event)" />
-          <TextInput label="字号(px)" :model-value="String(fontSize ?? 12)" placeholder="12" @update:model-value="handleFontSizeUpdate" />
+          <TextInput label="字号(px)" :model-value="String(fontSize ?? 24)" placeholder="24" @update:model-value="handleFontSizeUpdate" />
           <div>
             <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">边框颜色</span>
             <div class="flex items-center gap-1.5">
@@ -147,6 +168,8 @@ import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
 import { getStage, getStagePreBracket } from '@/api/game/stage';
+import { getTournament } from '@/api/game/tournament';
+import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 const props = defineProps<{
@@ -175,9 +198,9 @@ const bracketStyle = computed(() => ({
   '--bracket-bg': props.bgColor === '' ? 'transparent' : props.bgColor || undefined
 }));
 
-/** 字号缩放:以 fontSize(默认 12px)为基准,名字按比例联动,限制在 6~80px */
+/** 字号缩放:以 fontSize(默认 24px)为基准,名字按比例联动,限制在 6~80px */
 const fz = (ratio: number) => {
-  const base = Math.max(6, Math.min(80, Number(props.fontSize) || 12));
+  const base = Math.max(6, Math.min(80, Number(props.fontSize) || 24));
   return {
     fontSize: `${Math.round(base * ratio)}px`,
     lineHeight: `${Math.round(base * ratio * 1.3)}px`
@@ -186,7 +209,7 @@ const fz = (ratio: number) => {
 
 const handleFontSizeUpdate = (v: string) => {
   const n = Number(v);
-  emit('update:fontSize', Number.isFinite(n) && n > 0 ? n : 12);
+  emit('update:fontSize', Number.isFinite(n) && n > 0 ? n : 24);
 };
 
 const loading = ref(false);
@@ -199,6 +222,7 @@ const preSeeds = ref<any[]>([]);
 const prePairs = ref<any[]>([]);
 const isFinal = ref(false);
 const isSemi = ref(false);
+const thirdPlaceEnabled = ref(false);
 const stageModeError = ref(false);
 const stageMode = ref('');
 /** 上一赛段ID:预排/决赛来源解析依赖上一赛段,收到其事件时也需刷新 */
@@ -206,6 +230,10 @@ const prevStageId = ref<string | number | null>(null);
 const prevZoneMap = ref<Record<string, string>>({});
 const stagePairingMode = ref('');
 const stageTeamCountStart = ref(0);
+/** 赛事级红蓝配色(所有下属淘汰赛共享) */
+const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
+const bracketTopClass = computed(() => (colorConfig.value.bracketColorOrder === 'BLUE_TOP' ? 'bracket-blue' : 'bracket-red'));
+const bracketBottomClass = computed(() => (colorConfig.value.bracketColorOrder === 'BLUE_TOP' ? 'bracket-red' : 'bracket-blue'));
 
 // 标准种子摆位(与后端 KnockoutGenerator 一致):8/16/32 查表,其余递归
 const SEED_LAYOUT: Record<number, number[]> = {
@@ -260,6 +288,16 @@ const loadData = async () => {
       prevStageId.value = null;
       stagePairingMode.value = '';
       stageTeamCountStart.value = 0;
+    }
+    // 赛事级红蓝配色:从 tournament.themeConfig 读取(所有淘汰赛共享)
+    colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
+    if (stageInfo?.data?.tournamentId) {
+      try {
+        const tr: any = await getTournament(stageInfo.data.tournamentId);
+        colorConfig.value = parseTournamentColorConfig(tr?.data?.themeConfig);
+      } catch (e) {
+        colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
+      }
     }
     // 对战树支持淘汰赛(标准对战树)与擂台赛(8 强名单展示);其他赛制提示不支持
     const boundMode = stageInfo?.data?.stageMode;
@@ -334,6 +372,7 @@ const loadData = async () => {
     const isKnockout = stageInfo?.data?.stageMode === 'KNOCKOUT';
     isFinal.value = isKnockout && endN === 1;
     isSemi.value = isKnockout && startN === 4;
+    thirdPlaceEnabled.value = !!ko.thirdPlaceMatch;
     prevZoneMap.value = {};
     if (isFinal.value && matches.value.length === 1) {
       try {
@@ -663,23 +702,41 @@ const champion = computed(() => {
   return w ? { competitorId: w.competitorId, name: nameOf(w.competitorId), score: w.scoreValue == null ? '' : String(w.scoreValue) } : null;
 });
 
-// 半决赛四角:两场各两名参赛者,左上/左下、右上/右下
+// 半决赛四角:两场各两名参赛者,左上/左下、右上/右下;
+// 开启季军赛时识别第三场(季军赛),供底部中间季军框展示
 const semi = computed(() => {
-  const out: any = { left: null, right: null };
+  const out: any = { left: null, right: null, third: null };
   if (!isSemi.value) {
     return out;
   }
-  if (matches.value.length === 2) {
-    const ms = matches.value.slice().sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0));
-    const build = (m: any) => {
-      const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
-      return {
-        top: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), win: isWinner(ss[0]) } : null,
-        bottom: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), win: isWinner(ss[1]) } : null
-      };
+  const build = (m: any) => {
+    const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+    return {
+      top: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), win: isWinner(ss[0]) } : null,
+      bottom: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), win: isWinner(ss[1]) } : null
     };
-    out.left = ms[0] ? build(ms[0]) : null;
-    out.right = ms[1] ? build(ms[1]) : null;
+  };
+  if (matches.value.length >= 2) {
+    const semis = matches.value
+      .filter((m: any) => m.name !== '季军赛' && String(m.displayZone) !== 'CENTER')
+      .slice()
+      .sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0));
+    if (semis.length >= 2) {
+      out.left = build(semis[0]);
+      out.right = build(semis[1]);
+    }
+    // 季军赛:底部中间框展示对阵与胜者
+    const third = matches.value.find((m: any) => m.name === '季军赛' || String(m.displayZone) === 'CENTER') || null;
+    if (third) {
+      const ss = (participantsByMatch.value[third.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+      const winner = ss.find((p: any) => isWinner(p)) || null;
+      out.third = {
+        left: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId) } : null,
+        right: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId) } : null,
+        winner: winner ? { competitorId: winner.competitorId, name: nameOf(winner.competitorId) } : null,
+        status: third.status || 'PENDING'
+      };
+    }
     return out;
   }
   // 未生成正式场次(预排 2 对 / 种子 4 人):两列各一对 → 左上左下、右上右下
@@ -689,6 +746,17 @@ const semi = computed(() => {
   out.left = lp ? { top: toCard(lp.leftName, lp.leftWin), bottom: toCard(lp.rightName, lp.rightWin) } : null;
   out.right = rp ? { top: toCard(rp.leftName, rp.leftWin), bottom: toCard(rp.rightName, rp.rightWin) } : null;
   return out;
+});
+
+// 季军框文案:已决出显示胜者,未决出显示双方对阵或待定
+const thirdPlaceText = computed(() => {
+  const third = semi.value?.third;
+  if (!third) return '待定';
+  if (third.winner) return third.winner.name || '待定';
+  const left = third.left?.name || '';
+  const right = third.right?.name || '';
+  if (left && right) return left + ' VS ' + right;
+  return left || right || '待定';
 });
 
 const leftSlots = computed(() => bracketSlots.value.filter((s) => s.zone === 'LEFT').sort((a, b) => a.order - b.order));
@@ -789,6 +857,12 @@ const handleTournamentEvent = (data: any) => {
   min-width: 0;
   max-width: 100%;
 }
+.bracket-red {
+  color: #ef4444;
+}
+.bracket-blue {
+  color: #3b82f6;
+}
 .final-win {
   background: var(--bracket-bg, transparent);
   border-color: var(--bracket-border, transparent);
@@ -804,6 +878,21 @@ const handleTournamentEvent = (data: any) => {
   font-size: clamp(12px, 1.5vw, 24px);
   width: 9.5em;
   max-width: 9.5em;
+}
+.third-place-card {
+  flex-direction: column;
+  gap: 2px;
+  width: 12em;
+  max-width: 12em;
+  min-height: 2.8em;
+  padding: 4px 10px 6px;
+}
+.third-place-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
 }
 .custom-scrollbar-y::-webkit-scrollbar {
   width: 4px;

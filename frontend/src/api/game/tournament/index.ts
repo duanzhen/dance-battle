@@ -45,6 +45,7 @@ export const addTournament = (data: TournamentForm) => {
  */
 export const createTournamentByTemplate = (data: {
   name: string;
+  themeConfig?: string;
   coverImage?: string;
   templateCode: string;
   remark?: string;

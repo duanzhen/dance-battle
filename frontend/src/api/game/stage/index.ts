@@ -166,3 +166,15 @@ export const getStageRankDetail = (stageId: string | number) => {
     method: 'get'
   });
 };
+
+/**
+ * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名
+ * @param stageId 海选赛赛段ID
+ */
+export const exportAuditionResult = (stageId: string | number) => {
+  return request({
+    url: '/game/stage/' + stageId + '/export-audition-result',
+    method: 'get',
+    responseType: 'blob'
+  });
+};

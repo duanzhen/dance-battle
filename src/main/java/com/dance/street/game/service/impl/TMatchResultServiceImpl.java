@@ -514,6 +514,19 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                     .eq(TMatchParticipant::getMatchId, wt.getTargetMatchId())
                     .eq(TMatchParticipant::getDisplaySlotIndex, wt.getTargetSlot().longValue()));
             }
+            // 季军赛:败者占位同样回退,避免 reset 后半决赛败者残留
+            PromotionTarget lt = rule.get("2");
+            if (lt != null && StageConstants.ACTION_ADVANCE.equals(lt.getAction())
+                && lt.getTargetMatchId() != null && lt.getTargetSlot() != null) {
+                TMatch downstream = matchMapper.selectById(lt.getTargetMatchId());
+                if (downstream != null && !StageConstants.MATCH_PENDING.equals(downstream.getStatus())) {
+                    throw new ServiceException("季军赛场次已开赛,无法 reset");
+                }
+                participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                    .set(TMatchParticipant::getCompetitorId, null)
+                    .eq(TMatchParticipant::getMatchId, lt.getTargetMatchId())
+                    .eq(TMatchParticipant::getDisplaySlotIndex, lt.getTargetSlot().longValue()));
+            }
         }
         clearMatchState(match, StageConstants.MATCH_GAMING);
         refereeSseNotifier.notifyMatch(match.getStageId(), matchId, "reset");
@@ -617,6 +630,42 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                     winnerTarget.getTargetSlot().longValue());
             }
         }
+
+        // 季军赛:本场第 2 名(败者)路由到败者组场次(半决赛败者互争季军)
+        PromotionTarget loserTarget = rule.get("2");
+        if (loserTarget != null && StageConstants.ACTION_ADVANCE.equals(loserTarget.getAction())
+            && loserTarget.getTargetMatchId() != null && loserTarget.getTargetSlot() != null) {
+            MatchScoreResult loser = results.stream()
+                .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
+                .findFirst().orElse(null);
+            if (loser != null && loser.getCompetitorId() != null) {
+                fillDownstreamSlot(match, loserTarget.getTargetMatchId(),
+                    loserTarget.getTargetSlot().longValue(), loser.getCompetitorId());
+                log.info("场次[{}]败者[{}]补插到季军赛场次[{}]占位(slot={})",
+                    match.getId(), loser.getCompetitorId(), loserTarget.getTargetMatchId(),
+                    loserTarget.getTargetSlot().longValue());
+            }
+        }
+    }
+
+    /** 结果填入下游场次占位:占位行已存在则更新,不存在则补插(与胜者路由共用) */
+    private void fillDownstreamSlot(TMatch sourceMatch, Long targetMatchId, Long targetSlot, Long competitorId) {
+        TMatchParticipant pUpd = new TMatchParticipant();
+        pUpd.setCompetitorId(competitorId);
+        int affected = participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
+            .eq(TMatchParticipant::getMatchId, targetMatchId)
+            .eq(TMatchParticipant::getDisplaySlotIndex, targetSlot));
+        if (affected > 0) {
+            return;
+        }
+        TMatchParticipant np = new TMatchParticipant();
+        np.setTenantId(sourceMatch.getTenantId());
+        np.setTournamentId(sourceMatch.getTournamentId());
+        np.setMatchId(targetMatchId);
+        np.setCompetitorId(competitorId);
+        np.setDisplaySlotIndex(targetSlot);
+        np.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
+        participantMapper.insert(np);
     }
 
     private void markCompetitorOutcome(Long competitorId, String status) {

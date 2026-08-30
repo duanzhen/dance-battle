@@ -7,6 +7,36 @@
         <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
       </div>
       <div class="flex items-center gap-3 text-xs">
+        <!-- 海选赛:号码牌 / 分数排名 排序切换 -->
+        <template v-if="isAudition">
+          <button
+            @click="sortMode = 'NUMBER'"
+            class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors flex items-center gap-1"
+            :class="sortBtnClass('NUMBER')"
+            title="按签到时抽签的号码牌排序"
+          >
+            <Hash class="w-3.5 h-3.5" />
+            号码排序
+          </button>
+          <button
+            @click="sortMode = 'SCORE'"
+            class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors flex items-center gap-1"
+            :class="sortBtnClass('SCORE')"
+            title="按分数排名排序"
+          >
+            <Trophy class="w-3.5 h-3.5" />
+            分数排序
+          </button>
+          <button
+            @click="handleExportAudition"
+            :disabled="exporting"
+            class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors bg-emerald-600/15 text-emerald-400 border-emerald-600/30 hover:bg-emerald-600/25 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            title="导出 Excel:号码 / 选手名 / 各裁判分数 / 总分 / 排名"
+          >
+            <Download class="w-3.5 h-3.5" />
+            {{ exporting ? '导出中...' : '导出结果' }}
+          </button>
+        </template>
         <span class="text-neutral-500">共</span>
         <span class="text-amber-500 font-mono">{{ competitors.length }}</span>
         <span class="text-neutral-500">名</span>
@@ -33,7 +63,7 @@
       </div>
       <div class="divide-y divide-neutral-800/50">
         <div
-          v-for="(competitor, index) in competitors"
+          v-for="(competitor, index) in displayList"
           :key="competitor.id"
           class="px-6 py-4 transition-colors"
           :class="[
@@ -144,11 +174,19 @@
               </span>
             </div>
 
-            <!-- 最终排名 -->
-            <div v-if="competitor.finalRank" class="flex-shrink-0 w-16 text-center">
+            <!-- 最终排名(淘汰赛不展示) -->
+            <div v-if="competitor.finalRank && !isKnockout" class="flex-shrink-0 w-16 text-center">
               <div class="text-xs text-neutral-500">排名</div>
               <div class="text-lg font-bold" :class="getFinalRankClass(competitor.finalRank)">
                 {{ competitor.finalRank }}
+              </div>
+            </div>
+
+            <!-- 分数(海选赛:按场次累计总分) -->
+            <div v-if="isAudition" class="flex-shrink-0 w-20 text-center">
+              <div class="text-xs text-neutral-500">分数</div>
+              <div class="text-base font-bold font-mono" :class="scoreOf(competitor) == null ? 'text-neutral-600' : 'text-amber-400/90'">
+                {{ scoreOf(competitor) == null ? '–' : Number(scoreOf(competitor)).toFixed(2) }}
               </div>
             </div>
           </div>
@@ -161,12 +199,16 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Users, Pencil, Check, X } from 'lucide-vue-next';
+import { Users, Pencil, Check, X, Hash, Trophy, Download } from 'lucide-vue-next';
 import { listCompetitor, updateCompetitor } from '@/api/game/competitor';
+import { listMatch } from '@/api/game/match';
+import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { setStageSeedOrder } from '@/api/game/stage';
+import { exportAuditionResult } from '@/api/game/stage';
 import { withdrawArenaCompetitor } from '@/api/game/stage/lifecycle';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
+import FileSaver from 'file-saver';
 
 // Props
 const props = defineProps<{
@@ -180,6 +222,14 @@ const props = defineProps<{
 // 状态
 const loading = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
+const exporting = ref(false);
+/** 海选赛:competitorId -> 累计总分(t_match_participant.score_value 汇总) */
+const scoreByCompetitor = ref<Record<string, number>>({});
+/** 海选赛排序:号码牌 / 分数排名(默认号码牌) */
+const sortMode = ref<'NUMBER' | 'SCORE'>('NUMBER');
+
+const isAudition = computed(() => props.stageMode === 'AUDITION');
+const isKnockout = computed(() => props.stageMode === 'KNOCKOUT');
 
 // 行内改名状态
 const editingId = ref<string | number | null>(null);
@@ -192,6 +242,35 @@ const isArena = computed(() => props.stageMode === 'ARENA');
 
 // GUEST 可加入/可排位窗口:赛段未初始化且处于规划/未开始态(DRAFT/PENDING)
 const canArrange = computed(() => !props.isInitialized && (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING'));
+
+/** 号码牌数值(空/非数字排最后) */
+const numOf = (c: CompetitorVO) => {
+  const n = parseInt(String(c.number ?? ''), 10);
+  return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
+};
+/** 参赛方累计总分;无分数返回 null */
+const scoreOf = (c: CompetitorVO): number | null => {
+  const v = scoreByCompetitor.value[String(c.id)];
+  return v == null ? null : v;
+};
+/** 排序按钮样式 */
+const sortBtnClass = (mode: 'NUMBER' | 'SCORE') =>
+  sortMode.value === mode
+    ? 'bg-amber-500/15 text-amber-400 border-amber-500/40'
+    : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:text-neutral-200 hover:border-neutral-600';
+/** 展示列表:海选赛未初始化时保持种子顺序(供拖拽排位);初始化/结算后按所选方式排序 */
+const displayList = computed(() => {
+  if (!isAudition.value || canArrange.value) {
+    return competitors.value;
+  }
+  const list = [...competitors.value];
+  if (sortMode.value === 'SCORE') {
+    list.sort((a, b) => (scoreOf(b) ?? -1) - (scoreOf(a) ?? -1) || numOf(a) - numOf(b));
+  } else {
+    list.sort((a, b) => numOf(a) - numOf(b) || String(a.number || '').localeCompare(String(b.number || '')));
+  }
+  return list;
+});
 
 // GUEST 标记:remark == GUEST(由后端 addGuest 写入)
 const isGuest = (competitor: CompetitorVO) => competitor.remark === 'GUEST';
@@ -309,6 +388,49 @@ const saveSeedOrder = async () => {
   }
 };
 
+// 加载海选赛分数:按场次参赛方累计总分(competitorId -> scoreValue 汇总)
+const loadScores = async () => {
+  if (!isAudition.value) {
+    scoreByCompetitor.value = {};
+    return;
+  }
+  try {
+    const mr: any = await listMatch({ stageId: props.stageId, pageNum: 1, pageSize: 100 } as any);
+    const matches = mr?.data?.data || mr?.data || [];
+    const map: Record<string, number> = {};
+    for (const m of matches) {
+      const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 500 } as any);
+      const parts = pr?.data?.data || pr?.data || [];
+      parts.forEach((p: any) => {
+        if (p.competitorId != null && p.scoreValue != null) {
+          const key = String(p.competitorId);
+          map[key] = (map[key] || 0) + Number(p.scoreValue);
+        }
+      });
+    }
+    scoreByCompetitor.value = map;
+  } catch (e) {
+    console.error('加载海选赛分数失败:', e);
+    scoreByCompetitor.value = {};
+  }
+};
+
+// 导出海选结果 Excel(号码/选手名/各裁判分数/总平均分/排名)
+const handleExportAudition = async () => {
+  if (!props.stageId || exporting.value) return;
+  exporting.value = true;
+  try {
+    const blob = (await exportAuditionResult(props.stageId)) as unknown as Blob;
+    FileSaver.saveAs(blob, '海选结果.xlsx');
+    ElMessage.success('导出成功');
+  } catch (e) {
+    console.error('导出海选结果失败:', e);
+    ElMessage.error('导出失败');
+  } finally {
+    exporting.value = false;
+  }
+};
+
 // 加载参赛选手列表
 const loadCompetitors = async () => {
   if (!props.stageId) {
@@ -324,6 +446,7 @@ const loadCompetitors = async () => {
     competitors.value = data || [];
     // 按种子排名排序
     competitors.value.sort((a, b) => (a.seedRank || 999) - (b.seedRank || 999));
+    await loadScores();
   } catch (error) {
     console.error('加载参赛选手失败:', error);
     competitors.value = [];

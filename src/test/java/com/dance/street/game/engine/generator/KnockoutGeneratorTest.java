@@ -148,6 +148,80 @@ class KnockoutGeneratorTest {
         }
     }
 
+    @Test
+    void fourPlayers_singleRound_thirdPlaceMatch_generatesLoserMatch() {
+        // 4 人单轮半决赛(每轮一赛段)开启季军赛:两场半决赛 + 季军赛(3 场),败者路由到季军赛
+        RuleConfigHolder rc = new RuleConfigHolder();
+        KnockoutConfig kc = new KnockoutConfig();
+        kc.setSingleRound(true);
+        kc.setThirdPlaceMatch(true);
+        rc.setKnockout(kc);
+
+        List<Long> seeds = List.of(1L, 2L, 3L, 4L);
+        BracketPlan plan = generator.generate(seeds, rc);
+
+        assertEquals(4, plan.getBracketSize());
+        assertEquals(3, plan.getMatches().size(), "4 人半决赛开启季军赛应生成 3 场(2 半决赛 + 1 季军赛)");
+
+        List<MatchPlan> r1 = round(plan, 1);
+        assertEquals(2, r1.size());
+        // 两场半决赛:胜者晋级下一赛段(finalMatch),败者进季军赛(slot 对应场次序号)
+        for (int i = 0; i < 2; i++) {
+            assertTrue(r1.get(i).isFinalMatch());
+            assertEquals(2, r1.get(i).getLoserTargetRound());
+            assertEquals(0, r1.get(i).getLoserTargetMatchIndex());
+            assertEquals(i, r1.get(i).getLoserTargetSlot());
+        }
+
+        List<MatchPlan> r2 = round(plan, 2);
+        assertEquals(1, r2.size());
+        MatchPlan third = r2.get(0);
+        assertTrue(third.isThirdPlaceMatch(), "季军赛场次应标记 thirdPlaceMatch");
+        assertEquals("季军赛", third.getName());
+        assertFalse(third.isFinalMatch(), "季军赛胜者不晋级下一赛段");
+        assertNull(third.getWinnerTargetRound());
+        assertEquals("CENTER", third.getDisplayZone());
+    }
+
+    @Test
+    void fourPlayers_multiRound_thirdPlaceMatch_generatesLoserMatch() {
+        // 4 人完整单赛段 bracket 开启季军赛:2 半决赛 + 决赛 + 季军赛(4 场),半决赛败者路由到季军赛(R3)
+        RuleConfigHolder rc = new RuleConfigHolder();
+        KnockoutConfig kc = new KnockoutConfig();
+        kc.setThirdPlaceMatch(true);
+        rc.setKnockout(kc);
+
+        List<Long> seeds = List.of(1L, 2L, 3L, 4L);
+        BracketPlan plan = generator.generate(seeds, rc);
+
+        assertEquals(4, plan.getMatches().size(), "4 人完整 bracket 开启季军赛应生成 4 场(2 半决赛 + 决赛 + 季军赛)");
+
+        List<MatchPlan> r1 = round(plan, 1);
+        for (int i = 0; i < 2; i++) {
+            assertDownstream(r1.get(i), 2, 0, i);
+            assertEquals(3, r1.get(i).getLoserTargetRound());
+            assertEquals(0, r1.get(i).getLoserTargetMatchIndex());
+            assertEquals(i, r1.get(i).getLoserTargetSlot());
+        }
+
+        List<MatchPlan> r3 = round(plan, 3);
+        assertEquals(1, r3.size());
+        assertTrue(r3.get(0).isThirdPlaceMatch());
+        assertEquals("季军赛", r3.get(0).getName());
+        assertFalse(r3.get(0).isFinalMatch());
+    }
+
+    @Test
+    void fourPlayers_thirdPlaceDisabled_noExtraMatch() {
+        // 4 人半决赛未开启季军赛:仅 2 场半决赛 + 决赛占位
+        List<Long> seeds = List.of(1L, 2L, 3L, 4L);
+        BracketPlan plan = generator.generate(seeds, null);
+
+        assertEquals(3, plan.getMatches().size(), "4 人标准 bracket 应为 2 半决赛 + 1 决赛");
+        assertTrue(plan.getMatches().stream().noneMatch(MatchPlan::isThirdPlaceMatch));
+        assertTrue(plan.getMatches().stream().allMatch(m -> m.getLoserTargetRound() == null));
+    }
+
     private List<MatchPlan> round(BracketPlan plan, int round) {
         return plan.getMatches().stream()
             .filter(m -> m.getRound() == round)

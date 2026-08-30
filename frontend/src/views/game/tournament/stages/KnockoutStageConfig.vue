@@ -131,9 +131,9 @@
             <div>
               <label class="text-xs text-neutral-500 mb-2 block">晋级规则</label>
               <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
-                <!-- 第三名决赛仅在半决赛(4 队)出现;GUEST/种子相关配置在中间态处理 -->
+                <!-- 季军仅在半决赛(4 队)出现;GUEST/种子相关配置在中间态处理 -->
                 <label v-if="config.teamsCount === 4" class="flex items-center justify-between">
-                  <span class="text-sm text-neutral-300">第三名决赛</span>
+                  <span class="text-sm text-neutral-300">季军赛</span>
                   <input type="checkbox" v-model="config.playThirdPlace" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
                 </label>
                 <label class="flex items-center justify-between">

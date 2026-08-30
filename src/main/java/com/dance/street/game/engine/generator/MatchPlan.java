@@ -43,6 +43,18 @@ public class MatchPlan {
     /** 胜者去向:填入下游场地的槽位 */
     private Integer winnerTargetSlot;
 
+    /** 败者去向:下游轮次(季军赛等败者组场次;null 表示无败者路由) */
+    private Integer loserTargetRound;
+
+    /** 败者去向:下游轮内序号 */
+    private Integer loserTargetMatchIndex;
+
+    /** 败者去向:填入下游场地的槽位 */
+    private Integer loserTargetSlot;
+
     /** 是否决赛(胜者最终晋级到下一赛段) */
     private boolean finalMatch;
+
+    /** 是否季军赛(半决赛开启季军赛时生成的败者组场次,胜者为季军) */
+    private boolean thirdPlaceMatch;
 }

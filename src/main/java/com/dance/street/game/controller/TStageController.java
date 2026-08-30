@@ -273,6 +273,17 @@ public class TStageController extends BaseController {
     }
 
     /**
+     * 导出海选结果:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名
+     */
+    @SaCheckPermission("game:stage:query")
+    @Log(title = "导出海选结果", businessType = BusinessType.EXPORT)
+    @GetMapping("/{id}/export-audition-result")
+    public void exportAuditionResult(@NotNull(message = "赛段ID不能为空") @PathVariable Long id,
+                                     HttpServletResponse response) {
+        tStageLifecycleService.exportAuditionResult(id, response);
+    }
+
+    /**
      * GUEST 加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入;
      * 仅创建参赛单位进入 GUEST 池,不自动挂入任何场次;由导播按外部抽签结果设定种子顺序后,
      * initialize → generateMatches 生成对阵(GUEST 胜出即占晋级名额)。

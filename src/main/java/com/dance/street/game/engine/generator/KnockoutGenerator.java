@@ -30,15 +30,17 @@ public class KnockoutGenerator implements StageGenerator {
         if (kc != null && Boolean.TRUE.equals(kc.getSingleRound())) {
             return generateSingleRound(seededCompetitorIds, kc, round);
         }
-        return generateMultiRound(seededCompetitorIds);
+        return generateMultiRound(seededCompetitorIds, kc);
     }
 
     /** 多轮模式:单赛段完整 bracket(首轮→…→决赛,跨轮连线) */
-    private BracketPlan generateMultiRound(List<Long> seededCompetitorIds) {
+    private BracketPlan generateMultiRound(List<Long> seededCompetitorIds, KnockoutConfig kc) {
         int actualCount = seededCompetitorIds == null ? 0 : seededCompetitorIds.size();
         int bracketSize = nextPowerOfTwo(Math.max(actualCount, 2));
         int[] seeds = seedPositions(bracketSize);
         int totalRounds = log2(bracketSize);
+        boolean thirdPlace = kc != null && Boolean.TRUE.equals(kc.getThirdPlaceMatch())
+            && totalRounds == 2; // 季军赛仅在半决赛(4 队)场景生成
 
         List<MatchPlan> matches = new ArrayList<>();
 
@@ -64,6 +66,31 @@ public class KnockoutGenerator implements StageGenerator {
                 m.setSlots(slots);
                 matches.add(m);
             }
+        }
+
+        // 季军赛(半决赛败者组):两场半决赛的败者互相对决,胜者为季军,在决赛(下一赛段)前举行
+        if (thirdPlace) {
+            for (MatchPlan mp : matches) {
+                if (mp.getRound() == 1) {
+                    mp.setLoserTargetRound(totalRounds + 1);
+                    mp.setLoserTargetMatchIndex(0);
+                    mp.setLoserTargetSlot(mp.getMatchIndex());
+                }
+            }
+            MatchPlan third = new MatchPlan();
+            third.setName("季军赛");
+            third.setRound(totalRounds + 1);
+            third.setMatchIndex(0);
+            third.setDisplayRow(2);
+            third.setDisplayCol(totalRounds + 1);
+            third.setDisplayZone("CENTER");
+            third.setThirdPlaceMatch(true);
+            third.setFinalMatch(false);
+            List<SlotPlan> slots = new ArrayList<>();
+            slots.add(emptySlot(0));
+            slots.add(emptySlot(1));
+            third.setSlots(slots);
+            matches.add(third);
         }
 
         BracketPlan plan = new BracketPlan();
@@ -110,6 +137,30 @@ public class KnockoutGenerator implements StageGenerator {
             slots.add(seedSlot(1, seedB, actualCount, seededCompetitorIds));
             m.setSlots(slots);
             matches.add(m);
+        }
+
+        // 季军赛(半决赛败者组):4 队单轮赛段开启季军赛时,两场半决赛败者互争季军,
+        // 场次与半决赛同属本赛段,胜者不晋级下一赛段(决赛在下一赛段,天然晚于季军赛)
+        if (kc != null && Boolean.TRUE.equals(kc.getThirdPlaceMatch()) && r1Count == 2) {
+            for (MatchPlan m : matches) {
+                m.setLoserTargetRound(2);
+                m.setLoserTargetMatchIndex(0);
+                m.setLoserTargetSlot(m.getMatchIndex());
+            }
+            MatchPlan third = new MatchPlan();
+            third.setName("季军赛");
+            third.setRound(2);
+            third.setMatchIndex(0);
+            third.setDisplayRow(2);
+            third.setDisplayCol(2);
+            third.setDisplayZone("CENTER");
+            third.setThirdPlaceMatch(true);
+            third.setFinalMatch(false);
+            List<SlotPlan> slots = new ArrayList<>();
+            slots.add(emptySlot(0));
+            slots.add(emptySlot(1));
+            third.setSlots(slots);
+            matches.add(third);
         }
 
         BracketPlan plan = new BracketPlan();

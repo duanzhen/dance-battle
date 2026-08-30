@@ -1,5 +1,7 @@
 package com.dance.street.game.service.impl;
 
+import java.math.BigDecimal;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,9 @@ import com.dance.street.game.domain.vo.CircleAssignVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.domain.TTournament;
+import com.dance.street.game.domain.TReferee;
+import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.engine.common.DimensionConfig;
 import com.dance.street.game.engine.common.GroupConfig;
 import com.dance.street.game.engine.common.PromotionTarget;
@@ -54,8 +59,10 @@ import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
+import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITCompetitorMemberService;
 import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITRefereeStageService;
@@ -97,6 +104,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final TMatchRefereeMapper matchRefereeMapper;
     private final TMatchRoundMapper matchRoundMapper;
     private final TPlayerMapper playerMapper;
+    private final TRefereeMapper refereeMapper;
+    private final TTournamentMapper tournamentMapper;
     private final ScoringEngine scoringEngine = new ScoringEngine();
     private final TRoundScoreMapper roundScoreMapper;
     private final ITCompetitorService competitorService;
@@ -401,7 +410,17 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                     target.setTargetMatchId(matchKeyToId.get(matchKey(mp.getWinnerTargetRound(), mp.getWinnerTargetMatchIndex())));
                     target.setTargetSlot(mp.getWinnerTargetSlot());
                 }
-                String json = RuleConfigParser.toJsonPromotionRule(Map.of("1", target));
+                Map<String, PromotionTarget> rule = new java.util.LinkedHashMap<>();
+                rule.put("1", target);
+                // 季军赛:半决赛败者路由到败者组场次(rule key "2")
+                if (mp.getLoserTargetRound() != null) {
+                    PromotionTarget loserTarget = new PromotionTarget();
+                    loserTarget.setAction(StageConstants.ACTION_ADVANCE);
+                    loserTarget.setTargetMatchId(matchKeyToId.get(matchKey(mp.getLoserTargetRound(), mp.getLoserTargetMatchIndex())));
+                    loserTarget.setTargetSlot(mp.getLoserTargetSlot());
+                    rule.put("2", loserTarget);
+                }
+                String json = RuleConfigParser.toJsonPromotionRule(rule);
                 TMatch upd = new TMatch();
                 upd.setId(matchKeyToId.get(matchKey(mp.getRound(), mp.getMatchIndex())));
                 upd.setPromotionRule(json);
@@ -1838,8 +1857,116 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         stageMapper.updateById(stage);
         refereeSseNotifier.notifyStage(stageId, "stage");
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
-        // 不再自动晋级:裁判判完仅出预排/晋级者,由导播台在中间态「确认晋级」时正式写入下一赛段
+        // 默认不再自动晋级:裁判判完仅出预排/晋级者,由导播台在中间态「确认晋级」时正式写入下一赛段。
+        // 赛事级配置「跳过中间态确认」开启时,赛段完成即自动执行确认晋级。
+        if (autoConfirmAdvancement(stage.getTournamentId())) {
+            try {
+                CalculateAdvancementBo autoBo = new CalculateAdvancementBo();
+                autoBo.setStageId(stageId);
+                calculateAdvancement(autoBo);
+                log.info("赛段[{}]完成,赛事开启「跳过中间态确认」,已自动确认晋级到下一赛段", stageId);
+            } catch (ServiceException e) {
+                // 自动确认失败(如同分待定需人工裁决、下一赛段已生成对阵)不阻断赛段完成,
+                // 回退到中间态人工确认
+                log.warn("赛段[{}]自动确认晋级失败,退回中间态人工确认: {}", stageId, e.getMessage());
+            }
+        }
         return StageConstants.STAGE_SETTLED;
+    }
+
+    /** 赛事级配置:是否开启「跳过中间态确认阶段」(themeConfig.autoConfirmAdvancement) */
+    private boolean autoConfirmAdvancement(Long tournamentId) {
+        if (tournamentId == null) {
+            return false;
+        }
+        TTournament t = tournamentMapper.selectById(tournamentId);
+        if (t == null || StringUtils.isBlank(t.getThemeConfig())) {
+            return false;
+        }
+        try {
+            return cn.hutool.json.JSONUtil.parseObj(t.getThemeConfig())
+                .getBool("autoConfirmAdvancement", false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总分 / 排名。
+     * 总分 = 该选手所有裁判分数之和;排名取赛段最终排名。
+     */
+    @Override
+    public void exportAuditionResult(Long stageId, jakarta.servlet.http.HttpServletResponse response) {
+        TStage stage = mustGetStage(stageId);
+        if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("仅海选赛赛段支持导出海选结果");
+        }
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .orderByAsc(TMatch::getDisplayRow)
+            .orderByAsc(TMatch::getId));
+        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
+        List<Long> roundIds = matchIds.isEmpty() ? List.of()
+            : matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds))
+                .stream().map(TMatchRound::getId).toList();
+        List<TRoundScore> scores = roundIds.isEmpty() ? List.of()
+            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
+        // 裁判列顺序:赛事全部裁判按 id 升序(未打分的裁判该列留空)
+        List<TReferee> referees = refereeMapper.selectList(Wrappers.<TReferee>lambdaQuery()
+            .eq(TReferee::getTournamentId, stage.getTournamentId())
+            .orderByAsc(TReferee::getId));
+        // (competitorId:refereeId) -> 累计分
+        Map<String, BigDecimal> scoreByRef = new HashMap<>();
+        for (TRoundScore s : scores) {
+            if (s.getCompetitorId() == null || s.getRefereeId() == null || s.getScore() == null) {
+                continue;
+            }
+            scoreByRef.merge(s.getCompetitorId() + ":" + s.getRefereeId(), s.getScore(), BigDecimal::add);
+        }
+        // 选手按最终排名升序(未排名排最后),同排名按号码
+        List<TCompetitor> comps = competitorMapper.selectList(
+            Wrappers.<TCompetitor>lambdaQuery().eq(TCompetitor::getStageId, stageId));
+        comps.sort(Comparator
+            .comparing((TCompetitor c) -> c.getFinalRank() == null ? Long.MAX_VALUE : c.getFinalRank())
+            .thenComparing(c -> parseCompetitorNumber(c.getNumber())));
+        // 表头:号码 | 选手名 | 裁判1..n | 总平均分 | 排名
+        List<List<String>> head = new ArrayList<>();
+        head.add(List.of("号码"));
+        head.add(List.of("选手名"));
+        for (TReferee r : referees) {
+            head.add(List.of(StringUtils.defaultString(r.getName(), "裁判" + r.getId())));
+        }
+        head.add(List.of("总分"));
+        head.add(List.of("排名"));
+        List<List<Object>> rows = new ArrayList<>();
+        for (TCompetitor c : comps) {
+            List<Object> row = new ArrayList<>();
+            row.add(c.getNumber() == null ? "" : c.getNumber());
+            row.add(c.getName() == null ? "" : c.getName());
+            BigDecimal total = BigDecimal.ZERO;
+            int scoredRefs = 0;
+            for (TReferee r : referees) {
+                BigDecimal v = scoreByRef.get(c.getId() + ":" + r.getId());
+                row.add(v == null ? "" : v.stripTrailingZeros().toPlainString());
+                if (v != null) {
+                    total = total.add(v);
+                    scoredRefs++;
+                }
+            }
+            row.add(scoredRefs == 0 ? "" : total.stripTrailingZeros().toPlainString());
+            row.add(c.getFinalRank() == null ? "" : c.getFinalRank());
+            rows.add(row);
+        }
+        try {
+            org.dromara.common.core.utils.file.FileUtils.setAttachmentResponseHeader(
+                response, "海选结果-" + stage.getName() + ".xlsx");
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8");
+            try (jakarta.servlet.ServletOutputStream os = response.getOutputStream()) {
+                cn.idev.excel.FastExcel.write(os).head(head).sheet("海选结果").doWrite(rows);
+            }
+        } catch (java.io.IOException e) {
+            throw new ServiceException("导出海选结果失败: {}", e.getMessage());
+        }
     }
 
     /**

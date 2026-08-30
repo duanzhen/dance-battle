@@ -65,6 +65,9 @@ public class RuleConfigHolder implements Serializable {
     /** 排名展示是否显示分数(赛段级配置,由排名展示组件读取) */
     private Boolean showScore;
 
+    /** 擂台赛平局积分:平局后双方下场时,开启则双方各记 1 分(默认关闭,只有胜场记 1 分) */
+    private Boolean drawBothScore;
+
     /** 排名展示分数显示方式:TOTAL=只显示总分 / DETAIL=总分+各维度分(赛段级配置) */
     private String scoreDisplay;
 

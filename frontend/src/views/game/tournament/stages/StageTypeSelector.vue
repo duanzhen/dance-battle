@@ -134,22 +134,6 @@
               <el-input-number v-model="config.scale" :min="2" :max="512" class="w-full" />
             </div>
             <div>
-              <label class="block text-sm text-neutral-400 mb-1">最大挑战场次</label>
-              <el-input-number v-model="config.maxChallenges" :min="1" :max="10" class="w-full" />
-            </div>
-            <div>
-              <label class="block text-sm text-neutral-400 mb-1">连胜奖励积分</label>
-              <el-input-number v-model="config.winStreakBonus" :min="0" :max="100" class="w-full" />
-            </div>
-            <div>
-              <label class="block text-sm text-neutral-400 mb-1">挑战顺序</label>
-              <el-select v-model="config.challengeOrder" class="w-full">
-                <el-option label="随机" value="RANDOM" />
-                <el-option label="按排名" value="RANKED" />
-                <el-option label="手动" value="MANUAL" />
-              </el-select>
-            </div>
-            <div>
               <label class="block text-sm text-neutral-400 mb-1">比赛格式</label>
               <el-select v-model="config.format" class="w-full">
                 <el-option label="BO1" value="BO1" />
@@ -299,10 +283,8 @@ const initConfig = () => {
     case StageMode.ARENA:
       config.value = {
         scale: 8,
-        winStreakBonus: 10,
-        challengeOrder: 'RANDOM',
-        maxChallenges: 3,
-        format: 'BO1'
+        format: 'BO1',
+        drawBothScore: false
       } as ArenaConfig;
       break;
   }

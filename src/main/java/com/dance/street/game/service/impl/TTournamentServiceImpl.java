@@ -520,9 +520,6 @@ public class TTournamentServiceImpl implements ITTournamentService {
             // 配置与前端 ArenaStageConfig 默认值对齐(后端当前仅读胜负结算,其余为展示/预留)
             return "{\"mode\":\"ARENA\",\"format\":\"BO1\","
                 + "\"scale\":" + d.start() + ","
-                + "\"maxChallenges\":3,\"challengeOrder\":\"RANDOM\","
-                + "\"winStreakBonus\":10,\"defenseBonus\":5,"
-                + "\"allowDefenderRest\":true,\"allowRechallenge\":false,\"timeoutReplacement\":true,"
                 + "\"transition\":{}}";
         }
         return "{\"mode\":\"KNOCKOUT\",\"format\":\"BO1\","

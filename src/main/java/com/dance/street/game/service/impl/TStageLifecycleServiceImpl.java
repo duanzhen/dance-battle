@@ -130,11 +130,16 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
 
         // 海选/排名赛:按签到号码数值升序写 seedRank(号码即种子顺序,round 生成/落位以此为准);
+        // 擂台赛:已有显式 seedRank(GUEST 落位/手动预排)保持原顺序在前,其余签到选手按号码升序;
         // 其余赛制按原 seedRank 升序(空值排最后)
         boolean perCompetitorInit = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
             || StageModeEnum.RANK.getCode().equals(stage.getStageMode());
         if (perCompetitorInit) {
             comps.sort(Comparator.comparingInt(c -> parseCompetitorNumber(c.getNumber())));
+        } else if (StageModeEnum.ARENA.getCode().equals(stage.getStageMode())) {
+            comps.sort(Comparator
+                .comparing((TCompetitor c) -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank())
+                .thenComparingInt(c -> parseCompetitorNumber(c.getNumber())));
         } else {
             comps.sort(Comparator.comparing(c -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank()));
         }
@@ -878,6 +883,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (matches.isEmpty()) {
             return wins;
         }
+        // 平局双方各加1分:由赛段配置 drawBothScore 控制(默认关闭,只按胜场记分)
+        TStage stage = stageMapper.selectById(stageId);
+        RuleConfigHolder rc = stage != null ? RuleConfigParser.parse(stage.getRuleConfig()) : null;
+        boolean drawBothScore = rc != null && Boolean.TRUE.equals(rc.getDrawBothScore());
         List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
         List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
             .in(TMatchParticipant::getMatchId, matchIds)
@@ -885,6 +894,16 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         for (TMatchParticipant p : parts) {
             if (p.getCompetitorId() != null) {
                 wins.merge(p.getCompetitorId(), 1, Integer::sum);
+            }
+        }
+        if (drawBothScore) {
+            List<TMatchParticipant> draws = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .in(TMatchParticipant::getMatchId, matchIds)
+                .eq(TMatchParticipant::getOutcomeStatus, MatchOutcomeEnum.DRAW.getCode()));
+            for (TMatchParticipant p : draws) {
+                if (p.getCompetitorId() != null) {
+                    wins.merge(p.getCompetitorId(), 1, Integer::sum);
+                }
             }
         }
         return wins;

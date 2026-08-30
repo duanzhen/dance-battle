@@ -433,7 +433,7 @@ const defaultConfigs: Record<StageMode, any> = {
   [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
   [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-  [StageMode.ARENA]: { format: 'BO1', scale: 8, maxChallenges: 2, challengeOrder: 'RANDOM' },
+  [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
   [StageMode.RANK]: {
     mode: 'RANK',
     scale: 32,
@@ -613,7 +613,7 @@ const canCompleteCreate = computed(() => {
       return parsed.scale > 0 && parsed.advanceCount > 0;
     }
     if (selectedCreateMode.value === StageMode.ARENA) {
-      return (parsed.scale > 0 || parsed.challengerCount > 0) && parsed.maxChallenges > 0;
+      return parsed.scale > 0 || parsed.challengerCount > 0;
     }
     if (selectedCreateMode.value === StageMode.RANK) {
       return parsed.scale > 0 && parsed.advanceCount > 0 && parsed.scoring?.dimensions?.length > 0;
@@ -647,7 +647,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
       [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
-      [StageMode.ARENA]: { format: 'BO1', scale: 8, maxChallenges: 2, challengeOrder: 'RANDOM' },
+      [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
       [StageMode.RANK]: {
         mode: 'RANK',
         scale: 32,

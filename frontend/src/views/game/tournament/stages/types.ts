@@ -93,19 +93,11 @@ export interface RankingConfig {
   };
 }
 
-// 擂台赛配置
-export enum ChallengeOrder {
-  RANDOM = 'RANDOM', // 随机
-  RANKED = 'RANKED', // 按排名
-  MANUAL = 'MANUAL' // 手动
-}
-
 export interface ArenaConfig {
   scale: number; // 进入擂台赛总人数(擂主1人 + 攻擂N人)
-  winStreakBonus: number; // 连胜奖励积分
-  challengeOrder: ChallengeOrder; // 挑战顺序
-  maxChallenges: number; // 最大挑战场次
   format: MatchFormat;
+  /** 平局双方各加1分(双方下场时;默认关闭,只有胜场记1分) */
+  drawBothScore?: boolean;
 }
 
 // 联合类型

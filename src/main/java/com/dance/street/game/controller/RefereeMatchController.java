@@ -449,6 +449,7 @@ public class RefereeMatchController {
             if (p.getCompetitorId() != null) {
                 var comp = competitorMapper.selectById(p.getCompetitorId());
                 pi.setCompetitorName(comp != null ? comp.getName() : ("选手 " + p.getCompetitorId()));
+                pi.setNumber(comp != null ? comp.getNumber() : null);
             } else {
                 pi.setCompetitorName("待定");
             }

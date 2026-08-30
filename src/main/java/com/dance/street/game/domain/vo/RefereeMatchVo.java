@@ -138,6 +138,8 @@ public class RefereeMatchVo implements Serializable {
         private static final long serialVersionUID = 1L;
         private Long competitorId;
         private String competitorName;
+        /** 参赛号码(抽签号,海选/排名赛用于排序展示) */
+        private String number;
         private Long displaySlotIndex;
         /** 该参赛方的当前累计总分(所有裁判之和) */
         private BigDecimal currentScore;

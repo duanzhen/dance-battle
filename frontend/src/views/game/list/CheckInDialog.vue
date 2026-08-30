@@ -1,12 +1,5 @@
 <template>
-  <el-dialog
-    v-model="visible"
-    title="选手签到"
-    width="600px"
-    :before-close="handleClose"
-    append-to-body
-    class="checkin-dialog"
-  >
+  <el-dialog v-model="visible" title="选手签到" width="600px" :before-close="handleClose" append-to-body class="checkin-dialog">
     <template #header>
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold text-white">选手签到</h3>
@@ -75,10 +68,7 @@
         >
           取消编辑
         </button>
-        <button
-          @click="confirmEdit"
-          class="flex-1 py-2 text-sm font-bold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors"
-        >
+        <button @click="confirmEdit" class="flex-1 py-2 text-sm font-bold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors">
           确认
         </button>
       </div>
@@ -87,33 +77,39 @@
       <div>
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">参赛号码</label>
         <div ref="slotListRef" class="space-y-1.5 max-h-64 overflow-y-auto pr-2 scrollbar-hide">
-        <div
-          v-for="slot in numberSlots"
-          :key="slot.number"
-          :data-slot-number="slot.number"
-          @click="handleSelectSlot(slot)"
-          class="relative rounded flex items-center gap-2 cursor-pointer transition-all border-2 py-2 px-2"
-          :class="[
-            selectedSlot?.number === slot.number ? 'border-amber-500 bg-amber-500/10' : '',
-            selectedSlot?.number === slot.number ? '' : (slot.competitor ? 'bg-green-500/10 border-green-500/30' : 'bg-neutral-800/50 border-neutral-700'),
-            selectedSlot?.number === slot.number ? '' : (slot.competitor ? 'hover:border-green-500/60' : 'hover:border-neutral-500 hover:bg-neutral-800')
-          ]"
-        >
-          <div class="w-10 h-10 flex items-center justify-center flex-shrink-0">
-            <div class="text-lg font-bold" :class="slot.competitor ? 'text-green-500' : 'text-neutral-400'">
-              {{ slot.number }}
+          <div
+            v-for="slot in numberSlots"
+            :key="slot.number"
+            :data-slot-number="slot.number"
+            @click="handleSelectSlot(slot)"
+            class="relative rounded flex items-center gap-2 cursor-pointer transition-all border-2 py-2 px-2"
+            :class="[
+              selectedSlot?.number === slot.number ? 'border-amber-500 bg-amber-500/10' : '',
+              selectedSlot?.number === slot.number
+                ? ''
+                : slot.competitor
+                  ? 'bg-green-500/10 border-green-500/30'
+                  : 'bg-neutral-800/50 border-neutral-700',
+              selectedSlot?.number === slot.number
+                ? ''
+                : slot.competitor
+                  ? 'hover:border-green-500/60'
+                  : 'hover:border-neutral-500 hover:bg-neutral-800'
+            ]"
+          >
+            <div class="w-10 h-10 flex items-center justify-center flex-shrink-0">
+              <div class="text-lg font-bold" :class="slot.competitor ? 'text-green-500' : 'text-neutral-400'">
+                {{ slot.number }}
+              </div>
             </div>
-          </div>
-          <div class="flex-1 min-w-0">
-            <div v-if="slot.competitor" class="text-sm text-white truncate">
-              {{ slot.competitor.name }}
-            </div>
-            <div v-else class="text-sm text-neutral-500">
-              空闲
+            <div class="flex-1 min-w-0">
+              <div v-if="slot.competitor" class="text-sm text-white truncate">
+                {{ slot.competitor.name }}
+              </div>
+              <div v-else class="text-sm text-neutral-500">空闲</div>
             </div>
           </div>
         </div>
-      </div>
       </div>
 
       <!-- 分圈落位(海选/排名赛分圈且已生成对阵时,线下抽签可手动选圈) -->
@@ -123,9 +119,11 @@
           <button
             @click="selectedMatchId = null"
             class="rounded-lg border px-3 py-2 text-left transition-all"
-            :class="selectedMatchId === null
-              ? 'border-amber-500 bg-amber-500/10 text-amber-500'
-              : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'"
+            :class="
+              selectedMatchId === null
+                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'
+            "
           >
             <div class="text-xs font-bold">自动分配</div>
             <div class="text-[10px] text-neutral-500 mt-0.5">按各圈剩余名额择优</div>
@@ -135,9 +133,11 @@
             :key="circle.matchId"
             @click="selectedMatchId = circle.matchId"
             class="rounded-lg border px-3 py-2 text-left transition-all"
-            :class="selectedMatchId === circle.matchId
-              ? 'border-amber-500 bg-amber-500/10 text-amber-500'
-              : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'"
+            :class="
+              selectedMatchId === circle.matchId
+                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'
+            "
           >
             <div class="text-xs font-bold">{{ circle.name }}</div>
             <div class="text-[10px] text-neutral-500 mt-0.5">
@@ -153,12 +153,8 @@
           <template v-if="selectedSlot">
             <span class="text-neutral-400">已选择：</span>
             <span class="text-white font-bold">号码 {{ selectedSlot.number }}</span>
-            <span v-if="selectedSlot.competitor" class="text-green-500 ml-2">
-              ({{ selectedSlot.competitor.name }})
-            </span>
-            <span v-else class="text-neutral-500 ml-2">
-              (空白号码 - 新增参赛)
-            </span>
+            <span v-if="selectedSlot.competitor" class="text-green-500 ml-2"> ({{ selectedSlot.competitor.name }}) </span>
+            <span v-else class="text-neutral-500 ml-2"> (空白号码 - 新增参赛) </span>
           </template>
           <span v-else class="text-neutral-500">尚未选择参赛号码</span>
         </div>
@@ -169,19 +165,20 @@
       <div class="flex justify-between">
         <button
           @click="handleRandomSelect"
-          :disabled="loading || numberSlots.filter(s => !s.competitor).length === 0"
+          :disabled="loading || numberSlots.filter((s) => !s.competitor).length === 0"
           class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg font-bold shadow-lg shadow-green-900/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
           </svg>
           随机抽取
         </button>
         <div class="flex gap-3">
-          <button
-            @click="handleClose"
-            class="px-4 py-2 rounded-lg text-sm text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all"
-          >
+          <button @click="handleClose" class="px-4 py-2 rounded-lg text-sm text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all">
             取消
           </button>
           <button
@@ -191,7 +188,11 @@
           >
             <svg v-if="submitting" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
             </svg>
             {{ submitting ? '提交中...' : '确认签到' }}
           </button>
@@ -208,7 +209,7 @@ import { ElMessage } from 'element-plus';
 import { PlayerVO } from '@/api/game/player/types';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { listCompetitor } from '@/api/game/competitor';
-import { checkInPlayer } from '@/api/game/player';
+import { checkInPlayer, listPlayer } from '@/api/game/player';
 import { getStage } from '@/api/game/stage';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
@@ -228,6 +229,7 @@ const visible = ref(false);
 const loading = ref(false);
 const submitting = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
+const playerCount = ref(0);
 const selectedSlot = ref<{ number: number; competitor: CompetitorVO | null } | null>(null);
 const playerName = ref('');
 const playerAvatar = ref('');
@@ -267,9 +269,7 @@ const loadCircleInfo = async () => {
     }
     const matchRes = await listMatch({ stageId: props.stageId } as any);
     const matches = (matchRes.data || (matchRes as any).data || []) as any[];
-    const ordered = [...matches].sort(
-      (a, b) => (Number(a.displayRow) || 0) - (Number(b.displayRow) || 0)
-    );
+    const ordered = [...matches].sort((a, b) => (Number(a.displayRow) || 0) - (Number(b.displayRow) || 0));
     const list: typeof circleList.value = [];
     for (let i = 0; i < ordered.length; i++) {
       const m = ordered[i];
@@ -293,22 +293,32 @@ const loadCircleInfo = async () => {
 const scrollToFirstFreeSlot = async () => {
   await nextTick();
   const container = slotListRef.value;
-  const firstFree = numberSlots.value.find(slot => !slot.competitor);
+  const firstFree = numberSlots.value.find((slot) => !slot.competitor);
   if (!container || !firstFree) return;
   const el = container.querySelector(`[data-slot-number="${firstFree.number}"]`) as HTMLElement | null;
   if (!el) return;
   const targetTop =
-    el.getBoundingClientRect().top -
-    container.getBoundingClientRect().top +
-    container.scrollTop -
-    container.clientHeight / 2 +
-    el.clientHeight / 2;
+    el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - container.clientHeight / 2 + el.clientHeight / 2;
   container.scrollTop = Math.max(0, targetTop);
 };
 
 const loadCompetitors = async () => {
   loading.value = true;
   try {
+    // 已添加的选手总数:随机抽号时最多只会抽到这个数字以内的号码
+    try {
+      const pResp: any = await listPlayer({
+        tournamentId: props.tournamentId,
+        pageNum: 1,
+        pageSize: 10000
+      } as any);
+      const players = pResp?.data ?? [];
+      playerCount.value = Array.isArray(players) ? players.length : 0;
+    } catch (e) {
+      console.warn('加载选手总数失败:', e);
+      playerCount.value = 0;
+    }
+
     const response = await listCompetitor({
       tournamentId: props.tournamentId,
       stageId: props.stageId,
@@ -319,16 +329,14 @@ const loadCompetitors = async () => {
 
     let maxNumber = 10;
     if (competitors.value.length > 0) {
-      const numbers = competitors.value
-        .map(c => parseInt(c.number || '0'))
-        .filter(n => !isNaN(n) && n > 0);
+      const numbers = competitors.value.map((c) => parseInt(c.number || '0')).filter((n) => !isNaN(n) && n > 0);
       if (numbers.length > 0) {
         maxNumber = Math.max(...numbers) + 10;
       }
     }
 
     const competitorMap = new Map<number, CompetitorVO>();
-    competitors.value.forEach(c => {
+    competitors.value.forEach((c) => {
       const num = parseInt(c.number || '0');
       if (!isNaN(num) && num > 0) {
         competitorMap.set(num, c);
@@ -356,13 +364,17 @@ const handleSelectSlot = (slot: { number: number; competitor: CompetitorVO | nul
 };
 
 const handleRandomSelect = () => {
-  const availableSlots = numberSlots.value.filter(slot => !slot.competitor);
+  const availableSlots = numberSlots.value.filter((slot) => !slot.competitor);
   if (availableSlots.length === 0) {
     ElMessage.warning('没有可用的空闲号码');
     return;
   }
-  // 只取有空位的最小的 10 个号码,在其中随机抽取(不足 10 个时取全部)
-  const candidates = availableSlots.slice(0, 10);
+  // 只在"已添加选手数量以内"的空闲号码里随机(最多随机到该数字);保留最小的 10 个号机制
+  let candidates = availableSlots.filter((slot) => slot.number <= playerCount.value);
+  if (candidates.length === 0) {
+    candidates = availableSlots;
+  }
+  candidates = candidates.slice(0, 10);
   const randomIndex = Math.floor(Math.random() * candidates.length);
   selectedSlot.value = candidates[randomIndex];
   ElMessage.success(`已随机抽取号码 ${candidates[randomIndex].number}`);

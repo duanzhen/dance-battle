@@ -251,6 +251,11 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             cq.orderByAsc(TCompetitor::getSeedRank);
         }
         List<TCompetitor> comps = competitorMapper.selectList(cq);
+        // 海选/排名赛:按签到号码的数值排序(抽签号码决定上场/落位顺序),
+        // 数据库字符串排序在号码不补零时会错位(如 10 < 2),这里统一按数值重排
+        if (perCompetitorRound) {
+            comps.sort(Comparator.comparingInt(c -> parseCompetitorNumber(c.getNumber())));
+        }
         // 防御:seedRank 为 NULL 的参赛方(异常数据)排到最后,避免数据库 NULL 先序
         // 占位后又被打乱导致对阵出现空槽
         if (!perCompetitorRound) {
@@ -1131,6 +1136,18 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
         return target;
+    }
+
+    /** 参赛号码转数值用于排序:非数字号码排最后 */
+    private int parseCompetitorNumber(String number) {
+        if (number == null || number.isBlank()) {
+            return Integer.MAX_VALUE;
+        }
+        try {
+            return Integer.parseInt(number.trim());
+        } catch (NumberFormatException e) {
+            return Integer.MAX_VALUE;
+        }
     }
 
     /** displayZone("ZONE-1"..) -> 圈序号(0 基);"CENTER" 或无圈返回 0;解析失败返回 -1 */

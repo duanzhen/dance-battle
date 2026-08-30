@@ -267,7 +267,7 @@
                   "
                 >
                   <div class="text-[9px]" :class="keypadTarget?.competitorId === p.competitorId ? 'text-neutral-800' : 'text-neutral-500'">
-                    #{{ p.displaySlotIndex }}
+                    #{{ p.number || p.displaySlotIndex }}
                   </div>
                   <div
                     class="text-xs font-bold truncate max-w-[88px]"
@@ -463,7 +463,7 @@
                   <h3 class="text-sm font-bold text-white">{{ p.competitorName }}</h3>
                   <div class="flex items-center gap-2">
                     <span v-if="p.rankInMatch" class="text-[9px] font-mono text-amber-400">#{{ p.rankInMatch }}</span>
-                    <span class="text-xs font-mono text-neutral-500">#{{ p.displaySlotIndex }}</span>
+                    <span class="text-xs font-mono text-neutral-500">#{{ p.number || p.displaySlotIndex }}</span>
                   </div>
                 </div>
 
@@ -640,6 +640,8 @@ interface RoundInfo {
 interface Participant {
   competitorId: number | null;
   competitorName: string;
+  /** 参赛号码(抽签号) */
+  number?: string | number | null;
   displaySlotIndex: number;
   currentScore: number;
   myScore?: number;
@@ -1091,6 +1093,7 @@ const applyData = (data: any) => {
     .map((p) => ({
       competitorId: p.competitorId,
       competitorName: p.competitorName,
+      number: p.number,
       displaySlotIndex: p.displaySlotIndex,
       currentScore: Number(p.currentScore) || 0,
       myScore: p.myScore,

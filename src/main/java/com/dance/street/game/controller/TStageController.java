@@ -185,6 +185,19 @@ public class TStageController extends BaseController {
     }
 
     /**
+     * 擂台赛参赛选手弃权:弃权后不再参与排队;进行中的对决包含该选手时作废该对决,队列下一位补位
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "擂台赛选手弃权", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{id}/competitor/{competitorId}/withdraw")
+    public R<Void> withdrawCompetitor(@NotNull(message = "赛段ID不能为空") @PathVariable Long id,
+                                      @NotNull(message = "参赛选手ID不能为空") @PathVariable Long competitorId) {
+        tStageLifecycleService.withdrawArenaCompetitor(id, competitorId);
+        return R.ok();
+    }
+
+    /**
      * 开始赛段:PENDING→GAMING
      */
     @SaCheckPermission("game:stage:edit")

@@ -65,6 +65,18 @@ public interface ITStageLifecycleService {
     /** 擂台赛:按轮转队列创建并开始下一场对决(胜者守擂、败者队尾、平局双方均排到队尾)。赛段须 GAMING 且无进行中对决 */
     void startNextArenaMatch(Long stageId);
 
+    /**
+     * 擂台赛参赛选手弃权:标记 WITHDRAWN,不再参与排队/对阵/排名。
+     * 进行中的对决包含该选手时作废该对决(避免对手白拿积分/对决悬挂),队列下一位补位。
+     */
+    void withdrawArenaCompetitor(Long stageId, Long competitorId);
+
+    /**
+     * 擂台赛临时弃权(导播台):该选手本轮跳过、排到队尾,后续仍参与排队与排名;
+     * 进行中的对决包含该选手时作废该对决,队列下一位顶上来。
+     */
+    void tempWithdrawArenaCompetitor(Long stageId, Long competitorId);
+
     /** 擂台赛总览:轮转队列(含积分)与当前对决 */
     ArenaOverviewVo getArenaOverview(Long stageId);
 

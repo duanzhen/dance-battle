@@ -59,6 +59,14 @@ export const randomCircles = (id: string | number): AxiosPromise<CircleAssignVo[
   });
 };
 
+/** 擂台赛参赛选手弃权:弃权后不再参与排队;进行中的对决包含该选手时作废并下一位补位 */
+export const withdrawArenaCompetitor = (stageId: string | number, competitorId: string | number) => {
+  return request({
+    url: `/game/stage/${stageId}/competitor/${competitorId}/withdraw`,
+    method: 'post'
+  });
+};
+
 /** 开始赛段:PENDING→GAMING */
 export const startStage = (id: string | number) => {
   return request({

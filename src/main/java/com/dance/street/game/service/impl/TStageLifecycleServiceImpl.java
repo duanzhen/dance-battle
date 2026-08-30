@@ -608,6 +608,154 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "match");
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void withdrawArenaCompetitor(Long stageId, Long competitorId) {
+        TStage stage = mustGetStage(stageId);
+        if (!StageModeEnum.ARENA.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("仅擂台赛赛段支持参赛选手弃权");
+        }
+        TCompetitor comp = competitorMapper.selectById(competitorId);
+        if (comp == null || !Objects.equals(comp.getStageId(), stageId)) {
+            throw new ServiceException("参赛选手不存在或不属于当前赛段");
+        }
+        if (OutcomeStatusEnum.WITHDRAWN.getCode().equals(comp.getOutcomeStatus())) {
+            return; // 已弃权,幂等
+        }
+        TCompetitor upd = new TCompetitor();
+        upd.setId(competitorId);
+        upd.setOutcomeStatus(OutcomeStatusEnum.WITHDRAWN.getCode());
+        competitorMapper.updateById(upd);
+        // 补位:同一场次内把弃权选手替换为队列下一位(不开新场)
+        replaceArenaMatchParticipant(stageId, competitorId);
+        log.info("擂台赛[{}]参赛选手[{}]弃权,不再参与排队", stageId, competitorId);
+        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void tempWithdrawArenaCompetitor(Long stageId, Long competitorId) {
+        TStage stage = mustGetStage(stageId);
+        if (!StageModeEnum.ARENA.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("仅擂台赛赛段支持临时弃权");
+        }
+        if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
+            throw new ServiceException("赛段未在进行中,无法临时弃权");
+        }
+        TCompetitor comp = competitorMapper.selectById(competitorId);
+        if (comp == null || !Objects.equals(comp.getStageId(), stageId)) {
+            throw new ServiceException("参赛选手不存在或不属于当前赛段");
+        }
+        if (OutcomeStatusEnum.WITHDRAWN.getCode().equals(comp.getOutcomeStatus())) {
+            throw new ServiceException("该选手已永久弃权,无法临时弃权");
+        }
+        // 临时弃权 = 排到队尾:记录跳过标记(固定排在队列末尾,后续仍参与排队/对阵/排名)
+        TCompetitor upd = new TCompetitor();
+        upd.setId(competitorId);
+        upd.setRemark(appendArenaSkipMark(comp.getRemark()));
+        competitorMapper.updateById(upd);
+        // 补位:同一场次内把临时弃权选手替换为队列下一位(不开新场)
+        replaceArenaMatchParticipant(stageId, competitorId);
+        log.info("擂台赛[{}]选手[{}]临时弃权,排到队尾,同场次下一位补位", stageId, competitorId);
+        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
+    }
+
+    /**
+     * 弃权补位:不新建场次,把进行中对决里弃权选手的参赛方替换为队列下一位,
+     * 并清空本场已提交结果(替换者从零开始)。
+     * 擂主(slot1)弃权时:对手自动变擂主,队列下一位顶上来挑战;
+     * 挑战者(slot2)弃权时:擂主不动,队列下一位顶上来挑战。
+     * 无替补时移除对应参赛方行。
+     */
+    private void replaceArenaMatchParticipant(Long stageId, Long withdrawnId) {
+        List<Long> gamingMatchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, stageId)
+                .eq(TMatch::getStatus, StageConstants.MATCH_GAMING)
+                .select(TMatch::getId))
+            .stream().map(TMatch::getId).toList();
+        Long matchId = null;
+        Long withdrawnSlot = null;
+        Long otherId = null;
+        for (Long mid : gamingMatchIds) {
+            List<TMatchParticipant> ps = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, mid)
+                .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+            for (TMatchParticipant p : ps) {
+                if (p.getCompetitorId() == null) {
+                    continue;
+                }
+                if (p.getCompetitorId().equals(withdrawnId)) {
+                    matchId = mid;
+                    withdrawnSlot = p.getDisplaySlotIndex();
+                } else {
+                    otherId = p.getCompetitorId();
+                }
+            }
+            if (matchId != null) {
+                break;
+            }
+        }
+        if (matchId == null || withdrawnSlot == null) {
+            return;
+        }
+        // 清空本场已提交结果(视同重启对决,替换者从零开始)
+        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, matchId)
+                .select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        if (!roundIds.isEmpty()) {
+            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
+        }
+        // 队列下一位(排除弃权者与场上对手)
+        List<Long> queue = computeArenaQueue(stageId);
+        Long otherFinal = otherId;
+        Long replacement = queue.stream()
+            .filter(id -> !id.equals(withdrawnId) && (otherFinal == null || !id.equals(otherFinal)))
+            .findFirst().orElse(null);
+        if (Long.valueOf(1L).equals(withdrawnSlot)) {
+            // 擂主弃权:对手自动变擂主(slot1),队列下一位顶上来挑战(slot2)
+            if (otherId == null) {
+                participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .eq(TMatchParticipant::getMatchId, matchId)
+                    .eq(TMatchParticipant::getDisplaySlotIndex, 1L));
+            } else {
+                participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                    .set(TMatchParticipant::getCompetitorId, otherId)
+                    .eq(TMatchParticipant::getMatchId, matchId)
+                    .eq(TMatchParticipant::getDisplaySlotIndex, 1L));
+                if (replacement != null) {
+                    participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                        .set(TMatchParticipant::getCompetitorId, replacement)
+                        .eq(TMatchParticipant::getMatchId, matchId)
+                        .eq(TMatchParticipant::getDisplaySlotIndex, 2L));
+                } else {
+                    participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
+                        .eq(TMatchParticipant::getMatchId, matchId)
+                        .eq(TMatchParticipant::getDisplaySlotIndex, 2L));
+                }
+            }
+        } else {
+            // 挑战者弃权:擂主不动,队列下一位顶上来挑战(slot2)
+            if (replacement != null) {
+                participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                    .set(TMatchParticipant::getCompetitorId, replacement)
+                    .eq(TMatchParticipant::getMatchId, matchId)
+                    .eq(TMatchParticipant::getDisplaySlotIndex, 2L));
+            } else {
+                participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .eq(TMatchParticipant::getMatchId, matchId)
+                    .eq(TMatchParticipant::getDisplaySlotIndex, 2L));
+            }
+        }
+        // 双方回到待判状态
+        participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+            .set(TMatchParticipant::getOutcomeStatus, MatchOutcomeEnum.PENDING.getCode())
+            .set(TMatchParticipant::getScoreValue, null)
+            .eq(TMatchParticipant::getMatchId, matchId));
+        log.info("擂台赛[{}]弃权选手[{}](slot{})由[{}]补位(同一场次,对手={})",
+            stageId, withdrawnId, withdrawnSlot, replacement, otherId);
+    }
+
     private void insertArenaParticipant(TMatch match, Long competitorId, Long slotIndex) {
         TMatchParticipant p = new TMatchParticipant();
         p.setTournamentId(match.getTournamentId());
@@ -802,9 +950,22 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private List<Long> computeArenaQueue(Long stageId) {
         List<TCompetitor> comps = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
             .eq(TCompetitor::getStageId, stageId)
+            // 弃权选手不参与排队/对阵/排名
+            .ne(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.WITHDRAWN.getCode())
             .orderByAsc(TCompetitor::getSeedRank)
             .orderByAsc(TCompetitor::getId));
-        List<Long> queue = comps.stream().map(TCompetitor::getId).collect(Collectors.toCollection(ArrayList::new));
+        // 临时弃权标记:有标记的选手固定排在队尾(按标记时间),避免被"胜者守擂"重放顶回队首
+        List<TCompetitor> normal = new ArrayList<>();
+        List<TCompetitor> skipped = new ArrayList<>();
+        for (TCompetitor c : comps) {
+            if (arenaSkipSeq(c) >= 0) {
+                skipped.add(c);
+            } else {
+                normal.add(c);
+            }
+        }
+        skipped.sort(Comparator.comparingLong(this::arenaSkipSeq).thenComparing(TCompetitor::getId));
+        List<Long> queue = normal.stream().map(TCompetitor::getId).collect(Collectors.toCollection(ArrayList::new));
 
         List<TMatch> settled = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId)
@@ -872,7 +1033,36 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             next.add(loser);
             queue = next;
         }
+        for (TCompetitor c : skipped) {
+            queue.add(c.getId());
+        }
         return queue;
+    }
+
+    /** 临时弃权标记前缀(存于 remark,格式 ARENA_SKIP:<时间戳>;可多个,取最后一次) */
+    private static final String ARENA_SKIP_PREFIX = "ARENA_SKIP:";
+
+    /** 读取临时弃权时间戳;无标记返回 -1 */
+    private long arenaSkipSeq(TCompetitor c) {
+        String r = c.getRemark();
+        if (r == null || r.isBlank()) {
+            return -1L;
+        }
+        int idx = r.lastIndexOf(ARENA_SKIP_PREFIX);
+        if (idx < 0) {
+            return -1L;
+        }
+        try {
+            String rest = r.substring(idx + ARENA_SKIP_PREFIX.length());
+            return Long.parseLong(rest.split(";")[0].trim());
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
+    }
+
+    private String appendArenaSkipMark(String remark) {
+        String mark = ARENA_SKIP_PREFIX + System.currentTimeMillis();
+        return (remark == null || remark.isBlank()) ? mark : remark + ";" + mark;
     }
 
     /** 擂台赛积分:统计本赛段全部场次中参赛者的胜场数(每胜一场 +1) */

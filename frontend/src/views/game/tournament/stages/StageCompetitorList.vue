@@ -94,6 +94,21 @@
                   >
                     <Pencil class="w-3.5 h-3.5" />
                   </button>
+                  <button
+                    v-if="isArena && competitor.outcomeStatus !== 'WITHDRAWN'"
+                    class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 disabled:opacity-40"
+                    title="弃权(不再参与排队,进行中作废并由下一位补位)"
+                    :disabled="withdrawingId === competitor.id"
+                    @click="handleWithdraw(competitor)"
+                  >
+                    弃权
+                  </button>
+                  <span
+                    v-else-if="isArena && competitor.outcomeStatus === 'WITHDRAWN'"
+                    class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400 border border-red-500/30"
+                  >
+                    已弃权
+                  </span>
                 </template>
                 <span
                   v-if="competitor.type === 1"
@@ -117,8 +132,8 @@
                   待排位
                 </span>
               </div>
-              <div v-if="competitor.remark && !isGuest(competitor)" class="text-xs text-neutral-500 truncate">
-                {{ competitor.remark }}
+              <div v-if="remarkText(competitor.remark) && !isGuest(competitor)" class="text-xs text-neutral-500 truncate">
+                {{ remarkText(competitor.remark) }}
               </div>
             </div>
 
@@ -145,10 +160,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { Users, Pencil, Check, X } from 'lucide-vue-next';
 import { listCompetitor, updateCompetitor } from '@/api/game/competitor';
 import { setStageSeedOrder } from '@/api/game/stage';
+import { withdrawArenaCompetitor } from '@/api/game/stage/lifecycle';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
@@ -169,12 +185,23 @@ const competitors = ref<CompetitorVO[]>([]);
 const editingId = ref<string | number | null>(null);
 const editingName = ref('');
 const savingRename = ref(false);
+const withdrawingId = ref<string | number | null>(null);
+
+// 擂台赛:支持参赛选手弃权(弃权后不再参与排队,进行中作废并由下一位补位)
+const isArena = computed(() => props.stageMode === 'ARENA');
 
 // GUEST 可加入/可排位窗口:赛段未初始化且处于规划/未开始态(DRAFT/PENDING)
 const canArrange = computed(() => !props.isInitialized && (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING'));
 
 // GUEST 标记:remark == GUEST(由后端 addGuest 写入)
 const isGuest = (competitor: CompetitorVO) => competitor.remark === 'GUEST';
+
+/** 展示备注:过滤内部使用的临时弃权标记(ARENA_SKIP:xxx) */
+const remarkText = (remark?: string) =>
+  (remark || '')
+    .split(';')
+    .filter((s) => !s.startsWith('ARENA_SKIP:'))
+    .join(';');
 
 // 拖拽排序:按外部抽签结果调整参赛方种子顺序
 const dragIndex = ref<number | null>(null);
@@ -237,6 +264,29 @@ const saveRename = async () => {
     ElMessage.error((error as any)?.msg || (error as any)?.message || '修改名称失败');
   } finally {
     savingRename.value = false;
+  }
+};
+
+const handleWithdraw = async (competitor: CompetitorVO) => {
+  try {
+    await ElMessageBox.confirm(`确认「${competitor.name}」弃权?弃权后不可撤销,不再参与擂台排队;若正在对决,该场作废并由队列下一位补位。`, '确认弃权', {
+      type: 'warning',
+      confirmButtonText: '确认弃权',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return; // 取消
+  }
+  withdrawingId.value = competitor.id;
+  try {
+    await withdrawArenaCompetitor(props.stageId, competitor.id);
+    ElMessage.success('已标记弃权');
+    await loadCompetitors();
+  } catch (e) {
+    console.error('弃权失败:', e);
+    ElMessage.error((e as any)?.msg || (e as any)?.message || '弃权失败');
+  } finally {
+    withdrawingId.value = null;
   }
 };
 

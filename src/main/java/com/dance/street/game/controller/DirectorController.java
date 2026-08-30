@@ -167,6 +167,20 @@ public class DirectorController {
     }
 
     /**
+     * 擂台赛临时弃权:该选手本轮跳过、排到队尾,后续仍参与排队与排名;
+     * 进行中的对决包含该选手时作废,队列下一位顶上来
+     */
+    @Log(title = "导播台擂台临时弃权", businessType = BusinessType.UPDATE)
+    @PostMapping("/stage/{id}/arena-temp-withdraw")
+    public R<Void> arenaTempWithdraw(@PathVariable("id") Long id,
+                                     @RequestParam Long competitorId,
+                                     HttpServletRequest request) {
+        assertStageInTournament(currentTournament(request), id);
+        stageLifecycleService.tempWithdrawArenaCompetitor(id, competitorId);
+        return R.ok();
+    }
+
+    /**
      * 开始指定场次
      */
     @Log(title = "导播台开始场次", businessType = BusinessType.UPDATE)

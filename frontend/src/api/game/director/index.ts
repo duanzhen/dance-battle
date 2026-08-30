@@ -77,6 +77,15 @@ export function directorArenaNext(id: string | number) {
   });
 }
 
+/** 擂台赛临时弃权:该选手本轮跳过、排到队尾,后续仍参与排队与排名 */
+export function directorArenaTempWithdraw(id: string | number, competitorId: string | number) {
+  return directorRequest({
+    url: `/game/director/stage/${id}/arena-temp-withdraw`,
+    method: 'post',
+    params: { competitorId }
+  });
+}
+
 /** 开始场次 */
 export function directorStartMatch(id: string | number) {
   return directorRequest({

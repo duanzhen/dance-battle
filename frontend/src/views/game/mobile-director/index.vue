@@ -37,7 +37,12 @@
       <div class="text-center px-6">
         <div class="w-12 h-12 rounded-full bg-red-600/20 border border-red-600/30 flex items-center justify-center mx-auto mb-3">
           <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+            />
           </svg>
         </div>
         <p class="text-sm text-red-400 font-bold mb-1">认证失败</p>
@@ -144,6 +149,13 @@
               >
                 <Play class="w-3.5 h-3.5" /> 开始下一场
               </button>
+              <button
+                v-if="currentStage.stageMode === 'ARENA' && currentStage.status === 'GAMING'"
+                @click="openTempWithdraw"
+                class="py-2.5 px-3 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30"
+              >
+                临时弃权
+              </button>
             </div>
 
             <p
@@ -153,9 +165,7 @@
               <template v-if="currentStage.awaitingAdvancement">
                 上一赛段已结束，晋级选手需先在管理端「中间态」确认晋级；确认后「开始赛段」将自动可用。
               </template>
-              <template v-else>
-                上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
-              </template>
+              <template v-else> 上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。 </template>
             </p>
 
             <div
@@ -173,15 +183,12 @@
               <p class="text-[10px] text-green-400/70">赛段正在进行中，裁判可录入比分。完成后点击"完成赛段"结算排名。</p>
             </div>
             <div v-if="currentStage.status === 'SETTLED'" class="mt-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10">
-              <p class="text-[10px] text-amber-400/70">
-                赛段已结算。晋级选手需在管理端「中间态」确认晋级后写入下一赛段，确认前下一赛段无法开始。
-              </p>
+              <p class="text-[10px] text-amber-400/70">赛段已结算。晋级选手需在管理端「中间态」确认晋级后写入下一赛段，确认前下一赛段无法开始。</p>
             </div>
           </div>
         </div>
 
         <div v-if="matches.length > 0" class="mt-3">
-
           <h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2 px-1">
             {{ currentStage?.stageMode === 'AUDITION' ? '海选评分' : '场次' }}
           </h4>
@@ -491,7 +498,10 @@
                 </p>
 
                 <!-- 重启:仅已结束场次且赛段仍进行中,展开时可见 -->
-                <div v-if="match.status === 'SETTLED' && currentStage?.status === 'GAMING'" class="flex justify-end pt-1.5 border-t border-neutral-800">
+                <div
+                  v-if="match.status === 'SETTLED' && currentStage?.status === 'GAMING'"
+                  class="flex justify-end pt-1.5 border-t border-neutral-800"
+                >
                   <button
                     @click="
                       handleRestartMatch(match);
@@ -513,6 +523,41 @@
       </div>
     </div>
   </div>
+
+  <!-- 临时弃权弹窗:选择哪位选手本轮跳过(排到队尾,后续仍参与排名) -->
+  <div v-if="tempWithdrawVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div class="w-full max-w-sm bg-neutral-900 border border-neutral-700 rounded-xl p-4">
+      <h4 class="text-sm font-bold text-neutral-200 mb-3">当前对决 · 选择临时弃权选手</h4>
+      <div class="space-y-1.5 max-h-[50vh] overflow-y-auto">
+        <button
+          v-for="c in arenaQueue"
+          :key="String(c.competitorId)"
+          class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left border transition-colors"
+          :class="
+            String(tempWithdrawTarget) === String(c.competitorId)
+              ? 'border-red-500/50 bg-red-500/10'
+              : 'border-neutral-700 bg-neutral-800/60 hover:border-neutral-600'
+          "
+          @click="tempWithdrawTarget = c.competitorId"
+        >
+          <span class="text-xs font-bold text-neutral-200 truncate">{{ c.name || '待定' }}</span>
+          <span class="text-[10px] text-neutral-500 flex-none">#{{ c.queueIndex }} · {{ c.points ?? 0 }}分</span>
+        </button>
+        <p v-if="!arenaQueue.length" class="text-xs text-neutral-500 text-center py-4">当前无进行中对决</p>
+      </div>
+      <p class="text-[10px] text-neutral-500 mt-2">临时弃权:该选手跳过本轮、排到队尾,后续仍参与排名。</p>
+      <div class="flex justify-end gap-2 mt-4">
+        <button class="px-4 py-2 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800" @click="tempWithdrawVisible = false">取消</button>
+        <button
+          class="px-4 py-2 rounded-lg text-xs font-bold bg-red-600/20 text-red-400 border border-red-600/30 disabled:opacity-40"
+          :disabled="tempWithdrawTarget == null"
+          @click="confirmTempWithdraw"
+        >
+          确认临时弃权
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -528,11 +573,13 @@ import {
   directorStartStage,
   directorCompleteStage,
   directorArenaNext,
+  directorArenaTempWithdraw,
   directorStartMatch,
   directorResetMatch,
   directorSubmitResult,
   directorPublishResult
 } from '@/api/game/director';
+import { getArenaOverview } from '@/api/game/stage';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 const route = useRoute();
@@ -625,6 +672,10 @@ const canComplete = computed(() => {
   return currentStage.value.status === 'GAMING';
 });
 const hasGamingMatch = computed(() => matches.value.some((m) => m.status === 'GAMING'));
+/** 临时弃权(擂台赛):按钮唤起弹窗,选择哪位选手本轮跳过(排到队尾,后续仍参与排名) */
+const tempWithdrawVisible = ref(false);
+const arenaQueue = ref<any[]>([]);
+const tempWithdrawTarget = ref<string | number | null>(null);
 
 const getStatusText = (status: string) => {
   const map: Record<string, string> = {
@@ -805,6 +856,47 @@ const handleArenaNext = async () => {
   } catch (e: any) {
     console.error('开始下一场对决失败:', e);
     alert(e?.response?.data?.msg || e?.message || '开始下一场对决失败');
+  }
+};
+
+/** 擂台赛临时弃权弹窗:只列当前正在对决的两人供选择 */
+const openTempWithdraw = async () => {
+  const stage = currentStage.value;
+  if (!stage) return;
+  try {
+    const res: any = await getArenaOverview(stage.id);
+    const data = res?.data?.data ?? res?.data ?? res;
+    const cur = data?.currentMatch || {};
+    const list: any[] = [];
+    if (cur.defender?.competitorId != null) {
+      list.push({ ...cur.defender, queueIndex: 1 });
+    }
+    if (cur.challenger?.competitorId != null) {
+      list.push({ ...cur.challenger, queueIndex: 2 });
+    }
+    arenaQueue.value = list;
+    tempWithdrawTarget.value = null;
+    tempWithdrawVisible.value = true;
+  } catch (e: any) {
+    console.error('加载擂台队列失败:', e);
+    alert(e?.response?.data?.msg || e?.message || '加载擂台队列失败');
+  }
+};
+
+/** 确认临时弃权:选手本轮跳过、排到队尾,后续仍参与排名 */
+const confirmTempWithdraw = async () => {
+  const stage = currentStage.value;
+  if (!stage || tempWithdrawTarget.value == null) return;
+  const target = arenaQueue.value.find((c) => String(c.competitorId) === String(tempWithdrawTarget.value));
+  if (!confirm(`确认「${target?.name || '该选手'}」临时弃权?将跳过本轮、排到队尾,后续仍参与排名。`)) return;
+  try {
+    await directorArenaTempWithdraw(stage.id, tempWithdrawTarget.value);
+    tempWithdrawVisible.value = false;
+    await refreshMatches();
+    await loadStages();
+  } catch (e: any) {
+    console.error('临时弃权失败:', e);
+    alert(e?.response?.data?.msg || e?.message || '临时弃权失败');
   }
 };
 

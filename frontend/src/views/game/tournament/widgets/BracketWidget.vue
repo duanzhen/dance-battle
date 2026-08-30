@@ -7,15 +7,15 @@
       <div v-else-if="isFinal" class="w-full h-full flex flex-col items-center justify-between gap-3 px-2 py-2">
         <!-- 冠军卡:顶部,窄宽度 -->
         <div class="final-card champion-card" :class="{ 'final-win': !!champion }">
-          <span class="name">{{ champion?.name || '' }}</span>
+          <span class="name" :style="fz(1)">{{ champion?.name || '' }}</span>
         </div>
         <!-- 左右半区:下方 -->
         <div class="flex items-center justify-between min-h-0 w-full">
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.left?.competitorId }">
-            <span class="name" :title="finalists.left?.name || ''">{{ finalists.left?.name || '' }}</span>
+            <span class="name" :style="fz(1)" :title="finalists.left?.name || ''">{{ finalists.left?.name || '' }}</span>
           </div>
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.right?.competitorId }">
-            <span class="name" :title="finalists.right?.name || ''">{{ finalists.right?.name || '' }}</span>
+            <span class="name" :style="fz(1)" :title="finalists.right?.name || ''">{{ finalists.right?.name || '' }}</span>
           </div>
         </div>
       </div>
@@ -23,26 +23,29 @@
       <div v-else-if="isSemi" class="w-full h-full flex items-stretch justify-between gap-2 px-2 py-2">
         <div class="flex-none flex flex-col justify-between items-center min-h-0">
           <div class="final-card" :class="{ 'final-win': semi.left?.top?.win }">
-            <span class="name" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
+            <span class="name" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
           </div>
           <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
-            <span class="name" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
+            <span class="name" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
           </div>
         </div>
-        <div style="flex: 1; min-width: 0;"></div>
+        <div style="flex: 1; min-width: 0"></div>
         <div class="flex-none flex flex-col justify-between items-center min-h-0">
           <div class="final-card" :class="{ 'final-win': semi.right?.top?.win }">
-            <span class="name" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
+            <span class="name" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
           </div>
           <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
-            <span class="name" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
+            <span class="name" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
           </div>
         </div>
       </div>
       <div v-else-if="stageModeError" class="w-full flex items-center justify-center text-neutral-600 text-xs text-center px-2">
         对战树仅支持淘汰赛赛段,请在编辑模式重新绑定
       </div>
-      <div v-else-if="leftSlots.length === 0 && rightSlots.length === 0" class="w-full flex items-center justify-center text-neutral-600 text-xs text-center px-2">
+      <div
+        v-else-if="leftSlots.length === 0 && rightSlots.length === 0"
+        class="w-full flex items-center justify-center text-neutral-600 text-xs text-center px-2"
+      >
         {{ emptyHint }}
       </div>
       <div v-else class="w-full h-full flex gap-1.5 px-2 py-2">
@@ -53,15 +56,15 @@
         >
           <template v-for="(s, i) in leftSlots" :key="'l' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
-              <span class="name" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
+              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <span class="name" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
+              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
         </div>
         <!-- 中间留白(透明):供后续赛段的对战树 widget 叠放衔接 -->
-        <div style="flex: 1; min-width: 0;"></div>
+        <div style="flex: 1; min-width: 0"></div>
         <!-- 右列 -->
         <div
           class="bracket-col flex-none flex flex-col gap-3 min-h-0 overflow-y-auto custom-scrollbar-y items-center"
@@ -69,10 +72,10 @@
         >
           <template v-for="(s, i) in rightSlots" :key="'r' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
-              <span class="name" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
+              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <span class="name" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
+              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
         </div>
@@ -94,12 +97,13 @@
       <section>
         <span class="section-title">样式配置</span>
         <div class="space-y-3 mt-2">
-          <ColorInput label="文字颜色" :model-value="textColor || '#ffffff'" @update:model-value="$emit('update:textColor', $event)" />
+          <ColorInput label="文字颜色" :model-value="textColor || '#000000'" @update:model-value="$emit('update:textColor', $event)" />
+          <TextInput label="字号(px)" :model-value="String(fontSize ?? 12)" placeholder="12" @update:model-value="handleFontSizeUpdate" />
           <div>
             <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">边框颜色</span>
             <div class="flex items-center gap-1.5">
               <div class="flex-1 min-w-0">
-                <ColorInput :model-value="borderColor ?? '#404040'" @update:model-value="$emit('update:borderColor', $event)" />
+                <ColorInput :model-value="borderColor ?? ''" @update:model-value="$emit('update:borderColor', $event)" />
               </div>
               <button
                 class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
@@ -115,7 +119,7 @@
             <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">背景颜色</span>
             <div class="flex items-center gap-1.5">
               <div class="flex-1 min-w-0">
-                <ColorInput :model-value="bgColor ?? '#000000'" @update:model-value="$emit('update:bgColor', $event)" />
+                <ColorInput :model-value="bgColor ?? ''" @update:model-value="$emit('update:bgColor', $event)" />
               </div>
               <button
                 class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
@@ -138,6 +142,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { Ban } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
 import ColorInput from './common/ColorInput.vue';
+import TextInput from './common/TextInput.vue';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
@@ -151,12 +156,14 @@ const props = defineProps<{
   textColor?: string;
   borderColor?: string;
   bgColor?: string;
+  fontSize?: number;
 }>();
-defineEmits<{
+const emit = defineEmits<{
   'update:stageId': [value: string | number | null];
   'update:textColor': [value: string];
   'update:borderColor': [value: string];
   'update:bgColor': [value: string];
+  'update:fontSize': [value: number];
 }>();
 
 // 样式配置:通过 CSS 变量作用于全部对战卡;未配置时回退默认样式(白字/灰边/透明底)
@@ -167,6 +174,20 @@ const bracketStyle = computed(() => ({
   '--bracket-border': props.borderColor === '' ? 'transparent' : props.borderColor || undefined,
   '--bracket-bg': props.bgColor === '' ? 'transparent' : props.bgColor || undefined
 }));
+
+/** 字号缩放:以 fontSize(默认 12px)为基准,名字按比例联动,限制在 6~80px */
+const fz = (ratio: number) => {
+  const base = Math.max(6, Math.min(80, Number(props.fontSize) || 12));
+  return {
+    fontSize: `${Math.round(base * ratio)}px`,
+    lineHeight: `${Math.round(base * ratio * 1.3)}px`
+  };
+};
+
+const handleFontSizeUpdate = (v: string) => {
+  const n = Number(v);
+  emit('update:fontSize', Number.isFinite(n) && n > 0 ? n : 12);
+};
 
 const loading = ref(false);
 const loadedOnce = ref(false);
@@ -210,7 +231,9 @@ const nextPow2 = (v: number): number => {
 
 const compById = computed(() => {
   const m: Record<string, any> = {};
-  competitors.value.forEach((c) => { m[c.id] = c; });
+  competitors.value.forEach((c) => {
+    m[c.id] = c;
+  });
   return m;
 });
 
@@ -231,8 +254,7 @@ const loadData = async () => {
     try {
       stageInfo = await getStage(props.stageId);
       prevStageId.value = stageInfo?.data?.prevStageId ?? null;
-      stagePairingMode.value =
-        JSON.parse(stageInfo?.data?.ruleConfig || '{}')?.knockout?.pairingMode || '';
+      stagePairingMode.value = JSON.parse(stageInfo?.data?.ruleConfig || '{}')?.knockout?.pairingMode || '';
       stageTeamCountStart.value = Number(stageInfo?.data?.teamCountStart) || 0;
     } catch (e) {
       prevStageId.value = null;
@@ -260,7 +282,7 @@ const loadData = async () => {
     // 拉该赛段参赛方(按种子顺位)—— 即使未生成对阵也能按种子预排配对
     try {
       const cr: any = await listCompetitor({ stageId: props.stageId, pageNum: 1, pageSize: 999 } as any);
-      competitors.value = ((cr?.data?.data || cr?.data) || [])
+      competitors.value = (cr?.data?.data || cr?.data || [])
         .slice()
         .sort((a: any, b: any) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER));
     } catch (e) {
@@ -380,21 +402,25 @@ const arenaSlots = computed<BracketSlot[]>(() => {
     const bracketSize = Math.max(2, nextPow2(stageTeamCountStart.value || 8));
     const pairCount = Math.max(1, bracketSize / 2);
     const half = Math.ceil(pairCount / 2);
-    return Array.from({ length: pairCount }, (_, i) => ({
-      zone: i < half ? 'LEFT' : 'RIGHT',
-      order: i % half,
-      name: '8强',
-      status: 'PENDING',
-      leftName: '',
-      rightName: '',
-      leftScore: '',
-      rightScore: '',
-      leftWin: false,
-      rightWin: false,
-      rightBye: false,
-      leftSrc: '',
-      rightSrc: ''
-    } as BracketSlot));
+    return Array.from(
+      { length: pairCount },
+      (_, i) =>
+        ({
+          zone: i < half ? 'LEFT' : 'RIGHT',
+          order: i % half,
+          name: '8强',
+          status: 'PENDING',
+          leftName: '',
+          rightName: '',
+          leftScore: '',
+          rightScore: '',
+          leftWin: false,
+          rightWin: false,
+          rightBye: false,
+          leftSrc: '',
+          rightSrc: ''
+        }) as BracketSlot
+    );
   }
   const bracketSize = Math.max(2, nextPow2(count || stageTeamCountStart.value || 8));
   const pairCount = Math.max(1, bracketSize / 2);
@@ -431,9 +457,7 @@ const bracketSlots = computed<BracketSlot[]>(() => {
   }
   if (matches.value.length > 0) {
     return matches.value.map((m: any) => {
-      const ss = (participantsByMatch.value[m.id] || [])
-        .slice()
-        .sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+      const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
       const left = ss[0];
       const right = ss[1];
       return {
@@ -442,8 +466,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
         order: m.displayRow ?? 0,
         name: m.name || '',
         status: m.status || 'PENDING',
-        leftName: left?.competitorId == null ? '轮空' : (nameOf(left.competitorId) || ''),
-        rightName: right?.competitorId == null ? '轮空' : (nameOf(right.competitorId) || ''),
+        leftName: left?.competitorId == null ? '轮空' : nameOf(left.competitorId) || '',
+        rightName: right?.competitorId == null ? '轮空' : nameOf(right.competitorId) || '',
         leftScore: left?.scoreValue == null ? '' : String(left.scoreValue),
         rightScore: right?.scoreValue == null ? '' : String(right.scoreValue),
         leftWin: !!left && isWinner(left),
@@ -458,23 +482,26 @@ const bracketSlots = computed<BracketSlot[]>(() => {
 
   // 下一赛段预排:上一赛段胜者已按种子放入对应位置(未最终确认也可显示)
   if (prePairs.value.length > 0) {
-    return prePairs.value.map((p: any) => ({
-      zone: p.zone || 'LEFT',
-      order: p.position - 1,
-      name: `预排 ${p.position}`,
-      status: 'PENDING',
-      // 对应场次未打完(TBD)留空,模板回退显示「待定」;无对应场次/无参赛方=轮空
-      leftName: p.left?.name || (p.leftStatus === 'BYE' ? '轮空' : ''),
-      rightName: p.right?.name || (p.rightStatus === 'BYE' ? '轮空' : ''),
-      leftScore: '',
-      rightScore: '',
-      leftWin: false,
-      rightWin: false,
-      leftBye: p.leftStatus === 'BYE',
-      rightBye: p.rightStatus === 'BYE',
-      leftSrc: p.left?.sourceMatchName || '',
-      rightSrc: p.right?.sourceMatchName || ''
-    } as BracketSlot));
+    return prePairs.value.map(
+      (p: any) =>
+        ({
+          zone: p.zone || 'LEFT',
+          order: p.position - 1,
+          name: `预排 ${p.position}`,
+          status: 'PENDING',
+          // 对应场次未打完(TBD)留空,模板回退显示「待定」;无对应场次/无参赛方=轮空
+          leftName: p.left?.name || (p.leftStatus === 'BYE' ? '轮空' : ''),
+          rightName: p.right?.name || (p.rightStatus === 'BYE' ? '轮空' : ''),
+          leftScore: '',
+          rightScore: '',
+          leftWin: false,
+          rightWin: false,
+          leftBye: p.leftStatus === 'BYE',
+          rightBye: p.rightStatus === 'BYE',
+          leftSrc: p.left?.sourceMatchName || '',
+          rightSrc: p.right?.sourceMatchName || ''
+        }) as BracketSlot
+    );
   }
 
   // 尚未生成对阵:按种子顺位预排(前半 LEFT、后半 RIGHT)
@@ -486,21 +513,25 @@ const bracketSlots = computed<BracketSlot[]>(() => {
     const pairs = Math.floor(slotCount / 2);
     if (pairs > 0) {
       const half = Math.ceil(pairs / 2);
-      return Array.from({ length: pairs }, (_, i) => ({
-        zone: i < half ? 'LEFT' : 'RIGHT',
-        order: i % half,
-        name: '待对阵',
-        status: 'PENDING',
-        leftName: '',
-        rightName: '',
-        leftScore: '',
-        rightScore: '',
-        leftWin: false,
-        rightWin: false,
-        rightBye: false,
-        leftSrc: '',
-        rightSrc: ''
-      } as BracketSlot));
+      return Array.from(
+        { length: pairs },
+        (_, i) =>
+          ({
+            zone: i < half ? 'LEFT' : 'RIGHT',
+            order: i % half,
+            name: '待对阵',
+            status: 'PENDING',
+            leftName: '',
+            rightName: '',
+            leftScore: '',
+            rightScore: '',
+            leftWin: false,
+            rightWin: false,
+            rightBye: false,
+            leftSrc: '',
+            rightSrc: ''
+          }) as BracketSlot
+      );
     }
     return [];
   }
@@ -596,9 +627,7 @@ const finalists = computed(() => {
     }
     return out;
   }
-  const ss = (participantsByMatch.value[m.id] || [])
-    .slice()
-    .sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+  const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
   const sourceOf: Record<string, string> = {};
   competitors.value.forEach((c: any) => {
     if (c.sourceCompetitorId) {
@@ -631,9 +660,7 @@ const champion = computed(() => {
   }
   const ss = participantsByMatch.value[m.id] || [];
   const w = ss.find((p: any) => p.outcomeStatus === 'WIN' || (p.rankInMatch === 1 && p.scoreValue != null));
-  return w
-    ? { competitorId: w.competitorId, name: nameOf(w.competitorId), score: w.scoreValue == null ? '' : String(w.scoreValue) }
-    : null;
+  return w ? { competitorId: w.competitorId, name: nameOf(w.competitorId), score: w.scoreValue == null ? '' : String(w.scoreValue) } : null;
 });
 
 // 半决赛四角:两场各两名参赛者,左上/左下、右上/右下
@@ -645,16 +672,10 @@ const semi = computed(() => {
   if (matches.value.length === 2) {
     const ms = matches.value.slice().sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0));
     const build = (m: any) => {
-      const ss = (participantsByMatch.value[m.id] || [])
-        .slice()
-        .sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+      const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
       return {
-        top: ss[0]
-          ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), win: isWinner(ss[0]) }
-          : null,
-        bottom: ss[1]
-          ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), win: isWinner(ss[1]) }
-          : null
+        top: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), win: isWinner(ss[0]) } : null,
+        bottom: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), win: isWinner(ss[1]) } : null
       };
     };
     out.left = ms[0] ? build(ms[0]) : null;
@@ -670,12 +691,8 @@ const semi = computed(() => {
   return out;
 });
 
-const leftSlots = computed(() =>
-  bracketSlots.value.filter((s) => s.zone === 'LEFT').sort((a, b) => a.order - b.order)
-);
-const rightSlots = computed(() =>
-  bracketSlots.value.filter((s) => s.zone === 'RIGHT' || s.zone === 'CENTER').sort((a, b) => a.order - b.order)
-);
+const leftSlots = computed(() => bracketSlots.value.filter((s) => s.zone === 'LEFT').sort((a, b) => a.order - b.order));
+const rightSlots = computed(() => bracketSlots.value.filter((s) => s.zone === 'RIGHT' || s.zone === 'CENTER').sort((a, b) => a.order - b.order));
 
 onMounted(() => {
   loadData();
@@ -751,9 +768,9 @@ const handleTournamentEvent = (data: any) => {
   max-width: 100%;
 }
 .final-card {
-  border: 1px solid var(--bracket-border, #404040);
+  border: 1px solid var(--bracket-border, transparent);
   background: var(--bracket-bg, transparent);
-  color: var(--bracket-text, inherit);
+  color: var(--bracket-text, #000000);
   border-radius: 6px;
   padding: 8px 10px;
   display: flex;
@@ -774,15 +791,15 @@ const handleTournamentEvent = (data: any) => {
 }
 .final-win {
   background: var(--bracket-bg, transparent);
-  border-color: var(--bracket-border, #404040);
+  border-color: var(--bracket-border, transparent);
 }
 .final-bye {
   opacity: 0.35;
 }
 .champion-card {
   border-width: 2px;
-  border-color: var(--bracket-border, #404040);
-  color: var(--bracket-text, inherit);
+  border-color: var(--bracket-border, transparent);
+  color: var(--bracket-text, #000000);
   padding: 12px 14px;
   font-size: clamp(12px, 1.5vw, 24px);
   width: 9.5em;

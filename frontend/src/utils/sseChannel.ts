@@ -6,6 +6,9 @@
  * - 指数退避重连(带抖动上限),替代浏览器默认固定间隔重连,避免重连风暴;
  * - 重连补偿:连接(含断线重连)建立后触发 onRefresh,让订阅方做一次全量刷新,
  *   补回断线期间错过的事件;
+ * - 移动端适配:锁屏/切应用/网络切换导致连接被系统挂起或静默断开时,
+ *   页面恢复可见(visibilitychange/pageshow)、网络恢复(online)立即重连;
+ *   另有定时健康检查 + 空闲看门狗(后端 60s 心跳注释),兜底"半死"连接;
  * - 首次连接建立不触发 onRefresh(订阅方挂载时已自行拉取),避免重复请求。
  */
 
@@ -23,11 +26,49 @@ interface SseChannelConn {
   retryTimer: ReturnType<typeof setTimeout> | null;
   reopened: boolean;
   closed: boolean;
+  lastEventAt: number;
 }
 
 const channels = new Map<string, SseChannelConn>();
 
 const MAX_RETRY_DELAY = 30000;
+const HEARTBEAT_CHECK_INTERVAL = 20000;
+/** 空闲超时:后端每 60s 发送 comment 心跳,超过 90s 未收到任何数据视为连接已死 */
+const IDLE_TIMEOUT = 90000;
+
+/** 关闭旧连接并按(可选重置)退避策略重开;immediate=true 时立即重连并重置退避 */
+const reconnect = (conn: SseChannelConn, immediate = false) => {
+  if (conn.closed) return;
+  try {
+    conn.es?.close();
+  } catch {
+    // 忽略关闭旧连接异常
+  }
+  if (immediate) {
+    conn.retryDelay = 1000;
+  }
+  if (conn.retryTimer) {
+    clearTimeout(conn.retryTimer);
+  }
+  const jitter = Math.floor(Math.random() * 1000);
+  conn.retryTimer = setTimeout(() => open(conn), immediate ? 0 : conn.retryDelay + jitter);
+  if (!immediate) {
+    conn.retryDelay = Math.min(conn.retryDelay * 2, MAX_RETRY_DELAY);
+  }
+};
+
+/** 健康检查:连接已关闭/缺失,或长时间未收到任何数据(含心跳)时强制重连 */
+const ensureAlive = (conn: SseChannelConn) => {
+  if (conn.closed) return;
+  const es = conn.es;
+  if (!es || es.readyState === EventSource.CLOSED) {
+    reconnect(conn, true);
+    return;
+  }
+  if (Date.now() - conn.lastEventAt > IDLE_TIMEOUT) {
+    reconnect(conn, true);
+  }
+};
 
 const open = (conn: SseChannelConn) => {
   if (conn.closed) return;
@@ -41,6 +82,7 @@ const open = (conn: SseChannelConn) => {
 
   es.onopen = () => {
     conn.retryDelay = 1000;
+    conn.lastEventAt = Date.now();
     if (conn.reopened) {
       // 断线重连成功:补偿刷新,补回断线期间错过的事件
       conn.listeners.forEach((l) => {
@@ -62,6 +104,7 @@ const open = (conn: SseChannelConn) => {
   };
 
   es.onmessage = (e) => {
+    conn.lastEventAt = Date.now();
     let data: any;
     try {
       data = JSON.parse(e.data);
@@ -85,18 +128,28 @@ const open = (conn: SseChannelConn) => {
         // 忽略单个订阅者异常
       }
     });
-    try {
-      es.close();
-    } catch {
-      // 忽略关闭异常
-    }
-    if (conn.closed) return;
     // 指数退避重连(带抖动,降低并发重连对服务端的瞬时压力)
-    const jitter = Math.floor(Math.random() * 1000);
-    conn.retryTimer = setTimeout(() => open(conn), conn.retryDelay + jitter);
-    conn.retryDelay = Math.min(conn.retryDelay * 2, MAX_RETRY_DELAY);
+    reconnect(conn);
   };
 };
+
+// 全局生命周期兜底:锁屏/切应用恢复、网络恢复、定时健康检查
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      channels.forEach((c) => reconnect(c, true));
+    }
+  });
+  window.addEventListener('pageshow', () => {
+    channels.forEach((c) => reconnect(c, true));
+  });
+  window.addEventListener('online', () => {
+    channels.forEach((c) => reconnect(c, true));
+  });
+  setInterval(() => {
+    channels.forEach(ensureAlive);
+  }, HEARTBEAT_CHECK_INTERVAL);
+}
 
 /**
  * 订阅一个 SSE 通道。
@@ -123,7 +176,8 @@ export function subscribeChannel(options: {
       retryDelay: 1000,
       retryTimer: null,
       reopened: false,
-      closed: false
+      closed: false,
+      lastEventAt: Date.now()
     };
     channels.set(options.key, conn);
     open(conn);

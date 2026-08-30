@@ -43,7 +43,7 @@ public class PreBracketVo implements Serializable {
         private Long seedRank;
         /** 来源参赛方(上一赛段) */
         private Long sourceCompetitorId;
-        /** 来源场次名(淘汰赛胜者),如 第1场Round1 */
+        /** 来源场次名(淘汰赛胜者),如 第1场 */
         private String sourceMatchName;
     }
 

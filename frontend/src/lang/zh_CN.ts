@@ -99,7 +99,7 @@ export default {
     confirmRequired: '请再次输入新密码',
     confirmNotMatch: '两次输入的新密码不一致',
     sameAsOld: '新密码不能与旧密码相同',
-    success: '密码修改成功，请使用新密码重新登录',
+    success: '密码修改成功',
     cancel: '取 消',
     confirm: '确 定'
   }

@@ -13,7 +13,7 @@ import java.util.List;
 @Data
 public class MatchPlan {
 
-    /** 场次名,如 第1场Round1 */
+    /** 场次名,如 第1场 */
     private String name;
 
     /** 轮次(1=首轮) */

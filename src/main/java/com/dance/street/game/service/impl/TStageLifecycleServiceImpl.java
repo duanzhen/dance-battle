@@ -306,7 +306,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
 
-        // 淘汰赛轮次序号:沿赛段链从第一个淘汰赛开始计数,用于场次命名 第{场次}场Round{轮次}
+        // 淘汰赛轮次序号:沿赛段链从第一个淘汰赛开始计数,用于场次命名 第{场次}场
         if (StageModeEnum.KNOCKOUT.equals(mode) && rc != null) {
             rc.setKnockoutRound(knockoutRoundNo(stage));
         }

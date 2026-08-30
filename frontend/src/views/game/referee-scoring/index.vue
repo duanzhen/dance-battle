@@ -11,7 +11,12 @@
       <div class="text-center">
         <div class="w-12 h-12 rounded-full bg-red-600/20 border border-red-600/30 flex items-center justify-center mx-auto mb-3">
           <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+            />
           </svg>
         </div>
         <p class="text-sm text-red-400 font-bold mb-1">认证失败</p>
@@ -33,7 +38,12 @@
             title="刷新"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5M20 20v-5h-5M4.5 9A8 8 0 0 1 19 6.5M19.5 15A8 8 0 0 1 5 17.5" />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h5M20 20v-5h-5M4.5 9A8 8 0 0 1 19 6.5M19.5 15A8 8 0 0 1 5 17.5"
+              />
             </svg>
           </button>
           <span class="text-[8px] font-bold px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
@@ -93,10 +103,13 @@
                     v-for="r in rounds"
                     :key="r.id"
                     class="flex-none px-3 py-1.5 rounded-lg border text-[10px] font-bold"
-                    :class="r.id === currentRoundId
-                      ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
-                      : r.outcome === 'DRAW' ? 'border-neutral-700 bg-neutral-800/60 text-neutral-400'
-                      : 'border-neutral-800 bg-neutral-900 text-neutral-500'"
+                    :class="
+                      r.id === currentRoundId
+                        ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
+                        : r.outcome === 'DRAW'
+                          ? 'border-neutral-700 bg-neutral-800/60 text-neutral-400'
+                          : 'border-neutral-800 bg-neutral-900 text-neutral-500'
+                    "
                   >
                     第{{ r.roundSequence }}轮 · {{ r.id === currentRoundId ? '当前' : r.outcome === 'DRAW' ? '平局' : '已结算' }}
                   </div>
@@ -158,16 +171,13 @@
                 </div>
                 <div class="flex flex-wrap gap-1.5">
                   <span
-                    v-for="r in (selectedOverview?.rounds || [])"
+                    v-for="r in selectedOverview?.rounds || []"
                     :key="r.id"
                     class="px-2 py-0.5 rounded text-[9px] font-bold bg-neutral-800 text-neutral-500"
                   >
                     第{{ r.roundSequence }}轮{{ r.outcome === 'DRAW' ? '·平局' : '·已结算' }}
                   </span>
-                  <span
-                    v-if="selectedOverview?.winnerName"
-                    class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400"
-                  >
+                  <span v-if="selectedOverview?.winnerName" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
                     胜者 {{ selectedOverview.winnerName }}
                   </span>
                 </div>
@@ -191,11 +201,7 @@
               <p class="text-sm font-bold text-white">{{ stageName }}</p>
               <p class="text-[10px] text-neutral-500 mt-0.5">当前赛段进行中，等待导播台开始下一场比赛</p>
             </div>
-            <div
-              v-for="m in stageOverview"
-              :key="m.id"
-              class="bg-neutral-900 rounded-xl border border-neutral-800 p-3"
-            >
+            <div v-for="m in stageOverview" :key="m.id" class="bg-neutral-900 rounded-xl border border-neutral-800 p-3">
               <div class="flex items-center justify-between mb-2">
                 <span class="text-xs font-bold text-neutral-200">{{ m.name }}</span>
                 <span
@@ -214,16 +220,17 @@
                   v-for="r in m.rounds"
                   :key="r.id"
                   class="px-2 py-0.5 rounded text-[9px] font-bold"
-                  :class="r.outcome === 'DRAW'
-                    ? 'bg-neutral-800 text-neutral-400'
-                    : r.status === 'GAMING' ? 'bg-green-500/10 text-green-400' : 'bg-neutral-800 text-neutral-500'"
+                  :class="
+                    r.outcome === 'DRAW'
+                      ? 'bg-neutral-800 text-neutral-400'
+                      : r.status === 'GAMING'
+                        ? 'bg-green-500/10 text-green-400'
+                        : 'bg-neutral-800 text-neutral-500'
+                  "
                 >
                   第{{ r.roundSequence }}轮{{ r.outcome === 'DRAW' ? '·平局' : r.status === 'GAMING' ? '·进行中' : '·已结算' }}
                 </span>
-                <span
-                  v-if="m.winnerName"
-                  class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400"
-                >
+                <span v-if="m.winnerName" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
                   胜者 {{ m.winnerName }}
                 </span>
               </div>
@@ -232,330 +239,337 @@
           </div>
 
           <template v-else>
-          <div class="text-center mb-4">
-            <p class="text-[10px] text-neutral-500 mb-1">{{ matchName || ('场次 #' + matchId) }}</p>
-            <p class="text-[9px] text-neutral-600">
-              {{ matchMode }} / Round {{ roundSeq }}
-              <span v-if="!isPerCompetitor && roundSeq > 1" class="text-amber-400 font-bold">· 平局加赛轮</span>
-            </p>
-          </div>
+            <div class="text-center mb-4">
+              <p class="text-[10px] text-neutral-500 mb-1">{{ matchName || '场次 #' + matchId }}</p>
+              <p class="text-[9px] text-neutral-600">
+                {{ matchMode }} / Round {{ roundSeq }}
+                <span v-if="!isPerCompetitor && roundSeq > 1" class="text-amber-400 font-bold">· 平局加赛轮</span>
+              </p>
+            </div>
 
-          <div v-if="participants.length === 0" class="text-center py-8">
-            <p class="text-xs text-neutral-600">当前场次暂无参赛方信息，等待对阵生成/开赛后自动出现</p>
-          </div>
+            <div v-if="participants.length === 0" class="text-center py-8">
+              <p class="text-xs text-neutral-600">当前场次暂无参赛方信息，等待对阵生成/开赛后自动出现</p>
+            </div>
 
-          <div v-if="isPerCompetitor" class="space-y-4">
-            <!-- 顶部横向选手列表 -->
-            <div class="no-scrollbar flex gap-2 overflow-x-auto pt-3 pb-2 pl-[calc(50%-40px)] pr-[calc(50%-40px)]">
+            <div v-if="isPerCompetitor" class="space-y-4">
+              <!-- 顶部横向选手列表 -->
+              <div class="no-scrollbar flex gap-2 overflow-x-auto pt-3 pb-2 pl-[calc(50%-40px)] pr-[calc(50%-40px)]">
+                <button
+                  v-for="p in participants"
+                  :key="p.competitorId"
+                  :ref="setChipRef(p.competitorId)"
+                  @click="selectParticipant(p)"
+                  class="flex-none min-w-[80px] px-3 py-2 rounded-xl border-2 transition-all text-left"
+                  :class="
+                    keypadTarget?.competitorId === p.competitorId
+                      ? 'border-amber-400 bg-amber-500 text-neutral-900 scale-105 shadow-lg shadow-amber-500/30'
+                      : 'border-neutral-800 bg-neutral-900'
+                  "
+                >
+                  <div class="text-[9px]" :class="keypadTarget?.competitorId === p.competitorId ? 'text-neutral-800' : 'text-neutral-500'">
+                    #{{ p.displaySlotIndex }}
+                  </div>
+                  <div
+                    class="text-xs font-bold truncate max-w-[88px]"
+                    :class="keypadTarget?.competitorId === p.competitorId ? 'text-neutral-900' : 'text-neutral-200'"
+                  >
+                    {{ p.competitorName }}
+                  </div>
+                  <div
+                    class="text-sm font-black font-mono mt-0.5"
+                    :class="
+                      keypadTarget?.competitorId === p.competitorId
+                        ? 'text-neutral-900'
+                        : myTotal(p.competitorId!) > 0
+                          ? 'text-amber-400'
+                          : 'text-neutral-600'
+                    "
+                  >
+                    {{ myTotal(p.competitorId!) > 0 ? myTotal(p.competitorId!) : keypadTarget?.competitorId === p.competitorId ? '当前' : '未评' }}
+                  </div>
+                </button>
+              </div>
+
+              <!-- 中部打分器 -->
+              <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="min-w-0">
+                    <div class="text-[10px] text-neutral-500">正在为以下选手评分</div>
+                    <div class="text-base font-bold text-white truncate">{{ keypadTarget?.competitorName || '选择选手' }}</div>
+                  </div>
+                  <div v-if="!isRanking" class="text-right">
+                    <div class="text-[10px] text-neutral-600">我的评分</div>
+                    <div class="text-2xl font-black font-mono text-amber-400 tabular-nums">
+                      {{ keypadValue || '0' }}<span class="text-sm font-normal text-neutral-500"> / 100</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 排名赛:多维度打分(逐选手) -->
+                <template v-if="isRanking">
+                  <div v-for="dim in dimensions" :key="dim.key" class="flex items-center justify-between gap-3 mb-2">
+                    <div class="min-w-[72px]">
+                      <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
+                      <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <button
+                        @click="adjustDim(keypadTarget?.competitorId!, dim.key, -1)"
+                        :disabled="!keypadTarget"
+                        class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-red-900/30 active:scale-90 transition-transform disabled:opacity-30"
+                      >
+                        <Minus class="w-4 h-4 mx-auto" />
+                      </button>
+                      <input
+                        type="number"
+                        :value="keypadTarget?.competitorId != null ? getDimScore(keypadTarget.competitorId, dim.key) : 0"
+                        @input="keypadTarget?.competitorId != null && onDimInput(keypadTarget.competitorId, dim.key, $event)"
+                        class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
+                      />
+                      <button
+                        @click="adjustDim(keypadTarget?.competitorId!, dim.key, 1)"
+                        :disabled="!keypadTarget"
+                        class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-green-900/30 active:scale-90 transition-transform disabled:opacity-30"
+                      >
+                        <Plus class="w-4 h-4 mx-auto" />
+                      </button>
+                    </div>
+                  </div>
+                  <p
+                    v-if="keypadTarget?.competitorId != null && myTotal(keypadTarget.competitorId) > 0"
+                    class="text-[9px] text-neutral-500 text-center"
+                  >
+                    我的总分 {{ myTotal(keypadTarget.competitorId) }}
+                  </p>
+                  <div class="grid grid-cols-2 gap-2 mt-3">
+                    <button
+                      @click="clearRankTarget"
+                      class="py-3 rounded-xl text-xs font-bold bg-neutral-800 text-neutral-400 border border-neutral-700 active:bg-neutral-700 transition-colors"
+                    >
+                      清空
+                    </button>
+                    <button
+                      @click="confirmRankTarget"
+                      :disabled="keypadSubmitting || !keypadTarget"
+                      class="py-3 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-neutral-900 transition-colors disabled:opacity-40"
+                    >
+                      {{ keypadSubmitting ? '提交中...' : '提交并下一个' }}
+                    </button>
+                  </div>
+                </template>
+
+                <!-- 海选:单维度软键盘 -->
+                <template v-else>
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    :value="keypadValue"
+                    placeholder="0"
+                    class="w-full h-12 bg-black text-center text-2xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums mb-2"
+                    @input="onKeypadInput"
+                  />
+                  <div class="grid grid-cols-3 gap-2">
+                    <button
+                      v-for="k in keypadKeys"
+                      :key="k"
+                      @click="pressKey(k)"
+                      class="py-3 rounded-xl text-lg font-bold bg-neutral-800 border border-neutral-700 text-neutral-200 active:bg-neutral-700 transition-colors"
+                      :class="k === '⌫' ? 'text-neutral-400' : ''"
+                    >
+                      {{ k }}
+                    </button>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2 mt-2">
+                    <button
+                      @click="clearKeypad"
+                      class="py-3 rounded-xl text-xs font-bold bg-neutral-800 text-neutral-400 border border-neutral-700 active:bg-neutral-700 transition-colors"
+                    >
+                      清空
+                    </button>
+                    <button
+                      @click="confirmKeypad"
+                      :disabled="keypadSubmitting || !keypadTarget"
+                      class="py-3 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-neutral-900 transition-colors disabled:opacity-40"
+                    >
+                      {{ keypadSubmitting ? '提交中...' : '提交并下一个' }}
+                    </button>
+                  </div>
+                  <p v-if="auditionAllScored" class="text-[9px] font-bold text-amber-400/90 mt-1 text-center">
+                    本场选手已全部评完，等待导播台/管理端结束赛段后进入下一轮
+                  </p>
+                </template>
+              </div>
+            </div>
+
+            <div v-else-if="isKnockoutJudging" class="space-y-4">
+              <!-- 轮次历史:平局加赛产生的历史轮判罚 -->
+              <div class="flex gap-2 overflow-x-auto no-scrollbar pt-1 pb-2">
+                <div
+                  v-for="r in rounds"
+                  :key="r.id"
+                  class="flex-none px-3 py-1.5 rounded-lg border text-[10px] font-bold"
+                  :class="
+                    r.id === currentRoundId
+                      ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
+                      : r.outcome === 'DRAW'
+                        ? 'border-neutral-700 bg-neutral-800/60 text-neutral-400'
+                        : 'border-neutral-800 bg-neutral-900 text-neutral-500'
+                  "
+                >
+                  第{{ r.roundSequence }}轮 · {{ r.id === currentRoundId ? '当前' : r.outcome === 'DRAW' ? '平局' : '已结算' }}
+                </div>
+              </div>
+
+              <!-- 三按钮判罚:左(红) / 平 / 右(蓝) -->
+              <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
+                <div class="text-center mb-3">
+                  <div class="text-[10px] text-neutral-500">本场判罚</div>
+                  <div class="text-[9px] text-neutral-600 mt-0.5">第 {{ roundSeq }} 轮：选择左方胜 / 平局 / 右方胜</div>
+                  <div v-if="voteProgress" class="text-[9px] text-amber-400/80 mt-1 font-bold">裁判已判 {{ voteProgress }}</div>
+                </div>
+                <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
+                  <button
+                    @click="submitKnockout('LEFT')"
+                    :disabled="submitting"
+                    class="py-5 rounded-xl text-sm font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30 transition-colors disabled:opacity-40"
+                  >
+                    <span class="block text-[9px] text-red-500/70 mb-1">左方胜</span>
+                    <span class="truncate block max-w-[110px] mx-auto">{{ leftParticipant?.competitorName || '待定' }}</span>
+                  </button>
+                  <button
+                    @click="submitKnockout('DRAW')"
+                    :disabled="submitting"
+                    class="px-8 py-5 rounded-xl text-lg font-black bg-neutral-800 text-neutral-200 border-2 border-neutral-600 active:bg-neutral-700 transition-colors disabled:opacity-40"
+                  >
+                    平
+                  </button>
+                  <button
+                    @click="submitKnockout('RIGHT')"
+                    :disabled="submitting"
+                    class="py-5 rounded-xl text-sm font-bold bg-blue-600/15 text-blue-400 border border-blue-600/30 active:bg-blue-600/30 transition-colors disabled:opacity-40"
+                  >
+                    <span class="block text-[9px] text-blue-500/70 mb-1">右方胜</span>
+                    <span class="truncate block max-w-[110px] mx-auto">{{ rightParticipant?.competitorName || '待定' }}</span>
+                  </button>
+                </div>
+                <p class="text-[9px] text-neutral-600 mt-2 text-center">判平局将自动新增一轮加赛</p>
+              </div>
+            </div>
+
+            <div v-else class="space-y-4">
+              <div v-for="p in participants" :key="p.competitorId" class="bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden">
+                <div class="px-4 py-3 flex items-center justify-between border-b border-neutral-800">
+                  <h3 class="text-sm font-bold text-white">{{ p.competitorName }}</h3>
+                  <div class="flex items-center gap-2">
+                    <span v-if="p.rankInMatch" class="text-[9px] font-mono text-amber-400">#{{ p.rankInMatch }}</span>
+                    <span class="text-xs font-mono text-neutral-500">#{{ p.displaySlotIndex }}</span>
+                  </div>
+                </div>
+
+                <!-- STANDARD: 胜平负 -->
+                <div v-if="isStandard" class="p-4">
+                  <div class="grid grid-cols-3 gap-3">
+                    <button
+                      v-for="opt in outcomeOptions"
+                      :key="opt.value"
+                      @click="selectOutcome(p.competitorId!, opt.value)"
+                      class="py-4 rounded-xl border-2 text-sm font-bold transition-all"
+                      :class="
+                        outcomes[p.competitorId!] === opt.value
+                          ? opt.className + ' border-current'
+                          : 'bg-neutral-800 border-neutral-700 text-neutral-400'
+                      "
+                    >
+                      {{ opt.label }}
+                    </button>
+                  </div>
+                  <p class="text-[9px] text-neutral-600 mt-3 text-center">选择该选手本场判定结果</p>
+                </div>
+
+                <!-- RANKING: 多维度打分 -->
+                <div v-else-if="isRanking" class="p-4 space-y-4">
+                  <div v-for="dim in dimensions" :key="dim.key" class="flex items-center justify-between gap-3">
+                    <div class="min-w-[72px]">
+                      <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
+                      <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <button
+                        @click="adjustDim(p.competitorId!, dim.key, -1)"
+                        class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-red-900/30 active:scale-90 transition-transform"
+                      >
+                        <Minus class="w-4 h-4 mx-auto" />
+                      </button>
+                      <input
+                        type="number"
+                        :value="getDimScore(p.competitorId!, dim.key)"
+                        @input="onDimInput(p.competitorId!, dim.key, $event)"
+                        class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
+                      />
+                      <button
+                        @click="adjustDim(p.competitorId!, dim.key, 1)"
+                        class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-green-900/30 active:scale-90 transition-transform"
+                      >
+                        <Plus class="w-4 h-4 mx-auto" />
+                      </button>
+                    </div>
+                  </div>
+                  <p v-if="myTotal(p.competitorId!) > 0" class="text-[9px] text-neutral-500 text-center">
+                    我的总分 {{ myTotal(p.competitorId!) }} · 当前累计 {{ p.currentScore || 0 }}
+                  </p>
+                </div>
+
+                <!-- VOTING(非海选): 单分加减 -->
+                <div v-else class="p-4">
+                  <div class="flex items-center justify-center gap-3">
+                    <button
+                      @click="adjustDim(p.competitorId!, 'MAIN', -1)"
+                      class="w-12 h-12 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-400 flex items-center justify-center active:scale-90 transition-transform active:bg-red-900/30"
+                    >
+                      <Minus class="w-5 h-5" />
+                    </button>
+
+                    <div class="text-center min-w-[80px]">
+                      <div class="text-4xl font-black font-mono text-amber-400 tabular-nums leading-none">
+                        {{ getDimScore(p.competitorId!, 'MAIN') }}
+                      </div>
+                      <div class="text-[9px] text-neutral-600 mt-1">我的打分</div>
+                      <div v-if="p.currentScore > 0" class="text-[9px] text-neutral-500 mt-0.5">当前累计: {{ p.currentScore }}</div>
+                    </div>
+
+                    <button
+                      @click="adjustDim(p.competitorId!, 'MAIN', 1)"
+                      class="w-12 h-12 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-400 flex items-center justify-center active:scale-90 transition-transform active:bg-green-900/30"
+                    >
+                      <Plus class="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div class="flex justify-center gap-3 mt-3">
+                    <button
+                      v-for="quick in [1, 5, 10]"
+                      :key="quick"
+                      @click="adjustDim(p.competitorId!, 'MAIN', quick)"
+                      class="px-3 py-1 text-[10px] font-bold rounded-lg transition-colors bg-neutral-800 text-neutral-400 border border-neutral-700 active:bg-amber-500/20 active:text-amber-400 active:border-amber-500/30"
+                    >
+                      +{{ quick }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!isAudition && participants.length > 0" class="mt-6 px-1">
               <button
-                v-for="p in participants"
-                :key="p.competitorId"
-                :ref="setChipRef(p.competitorId)"
-                @click="selectParticipant(p)"
-                class="flex-none min-w-[80px] px-3 py-2 rounded-xl border-2 transition-all text-left"
-                :class="keypadTarget?.competitorId === p.competitorId
-                  ? 'border-amber-400 bg-amber-500 text-neutral-900 scale-105 shadow-lg shadow-amber-500/30'
-                  : 'border-neutral-800 bg-neutral-900'"
+                @click="handleSubmit"
+                :disabled="submitting || !hasChanges"
+                class="w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-neutral-900 font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-sm"
               >
-                <div class="text-[9px]" :class="keypadTarget?.competitorId === p.competitorId ? 'text-neutral-800' : 'text-neutral-500'">
-                  #{{ p.displaySlotIndex }}
-                </div>
-                <div
-                  class="text-xs font-bold truncate max-w-[88px]"
-                  :class="keypadTarget?.competitorId === p.competitorId ? 'text-neutral-900' : 'text-neutral-200'"
-                >
-                  {{ p.competitorName }}
-                </div>
-                <div
-                  class="text-sm font-black font-mono mt-0.5"
-                  :class="keypadTarget?.competitorId === p.competitorId
-                    ? 'text-neutral-900'
-                    : myTotal(p.competitorId!) > 0 ? 'text-amber-400' : 'text-neutral-600'"
-                >
-                  {{
-                    myTotal(p.competitorId!) > 0
-                      ? myTotal(p.competitorId!)
-                      : keypadTarget?.competitorId === p.competitorId ? '当前' : '未评'
-                  }}
-                </div>
+                {{ submitting ? '提交中...' : '提交判罚结果' }}
               </button>
+              <p v-if="submitted" class="text-center text-xs text-green-400 mt-2">判罚已提交</p>
             </div>
-
-            <!-- 中部打分器 -->
-            <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
-              <div class="flex items-center justify-between mb-3">
-                <div class="min-w-0">
-                  <div class="text-[10px] text-neutral-500">正在为以下选手评分</div>
-                  <div class="text-base font-bold text-white truncate">{{ keypadTarget?.competitorName || '选择选手' }}</div>
-                </div>
-                <div v-if="!isRanking" class="text-right">
-                  <div class="text-[10px] text-neutral-600">我的评分</div>
-                  <div class="text-2xl font-black font-mono text-amber-400 tabular-nums">{{ keypadValue || '0' }}</div>
-                </div>
-              </div>
-
-              <!-- 排名赛:多维度打分(逐选手) -->
-              <template v-if="isRanking">
-                <div
-                  v-for="dim in dimensions"
-                  :key="dim.key"
-                  class="flex items-center justify-between gap-3 mb-2"
-                >
-                  <div class="min-w-[72px]">
-                    <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
-                    <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button
-                      @click="adjustDim(keypadTarget?.competitorId!, dim.key, -1)"
-                      :disabled="!keypadTarget"
-                      class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-red-900/30 active:scale-90 transition-transform disabled:opacity-30"
-                    >
-                      <Minus class="w-4 h-4 mx-auto" />
-                    </button>
-                    <input
-                      type="number"
-                      :value="keypadTarget?.competitorId != null ? getDimScore(keypadTarget.competitorId, dim.key) : 0"
-                      @input="keypadTarget?.competitorId != null && onDimInput(keypadTarget.competitorId, dim.key, $event)"
-                      class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
-                    />
-                    <button
-                      @click="adjustDim(keypadTarget?.competitorId!, dim.key, 1)"
-                      :disabled="!keypadTarget"
-                      class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-green-900/30 active:scale-90 transition-transform disabled:opacity-30"
-                    >
-                      <Plus class="w-4 h-4 mx-auto" />
-                    </button>
-                  </div>
-                </div>
-                <p v-if="keypadTarget?.competitorId != null && myTotal(keypadTarget.competitorId) > 0" class="text-[9px] text-neutral-500 text-center">
-                  我的总分 {{ myTotal(keypadTarget.competitorId) }}
-                </p>
-                <div class="grid grid-cols-2 gap-2 mt-3">
-                  <button
-                    @click="clearRankTarget"
-                    class="py-3 rounded-xl text-xs font-bold bg-neutral-800 text-neutral-400 border border-neutral-700 active:bg-neutral-700 transition-colors"
-                  >
-                    清空
-                  </button>
-                  <button
-                    @click="confirmRankTarget"
-                    :disabled="keypadSubmitting || !keypadTarget"
-                    class="py-3 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-neutral-900 transition-colors disabled:opacity-40"
-                  >
-                    {{ keypadSubmitting ? '提交中...' : '提交并下一个' }}
-                  </button>
-                </div>
-              </template>
-
-              <!-- 海选:单维度软键盘 -->
-              <template v-else>
-                <div class="grid grid-cols-3 gap-2">
-                  <button
-                    v-for="k in keypadKeys"
-                    :key="k"
-                    @click="pressKey(k)"
-                    class="py-3 rounded-xl text-lg font-bold bg-neutral-800 border border-neutral-700 text-neutral-200 active:bg-neutral-700 transition-colors"
-                    :class="k === '⌫' ? 'text-neutral-400' : ''"
-                  >
-                    {{ k }}
-                  </button>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2 mt-2">
-                  <button
-                    @click="clearKeypad"
-                    class="py-3 rounded-xl text-xs font-bold bg-neutral-800 text-neutral-400 border border-neutral-700 active:bg-neutral-700 transition-colors"
-                  >
-                    清空
-                  </button>
-                  <button
-                    @click="confirmKeypad"
-                    :disabled="keypadSubmitting || !keypadTarget"
-                    class="py-3 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-neutral-900 transition-colors disabled:opacity-40"
-                  >
-                    {{ keypadSubmitting ? '提交中...' : '提交并下一个' }}
-                  </button>
-                </div>
-                <p class="text-[9px] text-neutral-600 mt-2 text-center">支持键盘输入分数（0-100，最多一位小数），回车确认提交；提交后自动跳转下一位</p>
-                <p v-if="auditionAllScored" class="text-[9px] font-bold text-amber-400/90 mt-1 text-center">本场选手已全部评完，等待导播台/管理端结束赛段后进入下一轮</p>
-              </template>
-            </div>
-          </div>
-
-          <div v-else-if="isKnockoutJudging" class="space-y-4">
-            <!-- 轮次历史:平局加赛产生的历史轮判罚 -->
-            <div class="flex gap-2 overflow-x-auto no-scrollbar pt-1 pb-2">
-              <div
-                v-for="r in rounds"
-                :key="r.id"
-                class="flex-none px-3 py-1.5 rounded-lg border text-[10px] font-bold"
-                :class="r.id === currentRoundId
-                  ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
-                  : r.outcome === 'DRAW' ? 'border-neutral-700 bg-neutral-800/60 text-neutral-400'
-                  : 'border-neutral-800 bg-neutral-900 text-neutral-500'"
-              >
-                第{{ r.roundSequence }}轮 · {{ r.id === currentRoundId ? '当前' : r.outcome === 'DRAW' ? '平局' : '已结算' }}
-              </div>
-            </div>
-
-            <!-- 三按钮判罚:左(红) / 平 / 右(蓝) -->
-            <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
-              <div class="text-center mb-3">
-                <div class="text-[10px] text-neutral-500">本场判罚</div>
-                <div class="text-[9px] text-neutral-600 mt-0.5">第 {{ roundSeq }} 轮：选择左方胜 / 平局 / 右方胜</div>
-                <div v-if="voteProgress" class="text-[9px] text-amber-400/80 mt-1 font-bold">裁判已判 {{ voteProgress }}</div>
-              </div>
-              <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
-                <button
-                  @click="submitKnockout('LEFT')"
-                  :disabled="submitting"
-                  class="py-5 rounded-xl text-sm font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30 transition-colors disabled:opacity-40"
-                >
-                  <span class="block text-[9px] text-red-500/70 mb-1">左方胜</span>
-                  <span class="truncate block max-w-[110px] mx-auto">{{ leftParticipant?.competitorName || '待定' }}</span>
-                </button>
-                <button
-                  @click="submitKnockout('DRAW')"
-                  :disabled="submitting"
-                  class="px-8 py-5 rounded-xl text-lg font-black bg-neutral-800 text-neutral-200 border-2 border-neutral-600 active:bg-neutral-700 transition-colors disabled:opacity-40"
-                >
-                  平
-                </button>
-                <button
-                  @click="submitKnockout('RIGHT')"
-                  :disabled="submitting"
-                  class="py-5 rounded-xl text-sm font-bold bg-blue-600/15 text-blue-400 border border-blue-600/30 active:bg-blue-600/30 transition-colors disabled:opacity-40"
-                >
-                  <span class="block text-[9px] text-blue-500/70 mb-1">右方胜</span>
-                  <span class="truncate block max-w-[110px] mx-auto">{{ rightParticipant?.competitorName || '待定' }}</span>
-                </button>
-              </div>
-              <p class="text-[9px] text-neutral-600 mt-2 text-center">判平局将自动新增一轮加赛</p>
-            </div>
-          </div>
-
-          <div v-else class="space-y-4">
-            <div
-              v-for="p in participants"
-              :key="p.competitorId"
-              class="bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden"
-            >
-              <div class="px-4 py-3 flex items-center justify-between border-b border-neutral-800">
-                <h3 class="text-sm font-bold text-white">{{ p.competitorName }}</h3>
-                <div class="flex items-center gap-2">
-                  <span v-if="p.rankInMatch" class="text-[9px] font-mono text-amber-400">#{{ p.rankInMatch }}</span>
-                  <span class="text-xs font-mono text-neutral-500">#{{ p.displaySlotIndex }}</span>
-                </div>
-              </div>
-
-              <!-- STANDARD: 胜平负 -->
-              <div v-if="isStandard" class="p-4">
-                <div class="grid grid-cols-3 gap-3">
-                  <button
-                    v-for="opt in outcomeOptions"
-                    :key="opt.value"
-                    @click="selectOutcome(p.competitorId!, opt.value)"
-                    class="py-4 rounded-xl border-2 text-sm font-bold transition-all"
-                    :class="outcomes[p.competitorId!] === opt.value
-                      ? opt.className + ' border-current'
-                      : 'bg-neutral-800 border-neutral-700 text-neutral-400'"
-                  >
-                    {{ opt.label }}
-                  </button>
-                </div>
-                <p class="text-[9px] text-neutral-600 mt-3 text-center">选择该选手本场判定结果</p>
-              </div>
-
-              <!-- RANKING: 多维度打分 -->
-              <div v-else-if="isRanking" class="p-4 space-y-4">
-                <div
-                  v-for="dim in dimensions"
-                  :key="dim.key"
-                  class="flex items-center justify-between gap-3"
-                >
-                  <div class="min-w-[72px]">
-                    <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
-                    <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button
-                      @click="adjustDim(p.competitorId!, dim.key, -1)"
-                      class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-red-900/30 active:scale-90 transition-transform"
-                    >
-                      <Minus class="w-4 h-4 mx-auto" />
-                    </button>
-                    <input
-                      type="number"
-                      :value="getDimScore(p.competitorId!, dim.key)"
-                      @input="onDimInput(p.competitorId!, dim.key, $event)"
-                      class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
-                    />
-                    <button
-                      @click="adjustDim(p.competitorId!, dim.key, 1)"
-                      class="w-10 h-10 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-400 active:bg-green-900/30 active:scale-90 transition-transform"
-                    >
-                      <Plus class="w-4 h-4 mx-auto" />
-                    </button>
-                  </div>
-                </div>
-                <p v-if="myTotal(p.competitorId!) > 0" class="text-[9px] text-neutral-500 text-center">
-                  我的总分 {{ myTotal(p.competitorId!) }} · 当前累计 {{ p.currentScore || 0 }}
-                </p>
-              </div>
-
-              <!-- VOTING(非海选): 单分加减 -->
-              <div v-else class="p-4">
-                <div class="flex items-center justify-center gap-3">
-                  <button
-                    @click="adjustDim(p.competitorId!, 'MAIN', -1)"
-                    class="w-12 h-12 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-400 flex items-center justify-center active:scale-90 transition-transform active:bg-red-900/30"
-                  >
-                    <Minus class="w-5 h-5" />
-                  </button>
-
-                  <div class="text-center min-w-[80px]">
-                    <div class="text-4xl font-black font-mono text-amber-400 tabular-nums leading-none">
-                      {{ getDimScore(p.competitorId!, 'MAIN') }}
-                    </div>
-                    <div class="text-[9px] text-neutral-600 mt-1">我的打分</div>
-                    <div v-if="p.currentScore > 0" class="text-[9px] text-neutral-500 mt-0.5">
-                      当前累计: {{ p.currentScore }}
-                    </div>
-                  </div>
-
-                  <button
-                    @click="adjustDim(p.competitorId!, 'MAIN', 1)"
-                    class="w-12 h-12 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-400 flex items-center justify-center active:scale-90 transition-transform active:bg-green-900/30"
-                  >
-                    <Plus class="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div class="flex justify-center gap-3 mt-3">
-                  <button
-                    v-for="quick in [1, 5, 10]"
-                    :key="quick"
-                    @click="adjustDim(p.competitorId!, 'MAIN', quick)"
-                    class="px-3 py-1 text-[10px] font-bold rounded-lg transition-colors bg-neutral-800 text-neutral-400 border border-neutral-700 active:bg-amber-500/20 active:text-amber-400 active:border-amber-500/30"
-                  >
-                    +{{ quick }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="!isAudition && participants.length > 0" class="mt-6 px-1">
-            <button
-              @click="handleSubmit"
-              :disabled="submitting || !hasChanges"
-              class="w-full py-3.5 bg-amber-600 hover:bg-amber-500 text-neutral-900 font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-sm"
-            >
-              {{ submitting ? '提交中...' : '提交判罚结果' }}
-            </button>
-            <p v-if="submitted" class="text-center text-xs text-green-400 mt-2">判罚已提交</p>
-          </div>
           </template>
         </div>
       </div>
@@ -573,10 +587,10 @@ import { subscribeChannel } from '@/utils/sseChannel';
 
 const route = useRoute();
 
-/** 兼容旧场次名 R{轮次}-M{场次},统一展示为 第{场次}场Round{轮次} */
+/** 兼容旧场次名 R{轮次}-M{场次},统一展示为 第{场次}场 */
 const fmtMatchName = (name?: string) => {
   const m = /^R(\d+)-M(\d+)$/.exec(name || '');
-  return m ? `第${m[2]}场Round${m[1]}` : name || '';
+  return m ? `第${m[2]}场` : name || '';
 };
 
 const loading = ref(true);
@@ -669,9 +683,7 @@ const isKnockoutJudging = computed(() => {
   return isStandard.value && !isPerCompetitor.value && participants.value.length === 2;
 });
 const isKnockoutMode = computed(() => stageMode.value === 'KNOCKOUT' && isStandard.value);
-const sortedParticipants = computed(() =>
-  participants.value.slice().sort((a, b) => (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0))
-);
+const sortedParticipants = computed(() => participants.value.slice().sort((a, b) => (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0)));
 const leftParticipant = computed(() => sortedParticipants.value[0] || null);
 const rightParticipant = computed(() => sortedParticipants.value[1] || null);
 
@@ -774,6 +786,22 @@ const pressKey = (k: string) => {
 
 const clearKeypad = () => {
   keypadValue.value = '';
+};
+
+/** 海选键盘直接输入:仅允许数字与一个小数点,最多一位小数,不超过 100 */
+const onKeypadInput = (e: Event) => {
+  const el = e.target as HTMLInputElement;
+  let v = el.value.replace(/[^0-9.]/g, '');
+  const dotIdx = v.indexOf('.');
+  if (dotIdx >= 0) {
+    v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, '');
+  }
+  const [intPart, decPart] = v.split('.');
+  const intNum = intPart ? Math.min(Number(intPart) || 0, 100) : 0;
+  const intText = intPart === '' ? '' : String(intNum);
+  v = decPart !== undefined ? intText + '.' + decPart.slice(0, 1) : intText;
+  keypadValue.value = v;
+  el.value = v;
 };
 
 /** 海选键盘评分:数字键/小数点/退格输入,回车确认提交 */
@@ -933,9 +961,7 @@ const selectOutcome = (competitorId: number, outcome: string) => {
 };
 
 const myTotal = (competitorId: number): number => {
-  return myScores.value
-    .filter((s) => s.competitorId === competitorId)
-    .reduce((sum, s) => sum + (s.score || 0), 0);
+  return myScores.value.filter((s) => s.competitorId === competitorId).reduce((sum, s) => sum + (s.score || 0), 0);
 };
 
 /** 海选逐选手打分:本场所有选手是否已被当前裁判评完(二海/加赛同样适用) */
@@ -971,7 +997,7 @@ const buildPayload = () => {
 const handleSubmit = async () => {
   if (!matchId.value) return;
   const payload = buildPayload();
-  if ((payload.scores && payload.scores.length === 0) && (!payload.outcomes || Object.keys(payload.outcomes).length === 0)) {
+  if (payload.scores && payload.scores.length === 0 && (!payload.outcomes || Object.keys(payload.outcomes).length === 0)) {
     return;
   }
   submitting.value = true;
@@ -1099,9 +1125,7 @@ const applyData = (data: any) => {
     } else {
       const list = stageMatches.value;
       if (list.length > 0) {
-        const cur = selectedMatchId.value
-          ? list.find((m) => m.id === selectedMatchId.value)
-          : null;
+        const cur = selectedMatchId.value ? list.find((m) => m.id === selectedMatchId.value) : null;
         // 当前选中的场次仍待开始(未结束):保持不变,避免 SSE/轮询刷新导致轮流跳动
         if (cur && cur.status !== 'SETTLED') {
           // keep current selection
@@ -1187,10 +1211,7 @@ const refresh = async () => {
     const nextMatchId = data?.match?.id;
     const nextRoundId = data?.currentRound?.id ?? null;
     const contextChanged =
-      !stageId.value || !matchId.value ||
-      nextStageId !== stageId.value ||
-      nextMatchId !== matchId.value ||
-      nextRoundId !== currentRoundId.value;
+      !stageId.value || !matchId.value || nextStageId !== stageId.value || nextMatchId !== matchId.value || nextRoundId !== currentRoundId.value;
     // 上下文变化,或本地为空但服务端已有参赛方时,整页应用(避免残留空态)
     const serverHasParticipants = (data?.participants || []).length > 0;
     if (contextChanged || (participants.value.length === 0 && serverHasParticipants)) {
@@ -1203,12 +1224,7 @@ const refresh = async () => {
   }
 };
 
-const loadData = async (
-  stageIdParam?: number,
-  matchIdParam?: number,
-  selectAfter?: Participant | null,
-  silent = false
-) => {
+const loadData = async (stageIdParam?: number, matchIdParam?: number, selectAfter?: Participant | null, silent = false) => {
   // 静默刷新(如提交打分后)不切换全页 loading,避免内容卸载重建导致滚动位置丢失/闪烁
   if (!silent) {
     loading.value = true;

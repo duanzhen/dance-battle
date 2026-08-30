@@ -86,10 +86,7 @@
       </div>
 
       <!-- 海选弃权/顶替(结算后、确认晋级前) -->
-      <div
-        v-if="isAuditionSource && sourceStage?.status === 'SETTLED' && !advancementConfirmed"
-        class="space-y-4 border-t border-neutral-800 pt-6"
-      >
+      <div v-if="isAuditionSource && sourceStage?.status === 'SETTLED' && !advancementConfirmed" class="space-y-4 border-t border-neutral-800 pt-6">
         <div class="flex items-center justify-between">
           <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">晋级名单</h4>
           <span class="text-xs text-neutral-500">晋级者弃权后,可手动把名次靠下的淘汰者顶上来,或不顶替(对手轮空晋级)</span>
@@ -118,20 +115,11 @@
 
         <div v-if="auditionWithdrawn.length > 0" class="space-y-1.5">
           <div class="text-[11px] text-neutral-500 mb-1">已弃权(可顶替)</div>
-          <div
-            v-for="w in auditionWithdrawn"
-            :key="w.id"
-            class="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-500/5 border border-red-900/30"
-          >
+          <div v-for="w in auditionWithdrawn" :key="w.id" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-500/5 border border-red-900/30">
             <span class="flex-1 min-w-0 text-sm text-neutral-400 line-through truncate">{{ w.name }}</span>
-            <select
-              v-model="replacementByWithdrawn[w.id]"
-              class="bg-black border border-neutral-700 rounded px-2 py-1 text-xs text-white"
-            >
+            <select v-model="replacementByWithdrawn[w.id]" class="bg-black border border-neutral-700 rounded px-2 py-1 text-xs text-white">
               <option :value="null">不顶替(对手轮空晋级)</option>
-              <option v-for="r in auditionReplacements" :key="r.id" :value="r.id">
-                {{ r.name }} #{{ r.finalRank }}
-              </option>
+              <option v-for="r in auditionReplacements" :key="r.id" :value="r.id">{{ r.name }} #{{ r.finalRank }}</option>
             </select>
             <button
               @click="handlePromote(w)"
@@ -610,6 +598,11 @@ const props = defineProps<{
   transitionIndex: number;
 }>();
 
+const emit = defineEmits<{
+  /** 晋级确认成功(参数:目标赛段ID),用于导播台自动跳转到下一赛段 */
+  confirmed: [targetStageId: string | number];
+}>();
+
 // 预排参赛者与保存状态
 const preStatus = ref('');
 const preSeeds = ref<any[]>([]);
@@ -703,9 +696,7 @@ const loadAuditionWithdrawal = async () => {
     // WITHDRAWN 需单独查询
     const wdResp: any = await listCompetitor({ stageId: sid, outcomeStatus: 'WITHDRAWN', pageNum: 1, pageSize: 1000 } as any);
     auditionWithdrawn.value = (wdResp.data || (wdResp as any).data || []).filter((c: any) => c.outcomeStatus === 'WITHDRAWN');
-    auditionReplacements.value = rep
-      .filter((c) => c.outcomeStatus === 'ELIMINATED')
-      .sort((a, b) => (a.finalRank || 9999) - (b.finalRank || 9999));
+    auditionReplacements.value = rep.filter((c) => c.outcomeStatus === 'ELIMINATED').sort((a, b) => (a.finalRank || 9999) - (b.finalRank || 9999));
     auditionWithdrawn.value.forEach((w: any) => {
       if (replacementByWithdrawn[w.id] === undefined) {
         replacementByWithdrawn[w.id] = null;
@@ -724,7 +715,9 @@ const handleWithdraw = async (c: any) => {
   if (!sourceStage.value) return;
   try {
     await ElMessageBox.confirm(`确认「${c.name}」弃权?弃权后不再占用晋级名额,可另行顶替。`, '海选弃权', {
-      type: 'warning', confirmButtonText: '确认弃权', cancelButtonText: '取消'
+      type: 'warning',
+      confirmButtonText: '确认弃权',
+      cancelButtonText: '取消'
     });
   } catch {
     return;
@@ -962,9 +955,7 @@ const auditionAdvancersVisible = computed(() => {
   const plan = Number(targetStage.value?.teamCountStart) || 0;
   const guestCount = (draftParticipants.value || []).filter((c: any) => !c._removed && isGuestComp(c)).length;
   const capacity = plan > 0 ? Math.max(0, plan - guestCount) : Number.MAX_SAFE_INTEGER;
-  return capacity <= 0
-    ? []
-    : auditionAdvancers.value.filter((c) => (c.finalRank ?? 9999) <= capacity);
+  return capacity <= 0 ? [] : auditionAdvancers.value.filter((c) => (c.finalRank ?? 9999) <= capacity);
 });
 
 /** 目标赛段模式:决定 GUEST 直入的落位方式 */
@@ -1069,6 +1060,7 @@ const handleConfirmAdvancement = async () => {
     const overrides = draftDirty.value || hasAdvancers ? await submitDraft() : undefined;
     await calculateAdvancement(sourceStage.value.id, overrides);
     ElMessage.success(`已确认晋级到「${props.targetStageName}」`);
+    emit('confirmed', props.targetStageId);
     await loadAll();
   } catch (e: any) {
     console.error('确认晋级失败:', e);

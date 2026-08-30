@@ -129,8 +129,15 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             throw new ServiceException("赛段无可初始化的参赛方");
         }
 
-        // 按 seedRank 升序排种子(null 视为最大),写回 1..n
-        comps.sort(Comparator.comparing(c -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank()));
+        // 海选/排名赛:按签到号码数值升序写 seedRank(号码即种子顺序,round 生成/落位以此为准);
+        // 其余赛制按原 seedRank 升序(空值排最后)
+        boolean perCompetitorInit = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+            || StageModeEnum.RANK.getCode().equals(stage.getStageMode());
+        if (perCompetitorInit) {
+            comps.sort(Comparator.comparingInt(c -> parseCompetitorNumber(c.getNumber())));
+        } else {
+            comps.sort(Comparator.comparing(c -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank()));
+        }
         for (int i = 0; i < comps.size(); i++) {
             TCompetitor c = comps.get(i);
             c.setSeedRank((long) (i + 1));
@@ -2215,7 +2222,16 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         sortedCids.sort((a, b) -> {
             java.math.BigDecimal sa = scores.getOrDefault(a, java.math.BigDecimal.ZERO);
             java.math.BigDecimal sb = scores.getOrDefault(b, java.math.BigDecimal.ZERO);
-            return sb.compareTo(sa);
+            int cmp = sb.compareTo(sa);
+            if (cmp != 0) {
+                return cmp;
+            }
+            // 同分:按抽签号码升序作为次级排序,保证晋级取舍/加赛落位稳定且与号码一致
+            TCompetitor ca = compMap.get(a);
+            TCompetitor cb = compMap.get(b);
+            int na = ca == null ? Integer.MAX_VALUE : parseCompetitorNumber(ca.getNumber());
+            int nb = cb == null ? Integer.MAX_VALUE : parseCompetitorNumber(cb.getNumber());
+            return Integer.compare(na, nb);
         });
 
         // 0 分选手(弃权/缺席,含未打分)不参与晋级,也不参与同分加赛;

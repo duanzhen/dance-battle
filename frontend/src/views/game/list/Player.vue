@@ -8,14 +8,7 @@
         <!-- 仅显示未签到选手开关 -->
         <div v-if="displayMode === 'player'" class="flex items-center gap-2">
           <span class="text-xs text-neutral-400">仅未签到</span>
-          <el-switch
-            v-model="filterUncheckInOnly"
-            size="small"
-            inline-prompt
-            active-text="开"
-            inactive-text="关"
-            class="filter-switch"
-          />
+          <el-switch v-model="filterUncheckInOnly" size="small" inline-prompt active-text="开" inactive-text="关" class="filter-switch" />
         </div>
 
         <el-input
@@ -34,9 +27,7 @@
     <div class="flex justify-between items-center pb-4">
       <div class="flex items-center gap-2 min-w-0">
         <span class="text-xs text-neutral-500">管理参赛选手名单及战队归属</span>
-        <span
-          class="px-2 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-[10px] text-neutral-300 flex items-center gap-1 flex-shrink-0"
-        >
+        <span class="px-2 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-[10px] text-neutral-300 flex items-center gap-1 flex-shrink-0">
           选手 {{ playerStats.total }} · 已签到 {{ playerStats.checkedIn }}
         </span>
         <span
@@ -50,22 +41,9 @@
       <div class="flex items-center gap-1">
         <el-button type="warning" size="small" :icon="Plus" @click="handleAdd" class="amber-button">添加选手</el-button>
         <el-button size="small" @click="showImportDialog = true" class="import-button">批量导入</el-button>
-        <el-button
-          v-if="canRandomCircles"
-          size="small"
-          :icon="Shuffle"
-          @click="handleRandomCircles"
-          class="import-button"
-        >
-          随机抽取圈
-        </el-button>
-        <el-segmented
-          v-model="displayMode"
-          :options="displayModeOptions"
-          size="small"
-          class="amber-segmented"
-          @change="handleModeChange"
-        />
+        <el-button v-if="canRandomCircles" size="small" :icon="Shuffle" @click="handleRandomCircles" class="import-button"> 随机抽取圈 </el-button>
+        <el-segmented v-model="displayMode" :options="displayModeOptions" size="small" class="amber-segmented" @change="handleModeChange" />
+        <el-button size="small" circle :icon="RefreshCw" class="import-button" title="刷新" @click="refreshAll" />
       </div>
     </div>
 
@@ -84,12 +62,7 @@
           <div
             class="w-12 h-12 rounded-lg bg-white border border-neutral-800 flex-none flex items-center justify-center text-neutral-700 overflow-hidden relative group-hover:border-amber-500/30 transition-colors"
           >
-            <img
-              v-if="player.avatar"
-              :src="player.avatar"
-              crossorigin="anonymous"
-              class="w-full h-full object-cover"
-            />
+            <img v-if="player.avatar" :src="player.avatar" crossorigin="anonymous" class="w-full h-full object-cover" />
             <User v-else class="w-6 h-6" />
             <div class="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full border border-neutral-950 shadow-[0_0_5px_lime]"></div>
             <!-- 签到状态标记 -->
@@ -102,7 +75,6 @@
           <div class="flex-1 min-w-0 flex items-center gap-4">
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-
                 <div class="text-sm font-bold text-white truncate">{{ player.name || '未命名' }}</div>
                 <!-- 签到状态标签 -->
                 <span
@@ -111,10 +83,7 @@
                 >
                   已签到
                 </span>
-                <span
-                  v-else
-                  class="px-1.5 py-0.5 bg-neutral-500/10 border border-neutral-500/20 rounded text-[10px] text-neutral-500 flex-shrink-0"
-                >
+                <span v-else class="px-1.5 py-0.5 bg-neutral-500/10 border border-neutral-500/20 rounded text-[10px] text-neutral-500 flex-shrink-0">
                   未签到
                 </span>
                 <!-- 选手号码 -->
@@ -138,9 +107,7 @@
               </span>
             </div>
 
-            <div v-if="player.idCard" class="text-[10px] text-neutral-500 font-mono flex-shrink-0">
-              ID: {{ player.idCard }}
-            </div>
+            <div v-if="player.idCard" class="text-[10px] text-neutral-500 font-mono flex-shrink-0">ID: {{ player.idCard }}</div>
           </div>
 
           <!-- 编辑按钮 -->
@@ -149,8 +116,17 @@
             class="bg-amber-500/20 text-amber-500 hover:bg-amber-500 hover:text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-md flex items-center justify-center"
             title="编辑"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
             </svg>
           </button>
 
@@ -174,9 +150,7 @@
           class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center gap-4 relative group hover:border-neutral-600 hover:shadow-lg transition-all duration-300"
         >
           <!-- 选手号码徽章 -->
-          <div
-            class="w-12 h-12 rounded-lg bg-amber-500/20 border border-amber-500/30 flex-none flex items-center justify-center"
-          >
+          <div class="w-12 h-12 rounded-lg bg-amber-500/20 border border-amber-500/30 flex-none flex items-center justify-center">
             <span class="text-amber-500 font-bold text-lg">{{ competitor.number || '-' }}</span>
           </div>
 
@@ -184,11 +158,7 @@
             <div class="flex-1 min-w-0">
               <!-- 选手姓名列表 -->
               <div v-if="competitor.playerList && competitor.playerList.length > 0" class="flex items-center gap-1 flex-wrap">
-                <span
-                  v-for="player in competitor.playerList"
-                  :key="player.id"
-                  class="text-sm font-medium text-neutral-200"
-                >
+                <span v-for="player in competitor.playerList" :key="player.id" class="text-sm font-medium text-neutral-200">
                   {{ player.name }}
                 </span>
               </div>
@@ -205,12 +175,7 @@
     </div>
 
     <!-- PlayerForm Dialog -->
-    <PlayerForm
-      v-model="formVisible"
-      :player="currentPlayer"
-      :tournament-id="tournamentId"
-      @submit="handleSubmit"
-    />
+    <PlayerForm v-model="formVisible" :player="currentPlayer" :tournament-id="tournamentId" @submit="handleSubmit" />
 
     <!-- CheckIn Dialog -->
     <CheckInDialog
@@ -241,26 +206,20 @@
           <div class="p-5 space-y-4">
             <div class="p-3 rounded-lg bg-neutral-800 border border-neutral-700">
               <p class="text-[10px] text-neutral-400 mb-2">下载模板，按格式填写后上传</p>
-              <button
-                @click="downloadTemplate"
-                class="text-xs text-amber-500 hover:text-amber-400 underline"
-              >
-                下载导入模板
-              </button>
+              <button @click="downloadTemplate" class="text-xs text-amber-500 hover:text-amber-400 underline">下载导入模板</button>
             </div>
 
             <label class="block cursor-pointer">
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                class="hidden"
-                @change="handleFileSelect"
-                ref="fileInputRef"
-              />
+              <input type="file" accept=".xlsx,.xls" class="hidden" @change="handleFileSelect" ref="fileInputRef" />
               <div class="border-2 border-dashed border-neutral-700 rounded-lg p-6 text-center hover:border-amber-500/50 transition-colors">
                 <div v-if="!importFile" class="space-y-2">
                   <svg class="w-8 h-8 text-neutral-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                    />
                   </svg>
                   <p class="text-xs text-neutral-500">点击选择 Excel 文件</p>
                   <p class="text-[10px] text-neutral-600">支持 .xlsx / .xls 格式</p>
@@ -272,7 +231,11 @@
               </div>
             </label>
 
-            <div v-if="importResult" class="p-3 rounded-lg" :class="importResult.success ? 'bg-green-500/10 border border-green-500/20' : 'bg-red-500/10 border border-red-500/20'">
+            <div
+              v-if="importResult"
+              class="p-3 rounded-lg"
+              :class="importResult.success ? 'bg-green-500/10 border border-green-500/20' : 'bg-red-500/10 border border-red-500/20'"
+            >
               <p class="text-xs" :class="importResult.success ? 'text-green-400' : 'text-red-400'">{{ importResult.msg }}</p>
             </div>
           </div>
@@ -305,9 +268,7 @@
       >
         <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-2xl mx-4 shadow-2xl max-h-[80vh] flex flex-col" @click.stop>
           <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
-            <h3 class="text-sm font-bold text-neutral-100 flex items-center gap-2">
-              <Shuffle class="w-4 h-4 text-amber-500" /> 随机抽取圈结果
-            </h3>
+            <h3 class="text-sm font-bold text-neutral-100 flex items-center gap-2"><Shuffle class="w-4 h-4 text-amber-500" /> 随机抽取圈结果</h3>
             <button @click="circleResult = null" class="text-neutral-500 hover:text-neutral-300">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -315,11 +276,7 @@
             </button>
           </div>
           <div class="p-5 overflow-y-auto space-y-4">
-            <div
-              v-for="circle in circleResult"
-              :key="circle.matchId"
-              class="rounded-lg border border-neutral-800 bg-black/30 overflow-hidden"
-            >
+            <div v-for="circle in circleResult" :key="circle.matchId" class="rounded-lg border border-neutral-800 bg-black/30 overflow-hidden">
               <div class="px-4 py-2.5 bg-neutral-800/60 border-b border-neutral-800 flex items-center justify-between">
                 <span class="text-xs font-bold text-amber-400">{{ circle.matchName }}</span>
                 <span class="text-[10px] text-neutral-500">{{ circle.competitors.length }} 人</span>
@@ -351,7 +308,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue';
-import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File } from 'lucide-vue-next';
+import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File, RefreshCw } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers } from '@/api/game/player';
 import { download } from '@/utils/request';
@@ -398,17 +355,14 @@ const auditionGaming = computed(() => {
 // 选手数量与已签到数量
 const playerStats = computed(() => {
   const total = players.value.length;
-  const checkedIn = players.value.filter(p => p.competitorId).length;
+  const checkedIn = players.value.filter((p) => p.competitorId).length;
   return { total, checkedIn };
 });
 
 // 仅分圈海选、赛段未开始时显示"随机抽取圈"
 const canRandomCircles = computed(() => {
   const info = firstStageInfo.value;
-  return !!info
-    && info.stageMode === 'AUDITION'
-    && (info.circles ?? 1) > 1
-    && (info.status === 'DRAFT' || info.status === 'PENDING');
+  return !!info && info.stageMode === 'AUDITION' && (info.circles ?? 1) > 1 && (info.status === 'DRAFT' || info.status === 'PENDING');
 });
 
 // 批量导入状态
@@ -424,15 +378,13 @@ const filteredPlayers = computed(() => {
 
   // 过滤掉已签到的选手
   if (filterUncheckInOnly.value) {
-    result = result.filter(player => !player.competitorId);
+    result = result.filter((player) => !player.competitorId);
   }
 
   // 搜索过滤
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase().trim();
-    result = result.filter(player =>
-      player.name?.toLowerCase().includes(keyword)
-    );
+    result = result.filter((player) => player.name?.toLowerCase().includes(keyword));
   }
 
   return result;
@@ -444,9 +396,9 @@ const filteredCompetitors = computed(() => {
 
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase().trim();
-    result = result.filter(competitor =>
-      competitor.name?.toLowerCase().includes(keyword) ||
-      competitor.playerList?.some((p: any) => p.name?.toLowerCase().includes(keyword))
+    result = result.filter(
+      (competitor) =>
+        competitor.name?.toLowerCase().includes(keyword) || competitor.playerList?.some((p: any) => p.name?.toLowerCase().includes(keyword))
     );
   }
 
@@ -503,7 +455,14 @@ const loadCompetitors = async () => {
 
 // 记录/恢复页面滚动位置:刷新列表时 DOM 重建会把滚动拉回顶部,刷新后还原
 const captureScroll = () =>
-  ([document.documentElement, document.body, document.querySelector('.main-container'), document.querySelector('.app-main')] as (HTMLElement | null)[])
+  (
+    [
+      document.documentElement,
+      document.body,
+      document.querySelector('.main-container'),
+      document.querySelector('.app-main')
+    ] as (HTMLElement | null)[]
+  )
     .filter((el): el is HTMLElement => !!el)
     .map((el) => ({ el, top: el === document.documentElement || el === document.body ? window.scrollY : el.scrollTop }));
 
@@ -541,10 +500,7 @@ const refreshAll = async () => {
     await loadFirstStageInfo();
 
     // 同时加载选手和参赛队伍
-    await Promise.all([
-      loadPlayers(),
-      loadCompetitors()
-    ]);
+    await Promise.all([loadPlayers(), loadCompetitors()]);
   } catch (error) {
     console.error('加载数据失败:', error);
   } finally {

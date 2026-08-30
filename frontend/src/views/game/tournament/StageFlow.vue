@@ -230,6 +230,7 @@
           :target-stage-id="stages[selection.id + 1].id"
           :target-stage-name="stages[selection.id + 1].name"
           :transition-index="selection.id"
+          @confirmed="handleAdvancementConfirmed"
         />
       </div>
 
@@ -546,6 +547,13 @@ const selectTransition = (index: number) => {
   // 无效索引(列表变更后)直接忽略,避免渲染阶段访问 undefined
   if (index < 0 || index >= stages.value.length - 1) return;
   selection.value = { type: 'TRANSITION', id: index };
+};
+
+/** 中间态确认晋级成功后:刷新赛段列表并自动跳转到下一赛段 */
+const handleAdvancementConfirmed = async (targetStageId: string | number) => {
+  if (targetStageId == null) return;
+  await loadStages(true);
+  selectStage(String(targetStageId));
 };
 
 const addStage = () => {

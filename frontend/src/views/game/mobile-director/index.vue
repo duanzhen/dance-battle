@@ -242,11 +242,11 @@
                     >
                       淘汰
                     </span>
-                    <span class="text-xs font-bold text-amber-400">{{ r.score ?? '-' }}</span>
+                    <span class="text-xs font-bold text-amber-400">{{ fmtScore(r.score) }}</span>
                   </div>
                   <div v-if="r.refereeScores && r.refereeScores.length" class="flex justify-end gap-2 mt-0.5">
                     <span v-for="rs in r.refereeScores" :key="rs.refereeId" class="text-[9px] text-neutral-600"
-                      >{{ rs.refereeName || '裁判' }} {{ rs.score }}</span
+                      >{{ rs.refereeName || '裁判' }} {{ fmtScore(rs.score) }}</span
                     >
                   </div>
                 </div>
@@ -432,6 +432,13 @@
                 >
                   公布结果
                 </button>
+                <button
+                  v-if="match.status === 'GAMING' && currentStage?.stageMode === 'KNOCKOUT'"
+                  @click="handleCancelStartMatch(match)"
+                  class="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:scale-95 transition-transform"
+                >
+                  重置
+                </button>
                 <!-- 展开/收起:仅已结束场次查看各轮判罚明细与重启;进行中已实时展示无需展开 -->
                 <button
                   v-if="match.status === 'SETTLED'"
@@ -575,6 +582,7 @@ import {
   directorArenaNext,
   directorArenaTempWithdraw,
   directorStartMatch,
+  directorCancelStartMatch,
   directorResetMatch,
   directorSubmitResult,
   directorPublishResult
@@ -697,6 +705,13 @@ const auditionAllScored = (match: any): boolean => {
 const safeId = (id: any): string | null => {
   if (!id || typeof id === 'object') return null;
   return String(id);
+};
+
+/** 海选分数显示:10分制两位小数;空值显示 - */
+const fmtScore = (v: any): string => {
+  if (v == null || v === '') return '-';
+  const n = Number(v);
+  return Number.isNaN(n) ? '-' : n.toFixed(2);
 };
 
 const loadStages = async () => {
@@ -841,6 +856,19 @@ const handleStartMatch = async (match: MatchInfo) => {
   } catch (e: any) {
     console.error('开始场次失败:', e);
     alert(e?.message || '开始场次失败');
+  }
+};
+
+/** 取消开始场次(误触回退):回到待开始,清空本场已提交的判罚/分数 */
+const handleCancelStartMatch = async (match: MatchInfo) => {
+  if (!confirm(`确认取消场次 #${match.id} 的开始状态？将清空本场已提交的判罚与分数，回到待开始。`)) return;
+  try {
+    await directorCancelStartMatch(match.id);
+    await refreshMatches();
+    await loadStages();
+  } catch (e: any) {
+    console.error('取消开始失败:', e);
+    alert(e?.message || '取消开始失败');
   }
 };
 

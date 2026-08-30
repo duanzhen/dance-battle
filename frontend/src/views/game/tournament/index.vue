@@ -6,7 +6,11 @@
   >
     <header class="h-12 flex-none bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 z-20">
       <div class="flex items-center gap-2">
-        <div class="w-6 h-6 bg-amber-500 rounded flex items-center justify-center shadow-lg shadow-amber-500/20">
+        <div
+          @click="openHome"
+          title="返回赛事首页"
+          class="w-6 h-6 bg-amber-500 rounded flex items-center justify-center shadow-lg shadow-amber-500/20 cursor-pointer hover:bg-amber-400 transition-colors"
+        >
           <img
             :src="logoFlat"
             alt="无败"
@@ -74,7 +78,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { MonitorPlay, ListTree, Settings2 } from 'lucide-vue-next';
 import { useDirectorStore } from '@/store/modules/directorStore';
 import DirectorLayout from './DirectorLayout.vue';
@@ -84,6 +88,7 @@ import logoFlat from '@/assets/logo/logo_flat.png';
 import MobileDirectorEntry from './MobileDirectorEntry.vue';
 
 const route = useRoute();
+const router = useRouter();
 const directorStore = useDirectorStore();
 
 // 当前激活的 tab
@@ -91,6 +96,16 @@ const activeTab = ref('director');
 
 // 从 URL 获取 tournamentId
 const tournamentId = ref<string | number | null>(null);
+
+// 点击 logo 切换到赛事首页标签:
+// 列表页(/game/list)加载时会把所在标签命名为 gameListTab,
+// 这里用同名 window.open 复用该标签并切换过去;没开过则新开标签。
+// URL 追加 #gameList 片段:目标标签已在 /game/list 时属于同文档导航,
+// 只切换焦点不刷新页面;列表页收到该 hash 后会自动清理。
+const openHome = () => {
+  const url = router.resolve({ path: '/game/list' }).href;
+  window.open(url + '#gameList', 'gameListTab');
+};
 
 onMounted(async () => {
   // 从 query.id 中获取 tournamentId

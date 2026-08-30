@@ -19,6 +19,11 @@ public class TTournamentTemplateBo {
     private String name;
 
     /**
+     * 封面图片URL
+     */
+    private String coverImage;
+
+    /**
      * 模版编码:AUDITION_32 / AUDITION_16 / AUDITION_ARENA
      */
     @NotBlank(message = "模版编码不能为空")

@@ -121,6 +121,14 @@
         >
           <!-- 背景图 -->
           <div class="absolute inset-0 bg-gradient-to-br from-neutral-800 to-neutral-700 group-hover:scale-105 transition-transform duration-500">
+            <img
+              v-if="item.coverImage"
+              :src="item.coverImage"
+              :alt="item.title"
+              class="absolute inset-0 w-full h-full object-cover"
+            />
+            <!-- 封面图上方加一层压暗遮罩,保证文字可读 -->
+            <div v-if="item.coverImage" class="absolute inset-0 bg-neutral-950/45"></div>
             <div
               class="absolute inset-0 opacity-10"
               style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 16px 16px"
@@ -186,11 +194,6 @@
             </div>
           </div>
 
-          <!-- 进度条（进行中的赛事） -->
-          <div v-if="item.status === 'LIVE'" class="absolute bottom-0 left-0 right-0 h-1 bg-neutral-800">
-            <div class="h-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]" :style="{ width: item.progress + '%' }"></div>
-          </div>
-
           <!-- 悬停遮罩 -->
           <div class="absolute inset-0 bg-amber-500/0 group-hover:bg-amber-500/5 transition-colors pointer-events-none"></div>
         </div>
@@ -229,7 +232,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
 import { useUserStore } from '@/store/modules/user';
@@ -271,6 +274,7 @@ interface TournamentItem {
   id: string | number;
   title: string;
   description: string;
+  coverImage: string;
   status: string;
   gameType: string;
   format: string;
@@ -296,6 +300,7 @@ const adaptTournamentData = (apiData: TournamentVO[]): TournamentItem[] => {
       id: item.id,
       title: item.name,
       description: item.remark || '暂无描述',
+      coverImage: item.coverImage || '',
       status: statusStr,
       gameType: '街舞赛事',
       format: '积分赛',
@@ -323,8 +328,23 @@ const loadTournaments = async () => {
 };
 
 // --- 组件挂载时加载数据 ---
+// 清理大屏页切换标签时追加的 #gameList 片段(仅替换历史,不刷新页面)
+const stripFocusHash = () => {
+  if (window.location.hash === '#gameList') {
+    history.replaceState(null, '', router.resolve({ path: '/game/list' }).href);
+  }
+};
+
 onMounted(() => {
+  // 给当前标签命名,供赛事大屏页点击 logo 时切换回本标签
+  window.name = 'gameListTab';
+  stripFocusHash();
+  window.addEventListener('hashchange', stripFocusHash);
   loadTournaments();
+});
+
+onUnmounted(() => {
+  window.removeEventListener('hashchange', stripFocusHash);
 });
 
 // --- 表单提交成功回调 ---

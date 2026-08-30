@@ -94,6 +94,14 @@ export function directorStartMatch(id: string | number) {
   });
 }
 
+/** 取消开始场次(误触回退):GAMING → PENDING,清空本场已提交分数/结果 */
+export function directorCancelStartMatch(id: string | number) {
+  return directorRequest({
+    url: `/game/director/match/${id}/cancel-start`,
+    method: 'post'
+  });
+}
+
 /** 回退单场结算 */
 export function directorResetMatch(id: string | number) {
   return directorRequest({

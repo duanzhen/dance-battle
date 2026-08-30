@@ -477,6 +477,7 @@ const submitForm = async () => {
       // 按模版创建:自动生成赛段链 + 场景 + 对战树关联
       await createTournamentByTemplate({
         name: form.name,
+        coverImage: form.coverImage,
         templateCode: selectedTemplate.value,
         remark: form.remark,
         refereeNames: form.refereeNames

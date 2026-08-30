@@ -230,6 +230,11 @@ public class RefereeMatchController {
                 vo.setDimensions(dims);
             }
         }
+        // 海选赛满分下发:按赛段 ruleConfig.maxScore 切换百分制/十分制(未配置默认 10 分制)
+        if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            vo.setMaxScore(rc != null && rc.getMaxScore() != null
+                ? rc.getMaxScore() : java.math.BigDecimal.valueOf(10));
+        }
 
         RefereeStageInfo stageInfo = new RefereeStageInfo();
         stageInfo.setId(stage.getId());

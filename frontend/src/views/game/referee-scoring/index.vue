@@ -285,7 +285,7 @@
                           : 'text-neutral-600'
                     "
                   >
-                    {{ myTotal(p.competitorId!) > 0 ? myTotal(p.competitorId!) : keypadTarget?.competitorId === p.competitorId ? '当前' : '未评' }}
+                    {{ myTotal(p.competitorId!) > 0 ? myTotal(p.competitorId!).toFixed(2) : keypadTarget?.competitorId === p.competitorId ? '当前' : '未评' }}
                   </div>
                 </button>
               </div>
@@ -300,7 +300,7 @@
                   <div v-if="!isRanking" class="text-right">
                     <div class="text-[10px] text-neutral-600">我的评分</div>
                     <div class="text-2xl font-black font-mono text-amber-400 tabular-nums">
-                      {{ keypadValue || '0' }}<span class="text-sm font-normal text-neutral-500"> / 100</span>
+                      {{ keypadValue || '0' }}<span class="text-sm font-normal text-neutral-500"> / {{ keypadMax }}</span>
                     </div>
                   </div>
                 </div>
@@ -339,7 +339,7 @@
                     v-if="keypadTarget?.competitorId != null && myTotal(keypadTarget.competitorId) > 0"
                     class="text-[9px] text-neutral-500 text-center"
                   >
-                    我的总分 {{ myTotal(keypadTarget.competitorId) }}
+                    我的总分 {{ myTotal(keypadTarget.competitorId).toFixed(2) }}
                   </p>
                   <div class="grid grid-cols-2 gap-2 mt-3">
                     <button
@@ -516,7 +516,7 @@
                     </div>
                   </div>
                   <p v-if="myTotal(p.competitorId!) > 0" class="text-[9px] text-neutral-500 text-center">
-                    我的总分 {{ myTotal(p.competitorId!) }} · 当前累计 {{ p.currentScore || 0 }}
+                    我的总分 {{ myTotal(p.competitorId!).toFixed(2) }} · 当前累计 {{ p.currentScore == null ? 0 : Number(p.currentScore).toFixed(2) }}
                   </p>
                 </div>
 
@@ -714,6 +714,11 @@ const keypadKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'
 const keypadTarget = ref<Participant | null>(null);
 const keypadValue = ref('');
 const keypadSubmitting = ref(false);
+/** 海选满分:来自后端 my-match 的 maxScore,按赛段配置切换 10分制/100分制 */
+const auditionMaxScore = ref(10);
+const keypadMax = computed(() => Math.max(1, Number(auditionMaxScore.value) || 10));
+/** 小数位数:10分制两位小数,100分制保持一位小数 */
+const keypadDecimals = computed(() => (keypadMax.value > 10 ? 1 : 2));
 
 /** 选手卡片 DOM 引用(用于选中时自动居中滚动) */
 const chipEls = new Map<number, HTMLElement>();
@@ -776,13 +781,13 @@ const pressKey = (k: string) => {
     keypadValue.value = keypadValue.value === '' ? '0.' : keypadValue.value + '.';
     return;
   }
-  // 百分制:最多一位小数、不超过 100
+  // 按赛段满分切换:10分制最多两位小数、100分制最多一位小数
   if (keypadValue.value.includes('.')) {
     const dec = keypadValue.value.split('.')[1] || '';
-    if (dec.length >= 1) return;
+    if (dec.length >= keypadDecimals.value) return;
   }
   const next = keypadValue.value === '0' ? k : keypadValue.value + k;
-  if (Number(next) > 100) return;
+  if (Number(next) > keypadMax.value) return;
   keypadValue.value = next;
 };
 
@@ -790,7 +795,7 @@ const clearKeypad = () => {
   keypadValue.value = '';
 };
 
-/** 海选键盘直接输入:仅允许数字与一个小数点,最多一位小数,不超过 100 */
+/** 海选键盘直接输入:仅允许数字与一个小数点,按满分切换小数位与上限 */
 const onKeypadInput = (e: Event) => {
   const el = e.target as HTMLInputElement;
   let v = el.value.replace(/[^0-9.]/g, '');
@@ -799,9 +804,9 @@ const onKeypadInput = (e: Event) => {
     v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, '');
   }
   const [intPart, decPart] = v.split('.');
-  const intNum = intPart ? Math.min(Number(intPart) || 0, 100) : 0;
+  const intNum = intPart ? Math.min(Number(intPart) || 0, keypadMax.value) : 0;
   const intText = intPart === '' ? '' : String(intNum);
-  v = decPart !== undefined ? intText + '.' + decPart.slice(0, 1) : intText;
+  v = decPart !== undefined ? intText + '.' + decPart.slice(0, keypadDecimals.value) : intText;
   keypadValue.value = v;
   el.value = v;
 };
@@ -843,8 +848,8 @@ const confirmKeypad = async () => {
   const target = keypadTarget.value;
   if (!target || target.competitorId == null) return;
   const score = Number(keypadValue.value);
-  if (Number.isNaN(score) || score < 0 || score > 100) {
-    alert('请输入 0-100 的有效分数（最多一位小数）');
+  if (Number.isNaN(score) || score < 0 || score > keypadMax.value) {
+    alert(`请输入 0-${keypadMax.value} 的有效分数（最多 ${keypadDecimals.value} 位小数）`);
     return;
   }
   keypadSubmitting.value = true;
@@ -1035,6 +1040,7 @@ const applyData = (data: any) => {
   stageName.value = data?.stage?.name || '';
   stageMode.value = data?.stage?.stageMode || '';
   scoreType.value = data?.scoreType || '';
+  auditionMaxScore.value = data?.maxScore != null ? Number(data.maxScore) : 10;
   matchId.value = data?.match?.id;
   matchName.value = fmtMatchName(data?.match?.name || '');
   matchMode.value = data?.match?.matchMode || 'STANDARD';

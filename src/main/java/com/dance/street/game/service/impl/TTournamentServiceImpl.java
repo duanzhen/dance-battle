@@ -239,6 +239,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         // 1. 创建赛事
         TTournamentBo tb = new TTournamentBo();
         tb.setName(bo.getName());
+        tb.setCoverImage(bo.getCoverImage());
         tb.setStatus(0L);
         tb.setLogicalWidth(1920L);
         tb.setLogicalHeight(1080L);
@@ -510,6 +511,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
     private String buildRuleConfig(StageDef d) {
         if ("AUDITION".equals(d.mode())) {
             return "{\"mode\":\"AUDITION\",\"format\":\"BO1\",\"circles\":1,"
+                + "\"maxScore\":10,"
                 + "\"scoring\":{\"type\":\"TOTAL_SCORE\",\"matchMode\":\"VOTING\","
                 + "\"aggregateRule\":\"SUM\",\"refereeAggregateRule\":\"SUM\"},"
                 + "\"transition\":{},"

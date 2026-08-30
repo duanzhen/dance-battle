@@ -138,8 +138,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                     if (se.getCompetitorId() == null || se.getScore() == null) {
                         continue;
                     }
-                    // 分数校验:海选 0-100;排名赛按维度满分校验(未配置时默认 100)
-                    java.math.BigDecimal maxScore = rankMaxScore(sc, se.getDimension());
+                    // 分数校验:海选按赛段配置满分校验(默认 10 分制,可配置 100 分制);
+                    // 排名赛按维度满分校验(未配置时默认 100)
+                    java.math.BigDecimal maxScore = isAudition
+                        ? (rc != null && rc.getMaxScore() != null
+                            ? rc.getMaxScore() : java.math.BigDecimal.valueOf(10))
+                        : rankMaxScore(sc, se.getDimension());
                     if (se.getScore().compareTo(java.math.BigDecimal.ZERO) < 0
                         || se.getScore().compareTo(maxScore) > 0) {
                         throw new ServiceException("{}打分须在 0-{} 之间", isAudition ? "海选" : "维度", maxScore);
@@ -444,6 +448,37 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         refereeSseNotifier.notifyMatch(stage.getId(), match.getId(), "match");
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), match.getId(), "match");
         log.info("场次[{}]已单独开始", matchId);
+    }
+
+    /**
+     * 取消开始场次(误触回退):GAMING → PENDING,清空本场已提交分数/结果与轮次状态,
+     * 用于导播台点错「开始」后还原为待开始(可重新开始正确场次)。
+     * 仅淘汰赛支持:其他赛制场次由赛段整体控制,不支持单场回退待开始。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelStartMatch(Long matchId) {
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在");
+        }
+        if (!StageConstants.MATCH_GAMING.equals(match.getStatus())) {
+            throw new ServiceException("仅进行中的场次可取消开始,当前: {}", match.getStatus());
+        }
+        TStage stage = stageMapper.selectById(match.getStageId());
+        if (stage == null
+            || StageConstants.STAGE_SETTLED.equals(stage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
+            throw new ServiceException("赛段状态不允许取消开始场次");
+        }
+        if (!StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("仅淘汰赛支持取消开始场次");
+        }
+        // 清空本场已提交的分数/结果,场次与轮次回 PENDING(已提交判罚一并作废,由前端确认兜底)
+        clearMatchState(match, StageConstants.MATCH_PENDING);
+        refereeSseNotifier.notifyMatch(match.getStageId(), matchId, "reset");
+        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), matchId, "reset");
+        log.info("场次[{}]已取消开始,回退待开始", matchId);
     }
 
     @Override

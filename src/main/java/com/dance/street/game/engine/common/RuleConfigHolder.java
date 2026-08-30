@@ -5,6 +5,7 @@ import lombok.Data;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.math.BigDecimal;
 
 /**
  * 赛段规则配置(对应 TStage.rule_config JSON)。
@@ -40,6 +41,9 @@ public class RuleConfigHolder implements Serializable {
 
     /** 海选分圈数(mode=AUDITION 时使用,1=不分圈,全场一场) */
     private Integer circles;
+
+    /** 海选满分(mode=AUDITION 时使用,默认 10 分制,支持两位小数) */
+    private BigDecimal maxScore;
 
     /**
      * 每圈晋级人数(mode=AUDITION 分圈时可选):按圈顺序(ZONE-1..n)逐圈配置晋级名额,

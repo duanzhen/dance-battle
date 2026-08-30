@@ -22,6 +22,12 @@ public interface ITMatchResultService {
      */
     void startMatch(Long matchId);
 
+    /**
+     * 取消开始场次(误触回退):GAMING → PENDING,清空本场已提交分数/结果与轮次状态,
+     * 用于导播台点错「开始」后还原为待开始。仅淘汰赛支持。
+     */
+    void cancelStartMatch(Long matchId);
+
     /** 回退单场结算(调试用):级联清下游占位、清本场分数与排名、场次回 GAMING */
     void resetMatch(Long matchId);
 

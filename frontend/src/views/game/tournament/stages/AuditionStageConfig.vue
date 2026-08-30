@@ -34,31 +34,8 @@
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">评分规则</div>
             <div class="flex flex-wrap gap-2">
-              <span
-                class="px-2.5 py-1 rounded text-xs border"
-                :class="
-                  config.advanceByScore ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-neutral-800 bg-neutral-900 text-neutral-600'
-                "
-                >按评分晋级</span
-              >
-              <span
-                class="px-2.5 py-1 rounded text-xs border"
-                :class="
-                  config.advanceByRank ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-neutral-800 bg-neutral-900 text-neutral-600'
-                "
-                >按排名晋级</span
-              >
-              <span
-                class="px-2.5 py-1 rounded text-xs border"
-                :class="
-                  config.judgeVote ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-neutral-800 bg-neutral-900 text-neutral-600'
-                "
-                >评委投票</span
-              >
+              <span class="px-2.5 py-1 rounded text-xs border border-green-500/30 bg-green-500/10 text-green-400">按评分晋级</span>
               <span class="px-2.5 py-1 rounded text-xs border border-neutral-800 bg-neutral-900 text-neutral-300">满分 {{ config.maxScore }}</span>
-              <span class="px-2.5 py-1 rounded text-xs border border-neutral-800 bg-neutral-900 text-neutral-300"
-                >及格线 {{ config.passingScore }}</span
-              >
             </div>
           </div>
 
@@ -245,50 +222,18 @@
               </p>
             </div>
 
-            <!-- 晋级条件 -->
-            <div>
-              <label class="text-xs text-neutral-500 mb-2 block">晋级条件</label>
-              <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
-                <label class="flex items-center justify-between">
-                  <span class="text-sm text-neutral-300">按评分晋级</span>
-                  <input type="checkbox" v-model="config.advanceByScore" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-                </label>
-                <label class="flex items-center justify-between">
-                  <span class="text-sm text-neutral-300">按排名晋级</span>
-                  <input type="checkbox" v-model="config.advanceByRank" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-                </label>
-                <label class="flex items-center justify-between">
-                  <span class="text-sm text-neutral-300">评委投票</span>
-                  <input type="checkbox" v-model="config.judgeVote" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-                </label>
-              </div>
-            </div>
-
             <!-- 评分规则 -->
-            <div v-if="config.advanceByScore || config.judgeVote">
+            <div>
               <label class="text-xs text-neutral-500 mb-2 block">评分规则</label>
-              <div class="grid grid-cols-2 gap-6">
-                <div>
-                  <label class="text-xs text-neutral-600 mb-1 block">满分</label>
-                  <input
-                    type="number"
-                    v-model.number="config.maxScore"
-                    :min="1"
-                    class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                    @input="handleUpdate"
-                  />
-                </div>
-                <div>
-                  <label class="text-xs text-neutral-600 mb-1 block">及格分数线</label>
-                  <input
-                    type="number"
-                    v-model.number="config.passingScore"
-                    :min="0"
-                    :max="config.maxScore"
-                    class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                    @input="handleUpdate"
-                  />
-                </div>
+              <div>
+                <label class="text-xs text-neutral-600 mb-1 block">满分</label>
+                <input
+                  type="number"
+                  v-model.number="config.maxScore"
+                  :min="1"
+                  class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                  @input="handleUpdate"
+                />
               </div>
             </div>
 
@@ -348,11 +293,7 @@ const config = ref<any>({
   advanceCount: 16,
   circles: 1,
   format: 'BO1',
-  advanceByScore: true,
-  advanceByRank: false,
-  judgeVote: false,
-  maxScore: 100,
-  passingScore: 60,
+  maxScore: 10,
   circleAdvanceCounts: [],
   circleRefereeIds: []
 });

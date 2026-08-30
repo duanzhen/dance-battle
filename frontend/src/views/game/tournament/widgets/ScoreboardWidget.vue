@@ -283,7 +283,7 @@ const numOf = (p: any) => {
   const n = parseInt(number(p), 10);
   return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
 };
-const score = (p: any) => (p?.scoreValue == null ? '–' : Number(p.scoreValue).toFixed(1));
+const score = (p: any) => (p?.scoreValue == null ? '–' : Number(p.scoreValue).toFixed(2));
 
 onMounted(() => {
   loadData();

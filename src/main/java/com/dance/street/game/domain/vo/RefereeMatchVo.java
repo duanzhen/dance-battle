@@ -37,6 +37,9 @@ public class RefereeMatchVo implements Serializable {
     /** 本赛段打分配置类型(决定裁判端界面形态) */
     private String scoreType;
 
+    /** 海选赛满分(按赛段配置切换,10分制/100分制;非海选为 null) */
+    private BigDecimal maxScore;
+
     /** 打分维度(RANKING 模式使用) */
     private List<RefereeDimensionInfo> dimensions;
 

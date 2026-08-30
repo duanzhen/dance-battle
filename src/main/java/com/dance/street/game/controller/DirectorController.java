@@ -192,6 +192,18 @@ public class DirectorController {
     }
 
     /**
+     * 取消开始场次(误触回退):GAMING → PENDING,清空本场已提交分数/结果,
+     * 用于导播台点错「开始」后还原为待开始。仅淘汰赛支持。
+     */
+    @Log(title = "导播台取消开始场次", businessType = BusinessType.UPDATE)
+    @PostMapping("/match/{id}/cancel-start")
+    public R<Void> cancelStartMatch(@PathVariable("id") Long id, HttpServletRequest request) {
+        assertMatchInTournament(currentTournament(request), id);
+        matchResultService.cancelStartMatch(id);
+        return R.ok();
+    }
+
+    /**
      * 回退单场结算(调试用)
      */
     @Log(title = "导播台重置场次", businessType = BusinessType.UPDATE)

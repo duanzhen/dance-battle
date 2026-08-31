@@ -7,7 +7,6 @@ import com.dance.street.game.engine.common.enums.StageModeEnum;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 淘汰赛对阵生成。
@@ -126,12 +125,6 @@ public class KnockoutGenerator implements StageGenerator {
             // 16 人 = (1,16),(8,9),(5,12),(4,13),(3,14),(6,11),(7,10),(2,15),头尾交叉分散强种子)
             int seedA = seedPairing ? layout[2 * i] : (2 * i + 1);
             int seedB = seedPairing ? layout[2 * i + 1] : (2 * i + 2);
-            // SEED 摆位:同一场两个种子上下位置随机,保持配对不变
-            if (seedPairing && ThreadLocalRandom.current().nextBoolean()) {
-                int tmp = seedA;
-                seedA = seedB;
-                seedB = tmp;
-            }
             List<SlotPlan> slots = new ArrayList<>();
             slots.add(seedSlot(0, seedA, actualCount, seededCompetitorIds));
             slots.add(seedSlot(1, seedB, actualCount, seededCompetitorIds));

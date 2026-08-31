@@ -27,6 +27,7 @@ target/
 /.nb-gradle/
 build/
 e2e
+docs
 !**/src/main/**/build/
 !**/src/test/**/build/
 

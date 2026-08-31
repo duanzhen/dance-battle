@@ -146,6 +146,15 @@ class KnockoutGeneratorTest {
             assertTrue(actual.containsAll(pair) && pair.containsAll(actual),
                 "场" + i + " 应为配对 " + pair + ",实际 " + actual);
         }
+        // 上下位置固定(不再随机):slot0 始终是摆位表左值,slot1 是右值
+        // 8 人摆位 [1,8,4,5,3,6,2,7] → 场0=(1,8)、场1=(4,5)、场2=(3,6)、场3=(2,7)
+        int[] layout = KnockoutGenerator.SEED_LAYOUT.get(8);
+        for (int i = 0; i < r1.size(); i++) {
+            assertEquals(Long.valueOf(layout[2 * i]), r1.get(i).getSlots().get(0).getCompetitorId(),
+                "场" + i + " 上方应为种子 " + layout[2 * i]);
+            assertEquals(Long.valueOf(layout[2 * i + 1]), r1.get(i).getSlots().get(1).getCompetitorId(),
+                "场" + i + " 下方应为种子 " + layout[2 * i + 1]);
+        }
     }
 
     @Test

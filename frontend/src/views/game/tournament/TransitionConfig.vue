@@ -148,6 +148,32 @@
             >
               撤销调整
             </button>
+            <!-- 已确认晋级后的后续调整:单独保存(种子顺序/移除 GUEST 等) -->
+            <button
+              v-if="advancementConfirmed && draftDirty && !targetLocked"
+              @click="handleSaveDraft"
+              :disabled="savingDraft"
+              class="text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
+            >
+              {{ savingDraft ? '保存中...' : '保存调整' }}
+            </button>
+            <!-- 海选→首个淘汰赛 SEED 模式:随机交换上下位置(1/3 恒在上、2/4 恒在下) -->
+            <template v-if="isSeedKnockoutTransition && !targetLocked">
+              <button
+                @click="randomSwapTopBottom"
+                class="text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                title="对每场配对随机交换上下位置;1/3 号种子固定在上、2/4 号种子固定在下"
+              >
+                <Shuffle class="w-3 h-3" /> 随机交换上下
+              </button>
+              <button
+                @click="restoreSeedOrder"
+                class="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:border-neutral-600 transition-colors flex items-center gap-1"
+                title="恢复为按海选名次排列的原始种子位置"
+              >
+                <RotateCcw class="w-3 h-3" /> 恢复
+              </button>
+            </template>
             <span
               v-if="targetStage?.teamCountStart"
               class="text-[10px] px-2 py-0.5 rounded bg-black border border-neutral-800 text-neutral-500"
@@ -213,10 +239,10 @@
                 :disabled="!canAddGuest"
                 class="w-full bg-black border border-neutral-700 rounded-lg p-2 text-sm text-white focus:border-amber-500 focus:outline-none appearance-none disabled:opacity-50"
               >
-                <option value="AUTO">自动</option>
                 <option value="FRONT">顶前</option>
                 <option value="TAIL">队尾</option>
                 <option value="SPECIFIED">指定种子</option>
+                <option value="AUTO">自动</option>
               </select>
             </div>
             <div v-if="directForm.placement === 'SPECIFIED'" class="w-24">
@@ -579,7 +605,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowRight, SlidersHorizontal, Lock, UserPlus, Trash2 } from 'lucide-vue-next';
+import { ArrowRight, SlidersHorizontal, Lock, UserPlus, Trash2, Shuffle, RotateCcw } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { getStage, getStagePreBracket, adjustStageAdvancement, addStageGuest, setStageSeedOrder } from '@/api/game/stage';
 import { calculateAdvancement } from '@/api/game/stage/lifecycle';
@@ -608,6 +634,7 @@ const preStatus = ref('');
 const preSeeds = ref<any[]>([]);
 const advSaving = ref(false);
 const confirmingAdvancement = ref(false);
+const savingDraft = ref(false);
 const pendingAdvancers = ref<any[]>([]);
 const selectedAdvanceIds = ref<string[]>([]);
 const sourceStage = ref<any>(null);
@@ -943,7 +970,7 @@ const computePairs = (list: any[], pairingMode: string, plannedSize = 0) => {
 };
 
 // ---- GUEST 直入目标赛段:按目标赛段模式的专属落位逻辑 ----
-const directForm = reactive({ name: '', type: 0, number: '', placement: 'AUTO', specifiedSeed: null as number | null });
+const directForm = reactive({ name: '', type: 0, number: '', placement: 'FRONT', specifiedSeed: null as number | null });
 const directCompetitors = ref<any[]>([]);
 const draftParticipants = ref<any[]>([]);
 const draftRemovedIds = ref<string[]>([]);
@@ -1032,14 +1059,30 @@ const rebuildDraft = () => {
         _removed: false
       }));
     rows = [...fromB, ...advancers];
-    // 默认种子:已落库参赛方(如 GUEST)保持原种子位,晋级者从其后按 finalRank 顺序后补
-    // (预排已按剩余名额分配好种子号,此处仅对晋级者统一从 base+1 起连续排布,与后端填充一致)
-    const base = rows.filter((r) => !r._advancer).reduce((m, c) => Math.max(m, c.seedRank || 0), 0);
-    let next = base + 1;
+    // 默认种子:已落库参赛方(如 GUEST)保持原种子位,晋级者按 finalRank 顺序
+    // 填入未被占用的种子空位(与后端 getPreBracket 口径一致)——GUEST 占高位时
+    // 晋级者自动填充其前/后空位,而不是一律排在最高种子之后(避免超出对战树范围/前段空位)
+    const occupied = new Set<number>();
+    rows.forEach((r) => {
+      if (!r._advancer && r.seedRank != null) {
+        occupied.add(Number(r.seedRank));
+      }
+    });
+    const plan = Number(targetStage.value?.teamCountStart) || Math.max(rows.length, ...rows.map((r) => r.seedRank || 0));
+    let cursor = 1;
     for (const a of rows
       .filter((r) => r._advancer)
       .sort((x, y) => (x.seedRank ?? Number.MAX_SAFE_INTEGER) - (y.seedRank ?? Number.MAX_SAFE_INTEGER))) {
-      a.seedRank = next++;
+      while (cursor <= plan && occupied.has(cursor)) {
+        cursor++;
+      }
+      if (cursor > plan) {
+        a._removed = true; // 名额已满:超出计划的晋级者不进入
+        continue;
+      }
+      a.seedRank = cursor;
+      occupied.add(cursor);
+      cursor++;
     }
   }
   draftParticipants.value = rows;
@@ -1067,6 +1110,22 @@ const handleConfirmAdvancement = async () => {
     ElMessage.error(e?.response?.data?.msg || '确认晋级失败');
   } finally {
     confirmingAdvancement.value = false;
+  }
+};
+
+/** 已确认晋级后的草稿调整(种子顺序/移除 GUEST 等)单独保存 */
+const handleSaveDraft = async () => {
+  if (!advancementConfirmed.value || savingDraft.value || targetLocked.value) return;
+  savingDraft.value = true;
+  try {
+    await submitDraft();
+    ElMessage.success('已保存调整');
+    await loadAll();
+  } catch (e: any) {
+    console.error('保存调整失败:', e);
+    ElMessage.error(e?.response?.data?.msg || '保存调整失败');
+  } finally {
+    savingDraft.value = false;
   }
 };
 
@@ -1159,7 +1218,7 @@ const addDirectGuest = () => {
   draftDirty.value = true;
   directForm.name = '';
   directForm.number = '';
-  directForm.placement = 'AUTO';
+  directForm.placement = 'FRONT';
   directForm.specifiedSeed = null;
   ElMessage.success('GUEST 已加入草稿,确认晋级时一并提交');
 };
@@ -1280,6 +1339,46 @@ const swapDirectPair = (pair: any) => {
   swapDirectSeeds(pair.left, pair.right);
 };
 
+/** 海选→首个淘汰赛(SEED 模式)的中间态随机交换入口 */
+const isSeedKnockoutTransition = computed(() => targetMode.value === 'KNOCKOUT' && directPairingMode.value === 'SEED');
+
+/**
+ * 随机交换上下位置:对每场配对 50% 概率交换上下;
+ * 涉及 1/2/3/4 号种子时固定 1、3 在上、2、4 在下(不做随机)。
+ */
+const randomSwapTopBottom = () => {
+  if (!isSeedKnockoutTransition.value || targetLocked.value) return;
+  let swapped = 0;
+  for (const pair of directPairs.value) {
+    if (!pair.left || !pair.right) continue;
+    const l = slotSeedAt(pair, 'left'); // 上方槽位的种子号
+    const r = slotSeedAt(pair, 'right'); // 下方槽位的种子号
+    const lTop = l === 1 || l === 3;
+    const rTop = r === 1 || r === 3;
+    const lBottom = l === 2 || l === 4;
+    const rBottom = r === 2 || r === 4;
+    let doSwap: boolean;
+    if (lTop || rTop || lBottom || rBottom) {
+      // 前四种子:1/3 必须在上面、2/4 必须在下面
+      doSwap = rTop || lBottom;
+    } else {
+      doSwap = Math.random() < 0.5;
+    }
+    if (doSwap) {
+      swapDirectPair(pair);
+      swapped++;
+    }
+  }
+  ElMessage.success(swapped > 0 ? `已随机交换 ${swapped} 场上下位置(1/3 恒在上、2/4 恒在下)` : '随机结果与当前一致,无需交换');
+};
+
+/** 恢复:按后端预排(海选名次)重建原始种子位置 */
+const restoreSeedOrder = () => {
+  if (targetLocked.value) return;
+  rebuildDraft();
+  ElMessage.success('已恢复原始种子位置');
+};
+
 /** 小组赛落位预览:蛇形分组(与 GroupGenerator.snakeSplit 一致) */
 const groupPreview = computed(() => {
   if (targetMode.value !== 'GROUP') return [];
@@ -1325,7 +1424,7 @@ watch([() => props.sourceStageId, () => props.targetStageId], () => {
   directForm.name = '';
   directForm.type = 0;
   directForm.number = '';
-  directForm.placement = 'AUTO';
+  directForm.placement = 'FRONT';
   directForm.specifiedSeed = null;
   directCompetitors.value = [];
   draftParticipants.value = [];

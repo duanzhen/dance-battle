@@ -134,10 +134,9 @@ class KnockoutGeneratorTest {
         List<MatchPlan> r1 = round(plan, 1);
 
         assertEquals(4, r1.size());
-        // 查表摆位:场0=(1,8)、场1=(4,5)、场2=(3,6)、场3=(2,7),强种子分散;
-        // 同一场上下槽位是随机摆放的,只校验配对集合,不校验槽位顺序
+        // 8 人基数摆位:场0=(1,8)、场1=(5,4)、场2=(3,6)、场3=(7,2),强种子分散
         List<List<Long>> expectedPairs = List.of(
-            List.of(1L, 8L), List.of(4L, 5L), List.of(3L, 6L), List.of(2L, 7L));
+            List.of(1L, 8L), List.of(5L, 4L), List.of(3L, 6L), List.of(7L, 2L));
         for (int i = 0; i < expectedPairs.size(); i++) {
             List<Long> pair = expectedPairs.get(i);
             List<Long> actual = List.of(
@@ -147,8 +146,8 @@ class KnockoutGeneratorTest {
                 "场" + i + " 应为配对 " + pair + ",实际 " + actual);
         }
         // 上下位置固定(不再随机):slot0 始终是摆位表左值,slot1 是右值
-        // 8 人摆位 [1,8,4,5,3,6,2,7] → 场0=(1,8)、场1=(4,5)、场2=(3,6)、场3=(2,7)
-        int[] layout = KnockoutGenerator.SEED_LAYOUT.get(8);
+        // 8 人摆位 [1,8,5,4,3,6,7,2] → 场0=(1,8)、场1=(5,4)、场2=(3,6)、场3=(7,2)
+        int[] layout = KnockoutGenerator.seedLayout(8);
         for (int i = 0; i < r1.size(); i++) {
             assertEquals(Long.valueOf(layout[2 * i]), r1.get(i).getSlots().get(0).getCompetitorId(),
                 "场" + i + " 上方应为种子 " + layout[2 * i]);
@@ -229,6 +228,51 @@ class KnockoutGeneratorTest {
         assertEquals(3, plan.getMatches().size(), "4 人标准 bracket 应为 2 半决赛 + 1 决赛");
         assertTrue(plan.getMatches().stream().noneMatch(MatchPlan::isThirdPlaceMatch));
         assertTrue(plan.getMatches().stream().allMatch(m -> m.getLoserTargetRound() == null));
+    }
+
+    @Test
+    void sixtyFour_seedLayout_matchesAuditionInterleave() {
+        // 64 人海选后淘汰赛摆位:通用生成器从 8 人基数递推,左侧 16 场 + 右侧 16 场
+        int[] layout = KnockoutGenerator.seedLayout(64);
+        assertEquals(64, layout.length);
+
+        int[][] left = {
+            {1, 64}, {32, 33}, {16, 49}, {17, 48}, {8, 57}, {25, 40}, {9, 56}, {24, 41},
+            {44, 21}, {53, 12}, {37, 28}, {60, 5}, {45, 20}, {52, 13}, {36, 29}, {61, 4}
+        };
+        int[][] right = {
+            {3, 62}, {30, 35}, {14, 51}, {19, 46}, {6, 59}, {27, 38}, {11, 54}, {22, 43},
+            {42, 23}, {55, 10}, {39, 26}, {58, 7}, {47, 18}, {50, 15}, {34, 31}, {63, 2}
+        };
+        for (int i = 0; i < 16; i++) {
+            assertArrayEquals(left[i], new int[]{layout[2 * i], layout[2 * i + 1]}, "左半区场" + (i + 1));
+            assertArrayEquals(right[i], new int[]{layout[32 + 2 * i], layout[32 + 2 * i + 1]}, "右半区场" + (i + 1));
+        }
+        // 全部 64 个种子恰好各出现一次
+        boolean[] seen = new boolean[65];
+        for (int v : layout) {
+            assertTrue(v >= 1 && v <= 64, "种子越界: " + v);
+            assertFalse(seen[v], "种子重复: " + v);
+            seen[v] = true;
+        }
+    }
+
+    @Test
+    void seedLayout_recursionMatchesAllLevels() {
+        // 4 人基数:左侧 (1,4);右侧 (3,2)
+        assertArrayEquals(new int[]{1, 4, 3, 2}, KnockoutGenerator.seedLayout(4));
+        // 8 人基数
+        assertArrayEquals(new int[]{1, 8, 5, 4, 3, 6, 7, 2}, KnockoutGenerator.seedLayout(8));
+        // 16 人:左侧 (1,16),(8,9),(12,5),(13,4);右侧 (3,14),(6,11),(10,7),(15,2)
+        assertArrayEquals(
+            new int[]{1, 16, 8, 9, 12, 5, 13, 4, 3, 14, 6, 11, 10, 7, 15, 2},
+            KnockoutGenerator.seedLayout(16));
+        // 32 人:左侧 (1,32),(16,17),(8,25),(9,24),(21,12),(28,5),(20,13),(29,4);
+        //        右侧 (3,30),(14,19),(6,27),(11,22),(23,10),(26,7),(18,15),(31,2)
+        assertArrayEquals(
+            new int[]{1, 32, 16, 17, 8, 25, 9, 24, 21, 12, 28, 5, 20, 13, 29, 4,
+                      3, 30, 14, 19, 6, 27, 11, 22, 23, 10, 26, 7, 18, 15, 31, 2},
+            KnockoutGenerator.seedLayout(32));
     }
 
     private List<MatchPlan> round(BracketPlan plan, int round) {

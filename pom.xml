@@ -241,4 +241,34 @@
 		</plugins>
 	</build>
 
+	<!--
+		GraalVM Native Image 构建 profile:
+		mvn -Pnative package
+		前提: 使用 GraalVM JDK 运行 Maven(本地 JAVA_HOME 指向 GraalVM, 或 CI 用 setup-graalvm)
+		spring-boot-starter-parent 的 native profile 已负责 process-aot 与 reachability metadata,
+		这里只需绑定 native-maven-plugin 的 compile-no-fork 到 package 阶段。
+	-->
+	<profiles>
+		<profile>
+			<id>native</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.graalvm.buildtools</groupId>
+						<artifactId>native-maven-plugin</artifactId>
+						<executions>
+							<execution>
+								<id>build-native</id>
+								<goals>
+									<goal>compile-no-fork</goal>
+								</goals>
+								<phase>package</phase>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
+
 </project>

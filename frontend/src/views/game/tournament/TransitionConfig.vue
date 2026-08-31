@@ -609,6 +609,7 @@ import { ArrowRight, SlidersHorizontal, Lock, UserPlus, Trash2, Shuffle, RotateC
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { getStage, getStagePreBracket, adjustStageAdvancement, addStageGuest, setStageSeedOrder } from '@/api/game/stage';
 import { calculateAdvancement } from '@/api/game/stage/lifecycle';
+import { seedLayout } from '@/utils/seedLayout';
 import { promoteReplacement } from '@/api/game/stage/lifecycle';
 import { listCompetitor, delCompetitor } from '@/api/game/competitor';
 import { listMatch } from '@/api/game/match';
@@ -896,24 +897,6 @@ const nextPowerOfTwo = (v: number) => {
   while (p < v) p <<= 1;
   return p;
 };
-
-// ---- 标准种子摆位:与后端 KnockoutGenerator.SEED_LAYOUT 一致(写死的赛事约定交叉排列) ----
-const SEED_LAYOUT_TABLE: Record<number, number[]> = {
-  8: [1, 8, 4, 5, 3, 6, 2, 7],
-  16: [1, 16, 8, 9, 5, 12, 4, 13, 3, 14, 6, 11, 7, 10, 2, 15],
-  32: [1, 32, 9, 24, 16, 17, 8, 25, 5, 28, 13, 20, 12, 21, 4, 29, 3, 30, 11, 22, 14, 19, 6, 27, 7, 26, 15, 18, 10, 23, 2, 31]
-};
-const seedPositions = (n: number): number[] => {
-  if (n <= 1) return [1];
-  const prev = seedPositions(n / 2);
-  const res: number[] = new Array(n);
-  for (let i = 0; i < prev.length; i++) {
-    res[2 * i] = prev[i];
-    res[2 * i + 1] = n + 1 - prev[i];
-  }
-  return res;
-};
-const seedLayout = (n: number) => SEED_LAYOUT_TABLE[n] || seedPositions(n);
 
 /** 对战树槽位的固定种子序号:SEED 按标准布局表,SEQUENTIAL 相邻配对(2i+1, 2i+2);空位同样编号 */
 const slotSeedAt = (pair: any, side: 'left' | 'right') => {

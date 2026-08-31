@@ -6,7 +6,6 @@ import com.dance.street.game.engine.common.enums.StageModeEnum;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 淘汰赛对阵生成。
@@ -122,7 +121,7 @@ public class KnockoutGenerator implements StageGenerator {
             m.setDisplayZone(i < r1Count / 2 ? "LEFT" : "RIGHT");
             m.setFinalMatch(true);
             // 配对模式:SEQUENTIAL=1-2、3-4(相邻);SEED=标准种子摆位(SEED_LAYOUT 写死的赛事约定:
-            // 16 人 = (1,16),(8,9),(5,12),(4,13),(3,14),(6,11),(7,10),(2,15),头尾交叉分散强种子)
+            // 16 人 = (1,16),(8,9),(12,5),(13,4),(3,14),(6,11),(10,7),(15,2),头尾交叉分散强种子)
             int seedA = seedPairing ? layout[2 * i] : (2 * i + 1);
             int seedB = seedPairing ? layout[2 * i + 1] : (2 * i + 2);
             List<SlotPlan> slots = new ArrayList<>();
@@ -210,23 +209,54 @@ public class KnockoutGenerator implements StageGenerator {
     }
 
     /**
-     * SEED 模式标准 bracket 摆位(种子号顺序,每两个一对,前半 LEFT 后半 RIGHT)。
-     * 8/16/32 为赛事约定摆位(强种子分散、汇聚对称);其余人数回退 seedPositions。
+     * 4 人基数(赛事约定):左侧 (1,4);右侧 (3,2)。
+     * 8/16/32/64… 由 {@link #seedLayout(int)} 逐层递推生成,不查表。
      */
-    static final Map<Integer, int[]> SEED_LAYOUT = Map.of(
-        8,  new int[]{1, 8, 4, 5, 3, 6, 2, 7},
-        16, new int[]{1, 16, 8, 9, 5, 12, 4, 13, 3, 14, 6, 11, 7, 10, 2, 15},
-        32, new int[]{1, 32, 9, 24, 16, 17, 8, 25, 5, 28, 13, 20, 12, 21, 4, 29,
-                      3, 30, 11, 22, 14, 19, 6, 27, 7, 26, 15, 18, 10, 23, 2, 31}
-    );
+    static final int[] BASE_4 = {1, 4, 3, 2};
 
     /**
-     * SEED 模式标准摆位:8/16/32 用赛事约定查表,其余人数按递归种子位生成。
+     * SEED 模式标准摆位(通用生成器,强种子分散、汇聚对称):
+     * 以 4 人基数逐层翻倍,每对 (x,y)(x+y=n+1) 扩展为 {x,2n+1-x}、{y,2n+1-y}(x 的子对阵在前);
+     * 新列内前半段的子对阵按 x/y 原样朝上,后半段按补数朝上;整表前一半=左列、后一半=右列。
      * 返回按 1..n 种子号排列的数组,相邻两两即首轮对阵。
      */
     public static int[] seedLayout(int n) {
-        int[] table = SEED_LAYOUT.get(n);
-        return table != null ? table : seedPositions(n);
+        if (n <= 4) {
+            return n == 4 ? BASE_4.clone() : seedPositions(n);
+        }
+        if ((n & (n - 1)) != 0) {
+            return seedPositions(n); // 非 2 的幂:回退递归种子位
+        }
+        int[] prev = seedLayout(n / 2);
+        int[] out = new int[n];
+        int parentCount = prev.length / 2;
+        int parentsPerColumn = prev.length / 4; // 每列父对阵数
+        int halfChildren = parentsPerColumn;    // 每列子对阵前半段数量(父对阵数)
+        int idx = 0;
+        for (int i = 0; i < parentCount; i++) {
+            int x = prev[2 * i];
+            int y = prev[2 * i + 1];
+            int cx = n + 1 - x;
+            int cy = n + 1 - y;
+            int childBase = (i % parentsPerColumn) * 2; // 子对阵在列内起始位置
+            boolean child1AsIs = childBase < halfChildren;
+            boolean child2AsIs = childBase + 1 < halfChildren;
+            if (child1AsIs) {
+                out[idx++] = x;
+                out[idx++] = cx;
+            } else {
+                out[idx++] = cx;
+                out[idx++] = x;
+            }
+            if (child2AsIs) {
+                out[idx++] = y;
+                out[idx++] = cy;
+            } else {
+                out[idx++] = cy;
+                out[idx++] = y;
+            }
+        }
+        return out;
     }
 
     /**

@@ -43,6 +43,42 @@ jobs:
           path: target/game-0.0.1-SNAPSHOT.jar
           retention-days: 14
 
+  # GraalVM Native Image 原生可执行文件(与 JAR/Docker 并行编译)
+  # 本地验证: JAVA_HOME 指向 GraalVM JDK 25 时 mvn -Pnative package 成功产出 target/game
+  build-native:
+    name: Build Native Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # native 编译耗时较长(约 30-60 分钟),如需节省 CI 分钟可在 PR 上跳过:
+    # if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # mvn package 的 exec 插件会执行 npm install + build:prod,需要 Node 环境
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: 'maven'
+
+      - name: Build Native Image
+        run: mvn -B -Pnative -Dmaven.test.skip=true package
+
+      - name: Upload Native Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-native-linux
+          path: target/game
+          retention-days: 14
+
   docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest

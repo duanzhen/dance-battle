@@ -14,10 +14,14 @@ import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.ScoreTypeEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.aot.hint.TypeReference;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.ImportRuntimeHints;
 
@@ -36,6 +40,8 @@ import org.springframework.context.annotation.ImportRuntimeHints;
 @Configuration(proxyBeanMethods = false)
 @ImportRuntimeHints(NativeRuntimeHints.class)
 public class NativeRuntimeHints implements RuntimeHintsRegistrar {
+
+	private static final Logger log = LoggerFactory.getLogger(NativeRuntimeHints.class);
 
 	private static final String[] MYBATIS_LOG_IMPLS = {
 			"org.apache.ibatis.logging.slf4j.Slf4jImpl",
@@ -66,6 +72,9 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 	private static final String[] MYBATIS_REFLECTIVE_CONSTRUCTORS = {
 			"org.apache.ibatis.scripting.xmltags.XMLLanguageDriver",
 			"org.apache.ibatis.scripting.defaults.RawLanguageDriver",
+			// MyBatis-Plus 默认语言驱动:MybatisConfiguration 构造器用反射实例化
+			// (native 运行时报 NoSuchMethodException: MybatisXMLLanguageDriver.<init>())
+			"com.baomidou.mybatisplus.core.MybatisXMLLanguageDriver",
 			"org.apache.ibatis.type.ArrayTypeHandler",
 			"org.apache.ibatis.type.BigDecimalTypeHandler",
 			"org.apache.ibatis.type.BigIntegerTypeHandler",
@@ -149,6 +158,28 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 		for (Class<?> type : RULE_CONFIG_TYPES) {
 			hints.reflection().registerType(type, MemberCategory.values());
 		}
+
+		// MyBatis-Plus 的 CRUD 通过 Reflector 反射调用实体 getter/setter/构造器
+		// (插入/更新/结果映射都会触发),缺注册会在首个写操作报
+		// MissingReflectionRegistrationError。包扫描一次性注册 domain 全部实体
+		// (含 vo/bo 子包),并沿父类链注册 TenantEntity 等基类(Reflector 会
+		// 通过 getMethods() 拿到继承的公共 getter/setter),以后新增实体无需再改 hints。
+		ClassPathScanningCandidateComponentProvider scanner =
+				new ClassPathScanningCandidateComponentProvider(false);
+		int registered = 0;
+		for (BeanDefinition definition : scanner.findCandidateComponents("com.dance.street.game.domain")) {
+			try {
+				Class<?> type = Class.forName(definition.getBeanClassName(), false, classLoader);
+				for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+					hints.reflection().registerType(c, MemberCategory.values());
+				}
+				registered++;
+			} catch (ClassNotFoundException | LinkageError e) {
+				log.warn("NativeRuntimeHints: domain 类加载失败: {} ({})",
+						definition.getBeanClassName(), e.toString());
+			}
+		}
+		log.info("NativeRuntimeHints: 已注册 {} 个 domain 类型(含继承链)", registered);
 
 		// SqliteFallbackEnvironmentPostProcessor: Class.forName(com.mysql.cj.jdbc.Driver)
 		hints.reflection().registerType(TypeReference.of("com.mysql.cj.jdbc.Driver"),

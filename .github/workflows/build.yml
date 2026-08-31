@@ -49,8 +49,8 @@ jobs:
     name: Build Native Image
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    # native 编译耗时较长(约 30-60 分钟),如需节省 CI 分钟可在 PR 上跳过:
-    # if: github.event_name != 'pull_request'
+    # native 编译耗时较长(约 30-60 分钟),只在主干/标签/手动触发时编译,PR 上跳过以节省 CI 分钟
+    if: github.event_name != 'pull_request'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,8 +69,49 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: 'maven'
 
+      # 小内存/小体积优化(目标 256MB 容器):
+      #   -Dnative.optimize=s         按体积优化代码区,产物和 RSS 更小
+      #   -Dnative.maxHeapSize=96m    限制运行期堆上限,避免按物理内存 80% 膨胀
+      #   -Dnative.activeProcessors=2 限制线程池/Netty 按 CPU 扩池,减少 native 内存
+      # 容器内存更大时可用 -Dnative.maxHeapSize=192m -Dnative.activeProcessors=4 覆盖
       - name: Build Native Image
-        run: mvn -B -Pnative -Dmaven.test.skip=true package
+        run: mvn -B -Pnative -Dmaven.test.skip=true -Dnative.optimize=s -Dnative.maxHeapSize=96m -Dnative.activeProcessors=2 package
+
+      # 编译成功不等于能跑:native 缺运行期 hint 会在启动/首个查询时报错,
+      # 这里启动真实二进制做冒烟测试(SQLite 单机模式,无需 MySQL/Redis)
+      - name: Smoke Test Native Binary
+        run: |
+          set -e
+          mkdir -p /tmp/game-smoke
+          SERVER_PORT=18080 \
+          DB_URL='jdbc:sqlite:/tmp/game-smoke/game.db' \
+          REDIS_ENABLED=false \
+          JWT_SECRET_FILE=/tmp/game-smoke/jwt.key \
+          FILE_UPLOAD_PATH=/tmp/game-smoke/upload \
+          ./target/game > /tmp/game-smoke/run.log 2>&1 &
+          GAME_PID=$!
+          trap 'kill $GAME_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:18080/ 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS -X POST http://127.0.0.1:18080/login \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"123456"}' | tee /tmp/game-smoke/login.json
+          grep -q '"code":200' /tmp/game-smoke/login.json
+          TOKEN=$(python3 -c "import sys,json;print(json.load(open('/tmp/game-smoke/login.json'))['data']['token'])")
+          curl -fsS -H "Authorization: Bearer $TOKEN" \
+            'http://127.0.0.1:18080/game/tournament/list?pageNum=1&pageSize=3' \
+            | tee /tmp/game-smoke/list.json
+          grep -q '"code":200' /tmp/game-smoke/list.json
+          RSS_KB=$(ps -o rss= -p $GAME_PID | tr -d ' ')
+          echo "Native process RSS: $((RSS_KB / 1024)) MB"
+          echo "Native smoke test passed"
+
+      - name: Show Native Binary Size
+        run: ls -lh target/game
 
       - name: Upload Native Binary
         uses: actions/upload-artifact@v4

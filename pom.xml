@@ -25,6 +25,15 @@
 		<mapstruct-plus.version>1.5.0</mapstruct-plus.version>
 		<mapstruct-plus.lombok.version>0.2.0</mapstruct-plus.lombok.version>
 		<lombok.version>1.18.40</lombok.version>
+		<!-- native-image 优化级别:s=按体积优化(256MB 小内存容器默认,代码区更小);
+		     发布大机器可 -Dnative.optimize=2 换回性能;本地迭代可 -Dnative.optimize=b 加快编译 -->
+		<native.optimize>s</native.optimize>
+		<!-- 小内存部署:限制 native 运行期堆上限,默认 96MB(配合 -Os 使 256MB 容器内
+		     总 RSS 稳定在 ~200-230MB);内存更充裕可 -Dnative.maxHeapSize=192m 等覆盖 -->
+		<native.maxHeapSize>96m</native.maxHeapSize>
+		<!-- 活动处理器数:限制线程池/Netty 等按 CPU 数扩池,减少 native 内存(线程栈、缓冲);
+		     容器核数更高时可 -Dnative.activeProcessors=4 覆盖,0 表示跟随系统 -->
+		<native.activeProcessors>2</native.activeProcessors>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -256,6 +265,13 @@
 					<plugin>
 						<groupId>org.graalvm.buildtools</groupId>
 						<artifactId>native-maven-plugin</artifactId>
+						<configuration>
+							<buildArgs>
+								<buildArg>-O${native.optimize}</buildArg>
+								<buildArg>-R:MaxHeapSize=${native.maxHeapSize}</buildArg>
+								<buildArg>-R:ActiveProcessorCount=${native.activeProcessors}</buildArg>
+							</buildArgs>
+						</configuration>
 						<executions>
 							<execution>
 								<id>build-native</id>

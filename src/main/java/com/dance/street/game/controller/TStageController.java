@@ -19,6 +19,7 @@ import org.dromara.common.log.enums.BusinessType;
 import org.dromara.common.excel.utils.ExcelUtil;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
+import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
@@ -281,6 +282,16 @@ public class TStageController extends BaseController {
     public void exportAuditionResult(@NotNull(message = "赛段ID不能为空") @PathVariable Long id,
                                      HttpServletResponse response) {
         tStageLifecycleService.exportAuditionResult(id, response);
+    }
+
+    /**
+     * 查询海选赛段结果(统一口径):原始海选成绩 + 二海/三海…加赛明细。
+     * 二海分数只用于同分者决出晋级顺序,不计入原始总分;各组件统一消费本结果。
+     */
+    @SaCheckPermission("game:stage:list")
+    @GetMapping("/{id}/audition-result")
+    public R<AuditionResultVo> auditionResult(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        return R.ok(tStageLifecycleService.queryAuditionResult(id));
     }
 
     /**

@@ -43,6 +43,7 @@ import {
   Coins,
   Network,
   ScrollText,
+  Users,
   ListTree,
   Timer,
   CreditCard,
@@ -67,6 +68,7 @@ const categories = [
     items: [
       { label: '晋级名单', type: 'SCOREBOARD', icon: ScrollText },
       { label: '擂台积分', type: 'ARENA_SCORE', icon: Coins },
+      { label: '海选名单', type: 'AUDITION', icon: Users },
       { label: '对战树', type: 'BRACKET', icon: Network },
       { label: '当前场次', type: 'MATCH_DETAIL', icon: Swords },
       { label: '排名展示', type: 'RANKING', icon: ListOrdered }

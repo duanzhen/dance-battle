@@ -211,7 +211,14 @@
 
             <label class="block cursor-pointer">
               <input type="file" accept=".xlsx,.xls" class="hidden" @change="handleFileSelect" ref="fileInputRef" />
-              <div class="border-2 border-dashed border-neutral-700 rounded-lg p-6 text-center hover:border-amber-500/50 transition-colors">
+              <div
+                class="border-2 border-dashed rounded-lg p-6 text-center transition-colors"
+                :class="dragOver ? 'border-amber-500 bg-amber-500/10' : 'border-neutral-700 hover:border-amber-500/50'"
+                @dragenter.prevent="handleDragEnter"
+                @dragover.prevent="handleDragOver"
+                @dragleave.prevent="handleDragLeave"
+                @drop.prevent.stop="handleFileDrop"
+              >
                 <div v-if="!importFile" class="space-y-2">
                   <svg class="w-8 h-8 text-neutral-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
@@ -221,7 +228,9 @@
                       d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
                     />
                   </svg>
-                  <p class="text-xs text-neutral-500">点击选择 Excel 文件</p>
+                  <p class="text-xs" :class="dragOver ? 'text-amber-400' : 'text-neutral-500'">
+                    {{ dragOver ? '松开鼠标导入文件' : '点击选择或拖入 Excel 文件' }}
+                  </p>
                   <p class="text-[10px] text-neutral-600">支持 .xlsx / .xls 格式</p>
                 </div>
                 <div v-else class="space-y-1">
@@ -371,6 +380,8 @@ const importFile = ref<File | null>(null);
 const importing = ref(false);
 const importResult = ref<{ success: boolean; msg: string } | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const dragOver = ref(false);
+let dragDepth = 0;
 
 // 过滤后的选手列表
 const filteredPlayers = computed(() => {
@@ -652,11 +663,47 @@ const handleFileSelect = (e: Event) => {
   }
 };
 
+// 拖入文件：用计数器避免子元素触发 dragenter/dragleave 导致高亮闪烁
+const handleDragEnter = () => {
+  dragDepth++;
+  dragOver.value = true;
+};
+
+const handleDragOver = (e: DragEvent) => {
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+};
+
+const handleDragLeave = () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) dragOver.value = false;
+};
+
+const handleFileDrop = (e: DragEvent) => {
+  dragDepth = 0;
+  dragOver.value = false;
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  if (!/\.(xlsx|xls)$/i.test(file.name)) {
+    ElMessage.warning('仅支持 .xlsx / .xls 格式的 Excel 文件');
+    return;
+  }
+  importFile.value = file;
+  importResult.value = null;
+};
+
 const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 };
+
+// 关闭弹窗时复位拖拽高亮状态
+watch(showImportDialog, (visible) => {
+  if (!visible) {
+    dragOver.value = false;
+    dragDepth = 0;
+  }
+});
 
 const doImport = async () => {
   if (!importFile.value || !props.tournamentId) return;

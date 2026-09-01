@@ -225,6 +225,31 @@
                 </span>
               </div>
 
+              <!-- 标记当前上场(海选大屏):MC 点击选手名字,大屏 widget 显示并居中 -->
+              <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1.5 mb-1.5 border-b border-neutral-800/60">
+                <span class="text-[9px] text-neutral-500 flex-none">当前:</span>
+                <button
+                  v-for="r in match.roundScores"
+                  :key="'cur-' + r.roundId"
+                  @click="handleMarkCurrent(match, r)"
+                  class="flex-none px-2 py-0.5 rounded text-[10px] font-bold transition-colors"
+                  :class="
+                    String(currentCompetitorByMatch[String(match.id)] ?? '') === String(r.competitorId ?? '')
+                      ? 'bg-amber-500 text-neutral-900'
+                      : 'bg-neutral-800 text-neutral-300 border border-neutral-700 hover:border-amber-500/40'
+                  "
+                >
+                  {{ r.competitorName || '#' + r.roundSequence }}
+                </button>
+                <button
+                  v-if="currentCompetitorByMatch[String(match.id)] != null"
+                  @click="handleMarkCurrent(match, null)"
+                  class="flex-none px-1.5 py-0.5 rounded text-[9px] text-neutral-500 hover:text-neutral-300"
+                >
+                  清除
+                </button>
+              </div>
+
               <div class="space-y-1">
                 <div v-for="r in match.roundScores" :key="r.roundId" class="py-1.5 border-b border-neutral-800/60 last:border-0">
                   <div class="flex items-center justify-between gap-2">
@@ -587,7 +612,9 @@ import {
   directorCancelStartMatch,
   directorResetMatch,
   directorSubmitResult,
-  directorPublishResult
+  directorPublishResult,
+  directorSetCurrentCompetitor,
+  directorGetCurrentCompetitor
 } from '@/api/game/director';
 import { getArenaOverview } from '@/api/game/stage';
 import { getTournament } from '@/api/game/tournament';
@@ -698,6 +725,8 @@ interface MatchRoundScore {
 const stages = ref<Stage[]>([]);
 const selectedStageId = ref<string>('');
 const matches = ref<MatchInfo[]>([]);
+/** 各场次当前标记的上场选手(matchId -> competitorId;海选大屏 widget 同步显示) */
+const currentCompetitorByMatch = ref<Record<string, string | number | null>>({});
 
 const currentStage = computed(() => stages.value.find((s) => s.id === selectedStageId.value));
 
@@ -845,6 +874,20 @@ const loadMatchesForStage = async (stageId: string) => {
     console.error('加载场次失败:', e);
     matches.value = [];
   }
+  // 海选:拉取各场次当前标记的上场选手,供导播台高亮(大屏 widget 同步显示)
+  currentCompetitorByMatch.value = {};
+  if (currentStage.value?.stageMode === 'AUDITION' && matches.value.length > 0) {
+    await Promise.all(
+      matches.value.map(async (m) => {
+        try {
+          const cc: any = await directorGetCurrentCompetitor(m.id);
+          currentCompetitorByMatch.value[String(m.id)] = cc?.data ?? null;
+        } catch {
+          currentCompetitorByMatch.value[String(m.id)] = null;
+        }
+      })
+    );
+  }
 };
 
 const selectStage = (id: string) => {
@@ -884,6 +927,18 @@ const handleComplete = async () => {
   } catch (e: any) {
     console.error('完成赛段失败:', e);
     alert(e?.message || '完成赛段失败');
+  }
+};
+
+/** 标记当前上场选手(海选大屏):MC 点击选手名字,仅标记并广播,大屏 widget 同步高亮/居中 */
+const handleMarkCurrent = async (match: MatchInfo, round: any) => {
+  const cid = round?.competitorId ?? null;
+  try {
+    await directorSetCurrentCompetitor(match.id, cid != null ? String(cid) : null);
+    currentCompetitorByMatch.value[String(match.id)] = cid;
+  } catch (e: any) {
+    console.error('标记当前上场失败:', e);
+    alert(e?.message || '标记失败');
   }
 };
 

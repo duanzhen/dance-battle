@@ -68,7 +68,7 @@ import { useRoute } from 'vue-router';
 import StageSelector from '../stages/StageSelector.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
 import TextInput from './common/TextInput.vue';
-import { getStage } from '@/api/game/stage';
+import { getStage, getAuditionResult } from '@/api/game/stage';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
@@ -233,25 +233,24 @@ const loadData = async () => {
       }
       grouped.get(zone)!.push(m);
     });
-    // 主赛分映射:二海(同分加赛)只决定谁晋级,展示分数/名次仍用原海选分
-    const normalScoreByCid: Record<string, number | undefined> = {};
-    withParts.forEach((m: any) => {
-      if (String(m.remark || '').startsWith('同分加赛')) return;
-      (m.participants || []).forEach((p: any) => {
-        if (p.competitorId != null && p.scoreValue != null) {
-          normalScoreByCid[String(p.competitorId)] = Number(p.scoreValue);
-        }
-      });
-    });
+    // 统一消费后端 audition-result:原始海选分(不含二海),二海只决定谁晋级
+    let auditionCompetitors: any[] = [];
+    try {
+      const ar: any = await getAuditionResult(props.stageId);
+      const data = ar?.data?.data || ar?.data || ar;
+      auditionCompetitors = data?.competitors || [];
+    } catch (e) {
+      console.error('ScoreboardWidget 加载海选成绩失败', e);
+    }
     columns.value = order.map((zone, idx) => {
       const zoneMatches = grouped.get(zone) || [];
       // 只取晋级选手,按签到号码升序
-      const advancers = zoneMatches
-        .flatMap((m: any) => (m.participants || []).filter((p: any) => p.outcomeStatus === 'ADVANCE' && p.competitorId != null))
+      const advancers = auditionCompetitors
+        .filter((c: any) => c.outcomeStatus === 'ADVANCE' && c.competitorId != null && (c.zone || 'CENTER') === zone)
         .map((p: any) => ({
-          ...p,
-          // 二海选手沿用原海选分,不因二海高分改变排名展示
-          scoreValue: normalScoreByCid[String(p.competitorId)] ?? p.scoreValue
+          competitorId: p.competitorId,
+          competitorName: p.name,
+          scoreValue: p.score
         }))
         .sort((a: any, b: any) => numOf(a) - numOf(b));
       return {

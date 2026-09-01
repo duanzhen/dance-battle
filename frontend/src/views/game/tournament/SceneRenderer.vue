@@ -90,6 +90,7 @@ import TimerWidget from './widgets/TimerWidget.vue';
 import ScoreboardWidget from './widgets/ScoreboardWidget.vue';
 import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
+import AuditionWidget from './widgets/AuditionWidget.vue';
 import html2canvas from 'html2canvas';
 
 const componentMap: Record<string, any> = {
@@ -101,6 +102,7 @@ const componentMap: Record<string, any> = {
   'MATCH_DETAIL': MatchDetailWidget,
   'SCOREBOARD': ScoreboardWidget,
   'ARENA_SCORE': ArenaWidget,
+  'AUDITION': AuditionWidget,
   'RANKING': RankingWidget
 };
 

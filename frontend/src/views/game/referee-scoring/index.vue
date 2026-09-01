@@ -266,7 +266,10 @@
                       : 'border-neutral-800 bg-neutral-900'
                   "
                 >
-                  <div class="text-[9px]" :class="keypadTarget?.competitorId === p.competitorId ? 'text-neutral-800' : 'text-neutral-500'">
+                  <div
+                    class="text-lg font-black leading-none"
+                    :class="keypadTarget?.competitorId === p.competitorId ? 'text-neutral-800' : 'text-neutral-300'"
+                  >
                     #{{ p.number || p.displaySlotIndex }}
                   </div>
                   <div
@@ -285,7 +288,13 @@
                           : 'text-neutral-600'
                     "
                   >
-                    {{ myTotal(p.competitorId!) > 0 ? myTotal(p.competitorId!).toFixed(2) : keypadTarget?.competitorId === p.competitorId ? '当前' : '未评' }}
+                    {{
+                      myTotal(p.competitorId!) > 0
+                        ? myTotal(p.competitorId!).toFixed(2)
+                        : keypadTarget?.competitorId === p.competitorId
+                          ? '当前'
+                          : '未评'
+                    }}
                   </div>
                 </button>
               </div>
@@ -361,13 +370,16 @@
                 <!-- 海选:单维度软键盘 -->
                 <template v-else>
                   <input
+                    ref="scoreInputRef"
                     type="text"
                     inputmode="decimal"
                     :value="keypadValue"
                     placeholder="0"
                     class="w-full h-12 bg-black text-center text-2xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums mb-2"
                     @input="onKeypadInput"
+                    @keydown.enter.prevent="confirmKeypad"
                   />
+                  <p class="text-[9px] text-neutral-600 -mt-1 mb-2 text-center">支持键盘直接输入，回车提交并跳下一位</p>
                   <div class="grid grid-cols-3 gap-2">
                     <button
                       v-for="k in keypadKeys"
@@ -463,7 +475,7 @@
                   <h3 class="text-sm font-bold text-white">{{ p.competitorName }}</h3>
                   <div class="flex items-center gap-2">
                     <span v-if="p.rankInMatch" class="text-[9px] font-mono text-amber-400">#{{ p.rankInMatch }}</span>
-                    <span class="text-xs font-mono text-neutral-500">#{{ p.number || p.displaySlotIndex }}</span>
+                    <span class="text-sm font-bold font-mono text-neutral-300">#{{ p.number || p.displaySlotIndex }}</span>
                   </div>
                 </div>
 
@@ -714,6 +726,8 @@ const keypadKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'
 const keypadTarget = ref<Participant | null>(null);
 const keypadValue = ref('');
 const keypadSubmitting = ref(false);
+/** 海选分数输入框:选中选手后自动聚焦,支持物理键盘直接输入 */
+const scoreInputRef = ref<HTMLInputElement | null>(null);
 /** 海选满分:来自后端 my-match 的 maxScore,按赛段配置切换 10分制/100分制 */
 const auditionMaxScore = ref(10);
 const keypadMax = computed(() => Math.max(1, Number(auditionMaxScore.value) || 10));
@@ -739,6 +753,9 @@ const selectParticipant = (p: Participant) => {
   if (p.competitorId != null) {
     nextTick(() => {
       chipEls.get(p.competitorId as number)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      // 聚焦分数输入框,桌面键盘/触屏键盘都能直接输入;已有分数时全选便于覆盖
+      scoreInputRef.value?.focus();
+      scoreInputRef.value?.select();
     });
   }
 };
@@ -1031,6 +1048,12 @@ const switchStage = async (id: number) => {
   await loadData(id, undefined);
 };
 
+/** 号码数值(空/非数字排最后) */
+const numValue = (n?: string | number | null) => {
+  const v = parseInt(String(n ?? ''), 10);
+  return Number.isNaN(v) ? Number.MAX_SAFE_INTEGER : v;
+};
+
 /** 完整应用一份 my-match 数据(切换赛段/场次/模式时调用,会重置编辑态) */
 const applyData = (data: any) => {
   error.value = '';
@@ -1095,17 +1118,20 @@ const applyData = (data: any) => {
     score: Number(s.score) || 0
   }));
 
-  participants.value = ((data?.participants || []) as any[])
-    .map((p) => ({
-      competitorId: p.competitorId,
-      competitorName: p.competitorName,
-      number: p.number,
-      displaySlotIndex: p.displaySlotIndex,
-      currentScore: Number(p.currentScore) || 0,
-      myScore: p.myScore,
-      rankInMatch: p.rankInMatch
-    }))
-    .sort((a, b) => (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0));
+  const rawParts = ((data?.participants || []) as any[]).map((p) => ({
+    competitorId: p.competitorId,
+    competitorName: p.competitorName,
+    number: p.number,
+    displaySlotIndex: p.displaySlotIndex,
+    currentScore: Number(p.currentScore) || 0,
+    myScore: p.myScore,
+    rankInMatch: p.rankInMatch
+  }));
+  // 海选/排名赛:号码即上场顺序,直接按号码数值排序(号码为空按槽位兜底);
+  // 其余赛制按场次槽位排序
+  participants.value = isPerCompetitor.value
+    ? rawParts.sort((a, b) => numValue(a.number) - numValue(b.number) || (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0))
+    : rawParts.sort((a, b) => (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0));
 
   // 只用自己的分回显,不拿累计分顶替
   edits.value = {};

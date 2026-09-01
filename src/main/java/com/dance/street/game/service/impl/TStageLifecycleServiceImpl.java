@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import cn.idev.excel.ExcelWriter;
+import cn.idev.excel.write.metadata.WriteSheet;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -25,6 +27,7 @@ import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.bo.TCompetitorBo;
 import com.dance.street.game.domain.bo.TCompetitorMemberBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
+import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
@@ -76,6 +79,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -84,6 +88,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -116,6 +121,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final ITRefereeStageService refereeStageService;
+
+    /** 海选大屏「当前上场选手」标记(仅内存,现场标记,不落库):matchId -> competitorId */
+    private final Map<Long, Long> matchCurrentCompetitor = new ConcurrentHashMap<>();
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -802,38 +810,61 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .in(TMatch::getStatus, StageConstants.MATCH_PENDING, StageConstants.MATCH_GAMING));
         int settled = 0;
         for (TMatch m : matches) {
-            List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                .eq(TMatchParticipant::getMatchId, m.getId())
-                .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
-            List<TMatchParticipant> real = parts.stream()
-                .filter(p -> p.getCompetitorId() != null)
-                .toList();
-            if (real.size() >= 2) {
-                continue; // 正常对决,不处理
+            if (settleByeMatch(m)) {
+                settled++;
             }
-            // 0 参赛者的场次:仅首轮视为双边轮空可结算;后续轮次是等待上游胜者填入的占位,
-            // 不能按轮空结算,否则整条淘汰链会在开赛瞬间塌掉
-            if (real.isEmpty()
-                && m.getDisplayCol() != null && m.getDisplayCol() > 1L) {
-                continue;
-            }
-            if (real.size() == 1) {
-                TMatchParticipant winner = real.get(0);
-                TMatchParticipant upd = new TMatchParticipant();
-                upd.setOutcomeStatus(MatchOutcomeEnum.WIN.getCode());
-                upd.setRankInMatch(1L);
-                participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                    .eq(TMatchParticipant::getMatchId, m.getId())
-                    .eq(TMatchParticipant::getCompetitorId, winner.getCompetitorId()));
-                resolveKnockoutByeWinner(m, winner.getCompetitorId());
-            }
-            markMatchSettled(m);
-            settled++;
         }
         if (settled > 0) {
             log.info("赛段[{}]轮空场次自动结算 {} 场", stageId, settled);
         }
         return settled;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean settleByeMatch(Long matchId) {
+        if (matchId == null) {
+            return false;
+        }
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null) {
+            return false;
+        }
+        TStage stage = stageMapper.selectById(match.getStageId());
+        if (stage == null || !StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+            return false;
+        }
+        return settleByeMatch(match);
+    }
+
+    /** 结算单个轮空场次:单边轮空(1 名真人)判胜并填下游/标晋级;双边轮空仅置已结算。非轮空返回 false。 */
+    private boolean settleByeMatch(TMatch m) {
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, m.getId())
+            .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+        List<TMatchParticipant> real = parts.stream()
+            .filter(p -> p.getCompetitorId() != null)
+            .toList();
+        if (real.size() >= 2) {
+            return false; // 正常对决,不处理
+        }
+        // 0 参赛者的场次:仅首轮视为双边轮空可结算;后续轮次是等待上游胜者填入的占位,
+        // 不能按轮空结算,否则整条淘汰链会在开赛瞬间塌掉
+        if (real.isEmpty() && m.getDisplayCol() != null && m.getDisplayCol() > 1L) {
+            return false;
+        }
+        if (real.size() == 1) {
+            TMatchParticipant winner = real.get(0);
+            TMatchParticipant upd = new TMatchParticipant();
+            upd.setOutcomeStatus(MatchOutcomeEnum.WIN.getCode());
+            upd.setRankInMatch(1L);
+            participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
+                .eq(TMatchParticipant::getMatchId, m.getId())
+                .eq(TMatchParticipant::getCompetitorId, winner.getCompetitorId()));
+            resolveKnockoutByeWinner(m, winner.getCompetitorId());
+        }
+        markMatchSettled(m);
+        return true;
     }
 
     /** 轮空胜者去向:填下游场次占位;finalMatch 则标记晋级下一赛段 */
@@ -1221,10 +1252,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 generateMatches(gm);
             }
         }
-        // 轮空场次自动晋级:人数不足 2 的幂时,单边轮空直接判胜填下游/标晋级,无需人工判罚
-        if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
-            settleByeMatches(stageId);
-        }
+        // 轮空场次不在此自动结算:保持 PENDING,由导播台逐场点「开始」时再自动结束(见 settleByeMatch),
+        // 保证淘汰赛的每一场(含轮空)都经过导播台确认
         stage.setStatus(StageConstants.STAGE_GAMING);
         stageMapper.updateById(stage);
         refereeSseNotifier.notifyStage(stageId, "stage");
@@ -1383,6 +1412,29 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         } catch (NumberFormatException e) {
             return Integer.MAX_VALUE;
         }
+    }
+
+    /** 加赛深度 -> sheet 名:1=二海,2=三海,3=四海,4=五海(加赛上限内最多四级) */
+    private String tiebreakerSheetName(int depth) {
+        return switch (depth) {
+            case 1 -> "二海";
+            case 2 -> "三海";
+            case 3 -> "四海";
+            case 4 -> "五海";
+            default -> "加赛" + depth;
+        };
+    }
+
+    /** 海选加赛参赛方结果文本 */
+    private String auditionResultText(String status) {
+        if (status == null) {
+            return "";
+        }
+        if ("ADVANCE".equals(status)) return "晋级";
+        if ("ELIMINATED".equals(status)) return "淘汰";
+        if ("PENDING".equals(status)) return "进行中";
+        if ("WITHDRAWN".equals(status)) return "退赛";
+        return status;
     }
 
     /** displayZone("ZONE-1"..) -> 圈序号(0 基);"CENTER" 或无圈返回 0;解析失败返回 -1 */
@@ -1643,25 +1695,77 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         log.info("参赛方[{}]追加到场次[{}](slot={})", competitorId, target.getId(), nextSlot);
     }
 
-    /** 追加参赛方并新建轮次(海选补签到:每个参赛方一个独立轮次,裁判逐选手打分) */
+    /**
+     * 追加参赛方并新建轮次(海选补签到:每个参赛方一个独立轮次,裁判逐选手打分)。
+     * 海选/排名赛按号码数值排序上场:补签选手按其号码插入对应位置,
+     * 插入点之后的参赛方(slot)与轮次(round)统一顺延 +1,避免新选手被追加到队尾导致号码排序错位。
+     */
     private void appendParticipantWithRound(TMatch target, Long competitorId) {
-        long nextSlot = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                .eq(TMatchParticipant::getMatchId, target.getId())
-                .select(TMatchParticipant::getDisplaySlotIndex))
-            .stream().mapToLong(p -> p.getDisplaySlotIndex() == null ? 0L : p.getDisplaySlotIndex())
-            .max().orElse(0L) + 1L;
-        long nextRound = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+        TCompetitor newcomer = competitorId == null ? null : competitorMapper.selectById(competitorId);
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, target.getId())
+            .isNotNull(TMatchParticipant::getCompetitorId)
+            .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+        Map<Long, TCompetitor> compById = parts.isEmpty() ? Map.of()
+            : competitorMapper.selectByIds(parts.stream()
+                    .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList())
+                .stream().collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+
+        // 插入位置:号码数值小于新选手的参赛方数量(同号排在已有同号之后)
+        int insertIdx = 0;
+        if (newcomer != null) {
+            for (TMatchParticipant p : parts) {
+                TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
+                if (c == null || parseCompetitorNumber(c.getNumber()) < parseCompetitorNumber(newcomer.getNumber())) {
+                    insertIdx++;
+                }
+            }
+        } else {
+            insertIdx = parts.size();
+        }
+        long newSlot = insertIdx + 1L;
+        long newRound = insertIdx + 1L;
+
+        // 插入点及之后的参赛方 slot 顺延 +1
+        if (newcomer != null) {
+            for (TMatchParticipant p : parts) {
+                TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
+                if (c != null
+                    && parseCompetitorNumber(c.getNumber()) >= parseCompetitorNumber(newcomer.getNumber())) {
+                    TMatchParticipant upd = new TMatchParticipant();
+                    upd.setId(p.getId());
+                    upd.setDisplaySlotIndex((p.getDisplaySlotIndex() == null ? 0L : p.getDisplaySlotIndex()) + 1L);
+                    participantMapper.updateById(upd);
+                }
+            }
+            // 插入点及之后的轮次 sequence 顺延 +1(每个参赛方一个独立轮次,按 competitorId 对齐)
+            Set<Long> shiftRoundCompetitorIds = parts.stream()
+                .filter(p -> {
+                    TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
+                    return c != null
+                        && parseCompetitorNumber(c.getNumber()) >= parseCompetitorNumber(newcomer.getNumber());
+                })
+                .map(TMatchParticipant::getCompetitorId)
+                .collect(Collectors.toSet());
+            List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
                 .eq(TMatchRound::getMatchId, target.getId())
-                .select(TMatchRound::getRoundSequence))
-            .stream().mapToLong(r -> r.getRoundSequence() == null ? 0L : r.getRoundSequence())
-            .max().orElse(0L) + 1L;
+                .orderByAsc(TMatchRound::getRoundSequence));
+            for (TMatchRound r : rounds) {
+                if (r.getCompetitorId() != null && shiftRoundCompetitorIds.contains(r.getCompetitorId())) {
+                    TMatchRound upd = new TMatchRound();
+                    upd.setId(r.getId());
+                    upd.setRoundSequence((r.getRoundSequence() == null ? 0L : r.getRoundSequence()) + 1L);
+                    matchRoundMapper.updateById(upd);
+                }
+            }
+        }
 
         TMatchParticipant p = new TMatchParticipant();
         p.setTenantId(target.getTenantId());
         p.setTournamentId(target.getTournamentId());
         p.setMatchId(target.getId());
         p.setCompetitorId(competitorId);
-        p.setDisplaySlotIndex(nextSlot);
+        p.setDisplaySlotIndex(newSlot);
         p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
         participantMapper.insert(p);
 
@@ -1670,12 +1774,12 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         round.setTenantId(target.getTenantId());
         round.setTournamentId(target.getTournamentId());
         round.setMatchId(target.getId());
-        round.setRoundSequence(nextRound);
+        round.setRoundSequence(newRound);
         round.setCompetitorId(competitorId);
         round.setStatus(target.getStatus());
         matchRoundMapper.insert(round);
 
-        log.info("参赛方[{}]挂入场次[{}](slot={},round={})", competitorId, target.getId(), nextSlot, nextRound);
+        log.info("参赛方[{}]挂入场次[{}](slot={},round={})", competitorId, target.getId(), newSlot, newRound);
     }
 
     /** 场次内下一可用展示位 */
@@ -1892,8 +1996,13 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     }
 
     /**
-     * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总分 / 排名。
-     * 总分 = 该选手所有裁判分数之和;排名取赛段最终排名。
+     * 导出海选结果 Excel:
+     * <ul>
+     *   <li>"海选成绩" sheet:号码 / 选手名 / 各裁判分数 / 总分 / 排名,总分只统计原始海选场;</li>
+     *   <li>二海/三海/… sheet:按加赛深度各占一张(号码 / 选手名 / 各裁判分数 / 总分 / 结果),
+     *       加赛分数仅用于同分者决出晋级顺序,不进入主表总分。</li>
+     * </ul>
+     * 数据统一来自 {@link #queryAuditionResult(Long)},此处不再重复聚合。
      */
     @Override
     public void exportAuditionResult(Long stageId, jakarta.servlet.http.HttpServletResponse response) {
@@ -1901,35 +2010,13 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
             throw new ServiceException("仅海选赛赛段支持导出海选结果");
         }
-        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stageId)
-            .orderByAsc(TMatch::getDisplayRow)
-            .orderByAsc(TMatch::getId));
-        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
-        List<Long> roundIds = matchIds.isEmpty() ? List.of()
-            : matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds))
-                .stream().map(TMatchRound::getId).toList();
-        List<TRoundScore> scores = roundIds.isEmpty() ? List.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
+        AuditionResultVo result = queryAuditionResult(stageId);
         // 裁判列顺序:赛事全部裁判按 id 升序(未打分的裁判该列留空)
         List<TReferee> referees = refereeMapper.selectList(Wrappers.<TReferee>lambdaQuery()
             .eq(TReferee::getTournamentId, stage.getTournamentId())
             .orderByAsc(TReferee::getId));
-        // (competitorId:refereeId) -> 累计分
-        Map<String, BigDecimal> scoreByRef = new HashMap<>();
-        for (TRoundScore s : scores) {
-            if (s.getCompetitorId() == null || s.getRefereeId() == null || s.getScore() == null) {
-                continue;
-            }
-            scoreByRef.merge(s.getCompetitorId() + ":" + s.getRefereeId(), s.getScore(), BigDecimal::add);
-        }
-        // 选手按最终排名升序(未排名排最后),同排名按号码
-        List<TCompetitor> comps = competitorMapper.selectList(
-            Wrappers.<TCompetitor>lambdaQuery().eq(TCompetitor::getStageId, stageId));
-        comps.sort(Comparator
-            .comparing((TCompetitor c) -> c.getFinalRank() == null ? Long.MAX_VALUE : c.getFinalRank())
-            .thenComparing(c -> parseCompetitorNumber(c.getNumber())));
-        // 表头:号码 | 选手名 | 裁判1..n | 总平均分 | 排名
+
+        // 主表头:号码 | 选手名 | 裁判1..n | 总分 | 排名
         List<List<String>> head = new ArrayList<>();
         head.add(List.of("号码"));
         head.add(List.of("选手名"));
@@ -1939,34 +2026,235 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         head.add(List.of("总分"));
         head.add(List.of("排名"));
         List<List<Object>> rows = new ArrayList<>();
-        for (TCompetitor c : comps) {
-            List<Object> row = new ArrayList<>();
-            row.add(c.getNumber() == null ? "" : c.getNumber());
-            row.add(c.getName() == null ? "" : c.getName());
-            BigDecimal total = BigDecimal.ZERO;
-            int scoredRefs = 0;
-            for (TReferee r : referees) {
-                BigDecimal v = scoreByRef.get(c.getId() + ":" + r.getId());
-                row.add(v == null ? "" : v.stripTrailingZeros().toPlainString());
-                if (v != null) {
-                    total = total.add(v);
-                    scoredRefs++;
-                }
-            }
-            row.add(scoredRefs == 0 ? "" : total.stripTrailingZeros().toPlainString());
-            row.add(c.getFinalRank() == null ? "" : c.getFinalRank());
-            rows.add(row);
+        for (AuditionResultVo.CompetitorItem c : result.getCompetitors()) {
+            rows.add(auditionExportRow(c, referees, true));
         }
+
+        // 加赛表头:号码 | 选手名 | 裁判1..n | 总分 | 结果
+        List<List<String>> tbHead = new ArrayList<>();
+        tbHead.add(List.of("号码"));
+        tbHead.add(List.of("选手名"));
+        for (TReferee r : referees) {
+            tbHead.add(List.of(StringUtils.defaultString(r.getName(), "裁判" + r.getId())));
+        }
+        tbHead.add(List.of("总分"));
+        tbHead.add(List.of("结果"));
+        Map<Integer, List<List<Object>>> tbRowsByDepth = new TreeMap<>();
+        for (AuditionResultVo.TiebreakerItem tb : result.getTiebreakers()) {
+            List<List<Object>> tbRows = new ArrayList<>();
+            for (AuditionResultVo.CompetitorItem c : tb.getCompetitors()) {
+                tbRows.add(auditionExportRow(c, referees, false));
+            }
+            tbRowsByDepth.put(tb.getRound(), tbRows);
+        }
+
         try {
             org.dromara.common.core.utils.file.FileUtils.setAttachmentResponseHeader(
                 response, "海选结果-" + stage.getName() + ".xlsx");
             response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8");
             try (jakarta.servlet.ServletOutputStream os = response.getOutputStream()) {
-                cn.idev.excel.FastExcel.write(os).head(head).sheet("海选结果").doWrite(rows);
+                ExcelWriter writer = cn.idev.excel.FastExcel.write(os).build();
+                try {
+                    WriteSheet mainSheet = cn.idev.excel.FastExcel.writerSheet("海选成绩").head(head).build();
+                    writer.write(rows, mainSheet);
+                    for (Map.Entry<Integer, List<List<Object>>> e : tbRowsByDepth.entrySet()) {
+                        WriteSheet tbSheet = cn.idev.excel.FastExcel
+                            .writerSheet(tiebreakerSheetName(e.getKey())).head(tbHead).build();
+                        writer.write(e.getValue(), tbSheet);
+                    }
+                } finally {
+                    writer.finish();
+                }
             }
         } catch (java.io.IOException e) {
             throw new ServiceException("导出海选结果失败: {}", e.getMessage());
         }
+    }
+
+    /** 海选导出行:主表最后一列为排名,加赛表最后一列为结果 */
+    private List<Object> auditionExportRow(AuditionResultVo.CompetitorItem c,
+                                           List<TReferee> referees, boolean mainSheet) {
+        Map<Long, BigDecimal> refMap = c.getRefereeScores() == null ? Map.of()
+            : c.getRefereeScores().stream()
+                .collect(Collectors.toMap(AuditionResultVo.RefereeScoreItem::getRefereeId,
+                    AuditionResultVo.RefereeScoreItem::getScore, (a, b) -> a));
+        List<Object> row = new ArrayList<>();
+        row.add(c.getNumber() == null ? "" : c.getNumber());
+        row.add(c.getName() == null ? "" : c.getName());
+        BigDecimal total = BigDecimal.ZERO;
+        int scoredRefs = 0;
+        for (TReferee r : referees) {
+            BigDecimal v = refMap.get(r.getId());
+            row.add(v == null ? "" : v.stripTrailingZeros().toPlainString());
+            if (v != null) {
+                total = total.add(v);
+                scoredRefs++;
+            }
+        }
+        row.add(scoredRefs == 0 ? "" : total.stripTrailingZeros().toPlainString());
+        row.add(mainSheet
+            ? (c.getFinalRank() == null ? "" : c.getFinalRank())
+            : auditionResultText(c.getOutcomeStatus()));
+        return row;
+    }
+
+    /**
+     * 查询海选赛段结果(统一口径):原始海选成绩 + 二海/三海…加赛明细。
+     * 二海分数只用于同分者决出晋级顺序,不计入原始总分;
+     * 导出与前端各组件均消费本结果,不再各自聚合。
+     */
+    @Override
+    public AuditionResultVo queryAuditionResult(Long stageId) {
+        TStage stage = mustGetStage(stageId);
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .orderByAsc(TMatch::getDisplayRow)
+            .orderByAsc(TMatch::getId));
+        List<TMatch> mainMatches = new ArrayList<>();
+        List<TMatch> tbMatches = new ArrayList<>();
+        for (TMatch m : matches) {
+            if (StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛")) {
+                tbMatches.add(m);
+            } else {
+                mainMatches.add(m);
+            }
+        }
+        List<TReferee> referees = refereeMapper.selectList(Wrappers.<TReferee>lambdaQuery()
+            .eq(TReferee::getTournamentId, stage.getTournamentId())
+            .orderByAsc(TReferee::getId));
+        Map<Long, String> refNameById = referees.stream()
+            .collect(Collectors.toMap(TReferee::getId,
+                r -> StringUtils.defaultString(r.getName(), "裁判" + r.getId()), (a, b) -> a));
+
+        AuditionResultVo vo = new AuditionResultVo();
+        vo.setCompetitors(buildAuditionMainItems(mainMatches, referees, refNameById));
+        vo.setTiebreakers(buildAuditionTiebreakers(tbMatches, referees, refNameById));
+        return vo;
+    }
+
+    /** 原始海选场参与方明细:原始总分(不含二海)、场次排名、结果、各裁判分;按最终排名升序 */
+    private List<AuditionResultVo.CompetitorItem> buildAuditionMainItems(List<TMatch> mainMatches,
+                                                                         List<TReferee> referees,
+                                                                         Map<Long, String> refNameById) {
+        if (mainMatches.isEmpty()) {
+            return List.of();
+        }
+        List<Long> matchIds = mainMatches.stream().map(TMatch::getId).toList();
+        Map<Long, TMatch> matchById = mainMatches.stream()
+            .collect(Collectors.toMap(TMatch::getId, m -> m, (a, b) -> a));
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .in(TMatchParticipant::getMatchId, matchIds)
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        Map<String, BigDecimal> scoreByRef = roundScoreByRef(matchIds);
+        Map<Long, TCompetitor> compById = competitorById(parts);
+        List<AuditionResultVo.CompetitorItem> items = new ArrayList<>();
+        for (TMatchParticipant p : parts) {
+            items.add(toCompetitorItem(p, compById, matchById, scoreByRef, referees, refNameById));
+        }
+        items.sort(Comparator
+            .comparing((AuditionResultVo.CompetitorItem i) -> i.getFinalRank() == null ? Long.MAX_VALUE : i.getFinalRank())
+            .thenComparingInt(i -> parseCompetitorNumber(i.getNumber())));
+        return items;
+    }
+
+    /** 二海/三海…:按加赛深度分组,每级一份明细,参与方按号码升序 */
+    private List<AuditionResultVo.TiebreakerItem> buildAuditionTiebreakers(List<TMatch> tbMatches,
+                                                                           List<TReferee> referees,
+                                                                           Map<Long, String> refNameById) {
+        Map<Integer, List<TMatch>> byDepth = new TreeMap<>();
+        for (TMatch m : tbMatches) {
+            String nm = m.getName() == null ? "" : m.getName();
+            int depth = 0;
+            for (int i = nm.indexOf("加赛"); i >= 0; i = nm.indexOf("加赛", i + 2)) {
+                depth++;
+            }
+            byDepth.computeIfAbsent(Math.max(1, depth), k -> new ArrayList<>()).add(m);
+        }
+        List<AuditionResultVo.TiebreakerItem> result = new ArrayList<>();
+        for (Map.Entry<Integer, List<TMatch>> e : byDepth.entrySet()) {
+            List<TMatch> group = e.getValue();
+            List<Long> ids = group.stream().map(TMatch::getId).toList();
+            Map<Long, TMatch> matchById = group.stream()
+                .collect(Collectors.toMap(TMatch::getId, m -> m, (a, b) -> a));
+            List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .in(TMatchParticipant::getMatchId, ids)
+                .isNotNull(TMatchParticipant::getCompetitorId));
+            Map<String, BigDecimal> scoreByRef = roundScoreByRef(ids);
+            Map<Long, TCompetitor> compById = competitorById(parts);
+            List<AuditionResultVo.CompetitorItem> items = new ArrayList<>();
+            for (TMatchParticipant p : parts) {
+                items.add(toCompetitorItem(p, compById, matchById, scoreByRef, referees, refNameById));
+            }
+            items.sort(Comparator.comparingInt(i -> parseCompetitorNumber(i.getNumber())));
+            AuditionResultVo.TiebreakerItem tb = new AuditionResultVo.TiebreakerItem();
+            tb.setRound(e.getKey());
+            tb.setMatchId(group.get(0).getId());
+            tb.setName(group.get(0).getName());
+            tb.setZone(group.get(0).getDisplayZone());
+            tb.setCompetitors(items);
+            result.add(tb);
+        }
+        return result;
+    }
+
+    /** 指定场次的 (competitorId:refereeId) -> 累计分 */
+    private Map<String, BigDecimal> roundScoreByRef(List<Long> matchIds) {
+        List<Long> roundIds = matchIds.isEmpty() ? List.of()
+            : matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                    .in(TMatchRound::getMatchId, matchIds).select(TMatchRound::getId))
+                .stream().map(TMatchRound::getId).toList();
+        return roundIds.isEmpty() ? Map.of()
+            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds))
+                .stream()
+                .filter(s -> s.getCompetitorId() != null && s.getRefereeId() != null && s.getScore() != null)
+                .collect(Collectors.toMap(
+                    s -> s.getCompetitorId() + ":" + s.getRefereeId(),
+                    TRoundScore::getScore,
+                    BigDecimal::add));
+    }
+
+    /** 参与方 -> 参赛单位映射 */
+    private Map<Long, TCompetitor> competitorById(List<TMatchParticipant> parts) {
+        List<Long> cids = parts.stream()
+            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+        return cids.isEmpty() ? Map.of()
+            : competitorMapper.selectByIds(cids).stream()
+                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+    }
+
+    /** 参赛方行 -> 统一结果项(号码/名称/总分/排名/结果/各裁判分) */
+    private AuditionResultVo.CompetitorItem toCompetitorItem(TMatchParticipant p,
+                                                             Map<Long, TCompetitor> compById,
+                                                             Map<Long, TMatch> matchById,
+                                                             Map<String, BigDecimal> scoreByRef,
+                                                             List<TReferee> referees,
+                                                             Map<Long, String> refNameById) {
+        TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
+        AuditionResultVo.CompetitorItem item = new AuditionResultVo.CompetitorItem();
+        item.setCompetitorId(p.getCompetitorId());
+        item.setNumber(c == null ? null : c.getNumber());
+        item.setName(c == null ? null : c.getName());
+        TMatch m = p.getMatchId() == null ? null : matchById.get(p.getMatchId());
+        item.setZone(m == null ? null : m.getDisplayZone());
+        item.setScore(p.getScoreValue());
+        item.setRankInMatch(p.getRankInMatch());
+        item.setOutcomeStatus(p.getOutcomeStatus());
+        item.setFinalRank(c == null ? null : c.getFinalRank());
+        List<AuditionResultVo.RefereeScoreItem> refScores = new ArrayList<>();
+        if (p.getCompetitorId() != null) {
+            for (TReferee r : referees) {
+                BigDecimal v = scoreByRef.get(p.getCompetitorId() + ":" + r.getId());
+                if (v != null) {
+                    AuditionResultVo.RefereeScoreItem rs = new AuditionResultVo.RefereeScoreItem();
+                    rs.setRefereeId(r.getId());
+                    rs.setRefereeName(refNameById.get(r.getId()));
+                    rs.setScore(v);
+                    refScores.add(rs);
+                }
+            }
+        }
+        item.setRefereeScores(refScores);
+        return item;
     }
 
     /**
@@ -2286,7 +2574,17 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     /** 上一赛段:优先 prevStageId,缺失时按 nextStageId 反向反查(兼容只维护单向链的赛段) */
     private TStage resolvePrevStage(TStage stage) {
         if (stage.getPrevStageId() != null) {
-            return stageMapper.selectById(stage.getPrevStageId());
+            TStage prev = stageMapper.selectById(stage.getPrevStageId());
+            if (prev != null) {
+                return prev;
+            }
+            // prevStageId 悬空(指向已删除赛段)时,按 nextStageId 反向反查兜底,
+            // 避免「上一赛段不存在」阻断本可自愈的链表
+            return stageMapper.selectOne(Wrappers.<TStage>lambdaQuery()
+                .eq(TStage::getTournamentId, stage.getTournamentId())
+                .eq(TStage::getNextStageId, stage.getId())
+                .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
+                .last("LIMIT 1"));
         }
         return stageMapper.selectOne(Wrappers.<TStage>lambdaQuery()
             .eq(TStage::getTournamentId, stage.getTournamentId())
@@ -2433,6 +2731,31 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (matches.isEmpty()) {
             return;
         }
+        // 圈名额/全局排名起点统一计算(与二海/三海单场自动结算共用,避免口径分叉)
+        Map<String, int[]> zoneCtx = buildAuditionZoneContext(stage, matches);
+        // 圈内已晋级数(含已结算正式圈与加赛,支持重复结算幂等)
+        Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(stage, matches);
+
+        for (TMatch match : matches) {
+            if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
+                continue;
+            }
+            String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+            int[] qb = zoneCtx.get(zone);
+            if (qb == null) {
+                continue;
+            }
+            settleAuditionMatch(match, qb[0], qb[1], zoneAdvanced);
+        }
+    }
+
+    /**
+     * 海选圈上下文统一计算:每圈晋级名额 + 全局排名起点(按场次 displayRow 顺序)。
+     * 整段结算与二海/三海单场自动结算共用,保证每圈名额与排名起点口径一致。
+     *
+     * @return zone(CENTER 归一) -> [每圈晋级名额, 全局排名起点]
+     */
+    private Map<String, int[]> buildAuditionZoneContext(TStage stage, List<TMatch> matches) {
         int advanceCount = readStageAdvanceCount(stage);
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
         List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
@@ -2446,46 +2769,116 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         // 圈数以实际生成的场次为准:配置圈数可能被生成器按人数收缩(人数<圈数),
         // 也可能在生成后被修改,按配置结算会导致名额均分错位或整除校验误报
-        int circles = (int) matches.stream()
+        int circles = Math.max(1, (int) matches.stream()
             .map(m -> m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone())
-            .distinct().count();
-        circles = Math.max(1, circles);
+            .distinct().count());
         int perCircle = circles > 1 ? advanceCount / circles : advanceCount;
         // 未显式配置每圈名额时才要求均分可整除
         if (!explicitQuota && advanceCount > 0 && advanceCount % circles != 0) {
             throw new ServiceException("海选总晋级数[{}]无法按实际[{}]圈均分,请调整晋级名额或圈数", advanceCount, circles);
         }
 
-        // 圈序号(displayRow 顺序) + 每圈晋级名额 + 全局排名起点(前序各圈名额累加)
-        List<String> orderedZones = new ArrayList<>();
-        Map<String, Integer> zoneOrdinal = new HashMap<>();
-        Map<String, Integer> zoneQuota = new HashMap<>();
-        Map<String, Integer> zoneBase = new HashMap<>();
+        Map<String, int[]> ctx = new HashMap<>();
         int ordinal = 0;
         int acc = 0;
         for (TMatch m : matches) {
             String zone = m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone();
-            if (zoneOrdinal.putIfAbsent(zone, ordinal) == null) {
-                int quota = explicitQuota && ordinal < perCircleCfg.size()
-                    ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
-                zoneQuota.put(zone, quota);
-                zoneBase.put(zone, acc);
-                acc += quota;
-                orderedZones.add(zone);
-                ordinal++;
-            }
-        }
-        // 圈内已晋级数(含已结算正式圈与加赛,支持重复结算幂等)
-        Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(stage, matches);
-
-        for (TMatch match : matches) {
-            if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
+            if (ctx.containsKey(zone)) {
                 continue;
             }
-            String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-            settleAuditionMatch(match, zoneQuota.getOrDefault(zone, perCircle),
-                zoneBase.getOrDefault(zone, 0), zoneAdvanced);
+            int quota = explicitQuota && ordinal < perCircleCfg.size()
+                ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
+            ctx.put(zone, new int[]{quota, acc});
+            acc += quota;
+            ordinal++;
         }
+        return ctx;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean tryAutoSettleTiebreaker(Long matchId) {
+        if (matchId == null) {
+            return false;
+        }
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null || !StageConstants.MATCH_GAMING.equals(match.getStatus())) {
+            return false;
+        }
+        boolean tiebreaker = StringUtils.isNotBlank(match.getRemark())
+            && match.getRemark().startsWith("同分加赛");
+        if (!tiebreaker) {
+            return false;
+        }
+        TStage stage = stageMapper.selectById(match.getStageId());
+        if (stage == null || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            return false;
+        }
+        // 全员已打分(任一裁判打过即可,与 assertTiebreakersJudged 同口径);退赛选手不计
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, matchId)
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        if (parts.isEmpty()) {
+            return false;
+        }
+        List<Long> cids = parts.stream()
+            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, TCompetitor> compById = cids.isEmpty() ? Map.of()
+            : competitorMapper.selectByIds(cids).stream()
+                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, matchId).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        Set<Long> judged = roundIds.isEmpty() ? Set.of()
+            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                    .in(TRoundScore::getRoundId, roundIds).select(TRoundScore::getCompetitorId))
+                .stream().map(TRoundScore::getCompetitorId).filter(Objects::nonNull).collect(Collectors.toSet());
+        for (TMatchParticipant p : parts) {
+            TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
+            if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
+                continue;
+            }
+            if (p.getCompetitorId() == null || !judged.contains(p.getCompetitorId())) {
+                return false;
+            }
+        }
+        // 单场结算:圈名额/全局排名起点与整段结算共用同一计算,幂等只处理未结算场次
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .orderByAsc(TMatch::getDisplayRow)
+            .orderByAsc(TMatch::getId));
+        Map<String, int[]> zoneCtx = buildAuditionZoneContext(stage, matches);
+        Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(stage, matches);
+        String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+        int[] qb = zoneCtx.get(zone);
+        if (qb == null) {
+            return false;
+        }
+        settleAuditionMatch(match, qb[0], qb[1], zoneAdvanced);
+        log.info("海选加赛[{}]全员打分完成,已自动结算", match.getId());
+        refereeSseNotifier.notifyMatch(stage.getId(), match.getId(), "match");
+        tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), match.getId(), "stage");
+        return true;
+    }
+
+    @Override
+    public void setMatchCurrentCompetitor(Long matchId, Long competitorId) {
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在");
+        }
+        if (competitorId == null) {
+            matchCurrentCompetitor.remove(matchId);
+        } else {
+            matchCurrentCompetitor.put(matchId, competitorId);
+        }
+        // 广播:大屏 widget 与导播台按事件刷新当前标记
+        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), matchId, "stage");
+    }
+
+    @Override
+    public Long getMatchCurrentCompetitor(Long matchId) {
+        return matchCurrentCompetitor.get(matchId);
     }
 
     /**
@@ -2669,6 +3062,119 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
             .eq(TMatchParticipant::getMatchId, matchId)
             .eq(TMatchParticipant::getCompetitorId, cid));
+
+        TMatch match = matchMapper.selectById(matchId);
+        // 二海(同分加赛)结算:把晋级/淘汰结果同步回该选手在所有场次(原始海选场、中间加赛场)的
+        // 参赛方行,避免原始场次参赛方状态停留在 PENDING 而一直显示"进行中";
+        // 普通海选场每个选手只有一行,无需跨场次同步
+        boolean tiebreaker = match != null && StringUtils.isNotBlank(match.getRemark())
+            && match.getRemark().startsWith("同分加赛");
+        if (tiebreaker) {
+            List<Long> stageMatchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                    .eq(TMatch::getStageId, match.getStageId())
+                    .select(TMatch::getId))
+                .stream().map(TMatch::getId).toList();
+            if (!stageMatchIds.isEmpty()) {
+                TMatchParticipant sync = new TMatchParticipant();
+                sync.setOutcomeStatus(outcome);
+                participantMapper.update(sync, Wrappers.<TMatchParticipant>lambdaUpdate()
+                    .in(TMatchParticipant::getMatchId, stageMatchIds)
+                    .eq(TMatchParticipant::getCompetitorId, cid));
+            }
+            // 二海/三海结果回写原始海选场的本场排名(按最终排名顺序重排同分小组)
+            syncTiebreakerOriginalRank(match);
+        }
+    }
+
+    /**
+     * 二海/三海结算后,把同分小组在原始海选场(一海)的本场排名写回:
+     * 小组基准名次 = 原场竞争性排名(同分并列时的名次),按各成员最终排名(finalRank,
+     * 即加赛逐级决出的顺序)依次顺延;尚未出结果(PENDING)的成员保持不动。
+     */
+    private void syncTiebreakerOriginalRank(TMatch tbMatch) {
+        if (tbMatch == null || tbMatch.getStageId() == null) {
+            return;
+        }
+        // 找原始海选场:同赛段同圈、非加赛、displayRow 小于加赛场次的最近一场(加赛链逐级回退)
+        List<TMatch> candidates = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, tbMatch.getStageId())
+            .eq(tbMatch.getDisplayZone() != null, TMatch::getDisplayZone, tbMatch.getDisplayZone())
+            .isNull(tbMatch.getDisplayZone() == null, TMatch::getDisplayZone)
+            .orderByDesc(TMatch::getDisplayRow));
+        TMatch original = null;
+        for (TMatch m : candidates) {
+            boolean tiebreaker = StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛");
+            if (tiebreaker) {
+                continue;
+            }
+            if (m.getDisplayRow() != null && tbMatch.getDisplayRow() != null
+                && m.getDisplayRow() < tbMatch.getDisplayRow()) {
+                original = m;
+                break;
+            }
+        }
+        if (original == null) {
+            return;
+        }
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, original.getId())
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        if (parts.isEmpty()) {
+            return;
+        }
+        // 原场竞争性排名(同分并列),用于确定同分小组的基准名次
+        Map<Long, BigDecimal> scores = new HashMap<>();
+        for (TMatchParticipant p : parts) {
+            scores.put(p.getCompetitorId(), p.getScoreValue() != null ? p.getScoreValue() : BigDecimal.ZERO);
+        }
+        Map<Long, Integer> compRanks = com.dance.street.game.engine.scoring.RankCalculator.rank(scores);
+        // 同分小组 = 本加赛场次的参与方
+        List<TMatchParticipant> tbParts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, tbMatch.getId())
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        List<Long> groupIds = tbParts.stream()
+            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+        if (groupIds.isEmpty()) {
+            return;
+        }
+        Integer baseRank = groupIds.stream()
+            .map(compRanks::get).filter(Objects::nonNull).min(Integer::compareTo).orElse(null);
+        if (baseRank == null) {
+            return;
+        }
+        // 连环加赛未全部决出时先不回写(避免中间名次错误),等全组有最终排名后再统一写回
+        List<TCompetitor> comps = competitorMapper.selectByIds(groupIds);
+        Map<Long, TCompetitor> compById = comps.stream()
+            .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+        boolean anyUnresolved = false;
+        for (Long gid : groupIds) {
+            TCompetitor c = compById.get(gid);
+            if (c == null || OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
+                continue;
+            }
+            if (c.getFinalRank() == null) {
+                anyUnresolved = true;
+                break;
+            }
+        }
+        if (anyUnresolved) {
+            return;
+        }
+        // 已出结果(有最终排名)的成员按 finalRank 升序,依次写回 base, base+1, …
+        List<TCompetitor> resolved = groupIds.stream()
+            .map(compById::get).filter(Objects::nonNull)
+            .filter(c -> !OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus()))
+            .filter(c -> c.getFinalRank() != null)
+            .sorted(Comparator.comparing(TCompetitor::getFinalRank))
+            .toList();
+        for (int i = 0; i < resolved.size(); i++) {
+            TCompetitor c = resolved.get(i);
+            TMatchParticipant upd = new TMatchParticipant();
+            upd.setRankInMatch(baseRank.longValue() + i);
+            participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
+                .eq(TMatchParticipant::getMatchId, original.getId())
+                .eq(TMatchParticipant::getCompetitorId, c.getId()));
+        }
     }
 
     /**

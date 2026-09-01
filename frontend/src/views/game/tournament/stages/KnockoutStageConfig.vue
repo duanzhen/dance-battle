@@ -33,6 +33,21 @@
             <div class="text-lg font-medium text-white">{{ config.format }}</div>
           </div>
 
+          <!-- 结果公布模式:赛段开始后仍可修改(自动/手动/导播台判定) -->
+          <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+            <label class="text-xs text-neutral-500 mb-2 block">结果公布模式</label>
+            <select
+              v-model="config.publishMode"
+              class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none"
+              @change="handleUpdate"
+            >
+              <option value="AUTO">自动公布(裁判判完即公布)</option>
+              <option value="MANUAL">手动公布(导播台确认后公布)</option>
+              <option value="DIRECTOR">导播台判定(裁判不判罚,导播台选胜负)</option>
+            </select>
+            <p class="text-[10px] text-neutral-600 mt-1.5">赛段开始后仍可修改,新场次按新模式生效</p>
+          </div>
+
           <!-- 赛制预览 -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">赛制概览</div>

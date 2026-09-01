@@ -1,5 +1,14 @@
 # 无败 - 街舞赛事管理系统
 
+<p align="center">
+  <img src="./frontend/src/assets/logo/logo.png" alt="无败 Logo" width="220" />
+</p>
+
+<p align="center">
+  <a href="https://dancebattle.win">访问官网</a> ｜ <a href="https://docs.dancebattle.win/">查看文档</a>
+</p>
+
+
 无败-面向街舞舞者的掰头平台 赛事创建、赛段编排、场次生成、打分结算、裁判端判罚、大屏实时投射（分布式 SSE）与手机导播台。后端基于 Spring Boot 4，前端为 Vue 3 前后端统一打包为单 Jar 部署。
 
 ## 功能

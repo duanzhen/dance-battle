@@ -184,6 +184,10 @@ public class TStageServiceImpl implements ITStageService {
         // 获取旧数据，用于清理原链表连接
         TStage oldStage = baseMapper.selectById(update.getId());
 
+        // 防呆:客户端提交的链表指针可能已过期(如删除中间赛段后本地未刷新),
+        // 指向的赛段必须存在且属于同一赛事,否则回退旧链接,避免把悬空指针写回
+        sanitizeLinkIds(update, oldStage);
+
         // 先清理旧的链表连接
         if (oldStage != null) {
             clearOldLinks(oldStage);
@@ -198,6 +202,35 @@ public class TStageServiceImpl implements ITStageService {
         updateNeighborLinks(update);
 
         return MapstructUtils.convert(update, TStageVo.class);
+    }
+
+    /**
+     * 修正过期的链表指针:prev/next 指向的赛段不存在或跨赛事时,
+     * 回退为旧赛段的链接(或置空),防止删除中间赛段后本地未刷新导致悬空引用写回。
+     */
+    private void sanitizeLinkIds(TStage update, TStage oldStage) {
+        if (update.getPrevStageId() != null && !isValidLinkTarget(update.getPrevStageId(), update.getTournamentId())) {
+            log.warn("赛段[{}] prevStageId={} 已失效(不存在或跨赛事),回退为旧链接 {}",
+                update.getId(), update.getPrevStageId(),
+                oldStage == null ? null : oldStage.getPrevStageId());
+            update.setPrevStageId(oldStage == null ? null : oldStage.getPrevStageId());
+        }
+        if (update.getNextStageId() != null && !isValidLinkTarget(update.getNextStageId(), update.getTournamentId())) {
+            log.warn("赛段[{}] nextStageId={} 已失效(不存在或跨赛事),回退为旧链接 {}",
+                update.getId(), update.getNextStageId(),
+                oldStage == null ? null : oldStage.getNextStageId());
+            update.setNextStageId(oldStage == null ? null : oldStage.getNextStageId());
+        }
+    }
+
+    /** 链表指针有效性:目标赛段存在,且(指定赛事时)属于同一赛事 */
+    private boolean isValidLinkTarget(Long stageId, Long tournamentId) {
+        if (stageId == null) {
+            return true;
+        }
+        TStage target = baseMapper.selectById(stageId);
+        return target != null
+            && (tournamentId == null || Objects.equals(target.getTournamentId(), tournamentId));
     }
 
     /**
@@ -469,13 +502,14 @@ public class TStageServiceImpl implements ITStageService {
         if (ids == null || ids.isEmpty()) {
             return false;
         }
+        List<TStage> toDeleteStages = List.of();
         if(isValid){
             // 在删除前重新连接链表
             reconnectChainBeforeDelete(ids);
             // 删除赛段后联动调整源赛段晋级名额:
             // 前驱赛段的 teamCountEnd 对齐到存活后继赛段的 teamCountStart(即被删赛段的 next),
             // 例如删除 32→16 的 32强 后,海选晋级名额自动回到下一赛段容量
-            List<TStage> toDeleteStages = baseMapper.selectList(
+            toDeleteStages = baseMapper.selectList(
                 Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids));
             for (TStage st : toDeleteStages) {
                 syncAdvanceCountFromNext(st.getPrevStageId(), st.getNextStageId());
@@ -515,7 +549,20 @@ public class TStageServiceImpl implements ITStageService {
         }
         refereeStageMapper.delete(Wrappers.<TRefereeStage>lambdaQuery()
             .in(TRefereeStage::getStageId, stageIds));
-        return baseMapper.deleteByIds(ids) > 0;
+        boolean deleted = baseMapper.deleteByIds(ids) > 0;
+        // 删除后清扫:同赛事仍有 prev/next 指向已删赛段的,按被删节点的前后链接重连,
+        // 兜底修复异常数据留下的悬空指针(正常链表下此处无命中)
+        for (TStage st : toDeleteStages) {
+            baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+                .eq(TStage::getTournamentId, st.getTournamentId())
+                .eq(TStage::getPrevStageId, st.getId())
+                .set(TStage::getPrevStageId, st.getPrevStageId()));
+            baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+                .eq(TStage::getTournamentId, st.getTournamentId())
+                .eq(TStage::getNextStageId, st.getId())
+                .set(TStage::getNextStageId, st.getNextStageId()));
+        }
+        return deleted;
     }
 
     /**
@@ -929,7 +976,11 @@ public class TStageServiceImpl implements ITStageService {
     /** 通过 prevStageId 或链表反查上一赛段 */
     private TStage resolvePrevStage(TStage stage) {
         if (stage.getPrevStageId() != null) {
-            return baseMapper.selectById(stage.getPrevStageId());
+            TStage prev = baseMapper.selectById(stage.getPrevStageId());
+            if (prev != null) {
+                return prev;
+            }
+            // prevStageId 悬空(指向已删除赛段)时,按 nextStageId 反向反查兜底
         }
         List<TStage> all = baseMapper.selectList(Wrappers.<TStage>lambdaQuery()
             .eq(TStage::getTournamentId, stage.getTournamentId())

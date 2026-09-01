@@ -94,6 +94,23 @@ export function directorStartMatch(id: string | number) {
   });
 }
 
+/** 标记场次当前上场选手(海选大屏):MC 点击选手名字后调用,仅标记并广播;competitorId 传 null 清除 */
+export function directorSetCurrentCompetitor(id: string | number, competitorId: string | number | null) {
+  return directorRequest({
+    url: `/game/director/match/${id}/current-competitor`,
+    method: 'put',
+    data: { competitorId }
+  });
+}
+
+/** 查询场次当前标记的上场选手(导播台高亮用) */
+export function directorGetCurrentCompetitor(id: string | number) {
+  return directorRequest({
+    url: `/game/director/match/${id}/current-competitor`,
+    method: 'get'
+  });
+}
+
 /** 取消开始场次(误触回退):GAMING → PENDING,清空本场已提交分数/结果 */
 export function directorCancelStartMatch(id: string | number) {
   return directorRequest({

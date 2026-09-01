@@ -23,6 +23,7 @@ import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITMatchResultService;
+import com.dance.street.game.service.ITStageLifecycleService;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 
 /**
@@ -39,6 +40,7 @@ public class TMatchController extends BaseController {
 
     private final ITMatchService tMatchService;
     private final ITMatchResultService tMatchResultService;
+    private final ITStageLifecycleService tStageLifecycleService;
 
     /**
      * 查询比赛场次列表
@@ -146,6 +148,15 @@ public class TMatchController extends BaseController {
     public R<Void> start(@NotNull(message = "场次ID不能为空") @PathVariable Long id) {
         tMatchResultService.startMatch(id);
         return R.ok();
+    }
+
+    /**
+     * 查询场次当前标记的上场选手(海选大屏 widget 用):导播台在手机端标记,大屏读取
+     */
+    @SaCheckPermission("game:match:list")
+    @GetMapping("/{id}/current-competitor")
+    public R<Long> currentCompetitor(@NotNull(message = "场次ID不能为空") @PathVariable Long id) {
+        return R.ok(tStageLifecycleService.getMatchCurrentCompetitor(id));
     }
 
     /**

@@ -78,12 +78,9 @@
           @dragend="onDragEnd"
         >
           <div class="flex items-center gap-4">
-            <!-- 种子排名 -->
-            <div
-              class="flex-shrink-0 w-12 h-12 rounded-lg bg-gradient-to-br flex items-center justify-center"
-              :class="getSeedRankClass(competitor.seedRank)"
-            >
-              <span class="text-lg font-bold">{{ competitor.seedRank || '-' }}</span>
+            <!-- 号码牌(海选直接显示抽到的号码) / 种子排名(其余赛制);均为赛前预排,不做金银铜高亮 -->
+            <div class="flex-shrink-0 w-12 h-12 rounded-lg bg-neutral-800 text-neutral-400 flex items-center justify-center">
+              <span class="text-lg font-bold">{{ isAudition ? competitor.number || '-' : competitor.seedRank || '-' }}</span>
             </div>
 
             <!-- 选手信息 -->
@@ -201,10 +198,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Users, Pencil, Check, X, Hash, Trophy, Download } from 'lucide-vue-next';
 import { listCompetitor, updateCompetitor } from '@/api/game/competitor';
-import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { setStageSeedOrder } from '@/api/game/stage';
-import { exportAuditionResult } from '@/api/game/stage';
+import { exportAuditionResult, getAuditionResult } from '@/api/game/stage';
 import { withdrawArenaCompetitor } from '@/api/game/stage/lifecycle';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
@@ -388,26 +383,21 @@ const saveSeedOrder = async () => {
   }
 };
 
-// 加载海选赛分数:按场次参赛方累计总分(competitorId -> scoreValue 汇总)
+// 加载海选赛分数:统一消费后端 audition-result(原始海选分,不含二海;二海分仅用于决出晋级)
 const loadScores = async () => {
   if (!isAudition.value) {
     scoreByCompetitor.value = {};
     return;
   }
   try {
-    const mr: any = await listMatch({ stageId: props.stageId, pageNum: 1, pageSize: 100 } as any);
-    const matches = mr?.data?.data || mr?.data || [];
+    const ar: any = await getAuditionResult(props.stageId);
+    const data = ar?.data?.data || ar?.data || ar;
     const map: Record<string, number> = {};
-    for (const m of matches) {
-      const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 500 } as any);
-      const parts = pr?.data?.data || pr?.data || [];
-      parts.forEach((p: any) => {
-        if (p.competitorId != null && p.scoreValue != null) {
-          const key = String(p.competitorId);
-          map[key] = (map[key] || 0) + Number(p.scoreValue);
-        }
-      });
-    }
+    (data?.competitors || []).forEach((c: any) => {
+      if (c.competitorId != null && c.score != null) {
+        map[String(c.competitorId)] = Number(c.score);
+      }
+    });
     scoreByCompetitor.value = map;
   } catch (e) {
     console.error('加载海选赛分数失败:', e);
@@ -444,8 +434,13 @@ const loadCompetitors = async () => {
   try {
     const { data } = await listCompetitor({ stageId: props.stageId, pageNum: 1, pageSize: 1000 });
     competitors.value = data || [];
-    // 按种子排名排序
-    competitors.value.sort((a, b) => (a.seedRank || 999) - (b.seedRank || 999));
+    // 海选赛直接按号码牌排序(号码即上场顺序,不依赖重建的 seedRank 索引);
+    // 其余赛制按种子排名排序;可拖拽排位时保持后端种子顺序供抽签调整
+    if (isAudition.value && !canArrange.value) {
+      competitors.value.sort((a, b) => numOf(a) - numOf(b) || String(a.number || '').localeCompare(String(b.number || '')));
+    } else {
+      competitors.value.sort((a, b) => (a.seedRank || 999) - (b.seedRank || 999));
+    }
     await loadScores();
   } catch (error) {
     console.error('加载参赛选手失败:', error);
@@ -453,16 +448,6 @@ const loadCompetitors = async () => {
   } finally {
     loading.value = false;
   }
-};
-
-// 获取种子排名样式
-const getSeedRankClass = (rank: number) => {
-  if (!rank) return 'bg-neutral-800 text-neutral-400';
-  if (rank === 1) return 'from-amber-500/20 to-amber-600/20 text-amber-500 border border-amber-500/30';
-  if (rank === 2) return 'from-neutral-400/20 to-neutral-500/20 text-neutral-300 border border-neutral-400/30';
-  if (rank === 3) return 'from-orange-600/20 to-orange-700/20 text-orange-500 border border-orange-600/30';
-  if (rank <= 8) return 'from-blue-500/20 to-blue-600/20 text-blue-400 border border-blue-500/30';
-  return 'bg-neutral-800 text-neutral-400';
 };
 
 // 获取结果状态样式

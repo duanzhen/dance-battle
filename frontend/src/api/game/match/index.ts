@@ -27,6 +27,14 @@ export const getMatch = (id: string | number): AxiosPromise<MatchVO> => {
   });
 };
 
+/** 查询场次当前标记的上场选手(海选大屏 widget 用);未标记返回 null */
+export const getMatchCurrentCompetitor = (id: string | number) => {
+  return request({
+    url: '/game/match/' + id + '/current-competitor',
+    method: 'get'
+  });
+};
+
 /**
  * 新增比赛场次
  * @param data

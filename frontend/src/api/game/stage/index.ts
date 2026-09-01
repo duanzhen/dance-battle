@@ -93,6 +93,17 @@ export const getArenaOverview = (stageId: string | number) => {
 };
 
 /**
+ * 海选赛段结果(统一口径):原始海选成绩 + 二海/三海…加赛明细。
+ * 二海分数只用于同分者决出晋级顺序,不计入原始总分;各组件统一消费本结果。
+ */
+export const getAuditionResult = (stageId: string | number) => {
+  return request({
+    url: '/game/stage/' + stageId + '/audition-result',
+    method: 'get'
+  });
+};
+
+/**
  * GUEST 加入赛段(除海选外任意赛段,赛段规划/未开始态 DRAFT/PENDING 且未初始化时可加;
  * 仅创建参赛单位进入 GUEST 池,不自动挂入场次,由导播排定种子顺序后 initialize 生成对阵)
  * @param stageId 赛段ID

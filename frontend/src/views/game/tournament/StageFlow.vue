@@ -799,7 +799,9 @@ const deleteStage = async () => {
   try {
     // 删除赛段（后端会自动维护链表指针）
     await delStageApi(stageId);
-    stages.value.splice(idx, 1);
+    // 删除后重新拉取:本地数组里的 prev/next 仍是旧链(如 16强.prev=已删的32强),
+    // 不刷新的话后续任何一次赛段保存都会把悬空指针写回数据库
+    await loadStages(true);
 
     // 选中下一个可用赛段
     if (stages.value.length > 0) {

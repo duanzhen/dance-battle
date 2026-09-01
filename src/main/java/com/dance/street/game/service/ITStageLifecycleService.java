@@ -6,6 +6,7 @@ import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.AddGuestBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
+import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.CircleAssignVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
@@ -33,6 +34,12 @@ public interface ITStageLifecycleService {
      * 返回本次结算的场次数。
      */
     int settleByeMatches(Long stageId);
+
+    /**
+     * 结算单个轮空场次(导播台点「开始」轮空场次时调用):单边轮空判胜填下游/标晋级,
+     * 双边轮空仅置已结算;非轮空场次返回 false。
+     */
+    boolean settleByeMatch(Long matchId);
 
     /**
      * 海选/排名赛补签到:把新参赛方挂入圈场次(新增 participant + round),保证可被裁判打分并参与结算。
@@ -105,6 +112,29 @@ public interface ITStageLifecycleService {
      * @param response HTTP 响应(直接写 xlsx)
      */
     void exportAuditionResult(Long stageId, jakarta.servlet.http.HttpServletResponse response);
+
+    /**
+     * 查询海选赛段结果(统一口径):原始海选成绩 + 二海/三海…加赛明细。
+     * 二海分数只用于同分者决出晋级顺序,不计入原始总分;
+     * 导出与前端各组件均消费本结果,不再各自聚合。
+     */
+    AuditionResultVo queryAuditionResult(Long stageId);
+
+    /**
+     * 海选加赛(二海/三海…)全员打分完成后自动结算:
+     * 幂等,仅处理进行中的加赛场次;若再次同分会自动生成下一级加赛。
+     * 返回是否执行了结算。
+     */
+    boolean tryAutoSettleTiebreaker(Long matchId);
+
+    /**
+     * 标记场次当前上场选手(海选大屏 widget 用):仅标记与广播,不参与结算;
+     * competitorId 传 null 表示清除。
+     */
+    void setMatchCurrentCompetitor(Long matchId, Long competitorId);
+
+    /** 查询场次当前标记的上场选手;未标记返回 null */
+    Long getMatchCurrentCompetitor(Long matchId);
 
     /**
      * 排名赛:同分并列导致晋级名额超限时,导播台在中间态手动指定晋级者

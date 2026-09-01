@@ -24,23 +24,19 @@
         <div class="flex-1 flex items-stretch justify-between gap-2 min-h-0">
           <div class="flex-none flex flex-col justify-between items-center min-h-0">
             <div class="final-card" :class="{ 'final-win': semi.left?.top?.win }">
-              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
+              <span class="name" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
-              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{
-                semi.left?.bottom?.name || ''
-              }}</span>
+              <span class="name" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
             </div>
           </div>
           <div style="flex: 1; min-width: 0"></div>
           <div class="flex-none flex flex-col justify-between items-center min-h-0">
             <div class="final-card" :class="{ 'final-win': semi.right?.top?.win }">
-              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
+              <span class="name" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
-              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{
-                semi.right?.bottom?.name || ''
-              }}</span>
+              <span class="name" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
             </div>
           </div>
         </div>
@@ -69,14 +65,10 @@
         >
           <template v-for="(s, i) in leftSlots" :key="'l' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
-              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{
-                s.leftName || ''
-              }}</span>
+              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{
-                s.rightName || ''
-              }}</span>
+              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
         </div>
@@ -89,14 +81,10 @@
         >
           <template v-for="(s, i) in rightSlots" :key="'r' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
-              <span class="name" :class="bracketTopClass" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{
-                s.leftName || ''
-              }}</span>
+              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <span class="name" :class="bracketBottomClass" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{
-                s.rightName || ''
-              }}</span>
+              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
         </div>
@@ -233,8 +221,6 @@ const stagePairingMode = ref('');
 const stageTeamCountStart = ref(0);
 /** 赛事级红蓝配色(所有下属淘汰赛共享) */
 const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
-const bracketTopClass = computed(() => (colorConfig.value.bracketColorOrder === 'BLUE_TOP' ? 'bracket-blue' : 'bracket-red'));
-const bracketBottomClass = computed(() => (colorConfig.value.bracketColorOrder === 'BLUE_TOP' ? 'bracket-red' : 'bracket-blue'));
 
 const nextPow2 = (v: number): number => {
   let p = 1;
@@ -841,12 +827,6 @@ const handleTournamentEvent = (data: any) => {
   white-space: nowrap;
   min-width: 0;
   max-width: 100%;
-}
-.bracket-red {
-  color: #ef4444;
-}
-.bracket-blue {
-  color: #3b82f6;
 }
 .final-win {
   background: var(--bracket-bg, transparent);

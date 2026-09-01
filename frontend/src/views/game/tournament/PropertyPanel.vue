@@ -124,6 +124,8 @@
                   @update:showTitle="handleUpdateProp('showTitle', $event)"
                   @update:showMilliseconds="handleUpdateProp('showMilliseconds', $event)"
                   @update:stageId="handleUpdateProp('stageId', $event)"
+                  @update:matchId="handleUpdateProp('matchId', $event)"
+                  @update:showCurrent="handleUpdateProp('showCurrent', $event)"
                   @update:bgImage="handleUpdateProp('bgImage', $event)"
                   @update:showScore="handleUpdateProp('showScore', $event)"
                   @update:opacity="handleUpdateProp('opacity', $event)"
@@ -398,6 +400,7 @@ import MatchDetailWidget from './widgets/MatchDetailWidget.vue';
 import ScoreboardWidget from './widgets/ScoreboardWidget.vue';
 import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
+import AuditionWidget from './widgets/AuditionWidget.vue';
 
 const emit = defineEmits(['widgetUpdated']);
 
@@ -414,6 +417,7 @@ const widgetComponentMap = {
   'MATCH_DETAIL': MatchDetailWidget,
   'SCOREBOARD': ScoreboardWidget,
   'ARENA_SCORE': ArenaWidget,
+  'AUDITION': AuditionWidget,
   'RANKING': RankingWidget
 };
 

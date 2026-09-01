@@ -164,7 +164,55 @@
         ></textarea>
       </div>
 
-      <!-- 高级配置(默认折叠):赛事级红蓝配色,所有下属淘汰赛共享 -->
+
+
+      <!-- 按模版创建:自动生成赛段链 + 场景 + 对战树关联 -->
+      <div v-if="!props.tournament" class="col-span-2 border-t border-neutral-800 pt-3">
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5">按模版创建</label>
+        <p class="text-[11px] text-neutral-600 mb-3">
+          点击模版先选中，再点底部「立即发布」即可创建赛段链（海选 + 淘汰赛）与两个场景（主视觉 / 对战），并自动关联对战树。
+        </p>
+        <div class="grid grid-cols-1 gap-2">
+          <button
+            v-for="tpl in templates"
+            :key="tpl.code"
+            @click="selectedTemplate = selectedTemplate === tpl.code ? null : tpl.code"
+            :disabled="isSubmitting"
+            :class="[
+              'text-left w-full rounded-xl border transition-all px-3.5 py-2.5 group disabled:opacity-50 disabled:cursor-not-allowed',
+              selectedTemplate === tpl.code
+                ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
+                : 'border-neutral-800 bg-neutral-950 hover:border-amber-500/50 hover:bg-neutral-900/80 active:scale-[0.99]'
+            ]"
+          >
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-bold text-neutral-200 group-hover:text-amber-400 transition-colors">{{ tpl.label }}</span>
+              <span class="flex items-center gap-1.5">
+                <span
+                  class="text-[9px] px-2 py-0.5 rounded-full transition-colors"
+                  :class="
+                    selectedTemplate === tpl.code
+                      ? 'bg-amber-500/15 text-amber-400'
+                      : 'bg-neutral-800 text-neutral-400 group-hover:bg-amber-500/10 group-hover:text-amber-400'
+                  "
+                  >{{ tpl.tag }}</span
+                >
+                <svg v-if="selectedTemplate === tpl.code" class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+                </svg>
+              </span>
+            </div>
+            <div class="flex items-center gap-1 text-[10px] text-neutral-500 font-mono flex-wrap">
+              <template v-for="(s, i) in tpl.stages" :key="i">
+                <span class="px-1.5 py-0.5 rounded bg-neutral-800/80">{{ s }}</span>
+                <span v-if="i < tpl.stages.length - 1" class="text-neutral-700">→</span>
+              </template>
+            </div>
+          </button>
+        </div>
+      </div>
+
+            <!-- 高级配置(默认折叠):赛事级红蓝配色,所有下属淘汰赛共享 -->
       <div class="col-span-2 border-t border-neutral-800 pt-3">
         <button type="button" @click="showAdvanced = !showAdvanced" class="w-full flex items-center justify-between py-2 text-left group">
           <span class="text-sm font-bold text-neutral-300 group-hover:text-amber-400 transition-colors flex items-center gap-2">
@@ -222,52 +270,7 @@
           <p class="md:col-span-2 text-[11px] text-neutral-600">该配置作用于本赛事所有淘汰赛的对战树、当前场次组件与裁判列表。</p>
         </div>
       </div>
-
-      <!-- 按模版创建:自动生成赛段链 + 场景 + 对战树关联 -->
-      <div v-if="!props.tournament" class="col-span-2 border-t border-neutral-800 pt-3">
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">按模版创建</label>
-        <p class="text-[11px] text-neutral-600 mb-3">
-          点击模版先选中，再点底部「立即发布」即可创建赛段链（海选 + 淘汰赛）与两个场景（主视觉 / 对战），并自动关联对战树。
-        </p>
-        <div class="grid grid-cols-1 gap-2">
-          <button
-            v-for="tpl in templates"
-            :key="tpl.code"
-            @click="selectedTemplate = selectedTemplate === tpl.code ? null : tpl.code"
-            :disabled="isSubmitting"
-            :class="[
-              'text-left w-full rounded-xl border transition-all px-3.5 py-2.5 group disabled:opacity-50 disabled:cursor-not-allowed',
-              selectedTemplate === tpl.code
-                ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
-                : 'border-neutral-800 bg-neutral-950 hover:border-amber-500/50 hover:bg-neutral-900/80 active:scale-[0.99]'
-            ]"
-          >
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="text-xs font-bold text-neutral-200 group-hover:text-amber-400 transition-colors">{{ tpl.label }}</span>
-              <span class="flex items-center gap-1.5">
-                <span
-                  class="text-[9px] px-2 py-0.5 rounded-full transition-colors"
-                  :class="
-                    selectedTemplate === tpl.code
-                      ? 'bg-amber-500/15 text-amber-400'
-                      : 'bg-neutral-800 text-neutral-400 group-hover:bg-amber-500/10 group-hover:text-amber-400'
-                  "
-                  >{{ tpl.tag }}</span
-                >
-                <svg v-if="selectedTemplate === tpl.code" class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
-                </svg>
-              </span>
-            </div>
-            <div class="flex items-center gap-1 text-[10px] text-neutral-500 font-mono flex-wrap">
-              <template v-for="(s, i) in tpl.stages" :key="i">
-                <span class="px-1.5 py-0.5 rounded bg-neutral-800/80">{{ s }}</span>
-                <span v-if="i < tpl.stages.length - 1" class="text-neutral-700">→</span>
-              </template>
-            </div>
-          </button>
-        </div>
-      </div>
+      
     </div>
 
     <template #footer>

@@ -191,6 +191,15 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             List<MatchScoreResult> accumulated = loadAuditionResults(match, competitorIds);
             refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
             tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
+            // 二海/三海:全员打分完成后自动结算(若再次同分会自动生成下一级加赛),
+            // 无需裁判判完后手动再点一次完成赛段;结算异常不阻断打分提交(仍可手动完成兜底)
+            if (isAudition) {
+                try {
+                    stageLifecycleService.tryAutoSettleTiebreaker(match.getId());
+                } catch (Exception e) {
+                    log.warn("海选加赛[{}]自动结算失败,可手动完成赛段兜底: {}", match.getId(), e.getMessage());
+                }
+            }
             // 排名赛 BATCH 公布模式:全部裁判对全部选手打分完成后,自动完成赛段一次性公布
             if (isRank) {
                 maybeAutoPublishRankStage(stage);
@@ -385,7 +394,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
             throw new ServiceException("赛段状态不允许开始场次");
         }
-        // 轮空场次(单边/双边轮空):无需裁判,开始即自动结算晋级,直接返回
+        // 轮空场次(单边/双边轮空):无需裁判,导播台点「开始」后仅自动结算本场,直接返回
         long realCount = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
                 .eq(TMatchParticipant::getMatchId, matchId))
             .stream().filter(p -> p.getCompetitorId() != null).count();
@@ -398,7 +407,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 refereeSseNotifier.notifyStage(stage.getId(), "stage");
                 tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
             }
-            stageLifecycleService.settleByeMatches(stage.getId());
+            boolean settled = stageLifecycleService.settleByeMatch(matchId);
+            if (!settled) {
+                // 0 参赛方的非首轮场次是等待上游胜者填入的占位,不能按轮空结算
+                throw new ServiceException("该场次暂无参赛方,请先完成上一轮场次后再开始");
+            }
             return;
         }
         // 淘汰赛逐场进行:同赛段其他进行中场次回退 PENDING 并清空已提交分数,保证同时只有一个进行中

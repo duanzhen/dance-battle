@@ -51,6 +51,7 @@
         <template v-if="currentMode !== ConfigMode.CREATE">
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4 space-y-3">
             <div class="text-xs text-neutral-500">结果公布</div>
+            <p class="text-[10px] text-neutral-600 -mt-1">赛段开始后仍可修改,新场次按新模式生效</p>
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">公布模式</label>

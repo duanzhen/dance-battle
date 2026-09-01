@@ -237,6 +237,29 @@ public class DirectorController {
         return R.ok(matchResultService.publishResult(id));
     }
 
+    /**
+     * 标记场次当前上场选手(海选大屏):MC 点击选手名字后调用,仅标记并广播,不参与结算。
+     * competitorId 传 null 清除标记。
+     */
+    @Log(title = "标记当前上场选手", businessType = BusinessType.UPDATE)
+    @PutMapping("/match/{id}/current-competitor")
+    public R<Void> setCurrentCompetitor(@PathVariable("id") Long id,
+                                        @RequestBody java.util.Map<String, Object> body,
+                                        HttpServletRequest request) {
+        assertMatchInTournament(currentTournament(request), id);
+        Object cid = body.get("competitorId");
+        Long competitorId = cid == null ? null : Long.valueOf(cid.toString());
+        stageLifecycleService.setMatchCurrentCompetitor(id, competitorId);
+        return R.ok();
+    }
+
+    /** 查询场次当前标记的上场选手(导播台高亮用);未标记返回 null */
+    @GetMapping("/match/{id}/current-competitor")
+    public R<Long> getCurrentCompetitor(@PathVariable("id") Long id, HttpServletRequest request) {
+        assertMatchInTournament(currentTournament(request), id);
+        return R.ok(stageLifecycleService.getMatchCurrentCompetitor(id));
+    }
+
     private TTournamentVo currentTournament(HttpServletRequest request) {
         return (TTournamentVo) request.getAttribute(DirectorAuthInterceptor.DIRECTOR_ATTR);
     }

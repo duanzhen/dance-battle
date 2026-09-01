@@ -50,6 +50,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 裁判端接口：authKey 即认证凭证，由 RefereeAuthInterceptor 校验
@@ -200,6 +201,23 @@ public class RefereeMatchController {
                     }
                 }
             }
+        }
+        // 海选/排名赛:号码即上场顺序,直接按号码数值排序,
+        // 避免补签选手按插入顺序排在队尾(不依赖可能错位的 displaySlotIndex)
+        if (perCompetitorStage && !participants.isEmpty()) {
+            List<Long> pids = participants.stream()
+                .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+            Map<Long, String> numberById = pids.isEmpty() ? Map.of()
+                : competitorMapper.selectByIds(pids).stream()
+                    .collect(Collectors.toMap(TCompetitor::getId,
+                        c -> c.getNumber() == null ? "" : c.getNumber(), (a, b) -> a));
+            participants.sort(Comparator
+                .comparingInt((TMatchParticipant p) -> {
+                    String n = p.getCompetitorId() == null ? ""
+                        : numberById.getOrDefault(p.getCompetitorId(), "");
+                    return parseNumber(n);
+                })
+                .thenComparing(p -> p.getDisplaySlotIndex() == null ? Long.MAX_VALUE : p.getDisplaySlotIndex()));
         }
         List<TMatchRound> rounds = match == null ? List.of() : matchRoundMapper.selectList(
             Wrappers.<TMatchRound>lambdaQuery()
@@ -462,6 +480,18 @@ public class RefereeMatchController {
         }
         vo.setParticipants(partInfos);
         return R.ok(vo);
+    }
+
+    /** 参赛号码转数值用于排序:空/非数字号码排最后 */
+    private static int parseNumber(String number) {
+        if (number == null || number.isBlank()) {
+            return Integer.MAX_VALUE;
+        }
+        try {
+            return Integer.parseInt(number.trim());
+        } catch (NumberFormatException e) {
+            return Integer.MAX_VALUE;
+        }
     }
 
     /**

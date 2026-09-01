@@ -1,15 +1,22 @@
 <template>
   <div class="space-y-1">
-    <!-- 第一行：搜索框和标题 -->
-    <div class="flex justify-between items-center gap-4">
+    <!-- 第一行：标题 + 搜索(移动端上下排列) -->
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
       <h2 class="text-xl font-bold text-neutral-100 flex items-center flex-shrink-0"><Users class="w-5 h-5 text-amber-500" /> 参赛阵容</h2>
 
-      <div class="flex items-center gap-2">
-        <!-- 仅显示未签到选手开关 -->
-        <div v-if="displayMode === 'player'" class="flex items-center gap-2">
-          <span class="text-xs text-neutral-400">仅未签到</span>
-          <el-switch v-model="filterUncheckInOnly" size="small" inline-prompt active-text="开" inactive-text="关" class="filter-switch" />
-        </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- 全部 / 未签到 过滤 -->
+        <el-segmented
+          v-if="displayMode === 'player'"
+          :model-value="filterUncheckInOnly ? 'uncheck' : 'all'"
+          :options="[
+            { label: '全部', value: 'all' },
+            { label: '未签到', value: 'uncheck' }
+          ]"
+          size="small"
+          class="amber-segmented flex-shrink-0"
+          @change="handleFilterMode"
+        />
 
         <el-input
           v-model="searchKeyword"
@@ -17,16 +24,15 @@
           size="small"
           :prefix-icon="Users"
           clearable
-          class="search-input"
-          style="width: 200px"
+          class="search-input w-full sm:w-52 rounded-lg"
         />
       </div>
     </div>
 
-    <!-- 第二行：按钮和segmented -->
-    <div class="flex justify-between items-center pb-4">
-      <div class="flex items-center gap-2 min-w-0">
-        <span class="text-xs text-neutral-500">管理参赛选手名单及战队归属</span>
+    <!-- 第二行：说明 + 操作按钮(移动端纵向堆叠、按钮换行) -->
+    <div class="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 pb-4">
+      <div class="flex flex-wrap items-center gap-2 min-w-0">
+        <span class="text-xs text-neutral-500 hidden lg:inline">管理参赛选手名单及战队归属</span>
         <span class="px-2 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-[10px] text-neutral-300 flex items-center gap-1 flex-shrink-0">
           选手 {{ playerStats.total }} · 已签到 {{ playerStats.checkedIn }}
         </span>
@@ -38,7 +44,7 @@
           海选进行中，签到后自动加入场次
         </span>
       </div>
-      <div class="flex items-center gap-1">
+      <div class="flex flex-wrap items-center gap-1.5 toolbar-buttons">
         <el-button type="warning" size="small" :icon="Plus" @click="handleAdd" class="amber-button">添加选手</el-button>
         <el-button size="small" @click="showImportDialog = true" class="import-button">批量导入</el-button>
         <el-button v-if="canRandomCircles" size="small" :icon="Shuffle" @click="handleRandomCircles" class="import-button"> 随机抽取圈 </el-button>
@@ -47,9 +53,9 @@
       </div>
     </div>
 
-    <div class="space-y-3">
-      <!-- 加载指示:仅顶部小提示,不卸载列表 DOM,避免滚动位置被拉回顶部 -->
-      <div v-show="loading" class="flex items-center justify-center py-2">
+    <div class="space-y-3 relative">
+      <!-- 加载指示:覆盖在列表上方,不占布局空间,避免刷新时顶部出现空白跳动 -->
+      <div v-show="loading" class="absolute top-0 left-0 right-0 z-10 flex items-center justify-center py-1 pointer-events-none">
         <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-amber-500"></div>
       </div>
       <!-- 显示选手列表 -->
@@ -57,7 +63,7 @@
         <div
           v-for="player in filteredPlayers"
           :key="player.id"
-          class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center gap-4 relative group hover:border-neutral-600 hover:shadow-lg transition-all duration-300"
+          class="bg-neutral-900 border border-neutral-800 rounded-xl p-3 sm:p-4 flex items-center gap-3 sm:gap-4 relative group hover:border-neutral-600 hover:shadow-lg transition-all duration-300"
         >
           <div
             class="w-12 h-12 rounded-lg bg-white border border-neutral-800 flex-none flex items-center justify-center text-neutral-700 overflow-hidden relative group-hover:border-amber-500/30 transition-colors"
@@ -72,9 +78,9 @@
             </div>
           </div>
 
-          <div class="flex-1 min-w-0 flex items-center gap-4">
+          <div class="flex-1 min-w-0 flex items-center gap-2 sm:gap-4 flex-wrap">
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <div class="text-sm font-bold text-white truncate">{{ player.name || '未命名' }}</div>
                 <!-- 签到状态标签 -->
                 <span
@@ -107,7 +113,7 @@
               </span>
             </div>
 
-            <div v-if="player.idCard" class="text-[10px] text-neutral-500 font-mono flex-shrink-0">ID: {{ player.idCard }}</div>
+            <div v-if="player.idCard" class="text-[10px] text-neutral-500 font-mono flex-shrink-0 hidden sm:block">ID: {{ player.idCard }}</div>
           </div>
 
           <!-- 编辑按钮 -->
@@ -147,14 +153,14 @@
         <div
           v-for="competitor in filteredCompetitors"
           :key="competitor.id"
-          class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center gap-4 relative group hover:border-neutral-600 hover:shadow-lg transition-all duration-300"
+          class="bg-neutral-900 border border-neutral-800 rounded-xl p-3 sm:p-4 flex items-center gap-3 sm:gap-4 relative group hover:border-neutral-600 hover:shadow-lg transition-all duration-300"
         >
           <!-- 选手号码徽章 -->
           <div class="w-12 h-12 rounded-lg bg-amber-500/20 border border-amber-500/30 flex-none flex items-center justify-center">
             <span class="text-amber-500 font-bold text-lg">{{ competitor.number || '-' }}</span>
           </div>
 
-          <div class="flex-1 min-w-0 flex items-center gap-4">
+          <div class="flex-1 min-w-0 flex items-center gap-2 sm:gap-4">
             <div class="flex-1 min-w-0">
               <!-- 选手姓名列表 -->
               <div v-if="competitor.playerList && competitor.playerList.length > 0" class="flex items-center gap-1 flex-wrap">
@@ -318,7 +324,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue';
 import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File, RefreshCw } from 'lucide-vue-next';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers } from '@/api/game/player';
 import { download } from '@/utils/request';
 import { PlayerVO, PlayerForm as PlayerFormType } from '@/api/game/player/types';
@@ -526,6 +532,11 @@ const handleModeChange = () => {
   // 数据已经在 refreshAll 中统一加载
 };
 
+/** 全部 / 未签到 过滤切换 */
+const handleFilterMode = (v: string | number | boolean) => {
+  filterUncheckInOnly.value = String(v) === 'uncheck';
+};
+
 // 打开添加表单
 const handleAdd = () => {
   if (!props.tournamentId) {
@@ -581,7 +592,15 @@ const loadFirstStageInfo = async () => {
 // 随机抽取圈:把已签到选手随机均衡分到各圈场次(可重抽)
 const handleRandomCircles = async () => {
   if (!firstStageId.value) return;
-  if (!confirm('随机抽取圈会把已签到选手随机均衡分到各圈场次，可重复抽取直到满意，确定？')) return;
+  try {
+    await ElMessageBox.confirm('随机抽取圈会把已签到选手随机均衡分到各圈场次，可重复抽取直到满意，确定？', '随机抽取圈', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
   drawingCircles.value = true;
   try {
     const resp = await randomCircles(firstStageId.value);
@@ -781,6 +800,7 @@ defineExpose({
 .search-input :deep(.el-input__wrapper) {
   background-color: #27272a !important;
   box-shadow: 0 0 0 1px #3f3f46 inset !important;
+  border-radius: 0.5rem !important;
 }
 
 .search-input :deep(.el-input__wrapper:hover) {
@@ -829,11 +849,6 @@ defineExpose({
 }
 
 /* Amber 主题 segmented */
-.amber-segmented :deep(.el-segmented) {
-  background-color: #27272a !important;
-  padding: 2px !important;
-}
-
 .amber-segmented :deep(.el-segmented__group) {
   background-color: transparent !important;
 }
@@ -855,6 +870,11 @@ defineExpose({
 
 .amber-segmented :deep(.el-segmented__item:hover) {
   color: #fff !important;
+}
+
+/* 工具栏内相邻 el-button 去掉默认 12px 左边距,统一用 flex gap 控制间距 */
+.toolbar-buttons .el-button + .el-button {
+  margin-left: 0 !important;
 }
 
 /* 过滤开关样式 */
@@ -886,6 +906,7 @@ defineExpose({
 .amber-segmented.el-segmented {
   background-color: #27272a !important;
   padding: 2px !important;
+  border-radius: 0.5rem !important;
 }
 
 .amber-segmented .el-segmented__group {
@@ -906,6 +927,7 @@ defineExpose({
 .amber-segmented.el-segmented .el-segmented__item-selected {
   background-color: #f59e0b !important;
   color: #fff !important;
+  border-radius: 6px !important;
 }
 
 .amber-segmented.el-segmented .el-segmented__item-selected .el-segmented__item-label,

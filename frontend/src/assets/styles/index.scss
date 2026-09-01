@@ -8,6 +8,14 @@
 @use 'animate.css';
 @use 'element-plus/dist/index.css';
 
+/* 全局按钮圆角统一为 rounded-lg(0.5rem),避免各页面圆角数值不一致;
+   rounded-none 例外:分段式控件内嵌按钮保持方形(外层容器已有圆角) */
+button:not(.rounded-none),
+.el-button:not(.rounded-none),
+[role='button']:not(.rounded-none) {
+  border-radius: 0.5rem !important;
+}
+
 body {
   height: 100%;
   margin: 0;

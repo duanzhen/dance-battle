@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full overflow-y-auto custom-scrollbar bg-neutral-950 p-5 space-y-5">
+  <div class="h-full overflow-y-auto custom-scrollbar bg-neutral-950 p-3 sm:p-5 space-y-4 sm:space-y-5">
     <!-- 配置面板头部 -->
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold text-neutral-100 flex items-center gap-2">

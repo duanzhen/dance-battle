@@ -279,7 +279,7 @@ const handleElementMouseDown = (e: MouseEvent, element: SceneElement) => {
   console.log('[SceneRenderer] handleElementMouseDown - element.id === store.selectedWidgetId:', element.id === store.selectedWidgetId);
 
   // 设置选中的 widget ID 到 store
-  selectedId.value = element.id;
+  store.selectWidget(element.id, 'canvas');
 
   const startX = e.clientX;
   const startY = e.clientY;

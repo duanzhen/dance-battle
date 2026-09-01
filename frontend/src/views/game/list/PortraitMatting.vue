@@ -22,7 +22,15 @@
       </div>
 
       <!-- 500x500 固定大小画布 -->
-      <canvas ref="canvasRef" width="500" height="500" @mousedown="hasProcessedImg && handleMouseDown($event)"></canvas>
+      <canvas
+        ref="canvasRef"
+        width="500"
+        height="500"
+        @mousedown="hasProcessedImg && handleMouseDown($event)"
+        @touchstart.prevent="handleTouchStart"
+        @touchmove.prevent="handleTouchMove"
+        @touchend="handleTouchEnd"
+      ></canvas>
 
       <div v-if="!hasProcessedImg" class="placeholder">
         <div class="placeholder-icon"><Upload :size="48" /></div>
@@ -79,6 +87,9 @@ const hasChanges = ref(false);
 const isDragging = ref(false);
 const dragStartX = ref(0);
 const dragStartY = ref(0);
+// 触屏双指缩放
+const pinchStartDist = ref(0);
+const pinchStartScale = ref(1);
 
 // --- MediaPipe 实例 ---
 let selfieSegmentation = null;
@@ -382,12 +393,21 @@ const onResults = (results) => {
 };
 
 // --- 鼠标拖拽事件 ---
+/** 画布显示缩放系数:画布 CSS 宽度 / 逻辑尺寸(500),移动端自适应后坐标需按此换算 */
+const displayScale = () => {
+  const canvas = canvasRef.value;
+  if (!canvas) return 1;
+  const rect = canvas.getBoundingClientRect();
+  return rect.width > 0 ? rect.width / CANVAS_SIZE : 1;
+};
+
 const handleMouseDown = (event) => {
   if (!hasProcessedImg.value) return;
 
   isDragging.value = true;
-  dragStartX.value = event.clientX - offsetX.value;
-  dragStartY.value = event.clientY - offsetY.value;
+  const s = displayScale();
+  dragStartX.value = (event.clientX - offsetX.value) / s;
+  dragStartY.value = (event.clientY - offsetY.value) / s;
 
   document.addEventListener('mousemove', handleMouseMove);
   document.addEventListener('mouseup', handleMouseUp);
@@ -396,8 +416,9 @@ const handleMouseDown = (event) => {
 const handleMouseMove = (event) => {
   if (!isDragging.value) return;
 
-  offsetX.value = event.clientX - dragStartX.value;
-  offsetY.value = event.clientY - dragStartY.value;
+  const s = displayScale();
+  offsetX.value = (event.clientX - dragStartX.value) / s;
+  offsetY.value = (event.clientY - dragStartY.value) / s;
 
   hasChanges.value = true; // 拖拽位置，有改动
   render();
@@ -407,6 +428,52 @@ const handleMouseUp = () => {
   isDragging.value = false;
   document.removeEventListener('mousemove', handleMouseMove);
   document.removeEventListener('mouseup', handleMouseUp);
+};
+
+// --- 触屏拖拽 / 双指缩放 ---
+const touchDist = (touches) => {
+  if (!touches || touches.length < 2) return 0;
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+const handleTouchStart = (event) => {
+  if (!hasProcessedImg.value) return;
+  const touches = event.touches;
+  if (touches.length === 1) {
+    isDragging.value = true;
+    const s = displayScale();
+    dragStartX.value = (touches[0].clientX - offsetX.value) / s;
+    dragStartY.value = (touches[0].clientY - offsetY.value) / s;
+  } else if (touches.length === 2) {
+    pinchStartDist.value = touchDist(touches);
+    pinchStartScale.value = scale.value;
+  }
+};
+
+const handleTouchMove = (event) => {
+  if (!hasProcessedImg.value) return;
+  const touches = event.touches;
+  if (touches.length === 1 && isDragging.value) {
+    const s = displayScale();
+    offsetX.value = (touches[0].clientX - dragStartX.value) / s;
+    offsetY.value = (touches[0].clientY - dragStartY.value) / s;
+    hasChanges.value = true;
+    render();
+  } else if (touches.length === 2 && pinchStartDist.value > 0) {
+    const d = touchDist(touches);
+    if (d > 0) {
+      scale.value = Math.max(0.1, Math.min(3, pinchStartScale.value * (d / pinchStartDist.value)));
+      hasChanges.value = true;
+      render();
+    }
+  }
+};
+
+const handleTouchEnd = () => {
+  isDragging.value = false;
+  pinchStartDist.value = 0;
 };
 
 // --- 滚轮缩放事件 ---
@@ -499,19 +566,22 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .matting-container {
+  width: 100%;
   max-width: 350px;
   margin: 0 auto;
   font-family: sans-serif;
   border: 1px solid #eee;
-  padding: 20px;
+  padding: 16px;
   border-radius: 8px;
+  box-sizing: border-box;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .canvas-wrapper {
   position: relative;
-  width: 300px;
-  height: 300px;
+  width: 100%;
+  max-width: 300px;
+  aspect-ratio: 1 / 1;
   margin: 0 auto;
   border: 2px dashed #ccc;
   display: flex;
@@ -559,6 +629,8 @@ onBeforeUnmount(() => {
 
 canvas {
   display: block;
+  width: 100%;
+  height: 100%;
   background-color: #1a1a1a;
   background-image:
     linear-gradient(45deg, #2a2a2a 25%, transparent 25%), linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),

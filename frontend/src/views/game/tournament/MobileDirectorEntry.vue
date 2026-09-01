@@ -2,9 +2,10 @@
   <div class="inline-flex">
     <button
       @click="openDirectorQr"
-      class="px-3 py-1.5 text-xs rounded transition-all duration-200 bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 flex items-center gap-1.5"
+      class="px-2 sm:px-3 py-1.5 text-xs rounded transition-all duration-200 bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 flex items-center gap-1.5 flex-none"
     >
-      <Smartphone class="w-3.5 h-3.5" /> MC导播台
+      <Smartphone class="w-3.5 h-3.5 hidden sm:block" />
+      <span>MC导播台</span>
     </button>
 
     <!-- 手机导播台扫码弹窗 -->

@@ -64,6 +64,8 @@ export const useDirectorStore = defineStore('director', () => {
 
   // 当前选中的组件 ID
   const selectedWidgetId = ref(null);
+  /** 组件选中来源:'canvas'=画布点击 / 'layer'=图层列表 / ''=其他(不自动切换选项卡) */
+  const widgetSelectSource = ref('');
 
   // 加载状态
   const loading = ref(false);
@@ -743,12 +745,20 @@ export const useDirectorStore = defineStore('director', () => {
   }
 
   // 选中/取消选中
-  function selectWidget(id) {
+  function selectWidget(id, source = '') {
     console.log('[directorStore] selectWidget - id:', id, 'type:', typeof id);
     const value = id ? String(id) : null;
     console.log('[directorStore] selectWidget - converted to:', value, 'type:', typeof value);
+    widgetSelectSource.value = source;
     selectedWidgetId.value = value;
     console.log('[directorStore] selectWidget - selectedWidgetId.value after set:', selectedWidgetId.value, 'type:', typeof selectedWidgetId.value);
+  }
+
+  /** 读取并清除选中来源(PropertyPanel 用于判断是否自动跳到组件配置) */
+  function consumeWidgetSelectSource() {
+    const s = widgetSelectSource.value;
+    widgetSelectSource.value = '';
+    return s;
   }
 
   // 更新组件属性（调用 API）
@@ -927,6 +937,7 @@ export const useDirectorStore = defineStore('director', () => {
     // 组件方法（API）
     addWidget,
     selectWidget,
+    consumeWidgetSelectSource,
     updateWidget,
     updateWidgetPosition,
     deleteWidget

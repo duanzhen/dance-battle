@@ -336,7 +336,7 @@
               <div
                 data-layer-row
                 :draggable="dragHandleId === layer.id && !layer.locked"
-                @click="store.selectWidget(layer.id)"
+                @click="store.selectWidget(layer.id, 'layer')"
                 @dblclick="openLayerWidget(layer)"
                 @dragstart="onDragStart(layer.id)"
                 @dragend="onDragEnd"
@@ -419,7 +419,7 @@
 import { ref, computed, watch } from 'vue';
 import { useDirectorStore } from '@/store/modules/directorStore';
 import { moveWidgetLayer, reorderWidgets } from '@/api/game/visWidget';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import NumberInput from './NumberInput.vue';
 import ImageWidget from './widgets/ImageWidget.vue';
 import VideoWidget from './widgets/VideoWidget.vue';
@@ -472,6 +472,12 @@ watch(
     if (newVal === null && oldVal) {
       // 从选中变为未选中，切换到场景选项卡
       activeTab.value = 'scene';
+      store.consumeWidgetSelectSource();
+      return;
+    }
+    // 画布点击选中组件后,右侧自动跳到组件配置
+    if (newVal != null && store.consumeWidgetSelectSource() === 'canvas') {
+      activeTab.value = 'widget';
     }
   }
 );
@@ -763,18 +769,25 @@ const handleDeleteScene = async () => {
 
   // 确认对话框
   if (store.scenes.length <= 1) {
-    alert('至少需要保留一个场景');
+    ElMessage.warning('至少需要保留一个场景');
     return;
   }
 
-  const confirmed = confirm(`确定要删除场景 "${scene.value.name}" 吗？此操作不可恢复。`);
-  if (!confirmed) return;
+  try {
+    await ElMessageBox.confirm(`确定要删除场景 "${scene.value.name}" 吗？此操作不可恢复。`, '删除场景', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
 
   try {
     await store.deleteScene(scene.value.id);
   } catch (error) {
     console.error('删除场景失败:', error);
-    alert('删除场景失败,请稍后重试');
+    ElMessage.error('删除场景失败,请稍后重试');
   }
 };
 </script>

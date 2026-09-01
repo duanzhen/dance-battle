@@ -593,6 +593,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Plus, Minus } from 'lucide-vue-next';
+import { ElMessage } from 'element-plus';
 import logo from '@/assets/logo/logo.png';
 import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore } from '@/api/game/referee/scoring';
 import { subscribeChannel } from '@/utils/sseChannel';
@@ -866,7 +867,7 @@ const confirmKeypad = async () => {
   if (!target || target.competitorId == null) return;
   const score = Number(keypadValue.value);
   if (Number.isNaN(score) || score < 0 || score > keypadMax.value) {
-    alert(`请输入 0-${keypadMax.value} 的有效分数（最多 ${keypadDecimals.value} 位小数）`);
+    ElMessage.warning(`请输入 0-${keypadMax.value} 的有效分数（最多 ${keypadDecimals.value} 位小数）`);
     return;
   }
   keypadSubmitting.value = true;
@@ -880,7 +881,7 @@ const confirmKeypad = async () => {
     await loadData(stageId.value ?? undefined, matchId.value ?? undefined, prev, true);
   } catch (e: any) {
     console.error('提交打分失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '提交失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
   } finally {
     keypadSubmitting.value = false;
   }
@@ -906,7 +907,7 @@ const confirmRankTarget = async () => {
     }
   });
   if (scores.length === 0) {
-    alert('请至少为当前选手打一个维度分');
+    ElMessage.warning('请至少为当前选手打一个维度分');
     return;
   }
   keypadSubmitting.value = true;
@@ -916,7 +917,7 @@ const confirmRankTarget = async () => {
     await loadData(stageId.value ?? undefined, matchId.value ?? undefined, prev, true);
   } catch (e: any) {
     console.error('提交维度打分失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '提交失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
   } finally {
     keypadSubmitting.value = false;
   }
@@ -946,7 +947,7 @@ const submitKnockout = async (side: 'LEFT' | 'DRAW' | 'RIGHT') => {
     await loadData(stageId.value ?? undefined, matchId.value ?? undefined, undefined, true);
   } catch (e: any) {
     console.error('提交判罚失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '提交失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
   } finally {
     submitting.value = false;
     // 提交后清除按钮 focus:避免下一场仍停留在旧按钮上,导致红/蓝高亮丢失显示为灰色
@@ -1035,7 +1036,7 @@ const handleSubmit = async () => {
     await loadData(stageId.value ?? undefined, matchId.value ?? undefined);
   } catch (e: any) {
     console.error('提交打分失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '提交失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
   } finally {
     submitting.value = false;
   }

@@ -300,6 +300,7 @@ import WidgetToolbox from './WidgetToolbox.vue';
 import SceneRenderer from './SceneRenderer.vue';
 import SceneThumbnail from './SceneThumbnail.vue';
 import PropertyPanel from './PropertyPanel.vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const store = useDirectorStore();
 const dragOverScreenId = ref(null);
@@ -469,13 +470,20 @@ const handleScreenReorderDragEnd = () => {
 
 // 删除屏幕
 const deleteScreen = async (screenId) => {
-  if (confirm('确定要删除这个屏幕吗？')) {
-    try {
-      await store.deleteScreen(screenId);
-    } catch (error) {
-      console.error('删除屏幕失败:', error);
-      alert(error.message || '删除屏幕失败，请稍后重试');
-    }
+  try {
+    await ElMessageBox.confirm('确定要删除这个屏幕吗？', '删除屏幕', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+  try {
+    await store.deleteScreen(screenId);
+  } catch (error) {
+    console.error('删除屏幕失败:', error);
+    ElMessage.error(error.message || '删除屏幕失败，请稍后重试');
   }
 };
 
@@ -564,7 +572,7 @@ const createNewScene = async () => {
   } catch (error) {
     console.error('创建场景失败:', error);
     // 显示错误提示
-    alert(error.message || '创建场景失败，请稍后重试');
+    ElMessage.error(error.message || '创建场景失败，请稍后重试');
   }
 };
 

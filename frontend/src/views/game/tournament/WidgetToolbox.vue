@@ -50,6 +50,7 @@ import {
   Swords,
   ListOrdered
 } from 'lucide-vue-next'; // 假设使用 lucide 图标库，或者你自己写 SVG
+import { ElMessage } from 'element-plus';
 
 const store = useDirectorStore();
 
@@ -66,9 +67,9 @@ const categories = [
   {
     title: '赛事专用',
     items: [
+      { label: '海选名单', type: 'AUDITION', icon: Users },
       { label: '晋级名单', type: 'SCOREBOARD', icon: ScrollText },
       { label: '擂台积分', type: 'ARENA_SCORE', icon: Coins },
-      { label: '海选名单', type: 'AUDITION', icon: Users },
       { label: '对战树', type: 'BRACKET', icon: Network },
       { label: '当前场次', type: 'MATCH_DETAIL', icon: Swords },
       { label: '排名展示', type: 'RANKING', icon: ListOrdered }
@@ -81,7 +82,7 @@ const handleAddWidget = async (type) => {
     await store.addWidget(type);
   } catch (error) {
     console.error('添加组件失败:', error);
-    alert(error.message || '添加组件失败，请稍后重试');
+    ElMessage.error(error.message || '添加组件失败，请稍后重试');
   }
 };
 </script>

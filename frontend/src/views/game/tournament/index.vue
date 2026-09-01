@@ -18,48 +18,48 @@
             style="filter: brightness(0) invert(1);"
           />
         </div>
-        <span class="font-bold text-sm tracking-wide text-neutral-300">赛事大屏</span>
+        <span class="font-bold text-sm tracking-wide text-neutral-300 hidden sm:block">赛事大屏</span>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar max-w-full">
         <button
           @click="activeTab = 'director'"
           :class="[
             'flex items-center gap-1.5',
-            'px-3 py-1.5 text-xs rounded transition-all duration-200',
+            'px-2 sm:px-3 py-1.5 text-xs rounded transition-all duration-200 flex-none',
             activeTab === 'director'
               ? 'bg-amber-500 text-neutral-900 font-medium shadow-lg shadow-amber-500/20'
               : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200'
           ]"
         >
-          <MonitorPlay class="w-3.5 h-3.5" />
-          屏幕控制
+          <MonitorPlay class="w-3.5 h-3.5 hidden sm:block" />
+          <span>屏幕控制</span>
         </button>
         <button
           @click="activeTab = 'stage'"
           :class="[
             'flex items-center gap-1.5',
-            'px-3 py-1.5 text-xs rounded transition-all duration-200',
+            'px-2 sm:px-3 py-1.5 text-xs rounded transition-all duration-200 flex-none',
             activeTab === 'stage'
               ? 'bg-amber-500 text-neutral-900 font-medium shadow-lg shadow-amber-500/20'
               : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200'
           ]"
         >
-          <ListTree class="w-3.5 h-3.5" />
-          赛段流程
+          <ListTree class="w-3.5 h-3.5 hidden sm:block" />
+          <span>赛段流程</span>
         </button>
         <MobileDirectorEntry :tournament-id="tournamentId" />
         <button
           @click="activeTab = 'config'"
           :class="[
             'flex items-center gap-1.5',
-            'px-3 py-1.5 text-xs rounded transition-all duration-200',
+            'px-2 sm:px-3 py-1.5 text-xs rounded transition-all duration-200 flex-none',
             activeTab === 'config'
               ? 'bg-amber-500 text-neutral-900 font-medium shadow-lg shadow-amber-500/20'
               : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200'
           ]"
         >
-          <Settings2 class="w-3.5 h-3.5" />
-          赛事配置
+          <Settings2 class="w-3.5 h-3.5 hidden sm:block" />
+          <span>赛事配置</span>
         </button>
         <!-- <div class="w-8 h-8 rounded-full bg-neutral-800 border border-neutral-700 hover:border-amber-500 transition-colors cursor-pointer"></div> -->
       </div>
@@ -77,7 +77,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { MonitorPlay, ListTree, Settings2 } from 'lucide-vue-next';
 import { useDirectorStore } from '@/store/modules/directorStore';
@@ -92,7 +92,14 @@ const router = useRouter();
 const directorStore = useDirectorStore();
 
 // 当前激活的 tab
-const activeTab = ref('director');
+// 移动端默认进入「赛事配置」;有历史记录时优先恢复上次的 tab
+const activeTab = ref(
+  localStorage.getItem('tournamentActiveTab') || (window.innerWidth < 640 ? 'config' : 'director')
+);
+// 刷新/切换后记住当前 tab
+watch(activeTab, (v) => {
+  localStorage.setItem('tournamentActiveTab', v);
+});
 
 // 从 URL 获取 tournamentId
 const tournamentId = ref<string | number | null>(null);
@@ -128,5 +135,11 @@ const handleTabKey = () => {
 </script>
 
 <style scoped lang="scss">
-// 全屏展示，不需要额外样式
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 </style>

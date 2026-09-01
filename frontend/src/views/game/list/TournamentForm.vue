@@ -164,8 +164,6 @@
         ></textarea>
       </div>
 
-
-
       <!-- 按模版创建:自动生成赛段链 + 场景 + 对战树关联 -->
       <div v-if="!props.tournament" class="col-span-2 border-t border-neutral-800 pt-3">
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">按模版创建</label>
@@ -212,7 +210,7 @@
         </div>
       </div>
 
-            <!-- 高级配置(默认折叠):赛事级红蓝配色,所有下属淘汰赛共享 -->
+      <!-- 高级配置(默认折叠):赛事级红蓝配色,所有下属淘汰赛共享 -->
       <div class="col-span-2 border-t border-neutral-800 pt-3">
         <button type="button" @click="showAdvanced = !showAdvanced" class="w-full flex items-center justify-between py-2 text-left group">
           <span class="text-sm font-bold text-neutral-300 group-hover:text-amber-400 transition-colors flex items-center gap-2">
@@ -262,15 +260,16 @@
             class="md:col-span-2 flex items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2.5 cursor-pointer"
           >
             <span>
-              <span class="block text-sm font-medium text-neutral-300">跳过中间态确认阶段</span>
-              <span class="block text-[11px] text-neutral-600 mt-0.5"> 开启后,上一个赛段完成时自动执行「确认晋级」,无需在中间态手动确认 </span>
+              <span class="block text-sm font-medium text-neutral-300">允许跳过中间态确认阶段</span>
+              <span class="block text-[11px] text-neutral-600 mt-0.5">
+                开启后,MC 导播台开始赛段时弹窗确认即可自动执行「确认晋级」直接开始,无需在中间态手动确认(默认开启)
+              </span>
             </span>
             <input type="checkbox" v-model="form.autoConfirmAdvancement" class="accent-amber-500 w-4 h-4 flex-none" />
           </label>
           <p class="md:col-span-2 text-[11px] text-neutral-600">该配置作用于本赛事所有淘汰赛的对战树、当前场次组件与裁判列表。</p>
         </div>
       </div>
-      
     </div>
 
     <template #footer>
@@ -358,7 +357,7 @@ const form = reactive({
   refereeNone: false, // 裁判配置:是否标记「暂无裁判」
   bracketColorOrder: 'RED_TOP', // 对战树红蓝位置:上红下蓝 / 上蓝下红
   matchColorOrder: 'RED_LEFT', // 当前场次/裁判列表红蓝位置:左红右蓝 / 右红左蓝
-  autoConfirmAdvancement: false // 跳过中间态确认阶段(默认关闭)
+  autoConfirmAdvancement: true // 跳过中间态确认阶段(默认开启)
 });
 
 // 文件上传相关
@@ -453,7 +452,7 @@ const resetForm = () => {
     refereeNone: false,
     bracketColorOrder: 'RED_TOP',
     matchColorOrder: 'RED_LEFT',
-    autoConfirmAdvancement: false
+    autoConfirmAdvancement: true
   });
   if (previewUrl.value && !previewUrl.value.startsWith('http')) {
     URL.revokeObjectURL(previewUrl.value);

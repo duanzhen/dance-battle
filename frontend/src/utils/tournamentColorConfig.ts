@@ -5,8 +5,8 @@
  *   RED_TOP = 上红下蓝(默认) / BLUE_TOP = 上蓝下红
  * matchColorOrder: 当前场次组件与裁判列表中左右两名选手颜色
  *   RED_LEFT = 左红右蓝(默认) / BLUE_LEFT = 右红左蓝
- * autoConfirmAdvancement: 跳过中间态确认阶段(默认关闭)
- *   开启后,上一个赛段完成时后端自动执行「确认晋级」,无需在中间态手动确认
+ * autoConfirmAdvancement: 跳过中间态确认阶段(默认开启)
+ *   开启后,MC 导播台在开始赛段时弹窗确认,自动执行「确认晋级」后直接开始,无需在中间态手动确认
  */
 export interface TournamentColorConfig {
   bracketColorOrder: 'RED_TOP' | 'BLUE_TOP';
@@ -24,7 +24,7 @@ export const DEFAULT_TOURNAMENT_COLOR_CONFIG: TournamentColorConfig = {
 
 export const DEFAULT_TOURNAMENT_THEME_CONFIG: TournamentThemeConfig = {
   ...DEFAULT_TOURNAMENT_COLOR_CONFIG,
-  autoConfirmAdvancement: false
+  autoConfirmAdvancement: true
 };
 
 export const parseTournamentColorConfig = (themeConfig?: string | null): TournamentColorConfig => {
@@ -45,15 +45,15 @@ export const parseTournamentColorConfig = (themeConfig?: string | null): Tournam
 export const parseTournamentThemeConfig = (themeConfig?: string | null): TournamentThemeConfig => {
   const colors = parseTournamentColorConfig(themeConfig);
   if (!themeConfig) {
-    return { ...colors, autoConfirmAdvancement: false };
+    return { ...colors, autoConfirmAdvancement: true };
   }
   try {
     const t = JSON.parse(themeConfig);
     return {
       ...colors,
-      autoConfirmAdvancement: t?.autoConfirmAdvancement === true
+      autoConfirmAdvancement: t?.autoConfirmAdvancement !== false
     };
   } catch {
-    return { ...colors, autoConfirmAdvancement: false };
+    return { ...colors, autoConfirmAdvancement: true };
   }
 };

@@ -137,6 +137,13 @@ public interface ITStageLifecycleService {
     Long getMatchCurrentCompetitor(Long matchId);
 
     /**
+     * 赛事是否开启「跳过中间态确认阶段」(themeConfig.autoConfirmAdvancement,默认开启):
+     * 开启后不再由后端在完成赛段时自动确认晋级,而是由 MC 导播台在开始赛段时
+     * 弹窗确认后调用确认晋级接口,再开始本赛段。
+     */
+    boolean isAutoConfirmAdvancement(Long tournamentId);
+
+    /**
      * 排名赛:同分并列导致晋级名额超限时,导播台在中间态手动指定晋级者
      * (传入全部待定者即全部晋级,未选中的待定者标记淘汰)。返回调整的晋级人数。
      */

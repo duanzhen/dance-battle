@@ -129,4 +129,10 @@ public class TStageVo implements Serializable {
      */
     private Boolean awaitingAdvancement;
 
+    /**
+     * 是否开启「跳过中间态确认阶段」(赛事级配置,导播台用):
+     * 开启后中间态未确认时也可点开始赛段,弹窗确认后自动确认晋级再开始
+     */
+    private Boolean skipConfirm;
+
 }

@@ -71,8 +71,36 @@ public class DirectorController {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tournamentId);
         List<TStageVo> stages = stageService.queryList(bo);
+        boolean skipConfirm = stageLifecycleService.isAutoConfirmAdvancement(tournament.getId());
+        for (TStageVo s : stages) {
+            s.setSkipConfirm(skipConfirm);
+        }
         enrichAwaitingAdvancement(stages);
         return R.ok(stages);
+    }
+
+    /**
+     * 跳过中间态确认晋级(仅开启「跳过中间态确认阶段」配置时可用):
+     * MC 导播台开始赛段时弹窗确认后调用,按当前预排把晋级者写入下一赛段
+     */
+    @Log(title = "导播台确认晋级", businessType = BusinessType.UPDATE)
+    @PostMapping("/stage/{id}/advance")
+    public R<Integer> advanceStage(@PathVariable("id") Long id, HttpServletRequest request) {
+        TTournamentVo tournament = currentTournament(request);
+        assertStageInTournament(tournament, id);
+        if (!stageLifecycleService.isAutoConfirmAdvancement(tournament.getId())) {
+            throw new ServiceException("未开启「跳过中间态确认阶段」配置,请先在管理端中间态确认晋级");
+        }
+        // 确认晋级作用于「要开始赛段的上一赛段」(已 SETTLED 的源赛段),把晋级者写入本赛段
+        TStageVo stage = stageService.queryById(id);
+        Long prevId = stage == null ? null : stage.getPrevStageId();
+        if (prevId == null) {
+            throw new ServiceException("该赛段没有上一赛段,无需确认晋级");
+        }
+        com.dance.street.game.domain.bo.CalculateAdvancementBo bo =
+            new com.dance.street.game.domain.bo.CalculateAdvancementBo();
+        bo.setStageId(prevId);
+        return R.ok(stageLifecycleService.calculateAdvancement(bo));
     }
 
     /**

@@ -1961,37 +1961,29 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         stageMapper.updateById(stage);
         refereeSseNotifier.notifyStage(stageId, "stage");
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
-        // 默认不再自动晋级:裁判判完仅出预排/晋级者,由导播台在中间态「确认晋级」时正式写入下一赛段。
-        // 赛事级配置「跳过中间态确认」开启时,赛段完成即自动执行确认晋级。
-        if (autoConfirmAdvancement(stage.getTournamentId())) {
-            try {
-                CalculateAdvancementBo autoBo = new CalculateAdvancementBo();
-                autoBo.setStageId(stageId);
-                calculateAdvancement(autoBo);
-                log.info("赛段[{}]完成,赛事开启「跳过中间态确认」,已自动确认晋级到下一赛段", stageId);
-            } catch (ServiceException e) {
-                // 自动确认失败(如同分待定需人工裁决、下一赛段已生成对阵)不阻断赛段完成,
-                // 回退到中间态人工确认
-                log.warn("赛段[{}]自动确认晋级失败,退回中间态人工确认: {}", stageId, e.getMessage());
-            }
-        }
+        // 不再由后端自动确认晋级:完成赛段仅产出晋级预排;是否跳过中间态由 MC 导播台
+        // 在开始下一赛段时弹窗确认后调用「确认晋级」接口决定(见 isAutoConfirmAdvancement)
         return StageConstants.STAGE_SETTLED;
     }
 
-    /** 赛事级配置:是否开启「跳过中间态确认阶段」(themeConfig.autoConfirmAdvancement) */
-    private boolean autoConfirmAdvancement(Long tournamentId) {
+    /**
+     * 赛事级配置:是否开启「跳过中间态确认阶段」(themeConfig.autoConfirmAdvancement,默认开启)。
+     * 开启后 MC 导播台在开始赛段时弹窗确认,调用确认晋级接口跳过中间态直接开始。
+     */
+    @Override
+    public boolean isAutoConfirmAdvancement(Long tournamentId) {
         if (tournamentId == null) {
             return false;
         }
         TTournament t = tournamentMapper.selectById(tournamentId);
         if (t == null || StringUtils.isBlank(t.getThemeConfig())) {
-            return false;
+            return true;
         }
         try {
             return cn.hutool.json.JSONUtil.parseObj(t.getThemeConfig())
-                .getBool("autoConfirmAdvancement", false);
+                .getBool("autoConfirmAdvancement", true);
         } catch (Exception e) {
-            return false;
+            return true;
         }
     }
 

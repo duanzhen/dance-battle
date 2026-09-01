@@ -949,6 +949,8 @@ const submitKnockout = async (side: 'LEFT' | 'DRAW' | 'RIGHT') => {
     alert(e?.response?.data?.msg || e?.message || '提交失败');
   } finally {
     submitting.value = false;
+    // 提交后清除按钮 focus:避免下一场仍停留在旧按钮上,导致红/蓝高亮丢失显示为灰色
+    nextTick(() => (document.activeElement as HTMLElement | null)?.blur());
   }
 };
 

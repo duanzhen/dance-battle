@@ -163,7 +163,7 @@
               class="mt-3 text-[10px] text-neutral-500 leading-relaxed"
             >
               <template v-if="currentStage.awaitingAdvancement">
-                上一赛段已结束，晋级选手需先在管理端「中间态」确认晋级；确认后「开始赛段」将自动可用。
+                上一赛段已结束，晋级者尚未确认。请先在管理端「中间态」确认晋级，确认后「开始赛段」将自动可用。
               </template>
               <template v-else> 上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。 </template>
             </p>
@@ -176,7 +176,12 @@
                 点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，胜者守擂、败者排到队尾，平局时擂主与挑战者均排到队尾。
               </p>
               <p v-else class="text-[10px] text-blue-400/70">
-                晋级选手需先在管理端「中间态」确认；确认后点击「开始赛段」将自动初始化并生成对阵，淘汰赛场次保持待开始、逐场点「开始」。
+                <template v-if="currentStage.awaitingAdvancement && currentStage.skipConfirm">
+                  已开启「跳过中间态确认」：点击「开始赛段」将弹窗确认，自动按当前预排确认晋级并生成对阵。
+                </template>
+                <template v-else>
+                  晋级选手需先在管理端「中间态」确认；确认后点击「开始赛段」将自动初始化并生成对阵，淘汰赛场次保持待开始、逐场点「开始」。
+                </template>
               </p>
             </div>
             <div v-if="currentStage.status === 'GAMING'" class="mt-3 p-3 rounded-lg bg-green-500/5 border border-green-500/10">
@@ -225,36 +230,36 @@
                 </span>
               </div>
 
-              <!-- 标记当前上场(海选大屏):MC 点击选手名字,大屏 widget 显示并居中 -->
-              <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1.5 mb-1.5 border-b border-neutral-800/60">
-                <span class="text-[9px] text-neutral-500 flex-none">当前:</span>
-                <button
+              <div class="space-y-1">
+                <div
                   v-for="r in match.roundScores"
-                  :key="'cur-' + r.roundId"
-                  @click="handleMarkCurrent(match, r)"
-                  class="flex-none px-2 py-0.5 rounded text-[10px] font-bold transition-colors"
+                  :key="r.roundId"
+                  @click="r.competitorId != null && handleMarkCurrent(match, r)"
+                  class="py-1.5 border-b border-neutral-800/60 last:border-0 cursor-pointer transition-colors"
                   :class="
                     String(currentCompetitorByMatch[String(match.id)] ?? '') === String(r.competitorId ?? '')
-                      ? 'bg-amber-500 text-neutral-900'
-                      : 'bg-neutral-800 text-neutral-300 border border-neutral-700 hover:border-amber-500/40'
+                      ? 'bg-amber-500/10'
+                      : 'hover:bg-neutral-800/40'
                   "
                 >
-                  {{ r.competitorName || '#' + r.roundSequence }}
-                </button>
-                <button
-                  v-if="currentCompetitorByMatch[String(match.id)] != null"
-                  @click="handleMarkCurrent(match, null)"
-                  class="flex-none px-1.5 py-0.5 rounded text-[9px] text-neutral-500 hover:text-neutral-300"
-                >
-                  清除
-                </button>
-              </div>
-
-              <div class="space-y-1">
-                <div v-for="r in match.roundScores" :key="r.roundId" class="py-1.5 border-b border-neutral-800/60 last:border-0">
                   <div class="flex items-center justify-between gap-2">
                     <span class="text-[9px] text-neutral-500 w-12 flex-none">第{{ r.roundSequence }}轮</span>
-                    <span class="text-xs font-bold text-neutral-300 flex-1 truncate">{{ r.competitorName || '待定' }}</span>
+                    <span
+                      class="text-xs font-bold flex-1 truncate"
+                      :class="
+                        String(currentCompetitorByMatch[String(match.id)] ?? '') === String(r.competitorId ?? '')
+                          ? 'text-amber-400'
+                          : 'text-neutral-300'
+                      "
+                    >
+                      {{ r.competitorName || '待定' }}
+                    </span>
+                    <span
+                      v-if="String(currentCompetitorByMatch[String(match.id)] ?? '') === String(r.competitorId ?? '')"
+                      class="text-[8px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 flex-none"
+                    >
+                      当前
+                    </span>
                     <span
                       v-if="r.outcomeStatus === 'ADVANCE'"
                       class="text-[8px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 flex-none"
@@ -598,6 +603,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Layers, Play, CircleCheck, ChevronRight, TimerReset } from 'lucide-vue-next';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import logo from '@/assets/logo/logo.png';
 import {
   setDirectorAuthKey,
@@ -605,6 +611,7 @@ import {
   listDirectorStages,
   listDirectorMatches,
   directorStartStage,
+  directorAdvanceStage,
   directorCompleteStage,
   directorArenaNext,
   directorArenaTempWithdraw,
@@ -675,6 +682,7 @@ interface Stage {
   status: string;
   isInitialized: boolean;
   awaitingAdvancement?: boolean;
+  skipConfirm?: boolean;
   prevStageId: string | null;
   nextStageId: string | null;
 }
@@ -739,8 +747,8 @@ const prevStage = computed(() => {
 const canStart = computed(() => {
   if (!currentStage.value) return false;
   if (currentStage.value.status !== 'DRAFT' && currentStage.value.status !== 'PENDING') return false;
-  // 上一赛段已结束但晋级者尚未在管理端中间态确认:禁止开始
-  if (currentStage.value.awaitingAdvancement) return false;
+  // 中间态未确认时:开启「跳过中间态确认」配置才允许点击(点击时弹窗确认后自动确认晋级再开始)
+  if (currentStage.value.awaitingAdvancement && !currentStage.value.skipConfirm) return false;
   return !prevStage.value || prevStage.value.status === 'SETTLED';
 });
 
@@ -803,6 +811,7 @@ const loadStages = async () => {
       status: item.status,
       isInitialized: item.isInitialized === 1,
       awaitingAdvancement: !!item.awaitingAdvancement,
+      skipConfirm: !!item.skipConfirm,
       prevStageId: safeId(item.prevStageId),
       nextStageId: safeId(item.nextStageId)
     }));
@@ -895,76 +904,121 @@ const selectStage = (id: string) => {
   expandedMatchId.value = null;
 };
 
+/** 弹窗确认:确认返回 true,取消/关闭返回 false */
+const askConfirm = async (message: string, title = '确认操作') => {
+  try {
+    await ElMessageBox.confirm(message, title, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const handleStartStage = async () => {
   const stage = currentStage.value;
   if (!stage) return;
-  if (!confirm(`确认开始赛段「${stage.name}」？将自动初始化并生成对阵。`)) return;
+  // 中间态未确认 + 开启跳过确认:先弹窗确认,再调用确认晋级接口,最后开始
+  const skipAdvance = stage.awaitingAdvancement && !!stage.skipConfirm;
+  if (skipAdvance) {
+    if (
+      !(await askConfirm(
+        `赛段「${stage.name}」上一赛段晋级者尚未在中间态调整。已开启「跳过中间态确认」，是否跳过中间态调整直接开始？确认后将自动按当前预排确认晋级并生成对阵。`
+      ))
+    ) {
+      return;
+    }
+  } else {
+    if (!(await askConfirm(`确认开始赛段「${stage.name}」？将自动初始化并生成对阵。`))) return;
+  }
   try {
+    if (skipAdvance) {
+      await directorAdvanceStage(stage.id);
+    }
     await directorStartStage(stage.id);
     isLive.value = true;
     await loadStages();
     await loadMatchesForStage(stage.id);
   } catch (e: any) {
     console.error('开始赛段失败:', e);
-    alert(e?.message || '开始赛段失败');
+    ElMessage.error(e?.message || '开始赛段失败');
   }
 };
 
 const handleComplete = async () => {
   const stage = currentStage.value;
   if (!stage) return;
-  if (!confirm(`确认完成赛段「${stage.name}」？所有比赛将被结算。`)) return;
+  if (!(await askConfirm(`确认完成赛段「${stage.name}」？所有比赛将被结算。`))) return;
   try {
     const res: any = await directorCompleteStage(stage.id);
     await loadStages();
-    await loadMatchesForStage(stage.id);
+
+    // 完成后跳转到下一个赛段;二海等未真正结束时停留当前赛段,最后一赛段也停留
+    const completed = stages.value.find((s) => String(s.id) === String(stage.id));
+    const finished = completed?.status === 'SETTLED';
+    const nextId = stage.nextStageId;
+    const hasNext = finished && nextId != null && stages.value.some((s) => String(s.id) === String(nextId));
+    if (hasNext) {
+      selectStage(String(nextId));
+    } else if (finished) {
+      selectStage(String(stage.id));
+    }
+    await loadMatchesForStage(selectedStageId.value);
 
     const stillGaming = stages.value.some((s) => s.status === 'GAMING');
     isLive.value = stillGaming;
     if (res?.data?.data?.status && res.data.data.status !== 'SETTLED') {
-      alert(stage.stageMode === 'AUDITION' ? '海选产生二海(同分加赛),完成二海判罚后才能结束赛段' : '赛段仍有未完成场次,完成全部判罚后才能结束赛段');
+      ElMessage.warning(
+        stage.stageMode === 'AUDITION' ? '海选产生二海(同分加赛),完成二海判罚后才能结束赛段' : '赛段仍有未完成场次,完成全部判罚后才能结束赛段'
+      );
     }
   } catch (e: any) {
     console.error('完成赛段失败:', e);
-    alert(e?.message || '完成赛段失败');
+    ElMessage.error(e?.message || '完成赛段失败');
   }
 };
 
 /** 标记当前上场选手(海选大屏):MC 点击选手名字,仅标记并广播,大屏 widget 同步高亮/居中 */
 const handleMarkCurrent = async (match: MatchInfo, round: any) => {
   const cid = round?.competitorId ?? null;
+  // 再点一次已高亮的选手则取消标记
+  const current = currentCompetitorByMatch.value[String(match.id)];
+  const next = cid != null && current != null && String(current) === String(cid) ? null : cid;
   try {
-    await directorSetCurrentCompetitor(match.id, cid != null ? String(cid) : null);
-    currentCompetitorByMatch.value[String(match.id)] = cid;
+    await directorSetCurrentCompetitor(match.id, next != null ? String(next) : null);
+    currentCompetitorByMatch.value[String(match.id)] = next;
   } catch (e: any) {
     console.error('标记当前上场失败:', e);
-    alert(e?.message || '标记失败');
+    ElMessage.error(e?.message || '标记失败');
   }
 };
 
 /** 开始指定场次:跳过其他场次,先开始这一场 */
 const handleStartMatch = async (match: MatchInfo) => {
-  if (!confirm(`确认开始场次？其他未开始的场次保持待开始。`)) return;
+  if (!(await askConfirm(`确认开始场次？其他未开始的场次保持待开始。`))) return;
   try {
     await directorStartMatch(match.id);
     await refreshMatches();
     await loadStages();
   } catch (e: any) {
     console.error('开始场次失败:', e);
-    alert(e?.message || '开始场次失败');
+    ElMessage.error(e?.message || '开始场次失败');
   }
 };
 
 /** 取消开始场次(误触回退):回到待开始,清空本场已提交的判罚/分数 */
 const handleCancelStartMatch = async (match: MatchInfo) => {
-  if (!confirm(`确认取消场次 #${match.id} 的开始状态？将清空本场已提交的判罚与分数，回到待开始。`)) return;
+  if (!(await askConfirm(`确认取消场次 #${match.id} 的开始状态？将清空本场已提交的判罚与分数，回到待开始。`))) return;
   try {
     await directorCancelStartMatch(match.id);
     await refreshMatches();
     await loadStages();
   } catch (e: any) {
     console.error('取消开始失败:', e);
-    alert(e?.message || '取消开始失败');
+    ElMessage.error(e?.message || '取消开始失败');
   }
 };
 
@@ -972,14 +1026,14 @@ const handleCancelStartMatch = async (match: MatchInfo) => {
 const handleArenaNext = async () => {
   const stage = currentStage.value;
   if (!stage) return;
-  if (!confirm(`确认开始下一场对决？将按轮转队列创建：擂主 vs 下一位挑战者。`)) return;
+  if (!(await askConfirm(`确认开始下一场对决？将按轮转队列创建：擂主 vs 下一位挑战者。`))) return;
   try {
     await directorArenaNext(stage.id);
     await refreshMatches();
     await loadStages();
   } catch (e: any) {
     console.error('开始下一场对决失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '开始下一场对决失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '开始下一场对决失败');
   }
 };
 
@@ -1003,7 +1057,7 @@ const openTempWithdraw = async () => {
     tempWithdrawVisible.value = true;
   } catch (e: any) {
     console.error('加载擂台队列失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '加载擂台队列失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '加载擂台队列失败');
   }
 };
 
@@ -1012,7 +1066,7 @@ const confirmTempWithdraw = async () => {
   const stage = currentStage.value;
   if (!stage || tempWithdrawTarget.value == null) return;
   const target = arenaQueue.value.find((c) => String(c.competitorId) === String(tempWithdrawTarget.value));
-  if (!confirm(`确认「${target?.name || '该选手'}」临时弃权?将跳过本轮、排到队尾,后续仍参与排名。`)) return;
+  if (!(await askConfirm(`确认「${target?.name || '该选手'}」临时弃权?将跳过本轮、排到队尾,后续仍参与排名。`))) return;
   try {
     await directorArenaTempWithdraw(stage.id, tempWithdrawTarget.value);
     tempWithdrawVisible.value = false;
@@ -1020,19 +1074,19 @@ const confirmTempWithdraw = async () => {
     await loadStages();
   } catch (e: any) {
     console.error('临时弃权失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '临时弃权失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '临时弃权失败');
   }
 };
 
 /** 重启场次:清空该场已提交的分数/结果,回到进行中 */
 const handleRestartMatch = async (match: MatchInfo) => {
-  if (!confirm(`确认重启场次 #${match.id}？将清空该场已提交的分数与结果。`)) return;
+  if (!(await askConfirm(`确认重启场次 #${match.id}？将清空该场已提交的分数与结果。`))) return;
   try {
     await directorResetMatch(match.id);
     await refreshMatches();
   } catch (e: any) {
     console.error('重启场次失败:', e);
-    alert(e?.message || '重启场次失败');
+    ElMessage.error(e?.message || '重启场次失败');
   }
 };
 
@@ -1142,7 +1196,7 @@ const handleDirectorJudge = async (match: MatchInfo, side: 'LEFT' | 'DRAW' | 'RI
     await loadStages();
   } catch (e: any) {
     console.error('导播台判定失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '判定失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '判定失败');
   } finally {
     actionLoading.value = false;
   }
@@ -1150,14 +1204,14 @@ const handleDirectorJudge = async (match: MatchInfo, side: 'LEFT' | 'DRAW' | 'RI
 
 /** 手动公布模式(MANUAL):裁判判完确认后公布结果 */
 const handlePublish = async (match: MatchInfo) => {
-  if (!confirm(`确认公布场次 #${match.id} 的结果？`)) return;
+  if (!(await askConfirm(`确认公布场次 #${match.id} 的结果？`))) return;
   try {
     await directorPublishResult(match.id);
     await refreshMatches();
     await loadStages();
   } catch (e: any) {
     console.error('公布结果失败:', e);
-    alert(e?.response?.data?.msg || e?.message || '公布失败');
+    ElMessage.error(e?.response?.data?.msg || e?.message || '公布失败');
   }
 };
 

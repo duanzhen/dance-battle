@@ -61,6 +61,14 @@ export function directorStartStage(id: string | number) {
   });
 }
 
+/** 跳过中间态确认晋级(开启「跳过中间态确认」配置时可用):按当前预排把晋级者写入下一赛段 */
+export function directorAdvanceStage(id: string | number) {
+  return directorRequest({
+    url: `/game/director/stage/${id}/advance`,
+    method: 'post'
+  });
+}
+
 /** 完成赛段 */
 export function directorCompleteStage(id: string | number) {
   return directorRequest({

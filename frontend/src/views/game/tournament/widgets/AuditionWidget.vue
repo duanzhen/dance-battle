@@ -18,53 +18,92 @@
         当前场次暂无选手
       </div>
 
-      <!-- 显示当前上场:顶部一排,横向自动滚动,当前选手居中高亮 -->
-      <div v-else-if="showCurrent" ref="rowRef" class="w-full h-full overflow-x-auto no-scrollbar flex items-stretch" :style="{ gap: sz(10) + 'px' }">
+      <!-- 显示当前上场:顶部一排圆形头像(自动滚动居中) + 中间大圆形当前选手 -->
+      <div v-else-if="showCurrent" class="w-full h-full flex flex-col">
         <div
-          v-for="p in participants"
-          :key="p.competitorId"
-          :ref="setChipRef(p.competitorId)"
-          class="flex-none rounded-lg border-2 px-4 flex flex-col items-center justify-center gap-1 min-w-[7em]"
-          :class="isCurrent(p.competitorId) ? 'border-amber-400 bg-amber-500/15' : 'border-white/10 bg-white/[0.03]'"
+          ref="rowRef"
+          class="flex-none overflow-x-auto no-scrollbar flex items-stretch"
+          :class="participants.length <= 9 ? 'justify-center' : ''"
+          :style="{ gap: sz(10) + 'px', padding: sz(6) + 'px' }"
         >
-          <span
-            class="font-black leading-none"
-            :style="{ fontSize: sz(26) + 'px' }"
-            :class="isCurrent(p.competitorId) ? 'text-amber-400' : 'text-white/50'"
+          <div
+            v-for="p in participants"
+            :key="p.competitorId"
+            :ref="setChipRef(p.competitorId)"
+            class="flex-none min-w-0 flex flex-col items-center justify-center gap-1 rounded-xl border-2 px-3"
+            :style="{ width: `calc((100% - ${sz(10) * 8}px) / 9)` }"
+            :class="isCurrent(p.competitorId) ? 'border-amber-400/70 bg-amber-500/10' : 'border-white/10'"
           >
-            {{ p.number || '–' }}
-          </span>
-          <span
-            class="font-bold truncate max-w-full"
-            :style="{ fontSize: sz(15) + 'px' }"
-            :class="isCurrent(p.competitorId) ? 'text-white' : 'text-white/80'"
-          >
-            {{ p.name || '待定' }}
-          </span>
+            <div
+              class="rounded-full border-2 overflow-hidden flex items-center justify-center flex-none bg-white/5"
+              :style="{ width: sz(52) + 'px', height: sz(52) + 'px' }"
+              :class="isCurrent(p.competitorId) ? 'border-amber-400/80' : 'border-white/15'"
+            >
+              <img v-if="p.avatar" :src="p.avatar" class="w-full h-full object-cover" @error="onImgError" />
+            </div>
+            <span
+              class="font-bold truncate max-w-full"
+              :style="{ fontSize: sz(13) + 'px' }"
+              :class="isCurrent(p.competitorId) ? 'text-white' : 'text-white/80'"
+            >
+              {{ p.name || '待定' }}
+            </span>
+            <span
+              class="font-mono leading-none"
+              :style="{ fontSize: sz(14) + 'px' }"
+              :class="isCurrent(p.competitorId) ? 'text-amber-400' : 'text-white/40'"
+            >
+              No.{{ p.number || '-' }}
+            </span>
+          </div>
+        </div>
+
+        <!-- 中间大圆形当前选手 -->
+        <div class="flex-1 min-h-0 flex items-center justify-center">
+          <div v-if="currentPlayer" class="flex flex-col items-center gap-3">
+            <div
+              class="rounded-full border-4 overflow-hidden flex items-center justify-center flex-none bg-white/5"
+              :style="{ width: sz(180) + 'px', height: sz(180) + 'px' }"
+              :class="currentPlayer.avatar ? 'border-amber-400/80' : 'border-white/15'"
+            >
+              <img v-if="currentPlayer.avatar" :src="currentPlayer.avatar" class="w-full h-full object-cover" @error="onImgError" />
+            </div>
+            <span class="text-white font-black truncate max-w-full" :style="{ fontSize: sz(28) + 'px' }">{{ currentPlayer.name || '待定' }}</span>
+            <span class="text-amber-400 font-mono" :style="{ fontSize: sz(22) + 'px' }">No.{{ currentPlayer.number || '-' }}</span>
+          </div>
+          <div v-else class="text-white/40" :style="{ fontSize: sz(14) + 'px' }">等待标记当前上场选手</div>
         </div>
       </div>
 
-      <!-- 不显示当前:9 列 grid 占满整个屏幕 -->
-      <div v-else class="w-full h-full grid grid-cols-9" :style="{ gap: sz(6) + 'px' }">
+      <!-- 不显示当前:每行 9 个,满 9 个铺满;不足 9 个时整体居中 -->
+      <div v-else class="w-full h-full flex flex-wrap items-center content-center justify-center" :style="{ gap: sz(8) + 'px' }">
         <div
           v-for="p in participants"
           :key="p.competitorId"
-          class="min-w-0 rounded-lg border flex flex-col items-center justify-center px-1"
-          :class="isCurrent(p.competitorId) ? 'border-amber-400/80 bg-amber-500/10' : 'border-white/10 bg-white/[0.03]'"
+          class="min-w-0 flex flex-col items-center justify-center gap-1"
+          :style="{ width: `calc((100% - ${sz(8) * 8}px) / 9)` }"
+          :class="isCurrent(p.competitorId) ? 'rounded-xl bg-amber-500/10' : ''"
         >
-          <span
-            class="font-black leading-none"
-            :style="{ fontSize: sz(20) + 'px' }"
-            :class="isCurrent(p.competitorId) ? 'text-amber-400' : 'text-white/40'"
+          <div
+            class="rounded-full border-2 overflow-hidden flex items-center justify-center flex-none bg-white/5"
+            :style="{ width: sz(58) + 'px', height: sz(58) + 'px' }"
+            :class="isCurrent(p.competitorId) ? 'border-amber-400/80' : 'border-white/15'"
           >
-            {{ p.number || '–' }}
-          </span>
+            <img v-if="p.avatar" :src="p.avatar" class="w-full h-full object-cover" @error="onImgError" />
+          </div>
           <span
             class="font-bold truncate w-full text-center"
-            :style="{ fontSize: sz(14) + 'px' }"
+            :style="{ fontSize: sz(13) + 'px' }"
             :class="isCurrent(p.competitorId) ? 'text-white' : 'text-white/80'"
           >
             {{ p.name || '待定' }}
+          </span>
+          <span
+            class="font-mono leading-none"
+            :style="{ fontSize: sz(14) + 'px' }"
+            :class="isCurrent(p.competitorId) ? 'text-amber-400' : 'text-white/40'"
+          >
+            No.{{ p.number || '-' }}
           </span>
         </div>
       </div>
@@ -119,6 +158,7 @@ import StageSelector from '../stages/StageSelector.vue';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
+import { listPlayer } from '@/api/game/player';
 import { getMatchCurrentCompetitor } from '@/api/game/match';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
@@ -143,7 +183,7 @@ const loading = ref(false);
 const loadedOnce = ref(false);
 const error = ref('');
 const matches = ref<any[]>([]);
-const participants = ref<{ competitorId: string | number; number?: string; name?: string; slot: number }[]>([]);
+const participants = ref<{ competitorId: string | number; number?: string; name?: string; avatar?: string; slot: number }[]>([]);
 const currentCompetitorId = ref<string | number | null>(null);
 
 // 查看模式容器 + 尺寸缩放(与擂台 widget 一致)
@@ -164,6 +204,18 @@ const setChipRef = (cid: string | number) => (el: unknown) => {
 };
 
 const isCurrent = (cid: unknown) => cid != null && String(cid) === String(currentCompetitorId.value);
+/** 当前选手:优先标记的选手,未标记时取第一位 */
+const currentPlayer = computed(() => {
+  if (currentCompetitorId.value != null) {
+    const hit = participants.value.find((p) => String(p.competitorId) === String(currentCompetitorId.value));
+    if (hit) return hit;
+  }
+  return participants.value[0] || null;
+});
+
+const onImgError = (e: Event) => {
+  (e.target as HTMLImageElement).style.visibility = 'hidden';
+};
 
 const startObserve = () => {
   resizeObserver?.disconnect();
@@ -207,16 +259,24 @@ const loadData = async () => {
       loadedOnce.value = true;
       return;
     }
-    // 参赛方 + 选手档案
-    const [pr, cr]: any[] = await Promise.all([
+    // 参赛方 + 选手档案(名称/号码/头像)
+    const [pr, cr, plr]: any[] = await Promise.all([
       listMatchParticipant({ matchId: mid, pageNum: 1, pageSize: 1000 } as any),
-      listCompetitor({ stageId: props.stageId, pageNum: 1, pageSize: 1000 } as any)
+      listCompetitor({ stageId: props.stageId, pageNum: 1, pageSize: 1000 } as any),
+      tournamentId.value != null ? listPlayer({ tournamentId: tournamentId.value, pageNum: 1, pageSize: 1000 } as any) : Promise.resolve(null)
     ]);
     const parts = pr?.data?.data || pr?.data || [];
     const comps = cr?.data?.data || cr?.data || [];
+    const players = plr?.data?.data || plr?.data || [];
     const compMap: Record<string, any> = {};
     comps.forEach((c: any) => {
       compMap[String(c.id)] = c;
+    });
+    const avatarByCompetitor: Record<string, string | undefined> = {};
+    players.forEach((p: any) => {
+      if (p.competitorId != null && p.avatar) {
+        avatarByCompetitor[String(p.competitorId)] = p.avatar;
+      }
     });
     participants.value = parts
       .filter((p: any) => p.competitorId != null)
@@ -226,6 +286,7 @@ const loadData = async () => {
           competitorId: p.competitorId,
           number: c.number != null ? String(c.number) : undefined,
           name: c.name || p.competitorName,
+          avatar: avatarByCompetitor[String(p.competitorId)],
           slot: Number(p.displaySlotIndex) || 0
         };
       })

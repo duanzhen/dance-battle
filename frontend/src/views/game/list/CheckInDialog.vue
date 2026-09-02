@@ -1,5 +1,13 @@
 <template>
-  <el-dialog v-model="visible" title="选手签到" width="600px" :before-close="handleClose" append-to-body class="checkin-dialog">
+  <el-dialog
+    v-model="visible"
+    title="选手签到"
+    width="600px"
+    :before-close="handleClose"
+    :close-on-click-modal="false"
+    append-to-body
+    class="checkin-dialog"
+  >
     <template #header>
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold text-white">选手签到</h3>

@@ -119,7 +119,7 @@
           <!-- 编辑按钮 -->
           <button
             @click.stop="handleEdit(player)"
-            class="bg-amber-500/20 text-amber-500 hover:bg-amber-500 hover:text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-md flex items-center justify-center"
+            class="bg-amber-500/20 text-amber-500 hover:bg-amber-500 hover:text-white p-1.5 rounded-full opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all shadow-md flex items-center justify-center"
             title="编辑"
           >
             <svg

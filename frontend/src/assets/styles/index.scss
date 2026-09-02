@@ -16,6 +16,13 @@ button:not(.rounded-none),
   border-radius: 0.5rem !important;
 }
 
+/* 移动端:消除按钮点击延迟/双击缩放判定,避免触屏"要点两次" */
+button,
+.el-button,
+[role='button'] {
+  touch-action: manipulation;
+}
+
 body {
   height: 100%;
   margin: 0;

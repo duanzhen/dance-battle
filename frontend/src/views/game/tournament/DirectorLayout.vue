@@ -191,25 +191,25 @@
         </div>
 
         <div
-          class="absolute top-4 left-1/2 -translate-x-1/2 bg-neutral-800/90 backdrop-blur border border-neutral-700 rounded-full px-4 py-1.5 flex items-center gap-4 z-20 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100"
+          class="absolute top-12 sm:top-4 left-1/2 -translate-x-1/2 bg-neutral-800/90 backdrop-blur border border-neutral-700 rounded-full px-2.5 sm:px-4 py-1 sm:py-1.5 flex items-center gap-1.5 sm:gap-4 z-20 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100"
         >
-          <span class="text-xs text-neutral-400 font-mono">{{ store.currentScene?.width || 1920 }} x {{ store.currentScene?.height || 1080 }}</span>
+          <span class="text-[10px] sm:text-xs text-neutral-400 font-mono">{{ store.currentScene?.width || 1920 }} x {{ store.currentScene?.height || 1080 }}</span>
           <div class="w-px h-3 bg-neutral-600"></div>
           <div class="flex items-center gap-2">
             <button @click="adjustScale(-0.05)" class="hover:text-amber-500 active:scale-90 transition-transform">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
               </svg>
             </button>
-            <span class="text-xs font-bold w-12 text-center tabular-nums">{{ Math.round(currentScaleValue * 100) }}%</span>
+            <span class="text-[10px] sm:text-xs font-bold w-9 sm:w-12 text-center tabular-nums">{{ Math.round(currentScaleValue * 100) }}%</span>
             <button @click="adjustScale(0.05)" class="hover:text-amber-500 active:scale-90 transition-transform">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
             </button>
           </div>
           <div class="w-px h-3 bg-neutral-600"></div>
-          <button @click="autoFitCanvas" class="text-xs hover:text-amber-500" title="自适应窗口">Fit</button>
+          <button @click="autoFitCanvas" class="text-[10px] sm:text-xs hover:text-amber-500" title="自适应窗口">Fit</button>
         </div>
 
         <div class="absolute inset-0">

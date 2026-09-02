@@ -34,11 +34,14 @@
 
       <div v-if="!hasProcessedImg" class="placeholder">
         <div class="placeholder-icon"><Upload :size="48" /></div>
-        <div class="placeholder-text">拖拽图片到此处</div>
-        <div class="placeholder-hint">支持 JPG、PNG 等常见图片格式</div>
+        <div class="placeholder-text">选择图片</div>
+        <div class="placeholder-hint">请选择JPG/PNG 支持拖拽</div>
       </div>
 
-      <div v-if="hasProcessedImg" class="canvas-hint">拖动移动 · 滚轮缩放</div>
+      <div v-if="hasProcessedImg" class="canvas-hint">
+        <span class="hidden sm:inline">拖动移动 滚轮缩放</span>
+        <span class="sm:hidden">单指拖动 双指缩放</span>
+      </div>
     </div>
   </div>
 </template>
@@ -87,6 +90,9 @@ const hasChanges = ref(false);
 const isDragging = ref(false);
 const dragStartX = ref(0);
 const dragStartY = ref(0);
+// 拖拽起始时的画布偏移(画布像素),与屏幕起点配合计算
+const dragStartOffsetX = ref(0);
+const dragStartOffsetY = ref(0);
 // 触屏双指缩放
 const pinchStartDist = ref(0);
 const pinchStartScale = ref(1);
@@ -406,9 +412,10 @@ const handleMouseDown = (event) => {
   if (!hasProcessedImg.value) return;
 
   isDragging.value = true;
-  const s = displayScale();
-  dragStartX.value = (event.clientX - offsetX.value) / s;
-  dragStartY.value = (event.clientY - offsetY.value) / s;
+  dragStartX.value = event.clientX;
+  dragStartY.value = event.clientY;
+  dragStartOffsetX.value = offsetX.value;
+  dragStartOffsetY.value = offsetY.value;
 
   document.addEventListener('mousemove', handleMouseMove);
   document.addEventListener('mouseup', handleMouseUp);
@@ -418,8 +425,8 @@ const handleMouseMove = (event) => {
   if (!isDragging.value) return;
 
   const s = displayScale();
-  offsetX.value = (event.clientX - dragStartX.value) / s;
-  offsetY.value = (event.clientY - dragStartY.value) / s;
+  offsetX.value = dragStartOffsetX.value + (event.clientX - dragStartX.value) / s;
+  offsetY.value = dragStartOffsetY.value + (event.clientY - dragStartY.value) / s;
 
   hasChanges.value = true; // 拖拽位置，有改动
   render();
@@ -444,9 +451,10 @@ const handleTouchStart = (event) => {
   const touches = event.touches;
   if (touches.length === 1) {
     isDragging.value = true;
-    const s = displayScale();
-    dragStartX.value = (touches[0].clientX - offsetX.value) / s;
-    dragStartY.value = (touches[0].clientY - offsetY.value) / s;
+    dragStartX.value = touches[0].clientX;
+    dragStartY.value = touches[0].clientY;
+    dragStartOffsetX.value = offsetX.value;
+    dragStartOffsetY.value = offsetY.value;
   } else if (touches.length === 2) {
     pinchStartDist.value = touchDist(touches);
     pinchStartScale.value = scale.value;
@@ -458,8 +466,8 @@ const handleTouchMove = (event) => {
   const touches = event.touches;
   if (touches.length === 1 && isDragging.value) {
     const s = displayScale();
-    offsetX.value = (touches[0].clientX - dragStartX.value) / s;
-    offsetY.value = (touches[0].clientY - dragStartY.value) / s;
+    offsetX.value = dragStartOffsetX.value + (touches[0].clientX - dragStartX.value) / s;
+    offsetY.value = dragStartOffsetY.value + (touches[0].clientY - dragStartY.value) / s;
     hasChanges.value = true;
     render();
   } else if (touches.length === 2 && pinchStartDist.value > 0) {
@@ -678,7 +686,7 @@ canvas {
   bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.35);
   color: white;
   padding: 6px 12px;
   border-radius: 20px;

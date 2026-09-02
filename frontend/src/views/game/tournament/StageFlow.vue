@@ -1,12 +1,12 @@
 <template>
   <div class="h-full flex flex-col bg-[#0a0a0a] text-neutral-200 font-sans overflow-visible">
-    <div id="top" class="flex-none bg-neutral-900 border-b border-neutral-800 py-0 px-8 relative">
+    <div id="top" class="flex-none bg-neutral-900 border-b border-neutral-800 py-0 px-3 sm:px-8 relative">
       <div class="overflow-x-auto !overflow-y-visible">
         <div class="flex items-center min-w-max px-2 pt-6 pb-6">
           <template v-for="(stage, index) in stages" :key="stage.id">
             <div
               @click="selectStage(stage.id)"
-              class="relative z-10 w-48 h-28 flex flex-col items-center justify-center gap-2 rounded-xl border-2 cursor-pointer group bg-[#0a0a0a] hover:-translate-y-1 transition-all duration-200 ease-out"
+              class="relative z-10 w-40 sm:w-48 h-28 flex flex-col items-center justify-center gap-2 rounded-xl border-2 cursor-pointer group bg-[#0a0a0a] hover:-translate-y-1 transition-all duration-200 ease-out"
               :class="[
                 selection.type === 'STAGE' && selection.id === stage.id
                   ? 'border-amber-500 selected-glow'
@@ -90,15 +90,15 @@
 
     <div class="flex-1 overflow-y-auto animate-fade-in bg-black/20">
       <!-- 新建赛段模式:类型选择 + 配置(中间区域) -->
-      <div v-if="isCreatingStage" class="flex justify-center p-8">
-        <div class="w-[900px] flex-shrink-0">
+      <div v-if="isCreatingStage" class="flex justify-center p-3 sm:p-8">
+        <div class="w-full max-w-[900px] flex-shrink-0">
           <!-- 步骤1: 选择赛段类型 -->
           <div v-if="createStep === 1" class="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
             <div class="flex items-center justify-between mb-4">
               <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">选择赛段类型</h3>
               <span v-if="insertAfterStageId" class="text-[10px] text-amber-500">插入位置:{{ insertAfterName }} 之后</span>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 v-for="type in stageTypes"
                 :key="type.mode"
@@ -166,10 +166,10 @@
       </div>
 
       <!-- 编辑已有赛段 -->
-      <div v-else-if="selection.type === 'STAGE' && currentStage" class="flex justify-center p-8">
-        <div class="flex gap-4">
+      <div v-else-if="selection.type === 'STAGE' && currentStage" class="flex justify-center p-3 sm:p-8">
+        <div class="flex flex-col lg:flex-row gap-4 w-full max-w-[1240px]">
           <!-- 左侧:专用配置 -->
-          <div class="w-[900px] flex-shrink-0">
+          <div class="w-full lg:w-[900px] flex-shrink-0 min-w-0">
             <!-- 参赛选手列表限高,内部滚动,避免把下方赛段配置顶出屏幕 -->
             <div class="mb-4 h-[min(38vh,420px)]">
               <StageCompetitorList
@@ -196,7 +196,7 @@
           </div>
 
           <!-- 右侧:通用配置 -->
-          <div class="w-[320px] flex-shrink-0">
+          <div class="w-full lg:w-[320px] flex-shrink-0">
             <div class="bg-neutral-900 border-2 border-neutral-800 rounded-2xl shadow-2xl overflow-hidden">
               <StageSidebar
                 :key="'sidebar-' + currentStage.id"
@@ -222,7 +222,7 @@
 
       <div
         v-else-if="selection.type === 'TRANSITION' && selection.id >= 0 && stages[selection.id] && stages[selection.id + 1]"
-        class="max-w-4xl mx-auto animate-fade-in"
+        class="max-w-4xl mx-auto animate-fade-in w-full px-3 sm:px-0"
       >
         <TransitionConfig
           :source-stage-id="stages[selection.id].id"

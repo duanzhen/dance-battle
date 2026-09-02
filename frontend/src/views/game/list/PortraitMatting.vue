@@ -100,7 +100,8 @@ let processedCtx = null;
 const initMediaPipe = async () => {
   selfieSegmentation = new SelfieSegmentation({
     locateFile: (file) => {
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+      // 本地加载模型/运行时(public/mediapipe),避免 CDN 被墙
+      return `${import.meta.env.BASE_URL}mediapipe/${file}`;
     }
   });
 

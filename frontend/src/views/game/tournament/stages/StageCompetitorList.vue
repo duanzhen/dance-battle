@@ -1,12 +1,12 @@
 <template>
   <div class="h-full flex flex-col bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden">
     <!-- 头部 -->
-    <div class="flex-none px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
+    <div class="flex-none px-3 sm:px-6 py-3 sm:py-4 border-b border-neutral-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
       <div class="flex items-center gap-2">
         <Users class="w-4 h-4 text-neutral-400" />
         <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
       </div>
-      <div class="flex items-center gap-3 text-xs">
+      <div class="flex flex-wrap items-center gap-2 text-xs">
         <!-- 海选赛:号码牌 / 分数排名 排序切换 -->
         <template v-if="isAudition">
           <button
@@ -58,14 +58,14 @@
 
     <!-- 选手列表 -->
     <div v-else class="flex-1 overflow-y-auto">
-      <div v-if="canArrange" class="flex-none px-6 py-2 border-b border-neutral-800/50 text-[11px] text-neutral-500">
+      <div v-if="canArrange" class="flex-none px-3 sm:px-6 py-2 border-b border-neutral-800/50 text-[11px] text-neutral-500">
         按外部抽签结果拖动排序,保存后 seedRank 依次 1..n,生成对阵时按此顺序配对
       </div>
       <div class="divide-y divide-neutral-800/50">
         <div
           v-for="(competitor, index) in displayList"
           :key="competitor.id"
-          class="px-6 py-4 transition-colors"
+          class="px-3 sm:px-6 py-3 sm:py-4 transition-colors"
           :class="[
             canArrange ? 'cursor-grab' : '',
             'hover:bg-neutral-900/50',
@@ -77,7 +77,7 @@
           @drop="onDrop(index)"
           @dragend="onDragEnd"
         >
-          <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2 sm:gap-4 flex-wrap">
             <!-- 号码牌(海选直接显示抽到的号码) / 种子排名(其余赛制);均为赛前预排,不做金银铜高亮 -->
             <div class="flex-shrink-0 w-12 h-12 rounded-lg bg-neutral-800 text-neutral-400 flex items-center justify-center">
               <span class="text-lg font-bold">{{ isAudition ? competitor.number || '-' : competitor.seedRank || '-' }}</span>
@@ -85,7 +85,7 @@
 
             <!-- 选手信息 -->
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-1">
+              <div class="flex items-center gap-2 mb-1 flex-wrap">
                 <template v-if="editingId === competitor.id">
                   <input
                     v-model="editingName"

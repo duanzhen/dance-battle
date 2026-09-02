@@ -1,12 +1,12 @@
 <template>
   <div class="flex flex-col h-full">
-    <section class="h-40 flex-none bg-neutral-925 border-b border-neutral-800 flex items-center px-4 overflow-y-hidden bg-[#0a0a0a]">
+    <section class="h-32 sm:h-40 flex-none bg-neutral-925 border-b border-neutral-800 flex items-center px-2 sm:px-4 overflow-y-hidden bg-[#0a0a0a]">
       <!-- 左侧：屏幕列表区域 -->
       <div class="flex items-center justify-center gap-4 overflow-x-auto custom-scrollbar-x flex-1">
         <div
           v-for="screen in store.screens"
           :key="screen.id"
-          class="flex-none w-64 h-32 bg-black rounded-lg border relative group flex flex-col transition-colors"
+          class="flex-none w-48 sm:w-64 h-28 sm:h-32 bg-black rounded-lg border relative group flex flex-col transition-colors"
           :class="[
             dragOverScreenId === screen.id
               ? 'border-amber-500 bg-neutral-800 scale-[1.02] shadow-[0_0_20px_rgba(245,158,11,0.3)]'
@@ -146,7 +146,7 @@
 
         <button
           @click="store.addScreen"
-          class="flex-none w-24 h-32 rounded-lg border-2 border-dashed border-neutral-800 bg-[#0a0a0a] flex flex-col items-center justify-center gap-2 text-neutral-600 hover:text-amber-500 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all cursor-pointer active:scale-95 group"
+          class="flex-none w-20 sm:w-24 h-28 sm:h-32 rounded-lg border-2 border-dashed border-neutral-800 bg-[#0a0a0a] flex flex-col items-center justify-center gap-2 text-neutral-600 hover:text-amber-500 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all cursor-pointer active:scale-95 group"
           title="添加新屏幕"
         >
           <span class="w-10 h-10 rounded-full border-2 border-current flex items-center justify-center group-hover:scale-110 transition-transform">
@@ -159,12 +159,37 @@
       </div>
     </section>
 
-    <main class="flex-1 flex overflow-hidden min-h-0">
-      <aside class="w-64 flex-none border-r border-neutral-800 z-10 bg-neutral-900 !mb-0">
+    <main class="flex-1 flex overflow-hidden min-h-0 relative">
+      <!-- 移动端浮层遮罩 -->
+      <div v-if="mobilePanel" class="absolute inset-0 bg-black/50 z-30 lg:hidden" @click="mobilePanel = null"></div>
+
+      <!-- 左侧:组件库(移动端浮层) -->
+      <aside
+        class="w-64 flex-none border-r border-neutral-800 z-40 bg-neutral-900 shadow-2xl lg:shadow-none transition-transform duration-200"
+        :class="mobilePanel === 'toolbox' ? 'absolute inset-y-0 left-0' : 'hidden lg:block'"
+      >
         <WidgetToolbox />
       </aside>
 
       <div ref="canvasContainer" class="flex-1 min-w-0 bg-black relative overflow-hidden group">
+        <!-- 移动端:组件库/配置开关 -->
+        <div class="absolute top-2 left-2 z-30 flex gap-1.5 lg:hidden">
+          <button
+            @click="toggleMobilePanel('toolbox')"
+            class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 bg-neutral-800/90 backdrop-blur border transition-colors"
+            :class="mobilePanel === 'toolbox' ? 'border-amber-500 text-amber-400' : 'border-neutral-700 text-neutral-300'"
+          >
+            <Package class="w-3.5 h-3.5" /> 组件
+          </button>
+          <button
+            @click="toggleMobilePanel('property')"
+            class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 bg-neutral-800/90 backdrop-blur border transition-colors"
+            :class="mobilePanel === 'property' ? 'border-amber-500 text-amber-400' : 'border-neutral-700 text-neutral-300'"
+          >
+            <Settings2 class="w-3.5 h-3.5" /> 配置
+          </button>
+        </div>
+
         <div
           class="absolute top-4 left-1/2 -translate-x-1/2 bg-neutral-800/90 backdrop-blur border border-neutral-700 rounded-full px-4 py-1.5 flex items-center gap-4 z-20 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100"
         >
@@ -192,7 +217,11 @@
         </div>
       </div>
 
-      <aside class="w-72 flex-none border-l border-neutral-800 z-10 bg-neutral-900 !mb-0">
+      <!-- 右侧:组件配置(移动端浮层) -->
+      <aside
+        class="w-72 flex-none border-l border-neutral-800 z-40 bg-neutral-900 shadow-2xl lg:shadow-none transition-transform duration-200"
+        :class="mobilePanel === 'property' ? 'absolute inset-y-0 right-0' : 'hidden lg:block'"
+      >
         <PropertyPanel @widget-updated="handleWidgetUpdated" />
       </aside>
     </main>
@@ -212,7 +241,7 @@
       </div>
     </div>
 
-    <footer class="h-36 flex-none bg-neutral-900 border-t border-neutral-800 flex flex-col z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.3)]">
+    <footer class="h-32 sm:h-36 flex-none bg-neutral-900 border-t border-neutral-800 flex flex-col z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.3)]">
       <div class="h-8 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4">
         <span class="text-[10px] font-bold text-neutral-500 tracking-wider uppercase">场景</span>
         <div class="flex items-center gap-2">
@@ -231,7 +260,7 @@
           @drop="handleSceneReorderDrop($event, index)"
           @dragend="handleSceneReorderDragEnd"
           :class="[
-            'flex-none w-48 h-20 rounded-lg border-2 relative cursor-pointer group transition-all duration-200 overflow-hidden',
+            'flex-none w-36 sm:w-48 h-16 sm:h-20 rounded-lg border-2 relative cursor-pointer group transition-all duration-200 overflow-hidden',
             scene.id === store.currentSceneId
               ? 'border-amber-500 bg-neutral-800 shadow-lg shadow-amber-900/20 scale-[1.02]'
               : 'border-neutral-800 bg-neutral-900 hover:border-neutral-600 hover:bg-neutral-850',
@@ -276,7 +305,7 @@
 
         <div
           @click="createNewScene"
-          class="flex-none w-20 h-20 rounded-lg border-2 border-dashed border-neutral-800 flex flex-col items-center justify-center text-neutral-600 hover:text-amber-500 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all cursor-pointer active:scale-95"
+          class="flex-none w-16 sm:w-20 h-16 sm:h-20 rounded-lg border-2 border-dashed border-neutral-800 flex flex-col items-center justify-center text-neutral-600 hover:text-amber-500 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all cursor-pointer active:scale-95"
         >
           <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -291,7 +320,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useDirectorStore } from '@/store/modules/directorStore'; // 确保路径正确
 import { useRouter } from 'vue-router';
-import { X } from 'lucide-vue-next';
+import { X, Package, Settings2 } from 'lucide-vue-next';
 
 const router = useRouter();
 
@@ -303,6 +332,11 @@ import PropertyPanel from './PropertyPanel.vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
 const store = useDirectorStore();
+/** 移动端:左右面板浮层开关('toolbox' | 'property' | null) */
+const mobilePanel = ref(null);
+const toggleMobilePanel = (panel) => {
+  mobilePanel.value = mobilePanel.value === panel ? null : panel;
+};
 const dragOverScreenId = ref(null);
 const canvasContainer = ref(null);
 const mainEditorRef = ref(null);

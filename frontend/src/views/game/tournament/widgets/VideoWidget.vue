@@ -92,7 +92,7 @@
 
         <div class="space-y-1">
           <label class="label">音量: {{ Math.round((volume || 1) * 100) }}%</label>
-          <input type="range" min="0" max="1" step="0.1" :value="volume || 1" @input="handleVolumeChange" class="w-full" />
+          <input type="range" min="0" max="1" step="0.1" :value="volume || 1" @change="handleVolumeChange" class="w-full" />
         </div>
       </section>
     </div>

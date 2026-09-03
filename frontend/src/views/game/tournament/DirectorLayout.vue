@@ -245,6 +245,26 @@
       <div class="h-8 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4">
         <span class="text-[10px] font-bold text-neutral-500 tracking-wider uppercase">场景</span>
         <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1">
+            <button
+              @click="handleUndo"
+              :disabled="!store.canUndo"
+              :title="store.canUndo ? `撤销 ${store.undoLabel} (Ctrl+Z)` : '没有可撤销的操作'"
+              class="w-6 h-6 rounded flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              :class="store.canUndo ? 'text-neutral-400 hover:text-amber-400 hover:bg-neutral-800' : ''"
+            >
+              <Undo2 class="w-3.5 h-3.5" />
+            </button>
+            <button
+              @click="handleRedo"
+              :disabled="!store.canRedo"
+              :title="store.canRedo ? `重做 ${store.redoLabel} (Ctrl+Shift+Z)` : '没有可重做的操作'"
+              class="w-6 h-6 rounded flex items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              :class="store.canRedo ? 'text-neutral-400 hover:text-amber-400 hover:bg-neutral-800' : ''"
+            >
+              <Redo2 class="w-3.5 h-3.5" />
+            </button>
+          </div>
           <span class="text-[10px] text-neutral-600">Total: {{ store.scenes.length }}</span>
         </div>
       </div>
@@ -320,7 +340,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useDirectorStore } from '@/store/modules/directorStore'; // 确保路径正确
 import { useRouter } from 'vue-router';
-import { X, Package, Settings2 } from 'lucide-vue-next';
+import { X, Package, Settings2, Undo2, Redo2 } from 'lucide-vue-next';
 
 const router = useRouter();
 
@@ -332,6 +352,25 @@ import PropertyPanel from './PropertyPanel.vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
 const store = useDirectorStore();
+/** 撤销/重做(Ctrl+Z 键盘监听放在父页面,避免 KeepAlive 下切到其他页签仍响应) */
+const handleUndo = async () => {
+  try {
+    const ok = await store.undo();
+    if (ok) ElMessage.success(`已撤销：${store.redoLabel || '上一步'}`);
+  } catch (e) {
+    ElMessage.error(e?.message || '撤销失败');
+  }
+};
+
+const handleRedo = async () => {
+  try {
+    const ok = await store.redo();
+    if (ok) ElMessage.success(`已重做：${store.undoLabel || '下一步'}`);
+  } catch (e) {
+    ElMessage.error(e?.message || '重做失败');
+  }
+};
+
 /** 移动端:左右面板浮层开关('toolbox' | 'property' | null) */
 const mobilePanel = ref(null);
 const toggleMobilePanel = (panel) => {

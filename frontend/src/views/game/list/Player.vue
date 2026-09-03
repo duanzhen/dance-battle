@@ -146,16 +146,6 @@
             <UserRoundCheck class="w-3.5 h-3.5" />
           </button>
 
-          <!-- 解除签到(已签到) -->
-          <button
-            v-if="player.competitorId"
-            @click.stop="handleCancelCheckIn(player)"
-            class="bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white p-1.5 rounded-full transition-all shadow-md flex items-center justify-center"
-            title="解除签到"
-          >
-            <Ban class="w-3.5 h-3.5" />
-          </button>
-
           <!-- 签到按钮 -->
           <button
             v-if="!player.competitorId"
@@ -222,7 +212,7 @@
         <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-md mx-4 shadow-2xl" @click.stop>
           <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-neutral-100">批量导入选手</h3>
-            <button @click="showImportDialog = false" class="text-neutral-500 hover:text-neutral-300">
+            <button @click="showImportDialog = false" class="dialog-close-btn">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -304,7 +294,7 @@
         <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-2xl mx-4 shadow-2xl max-h-[80vh] flex flex-col" @click.stop>
           <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-neutral-100 flex items-center gap-2"><Shuffle class="w-4 h-4 text-amber-500" /> 随机抽取圈结果</h3>
-            <button @click="circleResult = null" class="text-neutral-500 hover:text-neutral-300">
+            <button @click="circleResult = null" class="dialog-close-btn">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -343,9 +333,9 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue';
-import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File, RefreshCw, Ban } from 'lucide-vue-next';
+import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File, RefreshCw } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers, cancelCheckIn } from '@/api/game/player';
+import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers } from '@/api/game/player';
 import { download } from '@/utils/request';
 import { PlayerVO, PlayerForm as PlayerFormType } from '@/api/game/player/types';
 import { listCompetitor } from '@/api/game/competitor';
@@ -591,26 +581,6 @@ const handleEditCheckIn = (player: PlayerVO) => {
   }
   currentCheckInPlayer.value = player;
   checkInDialogRef.value?.open(player);
-};
-
-// 解除签到:回到未签到状态,可重新签到
-const handleCancelCheckIn = async (player: PlayerVO) => {
-  try {
-    await ElMessageBox.confirm(`确认解除「${player.name || '该选手'}」的签到？解除后选手回到未签到状态，可重新选择号码签到。`, '解除签到', {
-      type: 'warning',
-      confirmButtonText: '确认解除',
-      cancelButtonText: '取消'
-    });
-  } catch {
-    return;
-  }
-  try {
-    await cancelCheckIn(player.id);
-    ElMessage.success('已解除签到');
-    refreshAll();
-  } catch (e: any) {
-    ElMessage.error(e?.msg || e?.message || '解除签到失败');
-  }
 };
 
 // 加载首个赛段信息(判断是否分圈海选,控制"随机抽取圈"按钮)

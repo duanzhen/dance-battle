@@ -82,7 +82,7 @@
               step="5"
               :value="maskTransparency"
               class="flex-1 accent-amber-500"
-              @input="$emit('update:opacity', 100 - Number(($event.target as HTMLInputElement).value))"
+              @change="$emit('update:opacity', 100 - Number(($event.target as HTMLInputElement).value))"
             />
             <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ maskTransparency }}%</span>
           </div>

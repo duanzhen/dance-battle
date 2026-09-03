@@ -281,6 +281,11 @@ interface Stage {
   tournamentId?: string; // 赛事ID
 }
 
+// 通知父页面赛段链已变化(删除赛段后需要刷新大屏组件绑定)
+const emit = defineEmits<{
+  stagesChanged: [];
+}>();
+
 // --- 路由和数据加载 ---
 const route = useRoute();
 const tournamentId = ref<string | number>('');
@@ -410,6 +415,8 @@ const loadStages = async (keepSelection: boolean = false) => {
     } else {
       selection.value = { type: 'STAGE', id: '' };
     }
+    // 通知父页面:场景组件需要重新加载,自动清除对被删赛段的旧绑定
+    emit('stagesChanged');
   } catch (error) {
     console.error('❌ 加载赛段数据失败:', error);
   } finally {

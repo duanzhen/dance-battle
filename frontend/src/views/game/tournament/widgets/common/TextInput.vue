@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-1">
     <label v-if="label" class="label">{{ label }}</label>
-    <input type="text" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" :placeholder="placeholder" class="input-base" />
+    <input type="text" :value="modelValue" @change="$emit('update:modelValue', $event.target.value)" :placeholder="placeholder" class="input-base" />
   </div>
 </template>
 

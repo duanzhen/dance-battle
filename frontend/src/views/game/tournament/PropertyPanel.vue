@@ -418,7 +418,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useDirectorStore } from '@/store/modules/directorStore';
-import { moveWidgetLayer, reorderWidgets } from '@/api/game/visWidget';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import NumberInput from './NumberInput.vue';
 import ImageWidget from './widgets/ImageWidget.vue';
@@ -485,59 +484,30 @@ watch(
 // 监听组件布局属性变化 (x, y, w, h, z) - 仅在 PropertyPanel 中手动修改时触发
 // 移除 watch,让 SceneRenderer 专门处理位置大小的更新
 
-// 处理属性更新 - 使用防抖避免频繁请求
-let updateTimer = null;
-let isUpdatingProp = false;
-const updatePropQueue = new Map(); // 使用队列来合并更新
+// 属性更新:输入控件只在 @change 时触发(打字不逐步提交,键盘/拖动过程不计步),
+// 因此每个 @change 直接作为一步提交;用链式队列保证快速连续修改按顺序落库、互不覆盖
+let propCommitChain = Promise.resolve();
 
 const handleUpdateProp = async (key, value) => {
   if (!widget.value || isLocked.value) return;
-
-  // 将更新加入队列
-  updatePropQueue.set(key, value);
-
-  // 清除之前的定时器
-  if (updateTimer) {
-    clearTimeout(updateTimer);
-  }
-
-  // 延迟执行,等待用户停止编辑
-  updateTimer = setTimeout(async () => {
-    if (!widget.value || isUpdatingProp) return;
-
-    // 获取所有待更新的属性
-    const updates = Object.fromEntries(updatePropQueue);
-    updatePropQueue.clear();
-
-    isUpdatingProp = true;
-
+  const targetId = String(widget.value.id);
+  propCommitChain = propCommitChain.then(async () => {
+    if (!widget.value || String(widget.value.id) !== targetId) return;
     let dataConfig = {};
     try {
       dataConfig = widget.value.dataConfig ? JSON.parse(widget.value.dataConfig) : {};
     } catch (e) {
       dataConfig = {};
     }
-
-    // 合并所有更新
-    Object.assign(dataConfig, updates);
-
-    console.log('[PropertyPanel] 属性更新,准备提交:', { id: widget.value.id, updates });
-
+    Object.assign(dataConfig, { [key]: value });
     try {
-      // 调用 API 更新（直接传递对象，store 会处理 stringify）
-      await store.updateWidget(widget.value.id, {
-        dataConfig: dataConfig
-      });
-
-      // 通知父组件更新缩略图
+      await store.updateWidget(targetId, { dataConfig });
       emit('widgetUpdated');
-    } finally {
-      // 延迟重置标志
-      setTimeout(() => {
-        isUpdatingProp = false;
-      }, 100);
+    } catch (e) {
+      ElMessage.error(e?.msg || e?.message || '属性更新失败');
     }
-  }, 500); // 500ms 防抖延迟
+  });
+  return propCommitChain;
 };
 
 // 图层列表:按 zIndex 降序(z 大在上层,显示在列表顶部)
@@ -610,22 +580,13 @@ const moveLayer = async (w, dir) => {
     return;
   }
   try {
-    await moveWidgetLayer(w.id, dir);
+    // 排序、本地 z 更新与撤销历史统一由 store 处理
+    await store.moveLayer(w.id, dir);
+    emit('widgetUpdated');
   } catch (e: any) {
     console.error('图层排序失败', e);
     ElMessage.error(e?.msg || e?.message || '图层排序失败');
-    return;
   }
-  // 后端已原子交换;前端同步交换 z 并用新数组引用强制触发响应式重排
-  const idx = ordered.findIndex((x) => String(x.id) === String(w.id));
-  const sw = dir === 'up' ? ordered[idx - 1] : ordered[idx + 1];
-  if (sw) {
-    const tz = w.z;
-    w.z = sw.z;
-    sw.z = tz;
-    store.currentScene.widgets = [...store.currentScene.widgets];
-  }
-  emit('widgetUpdated');
 };
 
 // ===== 拖动排序(HTML5 draggable)=====
@@ -739,17 +700,16 @@ const onDrop = async () => {
   }
   const widgetIds = arr.map((w) => w.id);
   const sceneId = store.currentScene?.id;
+  if (!sceneId) return;
   try {
-    await reorderWidgets(sceneId, widgetIds);
-  } catch (e) {
+    // 排序、本地 z 更新与撤销历史统一由 store 处理
+    await store.reorderLayers(widgetIds);
+    emit('widgetUpdated');
+  } catch (e: any) {
+    console.error('拖动排序失败', e);
     ElMessage.error('拖动排序失败');
     return;
   }
-  // 前端按新顺序重排 z(arr 上 = z 大)
-  arr.forEach((w, i) => {
-    w.z = arr.length - i;
-  });
-  store.currentScene.widgets = [...store.currentScene.widgets];
 };
 
 // 全屏展示组件

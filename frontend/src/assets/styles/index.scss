@@ -123,6 +123,62 @@ button:where(
   color: inherit;
 }
 
+// 统一所有弹窗/抽屉右上角关闭为圆形(含 Element Plus 默认关闭按钮)
+button.el-dialog__headerbtn,
+button.el-drawer__close-btn {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 9999px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #a3a3a3;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+button.el-dialog__headerbtn:hover,
+button.el-drawer__close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+button.el-dialog__headerbtn .el-dialog__close,
+button.el-drawer__close-btn .el-drawer__close-icon {
+  color: inherit;
+  font-size: 16px;
+}
+
+// 自绘 Teleport 弹窗的右上角圆形关闭按钮(统一形态)
+button.dialog-close-btn {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 9999px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: none !important;
+  padding: 0 !important;
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  color: #a3a3a3 !important;
+  cursor: pointer !important;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+button.dialog-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+button.dialog-close-btn svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
 input {
   border: none !important;
   outline: none !important;

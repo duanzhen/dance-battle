@@ -18,7 +18,7 @@
         <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-sm mx-4 shadow-2xl" @click.stop>
           <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-neutral-100">手机导播台扫码入口</h3>
-            <button @click="closeDirectorQr" class="text-neutral-500 hover:text-neutral-300 border-none appearance-none">
+            <button @click="closeDirectorQr" class="dialog-close-btn">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>

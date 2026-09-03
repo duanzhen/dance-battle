@@ -21,6 +21,7 @@ import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.TRoundScore;
+import com.dance.street.game.domain.TVisWidget;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -40,6 +41,7 @@ import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.service.ITStageService;
 
 import org.springframework.transaction.annotation.Transactional;
@@ -67,6 +69,7 @@ public class TStageServiceImpl implements ITStageService {
     private final TRoundScoreMapper roundScoreMapper;
     private final TRefereeStageMapper refereeStageMapper;
     private final TPlayerMapper playerMapper;
+    private final TVisWidgetMapper visWidgetMapper;
 
     /**
      * 查询赛段流程
@@ -505,6 +508,8 @@ public class TStageServiceImpl implements ITStageService {
         if (ids == null || ids.isEmpty()) {
             return false;
         }
+        List<TStage> deletingStages = baseMapper.selectList(
+            Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids));
         List<TStage> toDeleteStages = List.of();
         if(isValid){
             // 在删除前重新连接链表
@@ -565,7 +570,74 @@ public class TStageServiceImpl implements ITStageService {
                 .eq(TStage::getNextStageId, st.getId())
                 .set(TStage::getNextStageId, st.getNextStageId()));
         }
+        // 自动解绑引用被删赛段/其场次的场景组件,避免大屏刷新后报"赛段不存在"
+        clearWidgetStageBindings(deletingStages, matchIds);
         return deleted;
+    }
+
+    /**
+     * 删除赛段后清理 vis_widget 绑定:dataConfig 中的 stageId / matchId
+     * 若指向被删赛段或其场次,统一置空(组件保留,显示为待绑定状态)。
+     */
+    private void clearWidgetStageBindings(List<TStage> stages, List<Long> matchIds) {
+        if (stages == null || stages.isEmpty()) {
+            return;
+        }
+        Set<Long> tournamentIds = stages.stream()
+            .map(TStage::getTournamentId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (tournamentIds.isEmpty()) {
+            return;
+        }
+        Set<String> removedRefs = new HashSet<>();
+        stages.forEach(s -> {
+            if (s.getId() != null) {
+                removedRefs.add(String.valueOf(s.getId()));
+            }
+        });
+        if (matchIds != null) {
+            matchIds.forEach(id -> {
+                if (id != null) {
+                    removedRefs.add(String.valueOf(id));
+                }
+            });
+        }
+        List<TVisWidget> widgets = visWidgetMapper.selectList(Wrappers.<TVisWidget>lambdaQuery()
+            .in(TVisWidget::getTournamentId, tournamentIds));
+        if (widgets.isEmpty()) {
+            return;
+        }
+        ObjectMapper mapper = new ObjectMapper();
+        for (TVisWidget w : widgets) {
+            if (StringUtils.isBlank(w.getDataConfig())) {
+                continue;
+            }
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> dc = mapper.readValue(w.getDataConfig(), Map.class);
+                if (dc == null) {
+                    continue;
+                }
+                boolean changed = false;
+                for (String key : List.of("stageId", "targetStageId", "matchId")) {
+                    Object val = dc.get(key);
+                    if (val != null && removedRefs.contains(String.valueOf(val))) {
+                        dc.put(key, null);
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    TVisWidget upd = new TVisWidget();
+                    upd.setId(w.getId());
+                    upd.setDataConfig(mapper.writeValueAsString(dc));
+                    visWidgetMapper.updateById(upd);
+                    log.info("赛段删除联动:组件[{}](type={}) 已清空失效绑定 {}", w.getId(), w.getType(), dc);
+                }
+            } catch (Exception e) {
+                log.warn("赛段删除联动:组件[{}] dataConfig 解析失败,跳过: {}", w.getId(), e.getMessage());
+            }
+        }
     }
 
     /**

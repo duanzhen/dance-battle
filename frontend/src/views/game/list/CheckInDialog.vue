@@ -1,28 +1,19 @@
 <template>
-  <el-dialog
+  <GameDialog
     v-model="visible"
-    :title="editing ? '编辑签到' : '选手签到'"
     width="600px"
+    :title="editing ? '编辑签到' : '选手签到'"
+    :subtitle="editing ? '修改参赛号码与落圈，确认选手信息' : '选择参赛号码并确认选手信息'"
+    :icon="UserRoundCheck"
     :before-close="handleClose"
     :close-on-click-modal="false"
-    append-to-body
-    class="checkin-dialog"
+    dialog-class="checkin-dialog"
   >
-    <template #header>
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-bold text-white">{{ editing ? '编辑签到结果' : '选手签到' }}</h3>
-      </div>
-    </template>
-
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
     </div>
 
     <div v-else class="space-y-4">
-      <div class="text-sm text-neutral-400">
-        {{ editing ? '修改参赛号码(按号分圈会自动换圈)并确认选手信息' : '请选择参赛号码并确认选手信息' }}
-      </div>
-
       <!-- 选手名称：展示 / 编辑 -->
       <div>
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">选手名称</label>
@@ -197,7 +188,17 @@
     </div>
 
     <template #footer>
-      <div class="flex justify-between">
+      <div class="flex items-center justify-between gap-2.5">
+        <!-- 编辑模式:左侧提供解除签到,普通签到保留随机抽取 -->
+        <button
+          v-if="editing"
+          @click="handleCancelCheckIn"
+          :disabled="submitting"
+          class="px-4 py-2 rounded-lg text-sm font-medium text-red-400 bg-red-500/10 border border-red-900/50 hover:bg-red-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+        >
+          <Ban class="w-4 h-4" />
+          解除签到
+        </button>
         <button
           v-if="!editing"
           @click="handleRandomSelect"
@@ -213,7 +214,7 @@
           </svg>
           随机抽取
         </button>
-        <div class="flex gap-3">
+        <div class="flex gap-2.5">
           <button @click="handleClose" class="px-4 py-2 rounded-lg text-sm text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all">
             取消
           </button>
@@ -235,21 +236,22 @@
         </div>
       </div>
     </template>
-  </el-dialog>
+  </GameDialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue';
-import { Pencil, User } from 'lucide-vue-next';
-import { ElMessage } from 'element-plus';
+import { Pencil, User, UserRoundCheck, Ban } from 'lucide-vue-next';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { PlayerVO } from '@/api/game/player/types';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { listCompetitor } from '@/api/game/competitor';
-import { checkInPlayer, editCheckIn, listPlayer } from '@/api/game/player';
+import { checkInPlayer, editCheckIn, cancelCheckIn, listPlayer } from '@/api/game/player';
 import { getStage } from '@/api/game/stage';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
 import PortraitMatting from './PortraitMatting.vue';
+import GameDialog from '@/components/GameDialog/index.vue';
 
 const props = defineProps<{
   player: PlayerVO | null;
@@ -546,6 +548,36 @@ const handleSubmit = async () => {
   }
 };
 
+// 解除签到:回到未签到状态(已有打分记录时后端会拦截)
+const handleCancelCheckIn = async () => {
+  if (!currentPlayer.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认解除「${currentPlayer.value.name || '该选手'}」的签到？解除后选手回到未签到状态，可重新选择号码签到。`,
+      '解除签到',
+      {
+        type: 'warning',
+        confirmButtonText: '确认解除',
+        cancelButtonText: '取消'
+      }
+    );
+  } catch {
+    return;
+  }
+  submitting.value = true;
+  try {
+    await cancelCheckIn(currentPlayer.value.id);
+    ElMessage.success('已解除签到');
+    emit('success');
+    handleClose();
+  } catch (error) {
+    console.error('解除签到失败:', error);
+    ElMessage.error((error as any)?.message || '解除签到失败');
+  } finally {
+    submitting.value = false;
+  }
+};
+
 const open = (player?: PlayerVO | null) => {
   currentPlayer.value = player ?? props.player ?? null;
   editing.value = !!currentPlayer.value?.competitorId;
@@ -570,28 +602,6 @@ defineExpose({
 </script>
 
 <style scoped>
-:global(.el-overlay .checkin-dialog) {
-  background-color: #171717 !important;
-  border: 1px solid #262626 !important;
-  border-radius: 16px !important;
-}
-
-:global(.checkin-dialog .el-dialog__header) {
-  padding: 16px 20px;
-  border-bottom: 1px solid #262626;
-}
-
-:global(.checkin-dialog .el-dialog__body) {
-  padding: 20px;
-  background-color: #171717;
-}
-
-:global(.checkin-dialog .el-dialog__footer) {
-  padding: 16px 20px;
-  border-top: 1px solid #262626;
-  background-color: #171717;
-}
-
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;

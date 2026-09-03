@@ -16,7 +16,7 @@
           <label class="label">内容</label>
           <textarea
             :value="text"
-            @input="$emit('update:text', ($event.target as HTMLTextAreaElement).value)"
+            @change="$emit('update:text', ($event.target as HTMLTextAreaElement).value)"
             class="input-base h-20 resize-none"
             placeholder="请输入文本内容"
           />

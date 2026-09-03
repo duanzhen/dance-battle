@@ -462,7 +462,15 @@ public class TPlayerServiceImpl implements ITPlayerService {
         }
         TCompetitor competitor = competitorMapper.selectById(player.getCompetitorId());
         if (competitor == null) {
-            throw new RuntimeException("选手对应的参赛单位不存在");
+            // 历史脏数据:参赛单位已被删除但选手仍残留 competitor_id,
+            // 直接清空关联,避免旧版本留下"已签到但找不到参赛单位"的死状态
+            log.warn("选手[{}]解除签到:参赛单位[{}]已不存在,仅清理选手关联",
+                playerId, player.getCompetitorId());
+            baseMapper.update(null, Wrappers.<TPlayer>lambdaUpdate()
+                .eq(TPlayer::getId, playerId)
+                .set(TPlayer::getCompetitorId, null));
+            tournamentEventNotifier.notify(player.getTournamentId(), null, null, "competitor");
+            return;
         }
         TTournamentVo tournament = tournamentService.queryById(player.getTournamentId());
         if (tournament == null) {
@@ -491,8 +499,10 @@ public class TPlayerServiceImpl implements ITPlayerService {
                 .eq(TCompetitorMember::getCompetitorId, competitor.getId()));
             competitorMapper.deleteById(competitor.getId());
         }
-        player.setCompetitorId(null);
-        baseMapper.updateById(player);
+        // updateById 默认忽略 null 字段,必须显式 set 才能清空 competitor_id
+        baseMapper.update(null, Wrappers.<TPlayer>lambdaUpdate()
+            .eq(TPlayer::getId, playerId)
+            .set(TPlayer::getCompetitorId, null));
         tournamentEventNotifier.notify(player.getTournamentId(), firstStage.getId(), null, "competitor");
         log.info("选手[{}]已解除签到(参赛单位[{}])", playerId, competitor.getId());
     }

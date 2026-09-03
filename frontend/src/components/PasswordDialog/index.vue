@@ -1,41 +1,18 @@
 <template>
-  <el-dialog
+  <GameDialog
     v-model="visible"
-    :title="force ? proxy.$t('passwordDialog.forceTitle') : proxy.$t('passwordDialog.title')"
     width="420px"
-    append-to-body
+    :title="force ? proxy.$t('passwordDialog.forceTitle') : proxy.$t('passwordDialog.title')"
+    :subtitle="proxy.$t('passwordDialog.subtitle')"
+    :icon="Lock"
     destroy-on-close
-    class="password-dialog"
+    dialog-class="password-dialog"
     :show-close="!force"
     :close-on-press-escape="!force"
     :close-on-click-modal="false"
     @closed="resetForm"
   >
-    <template #header>
-      <div class="flex items-center gap-3">
-        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/15">
-          <svg class="h-4 w-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-            />
-          </svg>
-        </div>
-        <div>
-          <h3 class="text-base font-bold tracking-tight text-white">
-            {{ force ? proxy.$t('passwordDialog.forceTitle') : proxy.$t('passwordDialog.title') }}
-          </h3>
-          <p class="mt-0.5 text-[11px] text-neutral-500">{{ proxy.$t('passwordDialog.subtitle') }}</p>
-        </div>
-      </div>
-    </template>
-
-    <div
-      v-if="force"
-      class="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3"
-    >
+    <div v-if="force" class="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
       <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           stroke-linecap="round"
@@ -119,10 +96,12 @@
         </button>
       </div>
     </template>
-  </el-dialog>
+  </GameDialog>
 </template>
 
 <script setup lang="ts">
+import { Lock } from 'lucide-vue-next';
+import GameDialog from '@/components/GameDialog/index.vue';
 import { changePassword } from '@/api/login';
 import { ChangePasswordData } from '@/api/types';
 import { useUserStore } from '@/store/modules/user';
@@ -216,64 +195,6 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 弹窗主体:深色 + 圆角 + 轻微琥珀光晕,与赛事/签到等弹窗保持一致 */
-:global(.el-overlay .password-dialog) {
-  max-width: 92vw;
-  overflow: hidden;
-  border: 1px solid #262626;
-  border-radius: 16px;
-  background-color: #171717;
-  box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.8),
-    0 0 0 1px rgba(245, 158, 11, 0.04);
-}
-
-/* 头部 */
-:global(.password-dialog .el-dialog__header) {
-  margin-right: 0;
-  padding: 14px 20px;
-  border-bottom: 1px solid #262626;
-  border-radius: 16px 16px 0 0;
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.04) 0%, transparent 100%);
-}
-
-/* 内容区 */
-:global(.password-dialog .el-dialog__body) {
-  padding: 20px;
-  color: #f5f5f5;
-  background-color: #171717;
-}
-
-/* 底部 */
-:global(.password-dialog .el-dialog__footer) {
-  padding: 12px 20px;
-  border-top: 1px solid #262626;
-  background-color: #171717;
-}
-
-/* 关闭按钮:默认灰色,hover 高亮 */
-:global(.password-dialog .el-dialog__headerbtn) {
-  top: 18px;
-  right: 20px;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-:global(.password-dialog .el-dialog__headerbtn:hover) {
-  background-color: rgba(255, 255, 255, 0.06);
-}
-
-:global(.password-dialog .el-dialog__close) {
-  color: #737373 !important;
-  font-size: 18px;
-}
-
-:global(.password-dialog .el-dialog__headerbtn:hover .el-dialog__close) {
-  color: #f5f5f5 !important;
-}
-
 /* 表单标签与输入框:暗色化,聚焦琥珀高亮(与登录页一致) */
 :global(.password-dialog .el-form-item__label) {
   color: #a3a3a3;
@@ -294,7 +215,9 @@ defineExpose({
 }
 
 :global(.password-dialog .el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px rgb(245 158 11) inset, 0 0 12px rgb(245 158 11 / 0.15);
+  box-shadow:
+    0 0 0 1px rgb(245 158 11) inset,
+    0 0 12px rgb(245 158 11 / 0.15);
 }
 
 :global(.password-dialog .el-input__inner) {
@@ -319,17 +242,5 @@ defineExpose({
 :global(.password-dialog .el-form-item__error) {
   padding-top: 4px;
   color: #f87171;
-}
-
-/* 遮罩层:更深的背景 + 轻微模糊 */
-:global(.el-overlay:has(.password-dialog)) {
-  background-color: rgba(0, 0, 0, 0.7) !important;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-/* 兼容不支持 :has() 的浏览器 */
-:global(.password-dialog ~ .el-overlay) {
-  background-color: rgba(0, 0, 0, 0.7) !important;
 }
 </style>

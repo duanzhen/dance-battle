@@ -280,6 +280,8 @@ const handleElementMouseDown = (e: MouseEvent, element: SceneElement) => {
 
   // 设置选中的 widget ID 到 store
   store.selectWidget(element.id, 'canvas');
+  // 记录本次拖拽的起始位置,保证 Ctrl+Z 能回到拖前状态
+  store.beginWidgetTransform(element.id);
 
   const startX = e.clientX;
   const startY = e.clientY;
@@ -311,6 +313,8 @@ const handleElementMouseDown = (e: MouseEvent, element: SceneElement) => {
 // 2. 调整大小 (Resize)
 const handleResizeMouseDown = (e: MouseEvent, element: SceneElement, handle: 'se' | 'ne' | 'sw' | 'nw') => {
   if (!editable.value || element.locked) return;
+  // 记录本次缩放的起始几何,保证 Ctrl+Z 能回到缩放前状态
+  store.beginWidgetTransform(element.id);
 
   const startX = e.clientX;
   const startY = e.clientY;

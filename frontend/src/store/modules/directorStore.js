@@ -4,6 +4,7 @@ import { ref, computed, shallowRef } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
 import { listVisScene, addVisScene, updateVisScene, delVisScene } from '@/api/game/visScene';
 import { listVisWidget, addVisWidget, updateVisWidget, delVisWidget } from '@/api/game/visWidget';
+import { moveWidgetLayer, reorderWidgets } from '@/api/game/visWidget';
 import { projectSceneToScreen, clearScreenScene } from '@/api/game/screenControl';
 import { getTournamentAuthKey } from '@/api/game/tournament';
 import { subscribeScreenControl, unsubscribeScreenControl, unsubscribeAllScreens } from '@/utils/screenSse';
@@ -91,6 +92,357 @@ export const useDirectorStore = defineStore('director', () => {
   });
 
   // ============================================
+  // 撤回/重做 (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y)
+  // ============================================
+  const undoStack = ref([]);
+  const redoStack = ref([]);
+  const canUndo = computed(() => undoStack.value.length > 0);
+  const canRedo = computed(() => redoStack.value.length > 0);
+  const undoLabel = computed(() => undoStack.value[undoStack.value.length - 1]?.label || '');
+  const redoLabel = computed(() => redoStack.value[redoStack.value.length - 1]?.label || '');
+  const MAX_HISTORY = 60;
+
+  // 删除后重建可能产生新 id:旧 id -> 当前实际 id 的映射,撤回/重做时统一解析
+  const widgetIdMap = new Map();
+  const sceneIdMap = new Map();
+  // 拖拽/缩放开始时记录起始快照:拖动过程中 SceneRenderer 会直接改本地元素,
+  // 若在 mouseup 才取 before,取到的已经是终点值,撤销会变成空操作
+  const widgetTransformStart = new Map();
+  const resolveWidgetId = (id) => widgetIdMap.get(String(id)) || String(id);
+  const resolveSceneId = (id) => sceneIdMap.get(String(id)) || String(id);
+  const registerWidgetId = (oldId, newId) => {
+    if (oldId == null || newId == null || String(oldId) === String(newId)) return;
+    widgetIdMap.set(String(oldId), String(newId));
+  };
+  const registerSceneId = (oldId, newId) => {
+    if (oldId == null || newId == null || String(oldId) === String(newId)) return;
+    sceneIdMap.set(String(oldId), String(newId));
+  };
+
+  const snapshotWidget = (w, sceneId) => {
+    if (!w) return null;
+    return {
+      id: w.id,
+      sceneId: sceneId ?? currentScene.value?.id ?? null,
+      name: w.name ?? '',
+      type: w.type,
+      x: Number(w.x) || 0,
+      y: Number(w.y) || 0,
+      w: Number(w.w) || 0,
+      h: Number(w.h) || 0,
+      z: Number(w.z) || 1,
+      visible: w.visible === 1 || w.visible === true,
+      locked: w.locked === 1 || w.locked === true,
+      layoutConfig: w.layoutConfig || '{}',
+      dataConfig: w.dataConfig || '{}',
+      renderConfig: w.renderConfig || '{}'
+    };
+  };
+
+  const snapshotScene = (s) => {
+    if (!s) return null;
+    const sid = s.id;
+    return {
+      id: sid,
+      name: s.name ?? '',
+      width: Number(s.width) || 1920,
+      height: Number(s.height) || 1080,
+      bgColor: s.bgColor || '#000000',
+      format: s.format || 'CUSTOM',
+      isTemplate: s.isTemplate || 0,
+      sortOrder: Number(s.sortOrder) ?? scenes.value.length,
+      widgets: (s.widgets || []).map((w) => snapshotWidget(w, sid))
+    };
+  };
+
+  /** 两个组件快照是否等价(用于跳过未产生实际变化的动作) */
+  const widgetSnapshotsEqual = (a, b) => {
+    if (!a || !b) return false;
+    return ['name', 'x', 'y', 'w', 'h', 'z', 'visible', 'locked', 'layoutConfig', 'dataConfig', 'renderConfig'].every(
+      (k) => String(a[k]) === String(b[k])
+    );
+  };
+
+  const findSceneById = (sid) => scenes.value.find((s) => String(s.id) === String(sid)) || null;
+  const findWidgetById = (wid) => {
+    for (const scene of scenes.value) {
+      const w = (scene.widgets || []).find((x) => String(x.id) === String(resolveWidgetId(wid)));
+      if (w) return w;
+    }
+    return null;
+  };
+
+  /** 记录一条历史(undo 回到动作前,redo 重放动作后);不做时间合并,每次操作独立成步 */
+  function commitHistory(label, key, undo, redo) {
+    undoStack.value.push({ label, key, undo, redo });
+    if (undoStack.value.length > MAX_HISTORY) undoStack.value.shift();
+    redoStack.value = [];
+  }
+
+  /** 撤销上一步;失败时把记录放回栈并抛出(由 UI 提示) */
+  async function undo() {
+    const entry = undoStack.value.pop();
+    if (!entry) return false;
+    try {
+      await entry.undo();
+      redoStack.value.push(entry);
+      return true;
+    } catch (error) {
+      undoStack.value.push(entry);
+      console.error('❌ 撤销失败:', error);
+      throw error;
+    }
+  }
+
+  /** 重做 */
+  async function redo() {
+    const entry = redoStack.value.pop();
+    if (!entry) return false;
+    try {
+      await entry.redo();
+      undoStack.value.push(entry);
+      return true;
+    } catch (error) {
+      redoStack.value.push(entry);
+      console.error('❌ 重做失败:', error);
+      throw error;
+    }
+  }
+
+  function clearHistory() {
+    undoStack.value = [];
+    redoStack.value = [];
+    widgetIdMap.clear();
+    sceneIdMap.clear();
+    widgetTransformStart.clear();
+  }
+
+  // ---- 原始(不带历史记录)底层操作,供动作与撤回共用 ----
+  async function deleteWidgetRaw(id) {
+    const actualId = resolveWidgetId(id);
+    if (!currentTournamentId) return;
+    widgetTransformStart.delete(String(actualId));
+    await delVisWidget(actualId);
+    for (const scene of scenes.value) {
+      const index = (scene.widgets || []).findIndex((w) => String(w.id) === String(actualId));
+      if (index > -1) {
+        scene.widgets.splice(index, 1);
+        if (selectedWidgetId.value === String(actualId)) selectedWidgetId.value = null;
+        break;
+      }
+    }
+  }
+
+  /** 删除场景前先清理其组件(后端删场景不级联) */
+  async function deleteWidgetsOfSceneRaw(sceneId) {
+    const scene = findSceneById(resolveSceneId(sceneId));
+    if (!scene) return;
+    for (const w of [...(scene.widgets || [])]) {
+      await delVisWidget(w.id);
+    }
+  }
+
+  /** 用快照覆盖一个已存在组件(处理锁定/解锁顺序) */
+  async function updateWidgetRaw(id, snap) {
+    const actualId = resolveWidgetId(id);
+    const current = findWidgetById(actualId);
+    const sceneId = resolveSceneId(snap.sceneId);
+    if (!sceneId) throw new Error('组件所在场景不存在');
+    const base = {
+      id: actualId,
+      tournamentId: currentTournamentId,
+      sceneId,
+      name: snap.name,
+      type: snap.type,
+      x: snap.x,
+      y: snap.y,
+      w: snap.w,
+      h: snap.h,
+      zIndex: snap.z,
+      visible: snap.visible ? 1 : 0,
+      locked: snap.locked ? 1 : 0,
+      layoutConfig: snap.layoutConfig,
+      dataConfig: snap.dataConfig,
+      renderConfig: snap.renderConfig
+    };
+    if (current?.locked && snap.locked) {
+      // 已锁定且目标仍锁定:先随解锁一起恢复字段,再单独锁回
+      await updateVisWidget({ ...base, locked: 0 });
+      await updateVisWidget({ id: actualId, tournamentId: currentTournamentId, sceneId, locked: 1 });
+    } else {
+      await updateVisWidget(base);
+    }
+    if (current) {
+      Object.assign(current, {
+        name: snap.name,
+        x: snap.x,
+        y: snap.y,
+        w: snap.w,
+        h: snap.h,
+        z: snap.z,
+        visible: snap.visible,
+        locked: snap.locked,
+        layoutConfig: snap.layoutConfig,
+        dataConfig: snap.dataConfig,
+        renderConfig: snap.renderConfig
+      });
+    }
+  }
+
+  /** 重建一个被删除的组件(服务端可能分配新 id,登记别名) */
+  async function restoreWidgetRaw(snap, sceneIdOverride) {
+    const sceneId = resolveSceneId(sceneIdOverride ?? snap.sceneId);
+    const scene = findSceneById(sceneId);
+    if (!scene) throw new Error('组件所在场景不存在,无法恢复');
+    const payload = {
+      tournamentId: currentTournamentId,
+      sceneId,
+      name: snap.name,
+      type: snap.type,
+      x: snap.x,
+      y: snap.y,
+      w: snap.w,
+      h: snap.h,
+      visible: snap.visible ? 1 : 0,
+      locked: 0, // 先以未锁定插入,便于恢复 z;随后再锁回
+      layoutConfig: snap.layoutConfig,
+      dataConfig: snap.dataConfig,
+      renderConfig: snap.renderConfig
+    };
+    const response = await addVisWidget(payload);
+    const data = response.data;
+    if (!data) throw new Error('恢复组件失败');
+    const newId = String(data.id);
+    const widget = {
+      id: newId,
+      name: data.name,
+      type: data.type,
+      x: Number(data.x ?? snap.x),
+      y: Number(data.y ?? snap.y),
+      w: Number(data.w ?? snap.w),
+      h: Number(data.h ?? snap.h),
+      z: Number(data.zIndex ?? 1),
+      visible: data.visible === 1,
+      locked: data.locked === 1,
+      layoutConfig: data.layoutConfig || snap.layoutConfig,
+      dataConfig: data.dataConfig || snap.dataConfig,
+      renderConfig: data.renderConfig || snap.renderConfig
+    };
+    scene.widgets.push(widget);
+    registerWidgetId(snap.id, newId);
+    if (Number(widget.z) !== Number(snap.z)) {
+      await updateVisWidget({
+        id: newId,
+        tournamentId: currentTournamentId,
+        sceneId,
+        zIndex: snap.z
+      });
+      widget.z = snap.z;
+    }
+    if (snap.locked) {
+      await updateVisWidget({
+        id: newId,
+        tournamentId: currentTournamentId,
+        sceneId,
+        locked: 1
+      });
+      widget.locked = true;
+    }
+    return newId;
+  }
+
+  /** 应用一个组件快照(空 = 删除) */
+  async function applyWidgetSnapshot(snap) {
+    if (!snap) {
+      throw new Error('缺少组件快照');
+    }
+    const exists = findWidgetById(snap.id);
+    if (exists) {
+      await updateWidgetRaw(snap.id, snap);
+    } else {
+      await restoreWidgetRaw(snap);
+    }
+  }
+
+  async function deleteSceneRaw(id) {
+    const actualId = resolveSceneId(id);
+    if (!currentTournamentId) return;
+    await deleteWidgetsOfSceneRaw(actualId);
+    await delVisScene(actualId);
+    const index = scenes.value.findIndex((s) => String(s.id) === String(actualId));
+    if (index > -1) {
+      scenes.value.splice(index, 1);
+      if (String(currentSceneId.value) === String(actualId)) {
+        currentSceneId.value = scenes.value.length > 0 ? scenes.value[0].id : null;
+      }
+    }
+  }
+
+  /** 重建被删除的场景及其组件 */
+  async function restoreSceneRaw(snap) {
+    const payload = {
+      id: snap.id,
+      tournamentId: currentTournamentId,
+      name: snap.name,
+      designWidth: snap.width,
+      designHeight: snap.height,
+      bgColor: snap.bgColor,
+      format: snap.format,
+      isTemplate: snap.isTemplate || 0,
+      sortOrder: snap.sortOrder ?? scenes.value.length
+    };
+    const response = await addVisScene(payload);
+    const data = response.data;
+    if (!data) throw new Error('恢复场景失败');
+    const newSceneId = String(data.id);
+    const scene = {
+      id: newSceneId,
+      name: data.name ?? snap.name,
+      width: Number(data.designWidth ?? snap.width),
+      height: Number(data.designHeight ?? snap.height),
+      bgColor: data.bgColor ?? snap.bgColor,
+      format: data.format ?? snap.format,
+      isTemplate: data.isTemplate ?? 0,
+      sortOrder: snap.sortOrder ?? scenes.value.length,
+      widgets: [],
+      thumbnailData: null
+    };
+    scenes.value.push(scene);
+    registerSceneId(snap.id, newSceneId);
+    // 删除前投射到该场景的屏幕,重建后指回新的场景 id
+    for (const screen of screens.value) {
+      if (screen.currentSceneId != null && String(screen.currentSceneId) === String(snap.id)) {
+        screen.currentSceneId = newSceneId;
+      }
+    }
+    for (const w of snap.widgets || []) {
+      await restoreWidgetRaw(w, newSceneId);
+    }
+    return newSceneId;
+  }
+
+  // ---- 图层顺序:以「整场 z 顺序」作为快照,上移/下移/拖动共用 reorder API 撤销重做 ----
+  const sceneZOrderIds = (scene) => {
+    if (!scene) return [];
+    return [...scene.widgets].sort((a, b) => (Number(b.z) || 1) - (Number(a.z) || 1)).map((w) => w.id);
+  };
+
+  /** 按指定顺序(上→下)调后端重排并更新本地 z(0 历史记录,供撤销/重做使用) */
+  async function applyLayerOrderRaw(sceneId, ids) {
+    const actualSceneId = resolveSceneId(sceneId);
+    const scene = findSceneById(actualSceneId);
+    if (!scene) return;
+    const actualIds = (ids || []).map((id) => resolveWidgetId(id));
+    await reorderWidgets(actualSceneId, actualIds);
+    const n = actualIds.length;
+    actualIds.forEach((aid, i) => {
+      const w = scene.widgets.find((x) => String(x.id) === String(aid));
+      if (w) w.z = n - i;
+    });
+    scene.widgets = [...scene.widgets];
+  }
+
+  // ============================================
   // 场景管理（接入 API）
   // ============================================
 
@@ -102,6 +454,7 @@ export const useDirectorStore = defineStore('director', () => {
     }
 
     currentTournamentId = tournamentId;
+    clearHistory();
     loading.value = true;
 
     try {
@@ -227,6 +580,17 @@ export const useDirectorStore = defineStore('director', () => {
         };
 
         scenes.value.push(newScene);
+        const createdSceneSnap = snapshotScene(newScene);
+        commitHistory(
+          '新建场景',
+          `scene-add-${sceneId}`,
+          async () => {
+            await deleteSceneRaw(sceneId);
+          },
+          async () => {
+            await restoreSceneRaw(createdSceneSnap);
+          }
+        );
         console.log(`✅ 成功添加场景 [${sceneData.name}]`);
         return newScene;
       }
@@ -286,12 +650,24 @@ export const useDirectorStore = defineStore('director', () => {
 
     try {
       console.log(`🗑️ 正在删除场景: ${sceneId}`);
+      await deleteWidgetsOfSceneRaw(sceneId);
       await delVisScene(sceneId);
 
       const index = scenes.value.findIndex((s) => s.id == sceneId);
       if (index > -1) {
         const deletedScene = scenes.value[index];
         scenes.value.splice(index, 1);
+        const deletedSceneSnap = snapshotScene(deletedScene);
+        commitHistory(
+          '删除场景',
+          `scene-del-${sceneId}`,
+          async () => {
+            await restoreSceneRaw(deletedSceneSnap);
+          },
+          async () => {
+            await deleteSceneRaw(deletedScene.id);
+          }
+        );
 
         // 如果删除的是当前场景，切换到其他场景
         if (currentSceneId.value == sceneId) {
@@ -736,6 +1112,17 @@ export const useDirectorStore = defineStore('director', () => {
 
         currentScene.value.widgets.push(widget);
         selectedWidgetId.value = widget.id;
+        const addedSnap = snapshotWidget(widget);
+        commitHistory(
+          '添加组件',
+          `widget-add-${widget.id}`,
+          async () => {
+            await deleteWidgetRaw(widget.id);
+          },
+          async () => {
+            await restoreWidgetRaw(addedSnap);
+          }
+        );
         console.log(`✅ 成功添加组件`);
       }
     } catch (error) {
@@ -754,6 +1141,91 @@ export const useDirectorStore = defineStore('director', () => {
     console.log('[directorStore] selectWidget - selectedWidgetId.value after set:', selectedWidgetId.value, 'type:', typeof selectedWidgetId.value);
   }
 
+  /** 拖拽/缩放开始前调用:记录该组件起始快照,作为本次手势撤销的 before */
+  function beginWidgetTransform(id) {
+    const widget = currentScene.value?.widgets.find((w) => String(w.id) === String(id));
+    if (widget) {
+      widgetTransformStart.set(String(widget.id), snapshotWidget(widget));
+    }
+  }
+
+  /** 图层上移/下移(整场顺序快照入撤销栈) */
+  async function moveLayer(id, dir) {
+    const scene = currentScene.value;
+    if (!scene) return;
+    const widget = scene.widgets.find((w) => String(w.id) === String(id));
+    if (!widget) return;
+    if (widget.locked === true || widget.locked === 1) {
+      throw new Error('已锁定的控件不能调整图层顺序，请先解锁');
+    }
+    const before = sceneZOrderIds(scene);
+    const idx = before.findIndex((wid) => String(wid) === String(id));
+    if (idx < 0) return;
+    const neighborIdx = dir === 'up' ? idx - 1 : idx + 1;
+    if (neighborIdx < 0 || neighborIdx >= before.length) return;
+    const neighborId = before[neighborIdx];
+    const neighbor = scene.widgets.find((w) => String(w.id) === String(neighborId));
+    if (neighbor && (neighbor.locked === true || neighbor.locked === 1)) {
+      throw new Error('相邻控件已锁定，请先解锁后再调整图层顺序');
+    }
+    const after = before.slice();
+    const [moved] = after.splice(idx, 1);
+    after.splice(neighborIdx, 0, moved);
+    await moveWidgetLayer(id, dir);
+    const n = after.length;
+    after.forEach((wid, i) => {
+      const w = scene.widgets.find((x) => String(x.id) === String(wid));
+      if (w) w.z = n - i;
+    });
+    scene.widgets = [...scene.widgets];
+    commitHistory(
+      '调整图层顺序',
+      `layer-${scene.id}`,
+      async () => {
+        await applyLayerOrderRaw(scene.id, before);
+      },
+      async () => {
+        await applyLayerOrderRaw(scene.id, after);
+      }
+    );
+  }
+
+  /** 图层拖拽排序:orderedIds 为拖拽后的顺序(上→下),整场顺序入撤销栈 */
+  async function reorderLayers(orderedIds) {
+    const scene = currentScene.value;
+    if (!scene || !orderedIds || orderedIds.length === 0) return;
+    const actualIds = orderedIds.map((id) => resolveWidgetId(id));
+    const locked = actualIds.some((aid) => {
+      const w = scene.widgets.find((x) => String(x.id) === String(aid));
+      return w && (w.locked === true || w.locked === 1);
+    });
+    if (locked) {
+      throw new Error('存在已锁定的控件，请先解锁后再拖动排序');
+    }
+    const before = sceneZOrderIds(scene);
+    if (before.length === actualIds.length && before.every((id, i) => String(id) === String(actualIds[i]))) {
+      return; // 顺序未变化
+    }
+    await reorderWidgets(scene.id, actualIds);
+    const n = actualIds.length;
+    actualIds.forEach((aid, i) => {
+      const w = scene.widgets.find((x) => String(x.id) === String(aid));
+      if (w) w.z = n - i;
+    });
+    scene.widgets = [...scene.widgets];
+    const after = sceneZOrderIds(scene);
+    commitHistory(
+      '拖动排序',
+      `layer-${scene.id}`,
+      async () => {
+        await applyLayerOrderRaw(scene.id, before);
+      },
+      async () => {
+        await applyLayerOrderRaw(scene.id, after);
+      }
+    );
+  }
+
   /** 读取并清除选中来源(PropertyPanel 用于判断是否自动跳到组件配置) */
   function consumeWidgetSelectSource() {
     const s = widgetSelectSource.value;
@@ -767,8 +1239,10 @@ export const useDirectorStore = defineStore('director', () => {
   async function updateWidget(id, payload) {
     const widget = currentScene.value?.widgets.find((w) => w.id === String(id));
     if (!widget) return;
+    const beforeSnap = snapshotWidget(widget);
     if (!currentTournamentId) {
       console.error('❌ 未设置 tournamentId，无法更新组件');
+      widgetTransformStart.delete(String(widget.id));
       return;
     }
 
@@ -828,6 +1302,19 @@ export const useDirectorStore = defineStore('director', () => {
         if (updateData.renderConfig !== undefined) patch.renderConfig = updateData.renderConfig;
         if (updateData.layoutConfig !== undefined) patch.layoutConfig = updateData.layoutConfig;
         Object.assign(widget, patch);
+        const afterSnap = snapshotWidget(widget);
+        if (!widgetSnapshotsEqual(beforeSnap, afterSnap)) {
+          commitHistory(
+            '修改组件',
+            `widget-prop-${widget.id}`,
+            async () => {
+              await applyWidgetSnapshot(beforeSnap);
+            },
+            async () => {
+              await applyWidgetSnapshot(afterSnap);
+            }
+          );
+        }
         console.log(`✅ 成功更新组件`);
       }
     } catch (error) {
@@ -840,6 +1327,8 @@ export const useDirectorStore = defineStore('director', () => {
   async function updateWidgetPosition(id, x, y, w, h, z) {
     const widget = currentScene.value?.widgets.find((w) => w.id === String(id));
     if (!widget) return;
+    // 手势开始时记录过起始快照则用起始值,避免 mouseup 时本地已被拖到终点
+    const beforeSnap = widgetTransformStart.get(String(widget.id)) || snapshotWidget(widget);
     if (!currentTournamentId) {
       console.error('❌ 未设置 tournamentId，无法更新组件');
       return;
@@ -870,11 +1359,27 @@ export const useDirectorStore = defineStore('director', () => {
           h: updateData.h,
           z: updateData.zIndex
         });
+        const afterSnap = snapshotWidget(widget);
+        const moved = x !== undefined || y !== undefined || w !== undefined || h !== undefined;
+        if (!widgetSnapshotsEqual(beforeSnap, afterSnap)) {
+          commitHistory(
+            moved ? '移动/缩放组件' : '调整组件层级',
+            `widget-pos-${widget.id}`,
+            async () => {
+              await applyWidgetSnapshot(beforeSnap);
+            },
+            async () => {
+              await applyWidgetSnapshot(afterSnap);
+            }
+          );
+        }
         console.log(`✅ 成功更新组件位置`);
       }
     } catch (error) {
       console.error('❌ 更新组件位置失败:', error);
       throw error;
+    } finally {
+      widgetTransformStart.delete(String(widget.id));
     }
   }
 
@@ -887,6 +1392,9 @@ export const useDirectorStore = defineStore('director', () => {
     }
 
     try {
+      widgetTransformStart.delete(String(id));
+      const deletedWidget = currentScene.value.widgets.find((w) => w.id === String(id));
+      const deletedSnap = snapshotWidget(deletedWidget);
       console.log(`🗑️ 正在删除组件: ${id}`);
       await delVisWidget(id);
 
@@ -896,6 +1404,16 @@ export const useDirectorStore = defineStore('director', () => {
         if (selectedWidgetId.value === String(id)) {
           selectedWidgetId.value = null;
         }
+        commitHistory(
+          '删除组件',
+          `widget-del-${id}`,
+          async () => {
+            await restoreWidgetRaw(deletedSnap);
+          },
+          async () => {
+            await deleteWidgetRaw(deletedWidget.id);
+          }
+        );
         console.log(`✅ 成功删除组件`);
       }
     } catch (error) {
@@ -913,6 +1431,13 @@ export const useDirectorStore = defineStore('director', () => {
     selectedWidgetId,
     selectedWidget,
     loading,
+    // 撤回/重做
+    canUndo,
+    canRedo,
+    undoLabel,
+    redoLabel,
+    undo,
+    redo,
 
     // 场景方法（API）
     loadScenes,
@@ -937,7 +1462,10 @@ export const useDirectorStore = defineStore('director', () => {
     // 组件方法（API）
     addWidget,
     selectWidget,
+    beginWidgetTransform,
     consumeWidgetSelectSource,
+    moveLayer,
+    reorderLayers,
     updateWidget,
     updateWidgetPosition,
     deleteWidget

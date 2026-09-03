@@ -1,12 +1,13 @@
 <template>
-  <el-dialog
+  <GameDialog
     v-model="visible"
-    :title="isEdit ? '编辑选手' : '添加选手'"
     :width="dialogWidth"
+    :title="isEdit ? '编辑选手' : '添加选手'"
+    subtitle="填写选手基础信息"
+    :icon="User"
     :before-close="handleClose"
     destroy-on-close
-    class="player-dialog"
-    append-to-body
+    dialog-class="player-dialog"
   >
     <div class="space-y-5 py-2">
       <!-- 头像上传区域 -->
@@ -109,14 +110,16 @@
         </button>
       </div>
     </template>
-  </el-dialog>
+  </GameDialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { ElMessage } from 'element-plus';
+import { User } from 'lucide-vue-next';
 import { PlayerVO } from '@/api/game/player/types';
 import PortraitMatting from './PortraitMatting.vue';
+import GameDialog from '@/components/GameDialog/index.vue';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -267,39 +270,3 @@ defineExpose({
   resetForm
 });
 </script>
-
-<style>
-/* --- 核心：覆盖 Element Plus 默认样式和全局样式 --- */
-/* 这些样式必须是全局的（非 scoped），因为 el-dialog 使用 append-to-body */
-
-/* 针对 player-dialog 的弹窗样式，覆盖全局样式 */
-.el-overlay .player-dialog {
-  background-color: #171717 !important;
-  border: 1px solid #262626 !important;
-  border-radius: 16px !important;
-  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25) !important;
-  overflow: hidden !important;
-}
-
-.el-overlay .player-dialog .el-dialog__header {
-  padding: 24px !important;
-  padding-bottom: 24px !important;
-  border-bottom: 1px solid #262626 !important;
-  margin-right: 0 !important;
-  background-color: #171717 !important;
-}
-
-.el-overlay .player-dialog .el-dialog__body {
-  padding: 24px !important;
-  padding-top: 16px !important;
-  padding-bottom: 16px !important;
-  color: #f5f5f5 !important;
-  background-color: #171717 !important;
-}
-
-.el-overlay .player-dialog .el-dialog__footer {
-  padding: 16px 24px !important;
-  border-top: 1px solid #262626 !important;
-  background-color: rgba(9, 9, 9, 0.3) !important;
-}
-</style>

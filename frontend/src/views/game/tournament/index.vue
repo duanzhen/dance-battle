@@ -3,6 +3,7 @@
     class="flex flex-col h-screen w-screen bg-neutral-950 text-neutral-100 overflow-hidden font-sans select-none selection:bg-amber-500 selection:text-white"
     tabindex="0"
     @keydown.tab.prevent="handleTabKey"
+    @keydown="handleRootKeydown"
   >
     <header class="h-12 flex-none bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 z-20">
       <div class="flex items-center gap-2">
@@ -69,7 +70,7 @@
     <div class="flex-1 overflow-hidden">
       <KeepAlive>
         <DirectorLayout v-if="activeTab === 'director'" />
-        <StageFlow v-else-if="activeTab === 'stage'" />
+        <StageFlow v-else-if="activeTab === 'stage'" @stages-changed="handleStagesChanged" />
         <ConfigPanel v-else-if="activeTab === 'config'" :tournament-id="tournamentId" />
       </KeepAlive>
     </div>
@@ -80,6 +81,7 @@
 import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { MonitorPlay, ListTree, Settings2 } from 'lucide-vue-next';
+import { ElMessage } from 'element-plus';
 import { useDirectorStore } from '@/store/modules/directorStore';
 import DirectorLayout from './DirectorLayout.vue';
 import StageFlow from './StageFlow.vue';
@@ -131,6 +133,39 @@ onMounted(async () => {
 // 处理 Tab 键切换
 const handleTabKey = () => {
   activeTab.value = activeTab.value === 'director' ? 'stage' : activeTab.value === 'stage' ? 'config' : 'director';
+};
+
+// 屏幕控制页的 Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y;输入框内保留浏览器原生撤销
+const runUndoOrRedo = async (isRedo) => {
+  try {
+    const ok = isRedo ? await directorStore.redo() : await directorStore.undo();
+    if (ok) ElMessage.success(isRedo ? '已重做' : '已撤销');
+  } catch (e) {
+    ElMessage.error(e?.message || (isRedo ? '重做失败' : '撤销失败'));
+  }
+};
+
+const handleRootKeydown = (e) => {
+  if (activeTab.value !== 'director') return;
+  const target = e.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod) return;
+  const key = e.key.toLowerCase();
+  if (key === 'z') {
+    e.preventDefault();
+    runUndoOrRedo(e.shiftKey);
+  } else if (key === 'y') {
+    e.preventDefault();
+    runUndoOrRedo(true);
+  }
+};
+
+// 赛段链变化(如删除赛段)后,重载大屏场景组件,清除对被删赛段的旧绑定
+const handleStagesChanged = async () => {
+  if (tournamentId.value != null) {
+    await directorStore.loadScenes(String(tournamentId.value));
+  }
 };
 </script>
 

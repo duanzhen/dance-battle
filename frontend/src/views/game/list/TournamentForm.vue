@@ -1,19 +1,14 @@
 <template>
-  <el-dialog v-model="visible" :width="dialogWidth" :before-close="handleClose" destroy-on-close class="tournament-dialog" append-to-body>
-    <template #header>
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
-          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-        </div>
-        <div>
-          <h3 class="text-base font-bold text-white tracking-tight">{{ title }}</h3>
-          <p class="text-[11px] text-neutral-500 mt-0.5">填写赛事基础信息与模版</p>
-        </div>
-      </div>
-    </template>
-
+  <GameDialog
+    v-model="visible"
+    :width="dialogWidth"
+    :title="title"
+    subtitle="填写赛事基础信息与模版"
+    :icon="Plus"
+    :before-close="handleClose"
+    destroy-on-close
+    dialog-class="tournament-dialog"
+  >
     <div class="grid grid-cols-2 gap-x-5 gap-y-4 py-1">
       <div class="col-span-2">
         <label class="block text-sm font-medium text-neutral-400 mb-2">赛事封面</label>
@@ -297,7 +292,7 @@
         </button>
       </div>
     </template>
-  </el-dialog>
+  </GameDialog>
 </template>
 
 <script setup>
@@ -306,7 +301,8 @@ import { addTournament, updateTournament, createTournamentByTemplate } from '@/a
 import { parseTournamentThemeConfig } from '@/utils/tournamentColorConfig';
 import request from '@/utils/request';
 import { ElMessage } from 'element-plus';
-import { X } from 'lucide-vue-next';
+import { Plus, X } from 'lucide-vue-next';
+import GameDialog from '@/components/GameDialog/index.vue';
 
 const props = defineProps({
   modelValue: Boolean,
@@ -574,78 +570,6 @@ const handleClose = () => {
 </script>
 
 <style scoped>
-/* --- 核心：覆盖 Element Plus 默认样式 (使用 :global 配合 class 选择器更可靠) --- */
-
-/* 1. 弹窗主体背景 + 边框 + 圆角 */
-:global(.el-overlay .tournament-dialog) {
-  background-color: #171717 !important;
-  border: 1px solid #262626 !important;
-  border-radius: 16px !important;
-  overflow: hidden;
-  box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.8),
-    0 0 0 1px rgba(245, 158, 11, 0.04);
-}
-
-/* 2. 头部区域 */
-:global(.tournament-dialog .el-dialog__header) {
-  padding: 14px 20px;
-  margin-right: 0;
-  border-bottom: 1px solid #262626;
-  border-radius: 16px 16px 0 0;
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.03) 0%, transparent 100%);
-}
-
-/* 3. 内容区域 */
-:global(.tournament-dialog .el-dialog__body) {
-  padding: 12px 16px;
-  color: #f5f5f5;
-  background-color: #171717;
-  max-height: 52vh;
-  overflow-y: auto;
-}
-
-/* 4. 底部区域 */
-:global(.tournament-dialog .el-dialog__footer) {
-  padding: 12px 20px;
-  border-top: 1px solid #262626;
-}
-
-/* 5. 关闭按钮:默认灰色,hover 时高亮 */
-:global(.tournament-dialog .el-dialog__headerbtn) {
-  top: 20px;
-  right: 20px;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-:global(.tournament-dialog .el-dialog__headerbtn:hover) {
-  background-color: rgba(255, 255, 255, 0.06);
-}
-
-:global(.tournament-dialog .el-dialog__close) {
-  color: #737373 !important;
-  font-size: 18px;
-}
-
-:global(.tournament-dialog .el-dialog__headerbtn:hover .el-dialog__close) {
-  color: #f5f5f5 !important;
-}
-
-/* 6. 遮罩层:更深的背景 + 轻微模糊 */
-:global(.el-overlay:has(.tournament-dialog)) {
-  background-color: rgba(0, 0, 0, 0.7) !important;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-/* 兼容不支持 :has() 的浏览器 */
-:global(.tournament-dialog ~ .el-overlay) {
-  background-color: rgba(0, 0, 0, 0.7) !important;
-}
-
 /* 裁判配置下拉:深色主题适配 */
 :global(.tournament-dialog .referee-config-select .el-select__wrapper) {
   background-color: #0a0a0a;

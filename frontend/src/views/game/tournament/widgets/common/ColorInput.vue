@@ -8,7 +8,7 @@
         <input
           type="color"
           :value="isTransparent ? '#000000' : modelValue || '#000000'"
-          @input="$emit('update:modelValue', $event.target.value)"
+          @change="$emit('update:modelValue', $event.target.value)"
           class="w-8 h-8 rounded cursor-pointer border-0 relative"
           :class="isTransparent ? 'opacity-0' : ''"
         />
@@ -17,7 +17,7 @@
       <input
         type="text"
         :value="isTransparent ? '透明' : modelValue"
-        @input="$emit('update:modelValue', $event.target.value)"
+        @change="$emit('update:modelValue', $event.target.value)"
         class="flex-1 input-base font-mono"
       />
     </div>

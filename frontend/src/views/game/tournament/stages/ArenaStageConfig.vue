@@ -194,9 +194,4 @@ onMounted(() => {
   max-width: 900px;
   margin: 0 auto;
 }
-
-input[type='number']::-webkit-inner-spin-button,
-input[type='number']::-webkit-outer-spin-button {
-  opacity: 1;
-}
 </style>

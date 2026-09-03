@@ -23,6 +23,7 @@ import com.dance.street.game.domain.vo.TPlayerVo;
 import com.dance.street.game.domain.vo.PlayerImportVo;
 import com.dance.street.game.domain.bo.TPlayerBo;
 import com.dance.street.game.domain.bo.CheckInBo;
+import com.dance.street.game.domain.bo.CheckInEditBo;
 import com.dance.street.game.service.ITPlayerService;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 
@@ -119,6 +120,28 @@ public class TPlayerController extends BaseController {
     @PostMapping("/checkin")
     public R<TPlayerVo> checkIn(@Validated @RequestBody CheckInBo bo) {
         return R.ok(tPlayerService.checkIn(bo));
+    }
+
+    /**
+     * 编辑签到结果(改号码/换圈/改名/头像)
+     */
+    @SaCheckPermission("game:player:checkin")
+    @Log(title = "选手签到", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PutMapping("/checkin")
+    public R<TPlayerVo> editCheckIn(@Validated @RequestBody CheckInEditBo bo) {
+        return R.ok(tPlayerService.editCheckIn(bo));
+    }
+
+    /**
+     * 解除签到
+     */
+    @SaCheckPermission("game:player:checkin")
+    @Log(title = "选手签到", businessType = BusinessType.DELETE)
+    @DeleteMapping("/checkin/{playerId}")
+    public R<Void> cancelCheckIn(@NotNull(message = "选手ID不能为空") @PathVariable Long playerId) {
+        tPlayerService.cancelCheckIn(playerId);
+        return R.ok();
     }
 
     /**

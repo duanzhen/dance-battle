@@ -108,12 +108,8 @@
           <h4 class="section-title">海选赛配置</h4>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm text-neutral-400 mb-1">海选规模</label>
-              <el-input-number v-model="config.scale" :min="8" :max="512" class="w-full" />
-            </div>
-            <div>
               <label class="block text-sm text-neutral-400 mb-1">晋级名额</label>
-              <el-input-number v-model="config.advanceCount" :min="1" :max="config.scale - 1" class="w-full" />
+              <el-input-number v-model="config.advanceCount" :min="1" :max="512" class="w-full" />
             </div>
             <div>
               <label class="block text-sm text-neutral-400 mb-1">比赛格式</label>
@@ -123,6 +119,7 @@
               </el-select>
             </div>
           </div>
+          <p class="text-xs text-neutral-500 mt-3">海选为入口赛段，不限制参赛人数（按实际签到为准）。</p>
         </div>
 
         <!-- 擂台赛配置 -->
@@ -272,7 +269,6 @@ const initConfig = () => {
       break;
     case StageMode.AUDITION:
       config.value = {
-        scale: 64,
         advanceCondition: 'score',
         advanceCount: 16,
         format: 'BO1',

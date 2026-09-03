@@ -4,6 +4,7 @@ import com.dance.street.game.domain.vo.PlayerImportVo;
 import com.dance.street.game.domain.vo.TPlayerVo;
 import com.dance.street.game.domain.bo.TPlayerBo;
 import com.dance.street.game.domain.bo.CheckInBo;
+import com.dance.street.game.domain.bo.CheckInEditBo;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.mybatis.core.page.PageQuery;
 
@@ -75,6 +76,24 @@ public interface ITPlayerService {
      * @return 签到后的选手信息
      */
     TPlayerVo checkIn(CheckInBo bo);
+
+    /**
+     * 编辑签到结果:已签到选手改号码(按号分圈自动换圈/随机分圈可指定圈)或改名/头像。
+     * 该选手所在场次已有打分记录时由底层校验拦截。
+     *
+     * @param bo 编辑签到请求
+     * @return 编辑后的选手信息
+     */
+    TPlayerVo editCheckIn(CheckInEditBo bo);
+
+    /**
+     * 解除签到:撤销选手与首个赛段参赛单位的关联。
+     * 名下还有其它成员时仅移除该选手;最后一个成员时连同参赛单位及其场次数据一并清理。
+     * 已有打分记录时禁止解除。
+     *
+     * @param playerId 选手ID
+     */
+    void cancelCheckIn(Long playerId);
 
     /**
      * 批量导入选手

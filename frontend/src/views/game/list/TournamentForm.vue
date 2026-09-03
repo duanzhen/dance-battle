@@ -129,7 +129,7 @@
         <p class="text-[11px] text-neutral-600 mt-1">输入姓名按快捷添加裁判,没有裁判时点击右侧 X 标记「暂无裁判」。</p>
       </div>
 
-      <div v-if="!simple" :class="props.tournament ? 'col-span-2' : ''">
+      <div v-if="!simple" class="col-span-2">
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">屏幕尺寸</label>
         <div class="flex items-center gap-2">
           <div class="relative flex-1 min-w-0">
@@ -667,6 +667,11 @@ const handleClose = () => {
 }
 :global(.tournament-dialog .referee-config-select .el-select__placeholder) {
   color: #525252;
+}
+/* 输入中的文字用亮色,与灰色 placeholder 明显区分 */
+:global(.tournament-dialog .referee-config-select .el-select__input) {
+  color: #f5f5f5;
+  caret-color: #f5f5f5;
 }
 :global(.tournament-dialog .referee-config-select .el-tag) {
   background-color: #262626;

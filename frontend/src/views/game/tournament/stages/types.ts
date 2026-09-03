@@ -56,7 +56,8 @@ export interface GroupConfig {
 
 // 海选赛配置
 export interface AuditionConfig {
-  scale: number; // 海选规模
+  /** 海选规模(历史遗留字段;海选不限制起始人数,已不再使用) */
+  scale?: number;
   advanceCondition: string; // 晋级条件
   advanceCount: number; // 晋级名额
   format: MatchFormat;

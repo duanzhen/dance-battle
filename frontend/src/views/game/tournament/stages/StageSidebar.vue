@@ -39,10 +39,12 @@
 
       <!-- 队伍数量预览 -->
       <div class="bg-black/50 border border-neutral-800 rounded-lg p-3">
-        <div class="text-xs text-neutral-500 mb-1">队伍数量</div>
+        <div class="text-xs text-neutral-500 mb-1">参赛选手</div>
         <div class="flex items-center justify-between text-sm">
           <span class="text-neutral-400">起始</span>
-          <span class="text-white font-mono">{{ localStage.teamCountStart }}</span>
+          <span class="text-white font-mono">
+            {{ localStage.stageMode === StageMode.AUDITION ? '不限' : localStage.teamCountStart }}
+          </span>
         </div>
         <div class="w-full h-px bg-neutral-800 my-2"></div>
         <div class="flex items-center justify-between text-sm">

@@ -397,7 +397,10 @@ public class TStageServiceImpl implements ITStageService {
         }
         TStage prev = baseMapper.selectById(prevId);
         TStage next = baseMapper.selectById(nextId);
-        if (prev == null || next == null || next.getTeamCountStart() == null) {
+        // teamCountStart <= 0 表示不限制容量(如海选入口赛段):不联动上一赛段晋级名额,
+        // 避免把前驱赛段的 teamCountEnd 清零
+        if (prev == null || next == null || next.getTeamCountStart() == null
+            || next.getTeamCountStart() <= 0) {
             return;
         }
         String mode = prev.getStageMode();

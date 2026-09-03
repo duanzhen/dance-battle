@@ -299,3 +299,15 @@ aside {
     margin-bottom: 10px;
   }
 }
+
+/* 全局隐藏原生 number 输入框的上下箭头:
+   统一视觉,避免箭头与输入框右侧单位/后缀文字重叠(如屏幕尺寸的「宽/高」) */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+}

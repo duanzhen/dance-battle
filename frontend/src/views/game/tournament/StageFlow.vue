@@ -33,7 +33,7 @@
                 {{ stage.name }}
               </h3>
               <div class="flex items-center gap-2 text-xs font-mono bg-neutral-900 px-2 py-1 rounded border border-neutral-800">
-                <span class="text-neutral-500">{{ stage.teamCountStart }}</span>
+                <span class="text-neutral-500">{{ stageStartText(stage) }}</span>
                 <ArrowRight class="w-3 h-3 text-neutral-600" />
                 <span class="text-amber-500">{{ stage.teamCountEnd }}</span>
               </div>
@@ -296,6 +296,12 @@ const safeId = (id: any): string | null => {
   return String(id);
 };
 
+// 海选为入口赛段,起始人数不设限;其余赛段展示计划起始人数
+const stageStartText = (stage: Pick<Stage, 'stageMode' | 'teamCountStart'>) => {
+  if (stage.stageMode === StageMode.AUDITION) return '不限';
+  return stage.teamCountStart ?? 0;
+};
+
 // --- 加载赛段数据 ---
 const loadStages = async (keepSelection: boolean = false) => {
   const id = route.query.id;
@@ -432,7 +438,7 @@ const insertAfterName = computed(() => {
 const defaultConfigs: Record<StageMode, any> = {
   [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
-  [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
+  [StageMode.AUDITION]: { format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
   [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
   [StageMode.RANK]: {
     mode: 'RANK',
@@ -459,7 +465,7 @@ const defaultConfigs: Record<StageMode, any> = {
 
 const stageTypes = [
   { mode: StageMode.KNOCKOUT, label: '淘汰赛', description: '单败淘汰制', icon: Trophy },
-  { mode: StageMode.AUDITION, label: '海选赛', description: '海选晋级', icon: Mic },
+  { mode: StageMode.AUDITION, label: '海选赛', description: '海选晋级·人数不限', icon: Mic },
   { mode: StageMode.ARENA, label: '擂台赛', description: 'SEVEN TO SMOKE', icon: Target },
   { mode: StageMode.RANK, label: '排名赛', description: '多维度打分排名', icon: ListOrdered }
 ];
@@ -610,7 +616,7 @@ const canCompleteCreate = computed(() => {
       return g.groupCount >= 2 && g.teamsPerGroup >= 2 && g.advancePerGroup >= 1;
     }
     if (selectedCreateMode.value === StageMode.AUDITION) {
-      return parsed.scale > 0 && parsed.advanceCount > 0;
+      return parsed.advanceCount > 0;
     }
     if (selectedCreateMode.value === StageMode.ARENA) {
       return parsed.scale > 0 || parsed.challengerCount > 0;
@@ -646,7 +652,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
     const defaultConfigs: Record<string, any> = {
       [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
-      [StageMode.AUDITION]: { scale: 32, format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
+      [StageMode.AUDITION]: { format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
       [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
       [StageMode.RANK]: {
         mode: 'RANK',
@@ -698,7 +704,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       name: name,
       stageMode: stageMode,
       format: config.format || 'BO3',
-      teamCountStart: config.teamsCount || config.scale || 0,
+      teamCountStart: stageMode === StageMode.AUDITION ? 0 : config.teamsCount || config.scale || 0,
       teamCountEnd: config.advanceCount || config.advanceQuota || 0,
       status: status,
       ruleConfig: ruleConfig || JSON.stringify(config),

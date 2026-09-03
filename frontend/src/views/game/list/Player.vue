@@ -136,6 +136,26 @@
             </svg>
           </button>
 
+          <!-- 编辑签到结果(已签到) -->
+          <button
+            v-if="player.competitorId"
+            @click.stop="handleEditCheckIn(player)"
+            class="bg-amber-500/20 text-amber-500 hover:bg-amber-500 hover:text-white p-1.5 rounded-full transition-all shadow-md flex items-center justify-center"
+            title="编辑签到结果"
+          >
+            <UserRoundCheck class="w-3.5 h-3.5" />
+          </button>
+
+          <!-- 解除签到(已签到) -->
+          <button
+            v-if="player.competitorId"
+            @click.stop="handleCancelCheckIn(player)"
+            class="bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white p-1.5 rounded-full transition-all shadow-md flex items-center justify-center"
+            title="解除签到"
+          >
+            <Ban class="w-3.5 h-3.5" />
+          </button>
+
           <!-- 签到按钮 -->
           <button
             v-if="!player.competitorId"
@@ -323,9 +343,9 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue';
-import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File, RefreshCw } from 'lucide-vue-next';
+import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File, RefreshCw, Ban } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers } from '@/api/game/player';
+import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers, cancelCheckIn } from '@/api/game/player';
 import { download } from '@/utils/request';
 import { PlayerVO, PlayerForm as PlayerFormType } from '@/api/game/player/types';
 import { listCompetitor } from '@/api/game/competitor';
@@ -561,6 +581,36 @@ const handleCheckIn = (player: PlayerVO) => {
   }
   currentCheckInPlayer.value = player;
   checkInDialogRef.value?.open(player);
+};
+
+// 编辑签到结果(改号码/换圈)
+const handleEditCheckIn = (player: PlayerVO) => {
+  if (!props.tournamentId || !firstStageId.value) {
+    ElMessage.warning('无法编辑：缺少赛事或赛段信息');
+    return;
+  }
+  currentCheckInPlayer.value = player;
+  checkInDialogRef.value?.open(player);
+};
+
+// 解除签到:回到未签到状态,可重新签到
+const handleCancelCheckIn = async (player: PlayerVO) => {
+  try {
+    await ElMessageBox.confirm(`确认解除「${player.name || '该选手'}」的签到？解除后选手回到未签到状态，可重新选择号码签到。`, '解除签到', {
+      type: 'warning',
+      confirmButtonText: '确认解除',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+  try {
+    await cancelCheckIn(player.id);
+    ElMessage.success('已解除签到');
+    refreshAll();
+  } catch (e: any) {
+    ElMessage.error(e?.msg || e?.message || '解除签到失败');
+  }
 };
 
 // 加载首个赛段信息(判断是否分圈海选,控制"随机抽取圈"按钮)

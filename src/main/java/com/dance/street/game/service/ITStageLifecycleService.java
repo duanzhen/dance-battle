@@ -43,7 +43,8 @@ public interface ITStageLifecycleService {
 
     /**
      * 海选/排名赛补签到:把新参赛方挂入圈场次(新增 participant + round),保证可被裁判打分并参与结算。
-     * 分圈且配置了每圈名额时,按"剩余名额余量"择优落圈;否则挂入人数最少的圈。
+     * 海选分圈为按号码顺序均分时,按新参赛方号码在其整体号码序列中的位置落圈;
+     * 随机分圈时,配置了每圈名额则按"剩余名额余量"择优落圈,否则挂入人数最少的圈。
      * AUDITION/RANK + GAMING/PENDING 且已生成场次时生效,尚未生成场次时为空操作(后续生成会纳入)。
      */
     void appendStageCompetitor(Long stageId, Long competitorId);
@@ -52,6 +53,19 @@ public interface ITStageLifecycleService {
      * 同上,但显式指定目标圈场次(签到弹窗手动选圈)。目标圈须为未结算的正式圈。
      */
     void appendStageCompetitor(Long stageId, Long competitorId, Long targetMatchId);
+
+    /**
+     * 编辑签到结果后重排落位:已改号的参赛方先从原圈场次移除,
+     * 再按新号码挂入对应圈(按号分圈自动计算圈位;随机分圈可显式传 targetMatchId 换圈)。
+     * 该参赛方已有打分记录时禁止移动。
+     */
+    void relocateCheckInCompetitor(Long stageId, Long competitorId, Long targetMatchId);
+
+    /**
+     * 解除签到:从圈场次移除参赛方及其轮次(已有打分记录时禁止),
+     * 同场后续号码槽位/轮次自动前移补位。
+     */
+    void removeCheckInCompetitor(Long stageId, Long competitorId);
 
     /**
      * GUEST 加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入。

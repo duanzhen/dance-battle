@@ -230,6 +230,11 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (rc != null) {
             rc.setRandomSplit(randomSplit);
         }
+        // 海选分圈:持久化本次分圈方式(按号顺序均分 / 随机抽取),
+        // 签到/补签需要据此判断新选手应按号码落圈还是按名额均衡落圈
+        if (isAudition) {
+            persistCircleSplitMode(stage, randomSplit);
+        }
         StageModeEnum mode = StageModeEnum.fromCode(stage.getStageMode());
         // 单赛段多轮淘汰赛(未开启单轮模式)结算后只有冠军可晋级到下一赛段:
         // 每场败者都会被标记淘汰,advanceCount 大于 1 的配置会被静默忽略,这里直接拒绝生成
@@ -1317,6 +1322,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId)
+            .orderByAsc(TMatch::getDisplayRow)
             .orderByAsc(TMatch::getId));
         if (matches.isEmpty()) {
             // 尚无场次:后续生成对阵(自动补救)时会纳入该参赛方,无需处理
@@ -1346,9 +1352,18 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .orElseThrow(() -> new ServiceException(
                     "目标圈场次不存在、已结算或为加赛场次,无法加入;请选择其他圈"));
         } else {
-            // 自动择优:分圈配置了每圈名额时,选"剩余名额余量"最足的圈;
-            // 未配置时等价于选人数最少的圈
-            target = pickCircleForCheckin(candidates, stage);
+            if (isNumberSplitCircle(stage, matches)) {
+                // 按号码顺序均分的海选:新选手按其号码在整体号码序列中的位置落圈,
+                // 与「生成对阵」的均分口径一致;目标圈已结算等异常时回退均衡落圈
+                target = pickCircleByNumberOrder(matches, stage, competitorId);
+                if (target == null || !candidates.contains(target)) {
+                    target = pickCircleForCheckin(candidates, stage);
+                }
+            } else {
+                // 随机分圈(或未分圈):自动择优——配置了每圈名额时选"剩余名额余量"最足的圈,
+                // 未配置时等价于选人数最少的圈
+                target = pickCircleForCheckin(candidates, stage);
+            }
         }
         if (target == null) {
             return;
@@ -1356,6 +1371,311 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         appendParticipantWithRound(target, competitorId);
         log.info("海选/排名赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void relocateCheckInCompetitor(Long stageId, Long competitorId, Long targetMatchId) {
+        if (stageId == null || competitorId == null) {
+            return;
+        }
+        TStage stage = mustGetStage(stageId);
+        if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+            && !StageModeEnum.RANK.getCode().equals(stage.getStageMode())) {
+            return;
+        }
+        if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
+            throw new ServiceException("赛段已结束,无法修改签到结果");
+        }
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .orderByAsc(TMatch::getDisplayRow)
+            .orderByAsc(TMatch::getId));
+        if (matches.isEmpty()) {
+            // 尚未生成对阵:号码更新由后续生成对阵统一纳入
+            return;
+        }
+        TMatch source = null;
+        for (TMatch m : matches) {
+            long cnt = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, m.getId())
+                .eq(TMatchParticipant::getCompetitorId, competitorId));
+            if (cnt > 0) {
+                source = m;
+                break;
+            }
+        }
+        if (source == null) {
+            // 未挂入场次(异常数据兜底):直接按新号码/目标圈补挂,避免新号码不参与场次
+            appendStageCompetitor(stageId, competitorId, targetMatchId);
+            return;
+        }
+
+        TMatch target;
+        if (targetMatchId != null) {
+            target = matches.stream().filter(m -> m.getId().equals(targetMatchId))
+                .findFirst().orElse(null);
+            if (target == null) {
+                throw new ServiceException("目标圈场次不存在");
+            }
+            if (StageConstants.MATCH_SETTLED.equals(target.getStatus())
+                || (StringUtils.isNotBlank(target.getRemark()) && target.getRemark().startsWith("同分加赛"))) {
+                throw new ServiceException("目标圈场次已结算或为加赛场次,无法改入");
+            }
+        } else if (isNumberSplitCircle(stage, matches)) {
+            // 按号分圈:号码已更新,按新号码在整体序列中的位置决定圈位
+            target = pickCircleByNumberOrder(matches, stage, competitorId);
+            if (target == null) {
+                target = source;
+            }
+        } else {
+            // 随机分圈/未分圈:不改圈,仅在原圈内按新号码重新排位
+            target = source;
+        }
+
+        removeParticipantWithRound(source, competitorId);
+        appendParticipantWithRound(target, competitorId);
+        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
+        log.info("海选/排名赛段[{}]编辑签到:参赛方[{}]从场次[{}]改入场次[{}]",
+            stageId, competitorId, source.getId(), target.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void removeCheckInCompetitor(Long stageId, Long competitorId) {
+        if (stageId == null || competitorId == null) {
+            return;
+        }
+        TStage stage = mustGetStage(stageId);
+        if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+            && !StageModeEnum.RANK.getCode().equals(stage.getStageMode())) {
+            return;
+        }
+        if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
+            throw new ServiceException("赛段已结束,无法解除签到");
+        }
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .orderByAsc(TMatch::getDisplayRow)
+            .orderByAsc(TMatch::getId));
+        boolean removed = false;
+        for (TMatch m : matches) {
+            long cnt = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, m.getId())
+                .eq(TMatchParticipant::getCompetitorId, competitorId));
+            if (cnt > 0) {
+                removeParticipantWithRound(m, competitorId);
+                removed = true;
+            }
+        }
+        if (removed) {
+            tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
+            log.info("海选/排名赛段[{}]解除签到:参赛方[{}]已移出圈场次", stageId, competitorId);
+        }
+    }
+
+    /**
+     * 从场次移除参赛方及其独立轮次:已有打分记录时禁止移除;
+     * 移除后按号码顺序重排本场 participant 槽位与轮次序号。
+     */
+    private void removeParticipantWithRound(TMatch match, Long competitorId) {
+        TMatchRound round = matchRoundMapper.selectOne(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, match.getId())
+            .eq(TMatchRound::getCompetitorId, competitorId)
+            .last("limit 1"));
+        if (round != null) {
+            long scored = roundScoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
+                .eq(TRoundScore::getRoundId, round.getId()));
+            if (scored > 0) {
+                throw new ServiceException(
+                    "该选手在「{}」已有打分记录,无法修改/解除签到,请先处理该场次成绩", match.getName());
+            }
+            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                .eq(TRoundScore::getRoundId, round.getId()));
+            matchRoundMapper.deleteById(round.getId());
+        }
+        participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, match.getId())
+            .eq(TMatchParticipant::getCompetitorId, competitorId));
+        renumberMatchParticipants(match.getId());
+    }
+
+    /**
+     * 按号码顺序重建场次内的展示位与轮次序号(移除/改号后保持 1..n 连续)。
+     */
+    private void renumberMatchParticipants(Long matchId) {
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, matchId)
+            .isNotNull(TMatchParticipant::getCompetitorId)
+            .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+        if (parts.isEmpty()) {
+            return;
+        }
+        Map<Long, TCompetitor> compById = competitorMapper.selectByIds(parts.stream()
+                .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList())
+            .stream().collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+        parts.sort(Comparator
+            .comparingInt((TMatchParticipant p) -> {
+                TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
+                return c == null ? Integer.MAX_VALUE : parseCompetitorNumber(c.getNumber());
+            })
+            .thenComparingLong(TMatchParticipant::getId));
+
+        List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, matchId)
+            .orderByAsc(TMatchRound::getRoundSequence));
+        Map<Long, List<TMatchRound>> roundsByComp = rounds.stream()
+            .filter(r -> r.getCompetitorId() != null)
+            .collect(Collectors.groupingBy(TMatchRound::getCompetitorId));
+
+        for (int i = 0; i < parts.size(); i++) {
+            TMatchParticipant p = parts.get(i);
+            TMatchParticipant slotUpd = new TMatchParticipant();
+            slotUpd.setId(p.getId());
+            slotUpd.setDisplaySlotIndex((long) (i + 1));
+            participantMapper.updateById(slotUpd);
+            List<TMatchRound> own = roundsByComp.getOrDefault(p.getCompetitorId(), List.of());
+            if (!own.isEmpty()) {
+                TMatchRound rUpd = new TMatchRound();
+                rUpd.setId(own.get(0).getId());
+                rUpd.setRoundSequence((long) (i + 1));
+                matchRoundMapper.updateById(rUpd);
+            }
+        }
+    }
+
+    /** 持久化海选分圈方式(随机 true / 按号 false),保留 rule_config 中其余自定义字段 */
+    private void persistCircleSplitMode(TStage stage, boolean randomSplit) {
+        if (StringUtils.isBlank(stage.getRuleConfig())) {
+            return;
+        }
+        try {
+            tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> raw = mapper.readValue(stage.getRuleConfig(), Map.class);
+            raw.put("randomSplit", randomSplit);
+            stage.setRuleConfig(mapper.writeValueAsString(raw));
+            stageMapper.updateById(stage);
+        } catch (Exception e) {
+            log.warn("海选赛段[{}]持久化分圈方式失败: {}", stage.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 当前海选圈是否为「按号码顺序均分」:显式 randomSplit=false 或未记录(兼容旧数据)
+     * 时按号落圈;randomSplit=true(随机抽取)时不按号。
+     */
+    private boolean isNumberSplitCircle(TStage stage, List<TMatch> matches) {
+        if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode()) || matches.size() <= 1) {
+            return false;
+        }
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        int circles = (rc != null && rc.getCircles() != null) ? Math.max(1, rc.getCircles()) : 1;
+        if (circles <= 1) {
+            return false;
+        }
+        if (rc != null && Boolean.TRUE.equals(rc.getRandomSplit())) {
+            return false;
+        }
+        if (rc != null && Boolean.FALSE.equals(rc.getRandomSplit())) {
+            return true;
+        }
+        // 旧数据未记录分圈方式:按现有号码分布判断——圈间号码区间按圈序单调不交错即为按号分圈
+        return circleNumbersOrderedByZone(matches, stage);
+    }
+
+    /**
+     * 判断当前各圈号码是否按圈序连续递增(按号均分特征):
+     * 每圈内号码升序,且下一圈最小号必须大于上一圈最大号。
+     */
+    private boolean circleNumbersOrderedByZone(List<TMatch> matches, TStage stage) {
+        List<TCompetitor> comps = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stage.getId())
+            .select(TCompetitor::getId, TCompetitor::getNumber));
+        Map<Long, Long> numByComp = new HashMap<>();
+        for (TCompetitor c : comps) {
+            int n = parseCompetitorNumber(c.getNumber());
+            if (n != Integer.MAX_VALUE) {
+                numByComp.put(c.getId(), (long) n);
+            }
+        }
+        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
+        if (matchIds.isEmpty()) {
+            return false;
+        }
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .in(TMatchParticipant::getMatchId, matchIds)
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        Map<Long, List<Long>> numsByMatch = new HashMap<>();
+        for (TMatchParticipant p : parts) {
+            Long num = numByComp.get(p.getCompetitorId());
+            if (num != null) {
+                numsByMatch.computeIfAbsent(p.getMatchId(), k -> new ArrayList<>()).add(num);
+            }
+        }
+        long prevMax = Long.MIN_VALUE;
+        for (TMatch m : matches) {
+            List<Long> nums = numsByMatch.get(m.getId());
+            if (nums == null || nums.isEmpty()) {
+                continue;
+            }
+            Collections.sort(nums);
+            if (nums.get(0) <= prevMax) {
+                return false;
+            }
+            prevMax = nums.get(nums.size() - 1);
+        }
+        return true;
+    }
+
+    /**
+     * 按号码顺序均分时为新选手计算应落圈位:
+     * 把所有参赛方(含新选手)按号码升序排成序列,再按「每圈均分、余数从前圈补」切段,
+     * 与 AuditionGenerator 生成对阵的口径一致。返回 null 表示无法按号定位(由调用方回退均衡)。
+     */
+    private TMatch pickCircleByNumberOrder(List<TMatch> matches, TStage stage, Long competitorId) {
+        List<TCompetitor> actives = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stage.getId())
+            .ne(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.WITHDRAWN.getCode())
+            .select(TCompetitor::getId, TCompetitor::getNumber));
+        if (actives.isEmpty()) {
+            return null;
+        }
+        actives.sort(Comparator
+            .comparingInt((TCompetitor c) -> parseCompetitorNumber(c.getNumber()))
+            .thenComparingLong(TCompetitor::getId));
+        int idx = -1;
+        for (int i = 0; i < actives.size(); i++) {
+            if (Objects.equals(actives.get(i).getId(), competitorId)) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0) {
+            return null;
+        }
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        int cfgCircles = (rc != null && rc.getCircles() != null) ? Math.max(1, rc.getCircles()) : 1;
+        // 已生成的正式圈数为界:实际圈数不会超过参赛人数与已建场次数
+        int effective = Math.min(cfgCircles, Math.min(matches.size(), Math.max(1, actives.size())));
+        if (effective <= 1) {
+            return null;
+        }
+        int total = actives.size();
+        int base = total / effective;
+        int remainder = total % effective;
+        int circleIdx;
+        if (idx < remainder * (base + 1)) {
+            circleIdx = idx / (base + 1);
+        } else {
+            circleIdx = remainder + (idx - remainder * (base + 1)) / base;
+        }
+        if (circleIdx < 0 || circleIdx >= matches.size()) {
+            return null;
+        }
+        return matches.get(circleIdx);
     }
 
     /**

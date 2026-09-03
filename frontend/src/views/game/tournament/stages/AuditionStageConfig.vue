@@ -9,9 +9,9 @@
           <!-- 基础信息 -->
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-              <div class="text-xs text-neutral-500 mb-1">海选规模</div>
-              <div class="text-2xl font-bold text-white font-mono">{{ config.scale }}</div>
-              <div class="text-xs text-neutral-600 mt-1">支队伍</div>
+              <div class="text-xs text-neutral-500 mb-1">参赛人数</div>
+              <div class="text-2xl font-bold text-white font-mono">不限</div>
+              <div class="text-xs text-neutral-600 mt-1">按实际签到为准</div>
             </div>
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-1">晋级名额</div>
@@ -47,7 +47,7 @@
                 <div class="text-sm font-bold text-amber-500 mb-2">第 {{ i + 1 }} 圈</div>
                 <div class="text-xs text-neutral-400 flex items-center justify-between py-0.5 gap-3">
                   <span>人数</span>
-                  <span class="text-white font-mono">{{ circlePlayerCount(i) }} 人</span>
+                  <span class="text-white font-mono">{{ circlePlayerText(i) }}</span>
                 </div>
                 <div class="text-xs text-neutral-400 flex items-center justify-between py-0.5 gap-3">
                   <span>晋级</span>
@@ -64,10 +64,7 @@
           <!-- 赛制概览 -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">赛制概览</div>
-            <div class="text-sm text-neutral-300">
-              {{ config.scale }} 支队伍参加选拔，最终 {{ config.advanceCount }} 支队伍晋级（晋级率
-              {{ ((config.advanceCount / config.scale) * 100).toFixed(1) }}%）
-            </div>
+            <div class="text-sm text-neutral-300">不限制参赛人数，按实际签到人数参加选拔，最终 {{ config.advanceCount }} 支队伍晋级</div>
             <div v-if="(config.circles || 1) > 1" class="text-sm text-neutral-400 mt-1">分 {{ config.circles }} 圈并行：{{ circleOverviewText }}</div>
           </div>
         </template>
@@ -77,47 +74,20 @@
           <!-- CREATE 模式: 仅创建配置(创建后锁定) -->
           <template v-if="currentMode === ConfigMode.CREATE">
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-              <div class="text-xs text-neutral-500 mb-3">创建配置</div>
-              <div>
-                <label class="text-xs text-neutral-600 mb-1 block">海选规模</label>
-                <div class="relative">
-                  <input
-                    type="number"
-                    v-model.number="config.scale"
-                    :min="8"
-                    :max="512"
-                    class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                    @input="handleUpdate"
-                  />
-                  <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">支队伍</div>
-                </div>
-              </div>
-              <p class="text-[11px] text-neutral-500 mt-3">
-                海选规模为创建配置,创建后锁定;晋级名额、分圈、每圈名额/裁判等初始配置请在创建完成后于「初始配置」中设置
+              <div class="text-xs text-neutral-500 mb-2">创建配置</div>
+              <p class="text-sm text-neutral-300 leading-relaxed">
+                海选为赛事入口赛段，<span class="text-amber-500 font-bold">不限制参赛人数</span>，按实际签到选手参与。
               </p>
+              <p class="text-[11px] text-neutral-500 mt-2">晋级名额、分圈、每圈名额/裁判等初始配置请在创建完成后于「初始配置」中设置</p>
             </div>
           </template>
 
           <!-- INIT 模式: 创建配置只读 + 初始配置可编辑 -->
           <template v-else>
-            <!-- 规模设置 -->
+            <!-- 晋级与分圈设置 -->
             <div>
-              <label class="text-xs text-neutral-500 mb-2 block">选拔规模</label>
-              <div class="grid grid-cols-3 gap-4">
-                <div>
-                  <label class="text-xs text-neutral-600 mb-1 block">海选规模</label>
-                  <div class="relative">
-                    <input
-                      type="number"
-                      v-model.number="config.scale"
-                      disabled
-                      :min="8"
-                      :max="512"
-                      class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50"
-                    />
-                    <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">支队伍</div>
-                  </div>
-                </div>
+              <label class="text-xs text-neutral-500 mb-2 block">晋级与分圈</label>
+              <div class="grid grid-cols-2 gap-4">
                 <div>
                   <label class="text-xs text-neutral-600 mb-1 block">晋级名额</label>
                   <div class="relative">
@@ -125,7 +95,6 @@
                       type="number"
                       v-model.number="config.advanceCount"
                       :min="1"
-                      :max="config.scale - 1"
                       class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
                       @input="handleUpdate"
                     />
@@ -139,7 +108,6 @@
                       type="number"
                       v-model.number="config.circles"
                       :min="1"
-                      :max="config.scale"
                       class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
                       @input="handleUpdate"
                     />
@@ -147,9 +115,9 @@
                   </div>
                 </div>
               </div>
-              <p class="text-[11px] text-neutral-500 mt-2">海选规模为创建配置,创建后锁定;晋级名额与分圈为初始配置,赛段开始前可继续修改</p>
+              <p class="text-[11px] text-neutral-500 mt-2">海选不限制参赛人数，晋级名额与分圈为初始配置，赛段开始前可继续修改</p>
               <p v-if="(config.circles || 1) > 1" class="text-[11px] text-neutral-500 mt-2">
-                分 {{ config.circles }} 圈并行进行，每圈约 {{ Math.ceil(config.scale / config.circles) }} 人，可分别配置每圈晋级人数
+                分 {{ config.circles }} 圈并行进行，实际签到人数会自动均分到各圈，可分别配置每圈晋级人数
               </p>
             </div>
 
@@ -240,19 +208,15 @@
             <!-- 预览 -->
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
-              <div class="text-sm text-neutral-300">{{ config.scale }} 支队伍参加选拔</div>
+              <div class="text-sm text-neutral-300">不限制参赛人数，按实际签到为准</div>
               <div class="text-sm text-neutral-300 mt-1">最终 {{ config.advanceCount }} 支队伍晋级</div>
-              <div v-if="(config.circles || 1) > 1" class="text-sm text-neutral-400 mt-1">
-                分 {{ config.circles }} 圈并行，每圈约 {{ Math.ceil(config.scale / config.circles) }} 人、晋级
-                {{ Math.floor(config.advanceCount / config.circles) }} 人
-              </div>
+              <div v-if="(config.circles || 1) > 1" class="text-sm text-neutral-400 mt-1">分 {{ config.circles }} 圈并行，签到选手自动均分到各圈</div>
               <div v-if="(config.circles || 1) > 1 && hasCircleQuotas" class="text-sm text-neutral-400 mt-1">
                 每圈晋级：{{ config.circleAdvanceCounts.join(' / ') }}（合计 {{ totalQuota }} 人）
               </div>
               <div v-if="(config.circles || 1) > 1 && hasCircleReferees" class="text-sm text-neutral-400 mt-1">
                 每圈裁判：{{ circleRefereeSummary }}
               </div>
-              <div class="text-xs text-neutral-500 mt-2">晋级率：{{ ((config.advanceCount / config.scale) * 100).toFixed(1) }}%</div>
             </div>
           </template>
         </template>
@@ -268,6 +232,7 @@ import { AuditionConfig, StageData, ConfigMode } from './types';
 import { listReferee } from '@/api/game/referee';
 import { listMatchReferee } from '@/api/game/matchReferee';
 import { listMatch } from '@/api/game/match';
+import { listMatchParticipant } from '@/api/game/matchParticipant';
 
 // Props
 const props = defineProps<{
@@ -288,7 +253,6 @@ const currentMode = computed(() => props.mode || ConfigMode.INIT);
 
 // 配置对象
 const config = ref<any>({
-  scale: 64,
   advanceCondition: 'score',
   advanceCount: 16,
   circles: 1,
@@ -302,6 +266,8 @@ const config = ref<any>({
 const referees = ref<{ id: string | number; name: string }[]>([]);
 // 实际已写入 t_match_referee 的圈-裁判(按圈顺序;生成对阵后才有值)
 const actualCircleReferees = ref<string[]>([]);
+// 实际各圈参赛人数(按场次 participant 统计;未生成对阵/未加载时为 null)
+const actualCirclePlayers = ref<(number | null)[]>([]);
 
 const loadReferees = async () => {
   if (props.stage.tournamentId == null) {
@@ -323,6 +289,7 @@ const loadReferees = async () => {
 
 const loadActualCircleReferees = async () => {
   actualCircleReferees.value = [];
+  actualCirclePlayers.value = [];
   // 创建模式下 stage.id 为占位符(如 temp),无真实场次,跳过接口调用
   const sid = props.stage?.id;
   if (sid == null || !/^\d+$/.test(String(sid))) return;
@@ -332,6 +299,19 @@ const loadActualCircleReferees = async () => {
     const matches = (matchResp?.data?.data || matchResp?.data || [])
       .slice()
       .sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0) || String(a.id).localeCompare(String(b.id)));
+    // 各圈实际参赛人数:一个场次即一圈,按 participant 条数统计
+    const counts: (number | null)[] = await Promise.all(
+      matches.map(async (m: any) => {
+        try {
+          const pResp: any = await listMatchParticipant({ matchId: m.id } as any);
+          const parts = pResp?.data ?? [];
+          return Array.isArray(parts) ? parts.length : null;
+        } catch {
+          return null;
+        }
+      })
+    );
+    actualCirclePlayers.value = counts;
     const byMatch: Record<string, string> = {};
     rows.forEach((r: any) => {
       if (r.matchId == null || !r.refereeName) return;
@@ -388,12 +368,10 @@ const formatLabel = computed(() => {
   return map[config.value.format] || config.value.format;
 });
 
-// 每圈预估人数(按规模均分,余数从前到后补)
-const circlePlayerCount = (i: number) => {
-  const n = circleCount.value;
-  const base = Math.floor((config.value.scale || 0) / n);
-  const rem = (config.value.scale || 0) % n;
-  return base + (i < rem ? 1 : 0);
+// 每圈实际人数(已生成对阵后按场次统计;未加载/未生成时显示 —)
+const circlePlayerText = (i: number) => {
+  const n = actualCirclePlayers.value[i];
+  return n == null ? '—' : `${n} 人`;
 };
 
 // 每圈晋级人数:已配置按配置,未配置显示均分值
@@ -419,7 +397,10 @@ const circleRefereeText = (i: number) => {
 
 // 每圈配置一行摘要(只读展示)
 const circleOverviewText = computed(() =>
-  Array.from({ length: circleCount.value }, (_, i) => `第${i + 1}圈 ${circlePlayerCount(i)}人晋${circleQuotaText(i)}`).join(' · ')
+  Array.from({ length: circleCount.value }, (_, i) => {
+    const count = actualCirclePlayers.value[i];
+    return `第${i + 1}圈 ${count == null ? '人数按实际' : `${count}人`}·晋${circleQuotaText(i)}`;
+  }).join(' · ')
 );
 
 // 圈数变化时同步每圈名额数组(保留已配置值,新增位用均分值补齐)
@@ -483,6 +464,10 @@ const parseConfig = () => {
     if (props.stage.ruleConfig) {
       const parsed = JSON.parse(props.stage.ruleConfig);
       config.value = { ...config.value, ...parsed };
+      // 旧数据可能残留 scale(海选规模):海选不再限定人数,清理避免误展示
+      if (config.value.scale !== undefined) {
+        delete config.value.scale;
+      }
     }
   } catch (e) {
     console.warn('Failed to parse ruleConfig:', e);
@@ -502,7 +487,8 @@ const handleUpdate = () => {
     localStage.value.teamCountEnd = config.value.advanceCount;
   }
   localStage.value.ruleConfig = serializeConfig();
-  localStage.value.teamCountStart = config.value.scale;
+  // 海选不限制起始人数:起始数量统一为 0(后端按 0/空视为无上限)
+  localStage.value.teamCountStart = 0;
   emit('update', localStage.value);
 };
 
@@ -541,10 +527,5 @@ onMounted(() => {
 .stage-config {
   max-width: 900px;
   margin: 0 auto;
-}
-
-input[type='number']::-webkit-inner-spin-button,
-input[type='number']::-webkit-outer-spin-button {
-  opacity: 1;
 }
 </style>

@@ -84,6 +84,36 @@ export const checkInPlayer = (data: {
 };
 
 /**
+ * 编辑签到结果(改号码/换圈/改名/头像)
+ * @param data
+ */
+export const editCheckIn = (data: {
+  playerId: string | number;
+  competitorNumber?: string;
+  /** 目标圈场次ID(随机分圈手动换圈时传;按号分圈由号码自动决定圈位) */
+  matchId?: string | number;
+  name?: string;
+  avatar?: string;
+}) => {
+  return request({
+    url: '/game/player/checkin',
+    method: 'put',
+    data: data
+  });
+};
+
+/**
+ * 解除签到(回到未签到状态)
+ * @param playerId
+ */
+export const cancelCheckIn = (playerId: string | number) => {
+  return request({
+    url: '/game/player/checkin/' + playerId,
+    method: 'delete'
+  });
+};
+
+/**
  * 批量导入选手
  */
 export const importPlayers = (data: FormData) => {

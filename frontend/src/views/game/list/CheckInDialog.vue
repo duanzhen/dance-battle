@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="选手签到"
+    :title="editing ? '编辑签到' : '选手签到'"
     width="600px"
     :before-close="handleClose"
     :close-on-click-modal="false"
@@ -10,7 +10,7 @@
   >
     <template #header>
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-bold text-white">选手签到</h3>
+        <h3 class="text-lg font-bold text-white">{{ editing ? '编辑签到结果' : '选手签到' }}</h3>
       </div>
     </template>
 
@@ -19,7 +19,9 @@
     </div>
 
     <div v-else class="space-y-4">
-      <div class="text-sm text-neutral-400">请选择参赛号码并确认选手信息</div>
+      <div class="text-sm text-neutral-400">
+        {{ editing ? '修改参赛号码(按号分圈会自动换圈)并确认选手信息' : '请选择参赛号码并确认选手信息' }}
+      </div>
 
       <!-- 选手名称：展示 / 编辑 -->
       <div>
@@ -120,39 +122,64 @@
         </div>
       </div>
 
-      <!-- 分圈落位(海选/排名赛分圈且已生成对阵时,线下抽签可手动选圈) -->
+      <!-- 分圈落位(海选/排名赛分圈且已生成对阵时) -->
       <div v-if="circleList.length > 1" class="bg-neutral-800/50 rounded-lg p-3 border border-neutral-700">
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">分圈落位</label>
-        <div class="grid grid-cols-2 gap-2">
-          <button
-            @click="selectedMatchId = null"
-            class="rounded-lg border px-3 py-2 text-left transition-all"
-            :class="
-              selectedMatchId === null
-                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
-                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'
-            "
-          >
-            <div class="text-xs font-bold">自动分配</div>
-            <div class="text-[10px] text-neutral-500 mt-0.5">按各圈剩余名额择优</div>
-          </button>
-          <button
-            v-for="circle in circleList"
-            :key="circle.matchId"
-            @click="selectedMatchId = circle.matchId"
-            class="rounded-lg border px-3 py-2 text-left transition-all"
-            :class="
-              selectedMatchId === circle.matchId
-                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
-                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'
-            "
-          >
-            <div class="text-xs font-bold">{{ circle.name }}</div>
-            <div class="text-[10px] text-neutral-500 mt-0.5">
-              当前 {{ circle.count }} 人<template v-if="circle.quota !== null"> / 名额 {{ circle.quota }}</template>
+        <!-- 按号码顺序均分:号码决定圈位,只读提示 -->
+        <template v-if="splitByNumber">
+          <div class="rounded-lg border border-neutral-700 bg-neutral-950/60 px-3 py-2.5">
+            <div class="flex items-center gap-2 text-xs text-neutral-300">
+              <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                />
+              </svg>
+              <span class="font-bold">按号码自动分圈</span>
             </div>
-          </button>
-        </div>
+            <p v-if="selectedSlot && !selectedSlot.competitor && selectedCircleName" class="mt-1.5 text-xs text-neutral-400">
+              号码 <span class="text-white font-bold">{{ selectedSlot.number }}</span> 将进入
+              <span class="text-amber-500 font-bold">{{ selectedCircleName }}</span>
+            </p>
+            <p v-else class="mt-1.5 text-xs text-neutral-500">选择空闲号码后自动进入对应圈，无需手动指定</p>
+          </div>
+        </template>
+        <!-- 随机抽取分圈:线下抽签可手动选圈 -->
+        <template v-else>
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              @click="selectedMatchId = null"
+              class="rounded-lg border px-3 py-2 text-left transition-all"
+              :class="
+                selectedMatchId === null
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+                  : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'
+              "
+            >
+              <div class="text-xs font-bold">自动分配</div>
+              <div class="text-[10px] text-neutral-500 mt-0.5">按各圈剩余名额择优</div>
+            </button>
+            <button
+              v-for="circle in circleList"
+              :key="circle.matchId"
+              @click="selectedMatchId = circle.matchId"
+              class="rounded-lg border px-3 py-2 text-left transition-all"
+              :class="
+                selectedMatchId === circle.matchId
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+                  : 'border-neutral-700 text-neutral-400 hover:border-neutral-500'
+              "
+            >
+              <div class="text-xs font-bold">{{ circle.name }}</div>
+              <div class="text-[10px] text-neutral-500 mt-0.5">
+                当前 {{ circle.count }} 人<template v-if="circle.quota !== null"> / 名额 {{ circle.quota }}</template>
+              </div>
+            </button>
+          </div>
+          <p class="text-[10px] text-neutral-600 mt-1.5">随机分圈模式下可手动指定目标圈，号码与圈位无关</p>
+        </template>
       </div>
 
       <!-- 选中信息:常显,避免弹窗高度变化闪烁 -->
@@ -172,6 +199,7 @@
     <template #footer>
       <div class="flex justify-between">
         <button
+          v-if="!editing"
           @click="handleRandomSelect"
           :disabled="loading || numberSlots.filter((s) => !s.competitor).length === 0"
           class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg font-bold shadow-lg shadow-green-900/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -202,7 +230,7 @@
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               ></path>
             </svg>
-            {{ submitting ? '提交中...' : '确认签到' }}
+            {{ submitting ? '提交中...' : editing ? '保存修改' : '确认签到' }}
           </button>
         </div>
       </div>
@@ -211,13 +239,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import { Pencil, User } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import { PlayerVO } from '@/api/game/player/types';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { listCompetitor } from '@/api/game/competitor';
-import { checkInPlayer, listPlayer } from '@/api/game/player';
+import { checkInPlayer, editCheckIn, listPlayer } from '@/api/game/player';
 import { getStage } from '@/api/game/stage';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant } from '@/api/game/matchParticipant';
@@ -236,6 +264,8 @@ const emit = defineEmits<{
 const visible = ref(false);
 const loading = ref(false);
 const submitting = ref(false);
+// 编辑模式:选手已签到,可改号码/换圈
+const editing = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
 const playerCount = ref(0);
 const selectedSlot = ref<{ number: number; competitor: CompetitorVO | null } | null>(null);
@@ -251,10 +281,14 @@ const numberSlots = ref<{ number: number; competitor: CompetitorVO | null }[]>([
 const slotListRef = ref<HTMLElement | null>(null);
 const circleList = ref<{ matchId: string | number; name: string; count: number; quota: number | null }[]>([]);
 const selectedMatchId = ref<string | number | null>(null);
+// 海选圈是否按号码顺序均分(生成对阵时后端会把 randomSplit 写入 ruleConfig)
+const splitByNumber = ref(false);
+const circleConfigCount = ref(1);
 
 // 加载分圈信息:赛段配置(circles/circleAdvanceCounts)+ 各圈当前人数(仅海选/排名赛分圈且已生成对阵时)
 const loadCircleInfo = async () => {
   circleList.value = [];
+  splitByNumber.value = false;
   selectedMatchId.value = null;
   try {
     const stageRes = await getStage(props.stageId);
@@ -265,16 +299,21 @@ const loadCircleInfo = async () => {
     }
     let circles = 0;
     let quotas: number[] = [];
+    let randomSplit = false;
     try {
       const rc = JSON.parse(stage?.ruleConfig || '{}');
       circles = Math.max(1, Number(rc.circles) || 1);
       quotas = Array.isArray(rc.circleAdvanceCounts) ? rc.circleAdvanceCounts.map(Number) : [];
+      randomSplit = rc.randomSplit === true;
     } catch {
       // 忽略解析失败,不展示分圈信息
     }
     if (circles <= 1) {
       return;
     }
+    circleConfigCount.value = circles;
+    // randomSplit=false / 旧数据未记录:按号分圈;randomSplit=true:随机分圈
+    splitByNumber.value = mode === 'AUDITION' && !randomSplit;
     const matchRes = await listMatch({ stageId: props.stageId } as any);
     const matches = (matchRes.data || (matchRes as any).data || []) as any[];
     const ordered = [...matches].sort((a, b) => (Number(a.displayRow) || 0) - (Number(b.displayRow) || 0));
@@ -358,6 +397,14 @@ const loadCompetitors = async () => {
         competitor: competitorMap.get(i) || null
       });
     }
+    // 编辑模式:预选当前选手已占用的号码
+    if (editing.value && currentPlayer.value?.competitorId) {
+      const ownNumber = competitors.value.find((c) => String(c.id) === String(currentPlayer.value?.competitorId))?.number;
+      const ownSlot = numberSlots.value.find((s) => String(s.number) === String(ownNumber));
+      if (ownSlot) {
+        selectedSlot.value = ownSlot;
+      }
+    }
   } catch (error) {
     console.error('加载参赛选手失败:', error);
     ElMessage.error('加载参赛选手失败');
@@ -368,8 +415,46 @@ const loadCompetitors = async () => {
 };
 
 const handleSelectSlot = (slot: { number: number; competitor: CompetitorVO | null }) => {
+  if (
+    editing.value &&
+    slot.competitor &&
+    currentPlayer.value?.competitorId &&
+    String(slot.competitor.id) !== String(currentPlayer.value.competitorId)
+  ) {
+    ElMessage.warning('该号码已被其他参赛占用，请选择空闲号码');
+    return;
+  }
   selectedSlot.value = slot;
 };
+
+// 按号分圈:把号码插入当前已有号码序列,按「均分、余数从前圈补」计算应落圈位(与后端生成口径一致)
+const circleIndexOfNumber = (num: number) => {
+  // 与后端一致:退赛选手不参与按号分圈的人数计算
+  const numbers = competitors.value
+    .filter((c) => c.outcomeStatus !== 'WITHDRAWN')
+    .map((c) => parseInt(c.number || '0'))
+    .filter((n) => !Number.isNaN(n) && n > 0);
+  const sorted = [...numbers, num].sort((a, b) => a - b);
+  const idx = sorted.indexOf(num);
+  const total = sorted.length;
+  const circles = circleList.value.length;
+  if (idx < 0 || circles <= 1) return idx < 0 ? -1 : 0;
+  const effective = Math.min(circleConfigCount.value, circles, Math.max(1, total));
+  if (effective <= 1) return 0;
+  const base = Math.floor(total / effective);
+  const remainder = total % effective;
+  if (idx < remainder * (base + 1)) {
+    return Math.floor(idx / (base + 1));
+  }
+  return remainder + Math.floor((idx - remainder * (base + 1)) / base);
+};
+
+const selectedCircleName = computed(() => {
+  const slot = selectedSlot.value;
+  if (!slot || slot.competitor || !splitByNumber.value) return '';
+  const idx = circleIndexOfNumber(Number(slot.number));
+  return idx >= 0 && idx < circleList.value.length ? circleList.value[idx].name : '';
+});
 
 const handleRandomSelect = () => {
   const availableSlots = numberSlots.value.filter((slot) => !slot.competitor);
@@ -428,17 +513,29 @@ const handleSubmit = async () => {
 
   submitting.value = true;
   try {
-    await checkInPlayer({
-      playerId: currentPlayer.value.id,
-      checkInType: selectedSlot.value.competitor ? 'JOIN' : 'CREATE',
-      competitorNumber: String(selectedSlot.value.number),
-      competitorId: selectedSlot.value.competitor?.id,
-      name: playerName.value.trim(),
-      avatar: playerAvatar.value,
-      matchId: selectedMatchId.value ?? undefined
-    });
-
-    ElMessage.success('签到成功');
+    if (editing.value) {
+      // 按号分圈时号码决定圈位,不传 matchId 由后端按号换圈
+      await editCheckIn({
+        playerId: currentPlayer.value.id,
+        competitorNumber: String(selectedSlot.value.number),
+        matchId: splitByNumber.value ? undefined : (selectedMatchId.value ?? undefined),
+        name: playerName.value.trim(),
+        avatar: playerAvatar.value
+      });
+      ElMessage.success('签到结果已更新');
+    } else {
+      await checkInPlayer({
+        playerId: currentPlayer.value.id,
+        checkInType: selectedSlot.value.competitor ? 'JOIN' : 'CREATE',
+        competitorNumber: String(selectedSlot.value.number),
+        competitorId: selectedSlot.value.competitor?.id,
+        name: playerName.value.trim(),
+        avatar: playerAvatar.value,
+        // 按号分圈时号码决定圈位,不传 matchId 由后端按号落圈
+        matchId: splitByNumber.value ? undefined : (selectedMatchId.value ?? undefined)
+      });
+      ElMessage.success('签到成功');
+    }
     emit('success');
     handleClose();
   } catch (error) {
@@ -451,6 +548,7 @@ const handleSubmit = async () => {
 
 const open = (player?: PlayerVO | null) => {
   currentPlayer.value = player ?? props.player ?? null;
+  editing.value = !!currentPlayer.value?.competitorId;
   selectedSlot.value = null;
   playerName.value = currentPlayer.value?.name || '';
   playerAvatar.value = currentPlayer.value?.avatar || '';

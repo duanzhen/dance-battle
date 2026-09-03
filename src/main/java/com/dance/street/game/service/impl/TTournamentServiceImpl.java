@@ -99,7 +99,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
         Map<String, List<StageDef>> m = new LinkedHashMap<>();
         // 海选 → 32强 → 16强 → 8强 → 半决赛 → 决赛
         m.put("AUDITION_32", List.of(
-            new StageDef("海选", "AUDITION", 40L, 32L),
+            // 海选为入口赛段:起始人数不设限(teamCountStart=0),晋级名额仍为下一赛段容量
+            new StageDef("海选", "AUDITION", 0L, 32L),
             new StageDef("32强", "KNOCKOUT", 32L, 16L),
             new StageDef("16强", "KNOCKOUT", 16L, 8L),
             new StageDef("8强", "KNOCKOUT", 8L, 4L),
@@ -108,7 +109,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         ));
         // 海选 → 16强 → 8强 → 半决赛 → 决赛
         m.put("AUDITION_16", List.of(
-            new StageDef("海选", "AUDITION", 20L, 16L),
+            new StageDef("海选", "AUDITION", 0L, 16L),
             new StageDef("16强", "KNOCKOUT", 16L, 8L),
             new StageDef("8强", "KNOCKOUT", 8L, 4L),
             new StageDef("半决赛", "KNOCKOUT", 4L, 2L),
@@ -116,7 +117,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         ));
         // 海选 → 32强 → 16强 → 擂台赛(淘汰至 8 人后进擂台)
         m.put("AUDITION_ARENA", List.of(
-            new StageDef("海选", "AUDITION", 40L, 32L),
+            new StageDef("海选", "AUDITION", 0L, 32L),
             new StageDef("32强", "KNOCKOUT", 32L, 16L),
             new StageDef("16强", "KNOCKOUT", 16L, 8L),
             new StageDef("擂台赛", "ARENA", 8L, 1L)
@@ -192,7 +193,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
     private LambdaQueryWrapper<TTournament> buildQueryWrapper(TTournamentBo bo) {
         Map<String, Object> params = bo.getParams();
         LambdaQueryWrapper<TTournament> lqw = Wrappers.lambdaQuery();
-        lqw.orderByAsc(TTournament::getId);
+        // 列表倒序:最后创建的排最前(createTime 相同按 id 倒序兜底)
+        lqw.orderByDesc(TTournament::getCreateTime).orderByDesc(TTournament::getId);
         lqw.like(StringUtils.isNotBlank(bo.getName()), TTournament::getName, bo.getName());
         lqw.eq(bo.getStatus() != null, TTournament::getStatus, bo.getStatus());
         lqw.eq(bo.getLogicalWidth() != null, TTournament::getLogicalWidth, bo.getLogicalWidth());

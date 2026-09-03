@@ -413,9 +413,4 @@ onMounted(() => {
   color: #737373;
   margin-top: 2px;
 }
-
-input[type='number']::-webkit-inner-spin-button,
-input[type='number']::-webkit-outer-spin-button {
-  opacity: 1;
-}
 </style>

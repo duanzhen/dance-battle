@@ -88,7 +88,7 @@
               {{ stage.name }}
             </h4>
             <div class="flex items-center gap-1 mt-1 text-[9px] text-neutral-500">
-              <span>{{ stage.teamCountStart }}</span>
+              <span>{{ stageStartText(stage) }}</span>
               <ChevronRight class="w-2.5 h-2.5" />
               <span class="text-amber-500">{{ stage.teamCountEnd }}</span>
             </div>
@@ -782,6 +782,12 @@ const auditionAllScored = (match: any): boolean => {
 const safeId = (id: any): string | null => {
   if (!id || typeof id === 'object') return null;
   return String(id);
+};
+
+/** 海选为入口赛段,起始人数不设限;其余赛段展示计划起始人数 */
+const stageStartText = (stage: { stageMode: string; teamCountStart: number }) => {
+  if (stage.stageMode === 'AUDITION') return '不限';
+  return stage.teamCountStart ?? 0;
 };
 
 /** 海选分数显示:10分制两位小数;空值显示 - */

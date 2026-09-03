@@ -222,6 +222,43 @@
           清除筛选条件
         </button>
       </div>
+
+      <!-- 分页:每页 20 条 -->
+      <div v-if="total > 0" class="flex items-center justify-between flex-wrap gap-3 mt-8">
+        <span class="text-xs text-neutral-500">共 {{ total }} 场赛事 · 每页 20 场</span>
+        <div class="flex items-center gap-1">
+          <button
+            @click="gotoPage(pageNum - 1)"
+            :disabled="pageNum <= 1"
+            class="h-9 px-3 rounded-lg text-sm font-medium border border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-amber-500/50 hover:text-amber-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-neutral-800 disabled:hover:text-neutral-300"
+          >
+            上一页
+          </button>
+          <template v-for="(p, i) in pageItems" :key="i">
+            <span v-if="p === '...'" class="px-1 text-neutral-600 select-none">…</span>
+            <button
+              v-else
+              @click="gotoPage(p)"
+              :disabled="p === pageNum"
+              class="min-w-9 h-9 px-2 rounded-lg text-sm font-medium border transition-colors disabled:cursor-default"
+              :class="
+                p === pageNum
+                  ? 'bg-amber-500 text-neutral-950 border-amber-500 font-bold'
+                  : 'border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-amber-500/50 hover:text-amber-400'
+              "
+            >
+              {{ p }}
+            </button>
+          </template>
+          <button
+            @click="gotoPage(pageNum + 1)"
+            :disabled="pageNum >= totalPages"
+            class="h-9 px-3 rounded-lg text-sm font-medium border border-neutral-800 bg-neutral-900 text-neutral-300 hover:border-amber-500/50 hover:text-amber-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-neutral-800 disabled:hover:text-neutral-300"
+          >
+            下一页
+          </button>
+        </div>
+      </div>
     </main>
 
     <!-- 表单对话框 -->
@@ -232,7 +269,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
 import { useUserStore } from '@/store/modules/user';
@@ -240,7 +277,7 @@ import PasswordDialog from '@/components/PasswordDialog/index.vue';
 import TournamentForm from './TournamentForm.vue';
 import { listTournament } from '@/api/game/tournament';
 import logoFlat from '@/assets/logo/logo_flat.png';
-import { TournamentVO } from '@/api/game/tournament/types';
+import { TournamentVO, TournamentQuery } from '@/api/game/tournament/types';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -287,6 +324,10 @@ interface TournamentItem {
 // --- 数据状态 ---
 const tournaments = ref<TournamentItem[]>([]);
 const loading = ref(false);
+const total = ref(0);
+const pageNum = ref(1);
+const PAGE_SIZE = 20;
+let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 // --- 数据适配器: 将API返回的数据转换为页面需要的格式 ---
 const adaptTournamentData = (apiData: TournamentVO[]): TournamentItem[] => {
@@ -316,12 +357,24 @@ const adaptTournamentData = (apiData: TournamentVO[]): TournamentItem[] => {
 const loadTournaments = async () => {
   try {
     loading.value = true;
-    const response = await listTournament();
-    const adaptedData = adaptTournamentData(response.data || []);
+    // 排序/分页由后端处理(创建时间倒序,最新创建在最前)
+    const query: TournamentQuery = {
+      pageNum: pageNum.value,
+      pageSize: PAGE_SIZE
+    };
+    const keyword = searchQuery.value.trim();
+    if (keyword) query.name = keyword;
+    const status = currentTab.value === 'REGISTERING' ? 0 : currentTab.value === 'LIVE' ? 1 : currentTab.value === 'ENDED' ? 2 : undefined;
+    if (status != null) query.status = status;
+
+    const response: any = await listTournament(query);
+    const adaptedData = adaptTournamentData(response?.data || []);
     tournaments.value = adaptedData;
+    total.value = Number(response?.total ?? adaptedData.length);
   } catch (error) {
     console.error('加载赛事数据失败:', error);
     tournaments.value = [];
+    total.value = 0;
   } finally {
     loading.value = false;
   }
@@ -345,11 +398,13 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('hashchange', stripFocusHash);
+  if (reloadTimer) clearTimeout(reloadTimer);
 });
 
 // --- 表单提交成功回调 ---
 const handleFormSuccess = () => {
-  // 刷新赛事列表
+  // 新建后回到第一页,保证最新赛事排在最前
+  pageNum.value = 1;
   loadTournaments();
 };
 
@@ -380,19 +435,44 @@ const tabs = [
 const currentTab = ref('ALL');
 const searchQuery = ref('');
 
-const filteredTournaments = computed(() => {
-  return tournaments.value.filter((t: TournamentItem) => {
-    const statusMatch = currentTab.value === 'ALL' || t.status === currentTab.value;
-    const query = searchQuery.value.toLowerCase();
-    const searchMatch = t.title.toLowerCase().includes(query) || t.gameType.toLowerCase().includes(query) || t.format.toLowerCase().includes(query);
-    return statusMatch && searchMatch;
-  });
-});
+// 搜索/状态筛选已交由后端分页查询,这里直接返回当前页数据
+const filteredTournaments = computed(() => tournaments.value);
 
 const resetFilters = () => {
   currentTab.value = 'ALL';
   searchQuery.value = '';
 };
+
+// --- 分页 ---
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+const pageItems = computed<(number | '...')[]>(() => {
+  const max = totalPages.value;
+  const cur = pageNum.value;
+  if (max <= 7) return Array.from({ length: max }, (_, i) => i + 1);
+  const items: (number | '...')[] = [];
+  for (let p = 1; p <= max; p++) {
+    if (p === 1 || p === max || Math.abs(p - cur) <= 1) {
+      items.push(p);
+    } else if (items[items.length - 1] !== '...') {
+      items.push('...');
+    }
+  }
+  return items;
+});
+
+const gotoPage = (p: number) => {
+  if (p < 1 || p > totalPages.value || p === pageNum.value) return;
+  if (reloadTimer) clearTimeout(reloadTimer);
+  pageNum.value = p;
+  loadTournaments();
+};
+
+// 切换标签 / 输入搜索词:回到第一页并重新查询(搜索防抖 250ms)
+watch([currentTab, searchQuery], () => {
+  pageNum.value = 1;
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => loadTournaments(), 250);
+});
 
 // 点击赛事:直接新窗口打开赛事大屏(配置入口在赛事大屏右上角「赛事配置」)
 const goToDetail = (id: string | number) => {

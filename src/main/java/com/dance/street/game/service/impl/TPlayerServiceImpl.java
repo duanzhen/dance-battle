@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import com.dance.street.game.domain.bo.TPlayerBo;
 import com.dance.street.game.domain.bo.CheckInBo;
+import com.dance.street.game.domain.bo.CheckInEditBo;
 import com.dance.street.game.domain.bo.TCompetitorBo;
 import com.dance.street.game.domain.bo.TCompetitorMemberBo;
 import com.dance.street.game.domain.vo.PlayerImportVo;
@@ -365,6 +366,135 @@ public class TPlayerServiceImpl implements ITPlayerService {
         tournamentEventNotifier.notify(tournamentId, firstStage.getId(), null, "competitor");
 
         return baseMapper.selectVoById(playerId);
+    }
+
+    /**
+     * 编辑签到结果:已签到选手改号码(按号分圈自动换圈/随机分圈指定圈)或改名/头像。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TPlayerVo editCheckIn(CheckInEditBo bo) {
+        TPlayer player = baseMapper.selectById(bo.getPlayerId());
+        if (player == null) {
+            throw new RuntimeException("选手不存在");
+        }
+        if (player.getCompetitorId() == null) {
+            throw new RuntimeException("该选手尚未签到,请先签到");
+        }
+        TCompetitor competitor = competitorMapper.selectById(player.getCompetitorId());
+        if (competitor == null) {
+            throw new RuntimeException("选手对应的参赛单位不存在");
+        }
+        TTournamentVo tournament = tournamentService.queryById(player.getTournamentId());
+        if (tournament == null) {
+            throw new RuntimeException("赛事不存在");
+        }
+        TStageVo firstStage = stageService.getFirstStageByTournamentId(player.getTournamentId());
+        if (firstStage == null) {
+            throw new RuntimeException("赛事没有设置赛段");
+        }
+        if (!Objects.equals(competitor.getStageId(), firstStage.getId())) {
+            throw new RuntimeException("只能编辑首个赛段的签到结果");
+        }
+        if (StageConstants.STAGE_SETTLED.equals(firstStage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(firstStage.getStatus())) {
+            throw new RuntimeException("赛段已结束,无法编辑签到结果");
+        }
+
+        boolean numberChanged = false;
+        if (StringUtils.isNotBlank(bo.getCompetitorNumber())) {
+            String newNumber = bo.getCompetitorNumber().trim();
+            if (!Objects.equals(competitor.getNumber(), newNumber)) {
+                long members = competitorMemberMapper.selectCount(Wrappers.<TCompetitorMember>lambdaQuery()
+                    .eq(TCompetitorMember::getCompetitorId, competitor.getId()));
+                if (members > 1) {
+                    throw new RuntimeException("该参赛单位包含多名选手,不能直接改号;请先解除本选手签到后重新签到");
+                }
+                long occupied = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                    .eq(TCompetitor::getTournamentId, player.getTournamentId())
+                    .eq(TCompetitor::getStageId, firstStage.getId())
+                    .eq(TCompetitor::getNumber, newNumber)
+                    .ne(TCompetitor::getId, competitor.getId()));
+                if (occupied > 0) {
+                    throw new RuntimeException("号码 " + newNumber + " 已被占用,请选择其他号码");
+                }
+                TCompetitor upd = new TCompetitor();
+                upd.setId(competitor.getId());
+                upd.setNumber(newNumber);
+                competitorMapper.updateById(upd);
+                competitor.setNumber(newNumber);
+                numberChanged = true;
+            }
+        }
+        // 改号或指定换圈时,把参赛方从旧场次挪到新号码对应圈/目标圈并重排
+        if (numberChanged || bo.getMatchId() != null) {
+            stageLifecycleService.relocateCheckInCompetitor(firstStage.getId(), competitor.getId(), bo.getMatchId());
+        }
+
+        String oldName = player.getName();
+        if (StringUtils.isNotBlank(bo.getName())) {
+            String newName = bo.getName().trim();
+            player.setName(newName);
+            if (!Objects.equals(oldName, newName)) {
+                syncLinkedCompetitorName(competitor.getId(), newName, player.getId());
+            }
+        }
+        if (StringUtils.isNotBlank(bo.getAvatar())) {
+            player.setAvatar(bo.getAvatar().trim());
+        }
+        baseMapper.updateById(player);
+        tournamentEventNotifier.notify(player.getTournamentId(), firstStage.getId(), null, "competitor");
+        return baseMapper.selectVoById(player.getId());
+    }
+
+    /**
+     * 解除签到:撤销选手与首个赛段参赛单位的关联。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelCheckIn(Long playerId) {
+        TPlayer player = baseMapper.selectById(playerId);
+        if (player == null) {
+            throw new RuntimeException("选手不存在");
+        }
+        if (player.getCompetitorId() == null) {
+            throw new RuntimeException("该选手尚未签到");
+        }
+        TCompetitor competitor = competitorMapper.selectById(player.getCompetitorId());
+        if (competitor == null) {
+            throw new RuntimeException("选手对应的参赛单位不存在");
+        }
+        TTournamentVo tournament = tournamentService.queryById(player.getTournamentId());
+        if (tournament == null) {
+            throw new RuntimeException("赛事不存在");
+        }
+        TStageVo firstStage = stageService.getFirstStageByTournamentId(player.getTournamentId());
+        if (firstStage == null) {
+            throw new RuntimeException("赛事没有设置赛段");
+        }
+        if (StageConstants.STAGE_SETTLED.equals(firstStage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(firstStage.getStatus())) {
+            throw new RuntimeException("赛段已结束,无法解除签到");
+        }
+
+        // 名下还有其他成员(如队伍):仅解除该选手本人,参赛单位及其场次保留
+        long memberCount = competitorMemberMapper.selectCount(Wrappers.<TCompetitorMember>lambdaQuery()
+            .eq(TCompetitorMember::getCompetitorId, competitor.getId()));
+        if (memberCount > 1) {
+            competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()
+                .eq(TCompetitorMember::getCompetitorId, competitor.getId())
+                .eq(TCompetitorMember::getPlayerId, playerId));
+        } else {
+            // 最后一名成员:从圈场次移除并清理参赛单位(已有打分记录时由底层拦截)
+            stageLifecycleService.removeCheckInCompetitor(firstStage.getId(), competitor.getId());
+            competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()
+                .eq(TCompetitorMember::getCompetitorId, competitor.getId()));
+            competitorMapper.deleteById(competitor.getId());
+        }
+        player.setCompetitorId(null);
+        baseMapper.updateById(player);
+        tournamentEventNotifier.notify(player.getTournamentId(), firstStage.getId(), null, "competitor");
+        log.info("选手[{}]已解除签到(参赛单位[{}])", playerId, competitor.getId());
     }
 
     /**

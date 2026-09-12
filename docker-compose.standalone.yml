@@ -12,10 +12,12 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      # 直接使用 SQLite 文件库(免 MySQL 探测,启动更快)
-      DB_URL: "jdbc:sqlite:/data/db/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS"
-      # 显式单机模式(免 Redis 探测,SSE 本地广播、无分布式锁)
-      REDIS_ENABLED: "false"
+      # 显式单机模式:强制 SQLite + 本地 SSE(SSE 本地广播、无分布式锁),
+      # 完全跳过 MySQL/Redis 探测与降级流程,启动更快
+      DEPLOY_MODE: ${DEPLOY_MODE:-standalone}
+      DB_TYPE: ${DB_TYPE:-auto}
+      # 单机模式使用的 SQLite 文件库(在 /data 命名卷内持久化)
+      SQLITE_FALLBACK_URL: "jdbc:sqlite:/data/db/game.db"
       LOGIN_USERNAME: ${LOGIN_USERNAME:-admin}
       LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
       SERVER_PORT: ${SERVER_PORT:-80}

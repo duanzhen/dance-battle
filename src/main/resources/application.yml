@@ -39,9 +39,16 @@ mybatis-plus:
 # 启动时自动检查数据库与表结构,缺失则用 JDBC 兜底建库建表
 # (MySQL 读取 sql/game_db.sql,SQLite 读取 sql/game_db.sqlite.sql)
 app:
+  # 部署模式:auto(探测失败自动降级)/ standalone(强制 SQLite + 本地 SSE,跳过所有探测)/
+  # distributed(强制 MySQL + Redis,连不上直接启动失败,不降级)
+  # 留空=按运行形态取默认:native 可执行文件 standalone(SQLite+本地 SSE),JAR auto
+  deploy-mode: ${DEPLOY_MODE:}
   schema-init:
     enabled: ${SCHEMA_INIT_ENABLED:true}
   db:
+    # 数据库类型:auto(默认,按 datasource url + 探测决定)/ sqlite(直连本地库,跳过 MySQL 探测)/
+    # mysql(强制 MySQL,禁用 SQLite 回退)。细粒度优先于 DEPLOY_MODE
+    type: ${DB_TYPE:auto}
     # MySQL 连接失败/未配置时自动回退到 SQLite 文件库(设为 false 关闭)
     fallback-to-sqlite: ${DB_FALLBACK_SQLITE:true}
     # date_class=text 与 sql/game_db.sqlite.sql 的 TEXT 日期列保持一致,避免 "Error parsing time stamp"

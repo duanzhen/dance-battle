@@ -15,14 +15,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Redis 单机模式自动回退。
+ * Redis 模式解析:显式禁用/单机部署,以及不可达时的单机模式自动回退。
  *
  * <p>Redis 未配置/不可达时,应用仍可单机运行:排除 Redisson 与 Spring Data Redis
  * 自动装配(不再创建 RedissonClient),SSE 走进程内本地广播、登录限流走本地计数、
  * 控件排序锁退化为 JVM 锁——多实例联动能力相应关闭。</p>
  *
- * <p>触发条件:显式设置 {@code REDIS_ENABLED=false},或默认开启时连接探测失败
- * (Redis 未启动/主机不可达)。</p>
+ * <p>跳过探测、直接走本地广播的显式写法:{@code REDIS_ENABLED=false} 或
+ * {@code DEPLOY_MODE=standalone}。反之 {@code DEPLOY_MODE=distributed} 表示必须使用
+ * Redis:探测失败直接启动失败,不再静默降级。</p>
  */
 public class RedisStandaloneEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
@@ -46,15 +47,46 @@ public class RedisStandaloneEnvironmentPostProcessor implements EnvironmentPostP
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         Boolean enabled = environment.getProperty(ENABLED_KEY, Boolean.class, true);
         boolean explicitlyDisabled = !Boolean.TRUE.equals(enabled);
-        if (!explicitlyDisabled && redisReachable(environment)) {
+        boolean standalone = DeployModeResolver.isStandalone(environment);
+        boolean distributed = DeployModeResolver.isDistributed(environment);
+
+        // 1) 显式禁用 / 单机部署:跳过探测,直接本地广播
+        if (explicitlyDisabled || standalone) {
+            if (explicitlyDisabled) {
+                log.info("Redis 已禁用(REDIS_ENABLED=false),以单机模式运行:SSE 本地广播、无分布式锁/跨实例联动");
+            } else {
+                log.info("Redis:单机部署(DEPLOY_MODE=standalone),跳过连接探测,SSE 本地广播、无分布式锁");
+            }
+            if (explicitlyDisabled && distributed) {
+                log.warn("REDIS_ENABLED=false 与 DEPLOY_MODE=distributed 冲突,按 REDIS_ENABLED=false 走单机模式");
+            }
+            excludeRedisAutoConfig(environment);
             return;
         }
-        if (explicitlyDisabled) {
-            log.info("Redis 已禁用(REDIS_ENABLED=false),以单机模式运行:SSE 本地广播、无分布式锁/跨实例联动");
-        } else {
-            log.warn("Redis 连接探测失败,自动进入单机模式:SSE 本地广播、无分布式锁/跨实例联动"
-                + "(显式关闭可设 REDIS_ENABLED=false)");
+
+        // 2) 多实例部署:要求 Redis 可用,连不上直接失败
+        if (distributed) {
+            if (redisUnavailableReason(environment) == null) {
+                return;
+            }
+            String host = environment.getProperty("spring.data.redis.host", "127.0.0.1");
+            int port = environment.getProperty("spring.data.redis.port", Integer.class, 6379);
+            throw new IllegalStateException(
+                "DEPLOY_MODE=distributed 要求 Redis 可用,但连接 " + host + ":" + port + " 失败。"
+                    + "如需单机运行,请改设 REDIS_ENABLED=false 或 DEPLOY_MODE=standalone");
         }
+
+        // 3) 自动模式:探测失败则降级为本地广播
+        String reason = redisUnavailableReason(environment);
+        if (reason == null) {
+            return;
+        }
+        log.warn("Redis 连接探测失败({}),自动进入单机模式:SSE 本地广播、无分布式锁/跨实例联动"
+            + "(显式关闭可设 REDIS_ENABLED=false,或 DEPLOY_MODE=standalone 跳过探测)", reason);
+        excludeRedisAutoConfig(environment);
+    }
+
+    private static void excludeRedisAutoConfig(ConfigurableEnvironment environment) {
         environment.getPropertySources().addFirst(new MapPropertySource(
             "redisStandalone", Map.of(EXCLUDE_KEY, mergedExcludes(environment))));
     }
@@ -73,16 +105,20 @@ public class RedisStandaloneEnvironmentPostProcessor implements EnvironmentPostP
         return String.join(",", excludes);
     }
 
-    /** TCP 探测 Redis:能建立连接即视为可用(认证失败也说明服务在) */
-    private static boolean redisReachable(ConfigurableEnvironment environment) {
+    /**
+     * TCP 探测 Redis:能建立连接即视为可用(认证失败也说明服务在)。
+     *
+     * @return 可用返回 {@code null},不可用返回失败原因
+     */
+    private static String redisUnavailableReason(ConfigurableEnvironment environment) {
         String host = environment.getProperty("spring.data.redis.host", "127.0.0.1");
         int port = environment.getProperty("spring.data.redis.port", Integer.class, 6379);
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(host, port), PROBE_TIMEOUT_MS);
-            return true;
+            return null;
         } catch (Exception e) {
-            log.warn("Redis 探测失败({}:{}),进入单机模式: {}", host, port, e.getMessage());
-            return false;
+            String message = e.getMessage();
+            return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
         }
     }
 }

@@ -27,6 +27,8 @@ WORKDIR /app
 
 # 数据统一落在 /data 子目录(裸 docker run 时生效;compose 会再覆盖)
 ENV TZ=Asia/Shanghai \
+    DEPLOY_MODE=auto \
+    DB_TYPE=auto \
     MYSQL_HOST=mysql \
     MYSQL_PORT=3306 \
     MYSQL_DATABASE=game_db \

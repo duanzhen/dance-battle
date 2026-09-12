@@ -56,6 +56,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # 部署模式:auto(默认,探测失败自动降级)/ standalone(强制 SQLite + 本地 SSE)/
+      # distributed(强制 MySQL + Redis,连不上直接启动失败)。依赖已由 depends_on + healthcheck 保证
+      DEPLOY_MODE: ${DEPLOY_MODE:-auto}
+      # 数据源模式(优先级高于 DEPLOY_MODE):auto(默认)/ sqlite / mysql
+      DB_TYPE: ${DB_TYPE:-auto}
       LOGIN_USERNAME: ${LOGIN_USERNAME:-admin}
       LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
       # 服务端口:默认 80,修改后同时生效于容器内监听端口与宿主机映射

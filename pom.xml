@@ -256,6 +256,10 @@
 		前提: 使用 GraalVM JDK 运行 Maven(本地 JAVA_HOME 指向 GraalVM, 或 CI 用 setup-graalvm)
 		spring-boot-starter-parent 的 native profile 已负责 process-aot 与 reachability metadata,
 		这里只需绑定 native-maven-plugin 的 compile-no-fork 到 package 阶段。
+
+		运行期默认值: 未设置 DEPLOY_MODE 时, native 可执行文件默认 standalone
+		(SQLite + 进程内 SSE, 不连 MySQL/Redis); JAR 仍默认 auto(探测失败自动降级)。
+		由 DeployModeResolver 按 org.graalvm.nativeimage.imagecode 区分, 见 README「先选部署模式」。
 	-->
 	<profiles>
 		<profile>

@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -54,4 +56,68 @@ class RedisStandaloneEnvironmentPostProcessorTest {
         assertTrue(excludes.contains("org.redisson.spring.starter.RedissonAutoConfigurationV4"));
     }
 
+    @Test
+    void standaloneModeSkipsProbeAndExcludesRedis() {
+        MockEnvironment env = new MockEnvironment()
+            .withProperty("app.deploy-mode", "standalone")
+            .withProperty("spring.data.redis.host", "127.0.0.1")
+            .withProperty("spring.data.redis.port", "1");
+
+        processor.postProcessEnvironment(env, null);
+
+        assertNotNull(env.getProperty(EXCLUDE_KEY));
+    }
+
+    @Test
+    void distributedModeFailsFastWhenRedisUnreachable() {
+        MockEnvironment env = new MockEnvironment()
+            .withProperty("app.deploy-mode", "distributed")
+            .withProperty("spring.data.redis.host", "127.0.0.1")
+            .withProperty("spring.data.redis.port", "1");
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+            () -> processor.postProcessEnvironment(env, null));
+
+        assertTrue(error.getMessage().contains("DEPLOY_MODE=distributed"));
+        assertNull(env.getProperty(EXCLUDE_KEY));
+    }
+
+    @Test
+    void redisEnabledFalseWinsOverDistributedMode() {
+        MockEnvironment env = new MockEnvironment()
+            .withProperty("app.deploy-mode", "distributed")
+            .withProperty("app.redis.enabled", "false");
+
+        processor.postProcessEnvironment(env, null);
+
+        assertNotNull(env.getProperty(EXCLUDE_KEY));
+    }
+
+    @Test
+    void unknownDeployModeFallsBackToAutoBehavior() {
+        MockEnvironment env = new MockEnvironment()
+            .withProperty("app.deploy-mode", "whatever")
+            .withProperty("spring.data.redis.host", "127.0.0.1")
+            .withProperty("spring.data.redis.port", "1");
+
+        processor.postProcessEnvironment(env, null);
+
+        // auto:探测失败仍降级为单机(不抛异常)
+        assertNotNull(env.getProperty(EXCLUDE_KEY));
+    }
+
+    @Test
+    void nativeImageDefaultsToLocalBroadcast() {
+        NativeImageFlag.runAsNativeImage(() -> {
+            MockEnvironment env = new MockEnvironment()
+                .withProperty("app.deploy-mode", "")
+                .withProperty("spring.data.redis.host", "127.0.0.1")
+                .withProperty("spring.data.redis.port", "1");
+
+            processor.postProcessEnvironment(env, null);
+
+            // native 默认 standalone:即使 Redis 不可达也直接走本地广播,不探测、不报错
+            assertNotNull(env.getProperty(EXCLUDE_KEY));
+        });
+    }
 }

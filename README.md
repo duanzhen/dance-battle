@@ -40,6 +40,54 @@ dance-battle/
 
 ## 快速开始
 
+### 先选部署模式：显式声明，跳过探测与降级
+
+不配置时的默认值按运行形态区分：**打包 Jar 默认 `auto`**（MySQL/Redis 连不上时先探测、再自动降级为 SQLite/单机）；**GraalVM native 可执行文件默认 `standalone`**（直接 SQLite + 本地 SSE，零外部依赖，适合展会/现场单机跑）。两种形态都可以用 `DEPLOY_MODE` 覆盖。
+
+确定部署形态时，建议显式声明，直接走目标路径、不做无用探测：
+
+| `DEPLOY_MODE` | 行为 | 典型用法 |
+| --- | --- | --- |
+| `auto`（Jar 默认） | 探测 MySQL/Redis，失败则自动降级 SQLite/单机 | 本地开发、演示、不确定依赖 |
+| `standalone` | **强制 SQLite + 进程内 SSE**，完全跳过 MySQL/Redis 探测与降级 | 单容器单机部署、离线现场 |
+| `distributed` | **强制 MySQL + Redis**，连不上直接启动失败并给出原因 | 正式多实例部署，尽早暴露配置问题 |
+
+细粒度开关优先级更高，便于混搭（例如 SQLite 单库 + Redis 多实例大屏）：
+
+| 变量 | 取值 | 说明 |
+| --- | --- | --- |
+| `DB_TYPE` | `auto` / `sqlite` / `mysql` | `sqlite` 直连本地文件库并跳过 MySQL 探测；`mysql` 强制 MySQL 且禁用 SQLite 回退（连不上即失败） |
+| `REDIS_ENABLED` | `true` / `false` | `false` 表示显式单机：跳过 Redis 探测，SSE 本地广播、无分布式锁 |
+
+```bash
+# 单机：SQLite + 本地广播，不碰 MySQL/Redis（推荐写法）
+DEPLOY_MODE=standalone java -jar target/game-0.0.1-SNAPSHOT.jar
+
+# 只要免 MySQL，Redis 仍用于多实例大屏联动
+DB_TYPE=sqlite java -jar target/game-0.0.1-SNAPSHOT.jar
+
+# 正式多实例：MySQL/Redis 连不上直接启动失败，不静默降级
+DEPLOY_MODE=distributed java -jar target/game-0.0.1-SNAPSHOT.jar
+```
+
+显式 SQLite 时数据源地址取自 `SQLITE_FALLBACK_URL`（默认 `jdbc:sqlite:./data/game.db`，Docker 镜像内为 `jdbc:sqlite:/data/db/game.db`）；若 `DB_URL` 本身已是 `jdbc:sqlite:...`，则沿用该地址。
+
+### GraalVM native 可执行文件
+
+`mvn -Pnative package` 产出的 `target/game`（或 CI 里的 `game-native-linux`）**零配置**即为单机形态：SQLite 文件库 + 进程内 SSE，不连 MySQL、不连 Redis，启动后日志会自报家门：
+
+```bash
+./target/game   # 无需任何环境变量
+# 运行配置: DEPLOY_MODE=standalone | 数据库=SQLite(jdbc:sqlite:./data/game.db) | Redis=本地模式(SSE 进程内广播、无分布式锁)
+```
+
+需要连外部依赖时按目标显式声明即可，行为与 Jar 完全一致：
+
+```bash
+DEPLOY_MODE=distributed MYSQL_HOST=10.0.0.5 REDIS_HOST=10.0.0.6 ./target/game
+DB_TYPE=mysql MYSQL_HOST=10.0.0.5 ./target/game        # 只要 MySQL，Redis 仍本地
+```
+
 ### 方式一：Docker Compose
 
 ```bash
@@ -73,15 +121,21 @@ java -jar target/game-0.0.1-SNAPSHOT.jar
 
 ### 方式三：SQLite（免 MySQL，适合本地试用/演示）
 
-无需 MySQL 时，设置 `DB_URL` 指向 SQLite 文件即可，启动时自动按 `sql/game_db.sqlite.sql` 建表建索引：
+无需 MySQL 时，设置 `DB_TYPE=sqlite` 即可直接使用本地文件库（跳过 MySQL 探测），启动时自动按 `sql/game_db.sqlite.sql` 建表建索引：
+
+```bash
+DB_TYPE=sqlite java -jar target/game-0.0.1-SNAPSHOT.jar
+```
+
+也可以显式指定 `DB_URL` 指向 SQLite 文件：
 
 ```bash
 DB_URL=jdbc:sqlite:./data/game.db java -jar target/game-0.0.1-SNAPSHOT.jar
 ```
 
 - 数据文件所在目录不存在时会自动创建；重复启动只补缺失项，不会破坏已有数据。
-- SQLite 模式无需 `MYSQL_*` / `DB_USERNAME` / `DB_PASSWORD`，但 Redis 仍然必需。
-- 也可以什么都不配置：MySQL 未配置或连接失败时，应用会自动回退到 SQLite（默认 `jdbc:sqlite:./data/game.db`，可用 `SQLITE_FALLBACK_URL` 修改；`DB_FALLBACK_SQLITE=false` 关闭回退）。
+- SQLite 模式无需 `MYSQL_*` / `DB_USERNAME` / `DB_PASSWORD`；Redis 默认仍会尝试连接，不需要时可加 `REDIS_ENABLED=false`（或直接用 `DEPLOY_MODE=standalone`）。
+- 也可以什么都不配置（`DEPLOY_MODE=auto`）：MySQL 未配置或连接失败时，应用会探测并自动回退到 SQLite（默认 `jdbc:sqlite:./data/game.db`，可用 `SQLITE_FALLBACK_URL` 修改；`DB_FALLBACK_SQLITE=false` 关闭回退）。
 - SQLite 连接会自动追加 `date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS`（与建表脚本中的 TEXT 日期列一致），避免时间字段出现 `Error parsing time stamp`；手动设置 `date_class` 时以你设置的值优先。
 
 > 如果你在旧版本下已经生成过 `data/game.db`（时间列被写成了毫秒数字串），修复参数只影响新写入。最简单的处理是删除 `data/game.db` 后重启让应用重建（演示数据会丢失），或按
@@ -97,7 +151,7 @@ Redis 未配置或连接失败时，应用会自动进入单机模式，无需�
 - 控件图层排序的分布式锁退化为 JVM 本地锁（单实例内仍原子）；
 - 不再创建 RedissonClient，不依赖 Redis 服务器；多实例联动能力相应关闭。
 
-显式禁用 Redis 可设 `REDIS_ENABLED=false`（跳过连接探测）；需要多实例部署时保持 Redis 可用即可恢复原有联动。
+显式禁用 Redis 可设 `REDIS_ENABLED=false`（跳过连接探测）；也可以直接用 `DEPLOY_MODE=standalone` 一次性跳过 MySQL 与 Redis 两处探测。需要多实例部署时保持 Redis 可用即可恢复原有联动。
 
 ### 单镜像运行与数据持久化
 
@@ -106,6 +160,14 @@ Redis 未配置或连接失败时，应用会自动进入单机模式，无需�
 ```bash
 docker build -t dance-game-app:latest .
 docker run -d --name dance-game -p 80:80 dance-game-app:latest
+```
+
+裸跑默认 `DEPLOY_MODE=auto`（探测失败才回退）。想跳过探测、明确走单机路径，加一个环境变量即可：
+
+```bash
+docker run -d --name dance-game -p 80:80 \
+  -e DEPLOY_MODE=standalone \
+  dance-game-app:latest
 ```
 
 > Dockerfile 的 `VOLUME` 是匿名卷：容器删除后数据仍留在磁盘，但重建容器不会自动复用。要可靠的持久化，用命名卷（推荐）或宿主机目录：
@@ -130,11 +192,13 @@ docker compose -f docker-compose.standalone.yml up -d --build
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
+| `DEPLOY_MODE` | Jar `auto` / native `standalone` | 部署模式：`auto` 探测失败自动降级；`standalone` 强制 SQLite + 本地 SSE（跳过所有探测）；`distributed` 强制 MySQL + Redis，连不上直接启动失败 |
+| `DB_TYPE` | `auto` | 数据源模式（优先级高于 `DEPLOY_MODE`）：`sqlite` 直连本地文件库并跳过 MySQL 探测；`mysql` 强制 MySQL 并禁用 SQLite 回退 |
 | `DB_URL` | 空（使用 MySQL 连接） | 数据源完整 JDBC URL；设为 `jdbc:sqlite:...` 即切换为 SQLite（自动补齐时间参数） |
 | `DB_USERNAME` | 空 | 数据库用户名（覆盖 `MYSQL_USER`） |
 | `DB_PASSWORD` | 空 | 数据库密码（覆盖 `MYSQL_PASSWORD`） |
-| `DB_FALLBACK_SQLITE` | `true` | MySQL 未配置/连接失败时自动回退 SQLite 文件库（`false` 关闭） |
-| `SQLITE_FALLBACK_URL` | `jdbc:sqlite:./data/game.db`（Docker 镜像内默认为 `jdbc:sqlite:/data/db/game.db`） | 自动回退时使用的 SQLite 连接（自动补齐时间参数） |
+| `DB_FALLBACK_SQLITE` | `true` | `auto` 模式下 MySQL 未配置/连接失败时是否自动回退 SQLite（`false` 关闭；显式 `DB_TYPE=mysql` / `DEPLOY_MODE=distributed` 时本开关不再生效） |
+| `SQLITE_FALLBACK_URL` | `jdbc:sqlite:./data/game.db`（Docker 镜像内默认为 `jdbc:sqlite:/data/db/game.db`） | 显式 SQLite / 自动回退时使用的 SQLite 连接（自动补齐时间参数；`DB_URL` 本身是 SQLite 时以 `DB_URL` 为准） |
 | `MYSQL_HOST` | `mysql` | MySQL 地址 |
 | `MYSQL_PORT` | `3306` | MySQL 端口 |
 | `MYSQL_DATABASE` | `game_db` | 数据库名 |
@@ -143,7 +207,7 @@ docker compose -f docker-compose.standalone.yml up -d --build
 | `REDIS_HOST` | `redis` | Redis 地址 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
 | `REDIS_PASSWORD` | 空 | Redis 密码（空 = 无密码） |
-| `REDIS_ENABLED` | `true` | Redis 未配置/连接失败时自动进入单机模式（`false` 显式关闭 Redis） |
+| `REDIS_ENABLED` | `true` | `false` 表示显式单机：跳过 Redis 探测，SSE 本地广播、无分布式锁；`true` 时在 `auto` 下不可达自动降级，在 `distributed` 下不可达则启动失败 |
 | `LOGIN_USERNAME` | `admin` | 系统登录账号 |
 | `LOGIN_PASSWORD` | `123456` | 系统登录密码 |
 | `SERVER_PORT` | `80`（Docker）/ `8080`（本地 jar） | 服务端口，修改后宿主机映射与容器内监听端口同步变更 |

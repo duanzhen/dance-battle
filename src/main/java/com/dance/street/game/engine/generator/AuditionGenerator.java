@@ -28,10 +28,10 @@ public class AuditionGenerator implements StageGenerator {
         if (ruleConfig != null && ruleConfig.getCircles() != null) {
             circles = Math.max(1, ruleConfig.getCircles());
         }
-        if (circles > seeded.size()) {
-            circles = Math.max(1, seeded.size());
-        }
-        // 随机抽取圈:先打乱再均分,选手随机分到各圈场次
+        // 分圈数按配置建立,允许暂时空圈:
+        // 圈结构在签到/抽号前即存在,抽号落圈后可直接写入对应圈场次。
+        // 因此不再按当前参赛人数收敛(配置 2 圈时即使当前无人也生成 2 个空圈)。
+        // 兼容旧数据 randomSplit=true:先打乱再均分;新流程签到即定圈,不再走随机抽取
         if (ruleConfig != null && Boolean.TRUE.equals(ruleConfig.getRandomSplit())) {
             List<Long> shuffled = new ArrayList<>(seeded);
             Collections.shuffle(shuffled);
@@ -39,7 +39,7 @@ public class AuditionGenerator implements StageGenerator {
         }
         List<MatchPlan> matches = new ArrayList<>();
 
-        // 分圈:每圈一个场次,每圈人数尽量均分(余数从前圈开始多分1人)
+        // 分圈:每圈一个场次,每圈人数尽量均分(余数从前圈开始多分1人);无人时生成空圈
         int base = seeded.size() / circles;
         int remainder = seeded.size() % circles;
         int cursor = 0;

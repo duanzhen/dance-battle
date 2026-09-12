@@ -16,7 +16,7 @@ import java.math.BigDecimal;
  *   "mode": "KNOCKOUT", "format": "BO1",
  *   "knockout": { "template":"QUARTER_FINAL", "teamsCount":8, "advanceCount":4 },
  *   "scoring":  { "type":"MULTI_DIM", "matchMode":"RANKING", ... },
- *   "transition": { "seedOverrides": {...} }
+ *   "transition": { "targetStageId": 123 }
  * }
  * </pre>
  */

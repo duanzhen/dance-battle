@@ -57,4 +57,10 @@ public class CheckInBo implements Serializable {
      */
     private Long matchId;
 
+    /**
+     * 目标圈序号（可选，1 起）：海选分圈尚未生成圈场次时，由抽号页选中的计划圈指定；
+     * 后端先按配置补建 ZONE-1..n 圈场次，再把新选手挂入该圈。
+     */
+    private Integer zoneIndex;
+
 }

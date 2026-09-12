@@ -28,6 +28,9 @@ CREATE TABLE `t_competitor` (
   `tournament_id` bigint NOT NULL,
   `stage_id` bigint NOT NULL,
   `source_competitor_id` bigint DEFAULT NULL COMMENT '上一阶段的CompetitorID',
+  `source_stage_id` bigint DEFAULT NULL COMMENT '直接来源赛段ID(apply写入时取池.source_stage_id)',
+  `from_roster` tinyint NOT NULL DEFAULT '0' COMMENT '名单快照写入行标记(S2双写:apply置1;签到/手工行为0)',
+  `entry_tag` varchar(20) DEFAULT NULL COMMENT '入场性质:ADVANCE/REVIVE/GUEST/MANUAL/CHECKIN',
   `type` tinyint DEFAULT '0' COMMENT '0:个人, 1:队伍',
   `name` varchar(50) DEFAULT NULL COMMENT '展示名称',
   `number` varchar(20) DEFAULT NULL COMMENT '参赛号',
@@ -67,6 +70,35 @@ CREATE TABLE `t_competitor_member` (
   KEY `idx_player` (`player_id`),
   UNIQUE KEY `uk_competitor_member` (`competitor_id`, `player_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='参赛成员关联表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+-- Table structure for table `t_stage_roster_override`
+--
+
+DROP TABLE IF EXISTS `t_stage_roster_override`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `t_stage_roster_override` (
+  `id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `tournament_id` bigint NOT NULL,
+  `target_stage_id` bigint NOT NULL COMMENT '目标赛段(冗余,便于按赛段清理)',
+  `op` varchar(20) NOT NULL COMMENT 'ADD_SOURCE/ADD_GUEST/REMOVE/SEED',
+  `source_competitor_id` bigint DEFAULT NULL COMMENT 'ADD_SOURCE/REMOVE/SEED 引用的源赛段行',
+  `player_id` bigint DEFAULT NULL COMMENT 'ADD_GUEST 关联选手',
+  `guest_name` varchar(100) DEFAULT NULL COMMENT 'ADD_GUEST 无选手时的展示名',
+  `guest_type` tinyint DEFAULT '0' COMMENT '0:个人, 1:队伍',
+  `guest_number` varchar(20) DEFAULT NULL COMMENT '外卡号码(空=快照时自动)',
+  `seed_rank` bigint DEFAULT NULL COMMENT 'SEED/ADD_GUEST 指定种子位(空=自动)',
+  `create_by` bigint DEFAULT NULL COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`),
+  KEY `idx_override_target` (`target_stage_id`),
+  KEY `idx_override_tournament` (`tournament_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='名单人工覆盖(规则之外的人工决定)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -296,6 +328,9 @@ CREATE TABLE `t_stage` (
   `members` int DEFAULT '1' COMMENT '每队选手数量',
   `visual_col_index` int DEFAULT NULL COMMENT '在大图中处于第几列 (X轴)',
   `rule_config` json DEFAULT NULL,
+  `roster_config_json` json DEFAULT NULL COMMENT '名单来源组(groups,唯一事实源)',
+  `roster_applied` tinyint DEFAULT '0' COMMENT '名单快照已物化(apply成功置1)',
+  `roster_skipped` tinyint DEFAULT '0' COMMENT '名单显式跳过(不带人)',
   `status` enum('DRAFT','PENDING','GAMING','SETTLED','DISCARD') DEFAULT 'DRAFT' COMMENT '状态',
   `team_count_start` int DEFAULT '0' COMMENT '起始队伍数量',
   `team_count_end` int DEFAULT '0' COMMENT '晋级队伍数量',

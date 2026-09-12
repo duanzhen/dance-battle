@@ -37,7 +37,7 @@
         </div>
       </div>
 
-      <!-- 队伍数量预览 -->
+      <!-- 选手数量预览 -->
       <div class="bg-black/50 border border-neutral-800 rounded-lg p-3">
         <div class="text-xs text-neutral-500 mb-1">参赛选手</div>
         <div class="flex items-center justify-between text-sm">
@@ -134,15 +134,16 @@
           {{ getDeleteDisabledReason() }}
         </p>
       </div>
+
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, reactive } from 'vue';
 import { Settings } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { startStage, completeStage, calculateAdvancement } from '@/api/game/stage/lifecycle';
+import { startStage, completeStage } from '@/api/game/stage/lifecycle';
 import { listReferee } from '@/api/game/referee';
 import { getStageRefereeIds, assignStageReferees } from '@/api/game/refereeStage';
 import { StageData, StageMode } from './types';
@@ -189,7 +190,7 @@ const stageModeLabels: Record<string, string> = {
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
     DRAFT: '规划中',
-    PENDING: '未开始',
+    PENDING: '规划中',
     GAMING: '进行中',
     SETTLED: '已结束',
     DISCARD: '已取消'
@@ -199,7 +200,7 @@ const statusLabel = computed(() => {
 const statusTextClass = computed(() => {
   const map: Record<string, string> = {
     DRAFT: 'text-neutral-400',
-    PENDING: 'text-amber-400',
+    PENDING: 'text-neutral-400',
     GAMING: 'text-green-400',
     SETTLED: 'text-neutral-300',
     DISCARD: 'text-red-400'
@@ -301,8 +302,6 @@ const doComplete = async () => {
     lifecycleLoading.value = false;
   }
 };
-const doCalculateAdvancement = () => runLifecycle(() => calculateAdvancement(localStage.value.id), undefined, '晋级已计算');
-
 // ===== 裁判分配 =====
 const refereeList = ref<{ id: string | number; name: string }[]>([]);
 const selectedRefereeIds = ref<string[]>([]);

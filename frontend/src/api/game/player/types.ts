@@ -25,12 +25,12 @@ export interface PlayerVO {
   idCard: string | number;
 
   /**
-   * 参赛队伍ID（签到后生成）
+   * 参赛选手ID（签到后生成）
    */
   competitorId?: string | number | null;
 
   /**
-   * 参赛队伍信息（签到后返回）
+   * 参赛选手信息（签到后返回）
    */
   competitorVo?: {
     id: string | number;

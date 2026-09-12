@@ -732,8 +732,8 @@ const scoreInputRef = ref<HTMLInputElement | null>(null);
 /** 海选满分:来自后端 my-match 的 maxScore,按赛段配置切换 10分制/100分制 */
 const auditionMaxScore = ref(10);
 const keypadMax = computed(() => Math.max(1, Number(auditionMaxScore.value) || 10));
-/** 小数位数:10分制两位小数,100分制保持一位小数 */
-const keypadDecimals = computed(() => (keypadMax.value > 10 ? 1 : 2));
+/** 小数位数:10 分制与 100 分制都支持两位小数 */
+const keypadDecimals = computed(() => 2);
 
 /** 选手卡片 DOM 引用(用于选中时自动居中滚动) */
 const chipEls = new Map<number, HTMLElement>();
@@ -799,7 +799,7 @@ const pressKey = (k: string) => {
     keypadValue.value = keypadValue.value === '' ? '0.' : keypadValue.value + '.';
     return;
   }
-  // 按赛段满分切换:10分制最多两位小数、100分制最多一位小数
+  // 10 分制与 100 分制都最多两位小数
   if (keypadValue.value.includes('.')) {
     const dec = keypadValue.value.split('.')[1] || '';
     if (dec.length >= keypadDecimals.value) return;

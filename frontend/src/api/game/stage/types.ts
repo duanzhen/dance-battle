@@ -1,3 +1,5 @@
+import { RosterVO } from './rosterTypes';
+
 export interface StageVO {
   /**
    *
@@ -50,12 +52,12 @@ export interface StageVO {
   status: string;
 
   /**
-   * 起始队伍数量
+   * 起始选手数量
    */
   teamCountStart: number;
 
   /**
-   * 晋级队伍数量
+   * 晋级选手数量
    */
   teamCountEnd: number;
 
@@ -68,6 +70,11 @@ export interface StageVO {
    * 是否完成初始化配置：0-否 1-是
    */
   isInitialized: number;
+
+  /**
+   * 入边池摘要(池化:目标赛段的名单来源)
+   */
+  incoming?: RosterVO[];
 
   /**
    * 视觉配置：{"color": "#f59e0b", "icon": "trophy"}
@@ -132,12 +139,12 @@ export interface StageForm extends BaseEntity {
   status?: string;
 
   /**
-   * 起始队伍数量
+   * 起始选手数量
    */
   teamCountStart?: number;
 
   /**
-   * 晋级队伍数量
+   * 晋级选手数量
    */
   teamCountEnd?: number;
 
@@ -209,12 +216,12 @@ export interface StageQuery extends PageQuery {
   status?: string;
 
   /**
-   * 起始队伍数量
+   * 起始选手数量
    */
   teamCountStart?: number;
 
   /**
-   * 晋级队伍数量
+   * 晋级选手数量
    */
   teamCountEnd?: number;
 

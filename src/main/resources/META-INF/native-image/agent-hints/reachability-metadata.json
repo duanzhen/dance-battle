@@ -1374,23 +1374,9 @@
           ]
         },
         {
-          "name": "addGuest",
-          "parameterTypes": [
-            "java.lang.Long",
-            "com.dance.street.game.domain.bo.AddGuestBo"
-          ]
-        },
-        {
           "name": "arenaOverview",
           "parameterTypes": [
             "java.lang.Long"
-          ]
-        },
-        {
-          "name": "calculateAdvancement",
-          "parameterTypes": [
-            "java.lang.Long",
-            "com.dance.street.game.domain.bo.CalculateAdvancementBo"
           ]
         },
         {
@@ -3021,41 +3007,6 @@
       "type": "com.dance.street.game.domain.TVisWidgetToTVisWidgetVoMapperImpl__BeanDefinitions"
     },
     {
-      "type": "com.dance.street.game.domain.bo.AddGuestBo",
-      "fields": [
-        {
-          "name": "name"
-        }
-      ],
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": []
-        },
-        {
-          "name": "setName",
-          "parameterTypes": [
-            "java.lang.String"
-          ]
-        },
-        {
-          "name": "setPlacement",
-          "parameterTypes": [
-            "java.lang.String"
-          ]
-        }
-      ]
-    },
-    {
-      "type": "com.dance.street.game.domain.bo.CalculateAdvancementBo",
-      "methods": [
-        {
-          "name": "<init>",
-          "parameterTypes": []
-        }
-      ]
-    },
-    {
       "type": "com.dance.street.game.domain.bo.CheckInBo",
       "fields": [
         {
@@ -3132,9 +3083,6 @@
     },
     {
       "type": "com.dance.street.game.domain.bo.MatchRefereeBo"
-    },
-    {
-      "type": "com.dance.street.game.domain.bo.PromoteReplacementBo"
     },
     {
       "type": "com.dance.street.game.domain.bo.ReorderBo"
@@ -5568,23 +5516,11 @@
           ]
         },
         {
-          "name": "addGuest",
-          "parameterTypes": [
-            "com.dance.street.game.domain.bo.AddGuestBo"
-          ]
-        },
-        {
           "name": "appendStageCompetitor",
           "parameterTypes": [
             "java.lang.Long",
             "java.lang.Long",
             "java.lang.Long"
-          ]
-        },
-        {
-          "name": "calculateAdvancement",
-          "parameterTypes": [
-            "com.dance.street.game.domain.bo.CalculateAdvancementBo"
           ]
         },
         {

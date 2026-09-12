@@ -399,7 +399,9 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 .eq(TMatchParticipant::getMatchId, matchId))
             .stream().filter(p -> p.getCompetitorId() != null).count();
         if (realCount <= 1) {
-            if (StageConstants.STAGE_PENDING.equals(stage.getStatus())) {
+            // 赛段已生成场次且尚未开赛(DRAFT/PENDING):开始首个场次时一并进入进行中
+            if (StageConstants.STAGE_PENDING.equals(stage.getStatus())
+                || StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
                 TStage sUpd = new TStage();
                 sUpd.setId(stage.getId());
                 sUpd.setStatus(StageConstants.STAGE_GAMING);
@@ -442,7 +444,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
         }
         // 赛段若尚未开始,随本场一起进入 GAMING
-        if (StageConstants.STAGE_PENDING.equals(stage.getStatus())) {
+        if (StageConstants.STAGE_PENDING.equals(stage.getStatus())
+            || StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
             TStage sUpd = new TStage();
             sUpd.setId(stage.getId());
             sUpd.setStatus(StageConstants.STAGE_GAMING);

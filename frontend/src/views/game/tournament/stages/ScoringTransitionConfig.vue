@@ -151,22 +151,4 @@ watch(
 </script>
 
 <style scoped>
-.cfg-select {
-  width: 100%;
-  background: #000;
-  border: 1px solid #404040;
-  border-radius: 4px;
-  padding: 10px;
-  font-size: 13px;
-  color: #fff;
-}
-.cfg-input {
-  width: 100%;
-  background: #000;
-  border: 1px solid #404040;
-  border-radius: 4px;
-  padding: 8px 10px;
-  font-size: 13px;
-  color: #fff;
-}
 </style>

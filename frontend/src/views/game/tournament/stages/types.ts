@@ -46,7 +46,7 @@ export interface KnockoutConfig {
 // 小组赛配置
 export interface GroupConfig {
   groupCount: number; // 分组数
-  teamsPerGroup: number; // 每组队伍数
+  teamsPerGroup: number; // 每组选手数
   winPoints: number; // 胜积分
   drawPoints: number; // 平积分
   lossPoints: number; // 负积分
@@ -60,7 +60,8 @@ export interface AuditionConfig {
   scale?: number;
   advanceCondition: string; // 晋级条件
   advanceCount: number; // 晋级名额
-  format: MatchFormat;
+  /** 海选为打分制,无比赛格式(BO1/BO3) */
+  format?: MatchFormat;
   circles?: number; // 分圈数(1=不分圈)
   /** 每圈晋级人数(按圈顺序 ZONE-1..n,各圈可不相同;未配置按 advanceCount 均分) */
   circleAdvanceCounts?: number[];
@@ -115,6 +116,8 @@ export interface StageData {
   status: 'DRAFT' | 'PENDING' | 'GAMING' | 'SETTLED' | 'DISCARD';
   isInitialized?: boolean; // 是否已完成初始化配置
   tournamentId?: string | number; // 赛事ID
+  prevStageId?: string | number | null;
+  nextStageId?: string | number | null;
 }
 
 // 赛段类型选择器事件

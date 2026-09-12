@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 验证 sql/game_db.sql 的建表语句解析:只保留 CREATE TABLE,
- * 忽略 DROP/SET/注释,并正确识别 14 张业务表。
+ * 忽略 DROP/SET/注释,并正确识别 16 张业务表。
  */
 class DatabaseSchemaInitializerTest {
 
@@ -24,7 +24,7 @@ class DatabaseSchemaInitializerTest {
 
         List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
 
-        assertEquals(14, ddlList.size());
+        assertEquals(16, ddlList.size());
         for (String ddl : ddlList) {
             assertTrue(ddl.matches("(?is)^CREATE\\s+TABLE.*"), "应为 CREATE TABLE 语句: " + ddl);
             assertFalse(ddl.matches("(?is)^DROP\\s+TABLE.*"), "不应包含 DROP 语句: " + ddl);
@@ -58,9 +58,8 @@ class DatabaseSchemaInitializerTest {
         List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
         List<String> indexList = DatabaseSchemaInitializer.parseCreateIndexStatements(script);
 
-        assertEquals(14, ddlList.size());
-        // 10 个普通索引 + uk_competitor_member / uk_round_score 两个唯一索引
-        assertEquals(12, indexList.size());
+        assertEquals(16, ddlList.size());
+        assertEquals(18, indexList.size());
         for (String index : indexList) {
             assertTrue(index.matches("(?is)^CREATE\\s+(UNIQUE\\s+)?INDEX.*"), "应为 CREATE INDEX 语句: " + index);
             assertFalse(index.matches("(?is)^CREATE\\s+TABLE.*"), "不应包含建表语句: " + index);

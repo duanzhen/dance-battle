@@ -1,7 +1,7 @@
 <template>
   <el-config-provider :locale="appStore.locale" :size="appStore.size">
     <router-view />
-    <password-dialog ref="passwordDialogRef" />
+    <!-- <password-dialog ref="passwordDialogRef" /> -->
 
     <!-- 微信内置浏览器提示蒙层 -->
     <div

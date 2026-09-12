@@ -311,7 +311,7 @@ const numOf = (p: any) => {
   const n = parseInt(number(p), 10);
   return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
 };
-const score = (p: any) => (p?.scoreValue == null ? '–' : Number(p.scoreValue).toFixed(1));
+const score = (p: any) => (p?.scoreValue == null ? '–' : Number(p.scoreValue).toFixed(2));
 const dimsOf = (p: any) => dimsByComp.value[String(p.competitorId)] || [];
 
 /** 表格维度列头:取第一个有维度分的选手配置(同赛段各选手维度一致) */
@@ -328,7 +328,7 @@ const tableDims = computed(() => {
 /** 某选手某维度分 */
 const dimScore = (p: any, key: string) => {
   const d = dimsOf(p).find((x: any) => x.key === key);
-  return d == null || d.score == null ? '–' : Number(d.score).toFixed(1);
+  return d == null || d.score == null ? '–' : Number(d.score).toFixed(2);
 };
 
 /** 名次配色:前三名高亮 */

@@ -175,7 +175,7 @@ const formData = ref<{
   remark: ''
 });
 
-const commonTags = ['种子', 'GUEST', '队长', '替补', '新人'];
+const commonTags = ['种子', 'GUEST', '替补', '新人'];
 
 // 标签操作
 const handleTagAdd = () => {

@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchRound;
@@ -22,13 +23,18 @@ import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TVisWidget;
+import com.dance.street.game.domain.TStageRosterOverride;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.RosterConstants;
+import com.dance.street.game.engine.common.StageRosterGroupCodec;
+import com.dance.street.game.engine.common.PairingModeResolver;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.generator.KnockoutGenerator;
@@ -41,7 +47,9 @@ import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.mapper.TStageRosterOverrideMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
+import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
 
 import org.springframework.transaction.annotation.Transactional;
@@ -70,6 +78,8 @@ public class TStageServiceImpl implements ITStageService {
     private final TRefereeStageMapper refereeStageMapper;
     private final TPlayerMapper playerMapper;
     private final TVisWidgetMapper visWidgetMapper;
+    private final TStageRosterOverrideMapper overrideMapper;
+    private final ITStageRosterService rosterService;
 
     /**
      * 查询赛段流程
@@ -93,6 +103,7 @@ public class TStageServiceImpl implements ITStageService {
     public TableDataInfo<TStageVo> queryPageList(TStageBo bo, PageQuery pageQuery) {
         LambdaQueryWrapper<TStage> lqw = buildQueryWrapper(bo);
         Page<TStageVo> result = baseMapper.selectVoPage(pageQuery.build(), lqw);
+        enrichIncoming(result.getRecords());
         return TableDataInfo.build(result);
     }
 
@@ -105,7 +116,22 @@ public class TStageServiceImpl implements ITStageService {
     @Override
     public List<TStageVo> queryList(TStageBo bo) {
         LambdaQueryWrapper<TStage> lqw = buildQueryWrapper(bo);
-        return baseMapper.selectVoList(lqw);
+        List<TStageVo> list = baseMapper.selectVoList(lqw);
+        enrichIncoming(list);
+        return list;
+    }
+
+    /** 补入名单摘要:名单是赛段属性,直接按赛段读取 */
+    private void enrichIncoming(List<TStageVo> stages) {
+        if (stages == null || stages.isEmpty()) {
+            return;
+        }
+        for (TStageVo stage : stages) {
+            if (stage.getId() != null) {
+                List<TStageRosterVo> rosters = rosterService.listByTarget(stage.getId());
+                stage.setIncoming(rosters.isEmpty() ? null : rosters);
+            }
+        }
     }
 
     private LambdaQueryWrapper<TStage> buildQueryWrapper(TStageBo bo) {
@@ -131,6 +157,7 @@ public class TStageServiceImpl implements ITStageService {
      * @return 新增后的赛段流程
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TStageVo insertByBo(TStageBo bo) {
         TStage add = MapstructUtils.convert(bo, TStage.class);
 
@@ -148,10 +175,17 @@ public class TStageServiceImpl implements ITStageService {
 
         // 更新链表中的相邻节点
         updateNeighborLinks(add);
+        // 名单:新赛段有直接前驱时同步写入默认来源组(source=prev, ADVANCE, AUTO);
+        // 先写名单再联动名额,使 syncAdvanceCountFromNext 能识别"目标是否多来源"
+        rosterService.ensureRosterForStage(add);
         // 插入赛段后联动调整源赛段晋级名额:
         // 前驱赛段的 teamCountEnd 对齐到新赛段的 teamCountStart,
         // 保证「前段选多少人 = 后段收多少人」;具体人选仍由中间态(预排/顶替/GUEST)对接
         syncAdvanceCountFromNext(add.getPrevStageId(), add.getId());
+        // 中间插入(A→Z→B):B 的 prev 已改为 Z,名单默认来源同步从 A 迁到 Z
+        if (add.getNextStageId() != null) {
+            rosterService.reconcileAfterLinkChange(add.getNextStageId());
+        }
 
         return MapstructUtils.convert(add, TStageVo.class);
     }
@@ -163,6 +197,7 @@ public class TStageServiceImpl implements ITStageService {
      * @return 修改后的赛段流程
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TStageVo updateByBo(TStageBo bo) {
         TStage update = MapstructUtils.convert(bo, TStage.class);
 
@@ -186,6 +221,8 @@ public class TStageServiceImpl implements ITStageService {
 
         // 获取旧数据，用于清理原链表连接
         TStage oldStage = baseMapper.selectById(update.getId());
+        // 分圈保护:海选圈数只增不减、开始后锁定(前端已改为按钮加圈)
+        validateAuditionCircleChange(update, oldStage);
 
         // 防呆:客户端提交的链表指针可能已过期(如删除中间赛段后本地未刷新),
         // 指向的赛段必须存在且属于同一赛事,否则回退旧链接,避免把悬空指针写回
@@ -203,8 +240,56 @@ public class TStageServiceImpl implements ITStageService {
 
         // 更新链表中的相邻节点
         updateNeighborLinks(update);
+        // 若本赛段因改链成为新的入口(无直接前驱),由后端补建签到外部来源组
+        if (update.getPrevStageId() == null) {
+            rosterService.ensureRosterForStage(update);
+        }
+        // 改链后对账本赛段名单:清旧前驱默认组/入口签到组,按新 prev 补齐默认组
+        rosterService.reconcileAfterLinkChange(update.getId());
 
         return MapstructUtils.convert(update, TStageVo.class);
+    }
+
+    /**
+     * 海选分圈变更保护:
+     * 1) 赛段开始/结束后分圈结构(圈数/每圈名额/每圈裁判)锁定,禁止修改;
+     * 2) 规划中允许增加圈,不允许减少到少于当前已生成的圈场次数。
+     */
+    private void validateAuditionCircleChange(TStage update, TStage oldStage) {
+        if (oldStage == null
+            || !StageModeEnum.AUDITION.getCode().equals(oldStage.getStageMode())
+            || StringUtils.isBlank(update.getRuleConfig())) {
+            return;
+        }
+        RuleConfigHolder oldRc = RuleConfigParser.parse(oldStage.getRuleConfig());
+        RuleConfigHolder newRc = RuleConfigParser.parse(update.getRuleConfig());
+        if (oldRc == null || newRc == null) {
+            return;
+        }
+        int oldCircles = oldRc.getCircles() == null ? 1 : Math.max(1, oldRc.getCircles());
+        int newCircles = newRc.getCircles() == null ? oldCircles : Math.max(1, newRc.getCircles());
+        boolean structureChanged = oldCircles != newCircles
+            || !Objects.equals(oldRc.getCircleAdvanceCounts(), newRc.getCircleAdvanceCounts())
+            || !Objects.equals(oldRc.getCircleRefereeIds(), newRc.getCircleRefereeIds());
+        if (!structureChanged) {
+            return;
+        }
+        boolean locked = StageConstants.STAGE_GAMING.equals(oldStage.getStatus())
+            || StageConstants.STAGE_SETTLED.equals(oldStage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(oldStage.getStatus());
+        if (locked) {
+            throw new ServiceException("赛段已开始或结束,分圈结构(圈数/每圈名额/每圈裁判)已锁定,不能修改");
+        }
+        if (newCircles < oldCircles) {
+            throw new ServiceException("分圈数只能增加不能减少(当前 {} 圈);如某圈不再使用,请把该圈晋级名额设为 0", oldCircles);
+        }
+        // 圈数增加时,新增圈必须在原有圈之后追加;以实际已建场次为下限兜底
+        long actualZones = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, oldStage.getId())
+            .likeRight(TMatch::getDisplayZone, "ZONE-"));
+        if (newCircles < actualZones) {
+            throw new ServiceException("已实际建成 {} 个圈,分圈数不能再减少", actualZones);
+        }
     }
 
     /**
@@ -389,69 +474,30 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /**
-     * 联动调整源赛段晋级名额:插入/删除赛段后,把前驱赛段的 teamCountEnd(晋级名额)
-     * 对齐到后继赛段的 teamCountStart(容量),并同步 ruleConfig 中的晋级名额,
-     * 保证结算与预排读取到一致的值。仅对带晋级名额的赛制(海选/排名/淘汰)生效;
-     * 具体晋级人选仍由中间态(预排/顶替/GUEST)调整对接。
+     * 晋级名额联动(旧链表模型遗留):名单化后**显式停用**。
+     *
+     * <p>每个赛段的晋级名额/容量与名单来源组是独立配置:
+     * 前驱赛段应输出多少人以来源组(晋级/落选/名次)为准,
+     * 下游赛段容量由 teamCountStart 决定。若在建链时临时把前驱 teamCountEnd
+     * 顶到下游容量,会在"先建链、后配复活/多来源"的流程里误改海选晋级名额,
+     * 因此这里保留调用点但不再修改任何数据。</p>
      */
     private void syncAdvanceCountFromNext(Long prevId, Long nextId) {
-        if (prevId == null || nextId == null) {
-            return;
-        }
-        TStage prev = baseMapper.selectById(prevId);
-        TStage next = baseMapper.selectById(nextId);
-        // teamCountStart <= 0 表示不限制容量(如海选入口赛段):不联动上一赛段晋级名额,
-        // 避免把前驱赛段的 teamCountEnd 清零
-        if (prev == null || next == null || next.getTeamCountStart() == null
-            || next.getTeamCountStart() <= 0) {
-            return;
-        }
-        String mode = prev.getStageMode();
-        if (!StageModeEnum.AUDITION.getCode().equals(mode)
-            && !StageModeEnum.RANK.getCode().equals(mode)
-            && !StageModeEnum.KNOCKOUT.getCode().equals(mode)) {
-            return;
-        }
-        Long newEnd = next.getTeamCountStart();
-        if (Objects.equals(prev.getTeamCountEnd(), newEnd)) {
-            return;
-        }
-        Long oldEnd = prev.getTeamCountEnd();
-        prev.setTeamCountEnd(newEnd);
-        prev.setRuleConfig(patchAdvanceCount(prev.getRuleConfig(), mode, newEnd));
-        baseMapper.updateById(prev);
-        log.info("赛段[{}]({})晋级名额联动调整 {} → {} (对齐下一赛段[{}]容量)",
-            prev.getName(), mode, oldEnd, newEnd, next.getName());
+        // no-op:名单流转由来源组与赛段配置决定
     }
 
-    /** 按赛制把 ruleConfig 中的晋级名额更新为指定值(与 teamCountEnd 权威字段保持一致) */
-    private String patchAdvanceCount(String ruleConfig, String mode, Long newEnd) {
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            Map<String, Object> rc = StringUtils.isBlank(ruleConfig)
-                ? new HashMap<>()
-                : mapper.readValue(ruleConfig, Map.class);
-            if (rc == null) {
-                rc = new HashMap<>();
+    /** 名单行的全部内部来源组是否都已结算(STREAM/外部组视为就绪) */
+    private boolean allGroupsResolved(List<TStageRosterGroupBo> groups) {
+        for (TStageRosterGroupBo g : groups) {
+            if (g.getSourceStageId() == null) {
+                continue;
             }
-            if (StageModeEnum.KNOCKOUT.getCode().equals(mode)) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> ko = (Map<String, Object>) rc.get("knockout");
-                if (ko == null) {
-                    ko = new HashMap<>();
-                    rc.put("knockout", ko);
-                }
-                ko.put("advanceCount", newEnd);
-            } else {
-                // 海选/排名赛:顶层 advanceCount(与 readStageAdvanceCount 口径一致)
-                rc.put("advanceCount", newEnd);
+            TStage src = baseMapper.selectById(g.getSourceStageId());
+            if (src == null || !StageConstants.STAGE_SETTLED.equals(src.getStatus())) {
+                return false;
             }
-            rc.putIfAbsent("mode", mode);
-            return mapper.writeValueAsString(rc);
-        } catch (Exception e) {
-            log.warn("赛段晋级名额联动:ruleConfig 更新失败,仅更新 teamCountEnd: {}", e.getMessage());
-            return ruleConfig;
         }
+        return true;
     }
 
     /**
@@ -525,6 +571,12 @@ public class TStageServiceImpl implements ITStageService {
         }
         // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
         List<Long> stageIds = ids.stream().map(Long::valueOf).toList();
+        // 名单清理:删除以这些赛段为目标的人工覆盖;其余赛段名单摘除引用被删赛段的来源组
+        if (!stageIds.isEmpty()) {
+            overrideMapper.delete(Wrappers.<TStageRosterOverride>lambdaQuery()
+                .in(TStageRosterOverride::getTargetStageId, stageIds));
+            rosterService.removeSourceRefs(stageIds);
+        }
         List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
                 .in(TMatch::getStageId, stageIds)
                 .select(TMatch::getId))
@@ -570,6 +622,13 @@ public class TStageServiceImpl implements ITStageService {
                 .eq(TStage::getNextStageId, st.getId())
                 .set(TStage::getNextStageId, st.getNextStageId()));
         }
+        Set<Long> affectedTournamentIds = toDeleteStages.stream()
+            .map(TStage::getTournamentId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        // 删除后为存活赛段补齐名单行:被删赛段的后续赛段若原名单整行失效,
+        // 按新 prev 补默认组;新入口(无前驱)补签到 STREAM 组
+        rosterService.ensureRosterForSurvivors(affectedTournamentIds);
         // 自动解绑引用被删赛段/其场次的场景组件,避免大屏刷新后报"赛段不存在"
         clearWidgetStageBindings(deletingStages, matchIds);
         return deleted;
@@ -886,10 +945,9 @@ public class TStageServiceImpl implements ITStageService {
             return vo;
         }
 
-        // 上一赛段已标记晋级的参赛方(finalRank 为 null 的排最后,保证稳定顺序)
-        List<TCompetitor> advancers = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, prev.getId())
-            .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
+        // 预排候选来自目标名单(来源组):AUTO 组按优先级并集、组配额截断,
+        // 分圈海选整单晋级沿用 apply 的圈内名次轮转排序——不再只读"链上上一赛段 ADVANCE"
+        List<TCompetitor> advancers = rosterService.previewRoster(stage.getId());
         if (advancers.isEmpty()) {
             // 上一赛段尚无晋级者:仅返回已提前加入的参赛方(如 GUEST)
             if (!own.isEmpty()) {
@@ -899,11 +957,8 @@ public class TStageServiceImpl implements ITStageService {
             vo.setStatus("WAIT_PREV");
             return vo;
         }
-        advancers.sort(Comparator
-            .comparing((TCompetitor c) -> c.getFinalRank() == null ? Long.MAX_VALUE : c.getFinalRank())
-            .thenComparing(TCompetitor::getId));
 
-        // 淘汰赛胜者来源场次名(用于"对应位置"展示)
+        // 场次位计数(用于 BYE/TBD 展示)仍按链上上一赛段场次;来源场次名取预排候选的真实来源赛段
         Map<Long, String> sourceMatch = new HashMap<>();
         Map<Integer, Integer> matchPosCount = new HashMap<>();
         List<TMatch> prevMatches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
@@ -914,13 +969,6 @@ public class TStageServiceImpl implements ITStageService {
                 Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds));
             Map<Long, Long> partCountByMatch = parts.stream()
                 .collect(Collectors.groupingBy(TMatchParticipant::getMatchId, Collectors.counting()));
-            Map<Long, String> matchNameById = prevMatches.stream()
-                .collect(Collectors.toMap(TMatch::getId, TMatch::getName));
-            for (TMatchParticipant p : parts) {
-                if (p.getCompetitorId() != null) {
-                    sourceMatch.put(p.getCompetitorId(), matchNameById.get(p.getMatchId()));
-                }
-            }
             for (TMatch m : prevMatches) {
                 if (m.getDisplayRow() != null) {
                     matchPosCount.put(m.getDisplayRow().intValue() + 1,
@@ -928,8 +976,27 @@ public class TStageServiceImpl implements ITStageService {
                 }
             }
         }
+        List<Long> sourceStageIds = advancers.stream()
+            .map(TCompetitor::getStageId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        if (!sourceStageIds.isEmpty()) {
+            List<TMatch> sourceMatches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                .in(TMatch::getStageId, sourceStageIds));
+            List<Long> sourceMatchIds = sourceMatches.stream().map(TMatch::getId).toList();
+            if (!sourceMatchIds.isEmpty()) {
+                Map<Long, String> matchNameById = sourceMatches.stream()
+                    .collect(Collectors.toMap(TMatch::getId, TMatch::getName));
+                participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                        .in(TMatchParticipant::getMatchId, sourceMatchIds)
+                        .isNotNull(TMatchParticipant::getCompetitorId))
+                    .forEach(p -> sourceMatch.putIfAbsent(p.getCompetitorId(),
+                        matchNameById.get(p.getMatchId())));
+            }
+        }
 
-        // 按原始场次位置(finalRank)排布:跳过场次留空,后续胜者不抢占被跳过场次的位置
+        // 按预排顺序填充种子空位:跳过场次留空,后续候选不抢占已占位置
         int totalSlots = stage.getTeamCountStart() != null && stage.getTeamCountStart() > 0
             ? stage.getTeamCountStart().intValue()
             : Math.max(advancers.size(), prevMatches.size());
@@ -964,23 +1031,18 @@ public class TStageServiceImpl implements ITStageService {
                 seeds.add(s);
             }
         }
-        vo.setSeededCompetitors(seeds);
+    vo.setSeededCompetitors(seeds);
         vo.setStatus("PREVIEW");
 
         List<PreBracketVo.PrePair> pairList = new ArrayList<>();
-        // 配对模式:显式配置优先;从海选赛进入的淘汰赛默认 SEED(1-16、2-15),否则 SEQUENTIAL(1-2、3-4)
-        String pairingMode = null;
+        // 配对模式:与生成对阵同一口径(显式配置优先;种子来自名次则默认种子摆位)
         RuleConfigHolder stageRc = RuleConfigParser.parse(stage.getRuleConfig());
-        if (stageRc != null && stageRc.getKnockout() != null) {
-            pairingMode = stageRc.getKnockout().getPairingMode();
-        }
-        if (StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())) {
-            // 承接上一淘汰赛胜者:按胜者位置顺序配对,覆盖本赛段配置的 SEED
-            pairingMode = "SEQUENTIAL";
-        } else if (StringUtils.isBlank(pairingMode)) {
-            pairingMode = (StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
-                || StageModeEnum.RANK.getCode().equals(prev.getStageMode())) ? "SEED" : "SEQUENTIAL";
-        }
+        String configuredPairing = stageRc != null && stageRc.getKnockout() != null
+            ? stageRc.getKnockout().getPairingMode() : null;
+        String pairingMode = PairingModeResolver.resolve(
+            configuredPairing,
+            seedsFromRanking(stage.getId()),
+            PairingModeResolver.prevIsRanking(prev));
         if ("SEED".equalsIgnoreCase(pairingMode)) {
             int bracketSize = Math.max(2, nextPowerOfTwo(seedArr.length));
             int[] layout = KnockoutGenerator.seedLayout(bracketSize);
@@ -1036,6 +1098,17 @@ public class TStageServiceImpl implements ITStageService {
             p <<= 1;
         }
         return p;
+    }
+
+    /** 本赛段名单的来源里是否有海选/排名赛(决定默认是否头尾交叉配对) */
+    private boolean seedsFromRanking(Long stageId) {
+        TStage stage = baseMapper.selectById(stageId);
+        if (stage == null) {
+            return false;
+        }
+        return PairingModeResolver.seedsFromRanking(
+            StageRosterGroupCodec.parse(stage.getRosterConfigJson()),
+            baseMapper::selectById);
     }
 
     private PreBracketVo.PreSeed toPreSeed(TCompetitor c, Long seedRank, String sourceMatchName) {

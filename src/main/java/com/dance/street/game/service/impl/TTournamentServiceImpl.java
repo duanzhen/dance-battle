@@ -18,12 +18,16 @@ import com.dance.street.game.domain.bo.TTournamentTemplateBo;
 import com.dance.street.game.domain.bo.TRefereeBo;
 import com.dance.street.game.domain.bo.StageRefereeBo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageRosterBo;
+import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.bo.TVisSceneBo;
 import com.dance.street.game.domain.bo.TVisWidgetBo;
 import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.domain.vo.TVisSceneVo;
 import com.dance.street.game.domain.TTournament;
+import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRefereeStage;
@@ -35,8 +39,10 @@ import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.mapper.TVisSceneMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITStageService;
+import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITVisSceneService;
 import com.dance.street.game.service.ITVisWidgetService;
 import com.dance.street.game.service.ITRefereeService;
@@ -47,6 +53,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.Objects;
+
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 赛事主Service业务层处理
@@ -70,6 +79,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
     private final ITVisWidgetService visWidgetService;
     private final ITRefereeService refereeService;
     private final ITRefereeStageService refereeStageService;
+    private final TStageMapper stageMapper;
+    private final ITStageRosterService rosterService;
 
     /** 赛事模版:模版编码 → 赛段定义(海选 + 淘汰赛链) */
     private static final Map<String, List<StageDef>> TEMPLATES = buildTemplates();
@@ -398,6 +409,10 @@ public class TTournamentServiceImpl implements ITTournamentService {
             refereeIds = createRefereesIfNeeded(tid, bo.getRefereeCount(), stageIds);
         }
 
+        // 6.5 海选圈自动配置(模板赛事免手工):按裁判数分 1~2 圈,均分晋级名额并绑定裁判,
+        //     同时把下一赛段的默认"海选·晋级"来源组替换为按圈的晋级出口
+        autoConfigureAuditionCircles(stages, refereeIds);
+
         log.info("按模版[{}]创建赛事[{}]完成:{} 个赛段,{} 个对战树 widget,1 个当前场次 widget,2 个背景图片 widget",
             bo.getTemplateCode(), tid, stages.size(), idx);
         if (refereeIds != null && !refereeIds.isEmpty()) {
@@ -511,9 +526,107 @@ public class TTournamentServiceImpl implements ITTournamentService {
         return visSceneService.insertByBo(bo);
     }
 
+    /**
+     * 模板赛事自动配置海选圈:圈数按裁判数(≥2 → 2 圈),均分晋级名额与裁判,
+     * 并把下一赛段默认的"海选·晋级"来源组替换为按圈的晋级出口。
+     */
+    private void autoConfigureAuditionCircles(List<TStageVo> stages, List<Long> refereeIds) {
+        TStageVo audition = stages.stream()
+            .filter(s -> "AUDITION".equals(s.getStageMode()))
+            .findFirst().orElse(null);
+        if (audition == null) {
+            return;
+        }
+        int idx = stages.indexOf(audition);
+        TStageVo next = idx >= 0 && idx + 1 < stages.size() ? stages.get(idx + 1) : null;
+        int refCount = refereeIds == null ? 0 : refereeIds.size();
+        int circles = refCount >= 2 ? 2 : 1;
+        int advance = audition.getTeamCountEnd() == null ? 0 : audition.getTeamCountEnd().intValue();
+        if (advance <= 0) {
+            return;
+        }
+        List<Integer> quotas = new ArrayList<>();
+        int base = advance / circles;
+        int rem = advance % circles;
+        for (int i = 0; i < circles; i++) {
+            quotas.add(base + (i < rem ? 1 : 0));
+        }
+        List<List<Long>> circleRefs = new ArrayList<>();
+        for (int i = 0; i < circles; i++) {
+            circleRefs.add(new ArrayList<>());
+        }
+        if (refereeIds != null) {
+            for (int i = 0; i < refereeIds.size(); i++) {
+                circleRefs.get(i % circles).add(refereeIds.get(i));
+            }
+        }
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> raw = mapper.readValue(audition.getRuleConfig(), Map.class);
+            if (raw == null) {
+                raw = new LinkedHashMap<>();
+            }
+            raw.put("circles", circles);
+            raw.put("circleAdvanceCounts", quotas);
+            raw.put("circleRefereeIds", circleRefs);
+            TStage upd = new TStage();
+            upd.setId(audition.getId());
+            upd.setRuleConfig(mapper.writeValueAsString(raw));
+            stageMapper.updateById(upd);
+        } catch (Exception e) {
+            log.warn("模板海选圈配置写入失败: {}", e.getMessage());
+        }
+        if (next == null) {
+            return;
+        }
+        try {
+            TStageRosterBo bo = new TStageRosterBo();
+            bo.setSourceStageId(audition.getId());
+            bo.setResultFilter("ADVANCE");
+            bo.setFillMode("AUTO");
+            bo.setQuota(0);
+            List<TStageRosterGroupBo> groups = new ArrayList<>();
+            for (int i = 0; i < circles; i++) {
+                TStageRosterGroupBo g = new TStageRosterGroupBo();
+                g.setSourceStageId(audition.getId());
+                g.setResultFilter("ADVANCE");
+                if (circles > 1) {
+                    g.setZone("ZONE-" + (i + 1));
+                }
+                g.setRankByZone(circles > 1);
+                g.setRankStart(1);
+                g.setRankEnd(quotas.get(i));
+                g.setFillMode("AUTO");
+                g.setQuota(0);
+                groups.add(g);
+            }
+            bo.setGroups(groups);
+            rosterService.addGroups(next.getId(), bo);
+            // 追加成功后移除旧的"全场名次"默认组,避免与按圈出口重复取人
+            List<TStageRosterVo> rosters = rosterService.listByTarget(next.getId());
+            if (!rosters.isEmpty() && rosters.get(0).getGroups() != null) {
+                List<TStageRosterGroupBo> merged = rosters.get(0).getGroups();
+                for (int i = 0; i < merged.size(); i++) {
+                    TStageRosterGroupBo g = merged.get(i);
+                    if (Objects.equals(g.getSourceStageId(), audition.getId())
+                        && g.getZone() == null && g.getRankStart() == null && g.getRankEnd() == null) {
+                        rosterService.removeGroup(next.getId(), i);
+                        break;
+                    }
+                }
+            }
+            log.info("模板海选自动配置完成:{} 圈,每圈晋级 {},出口已写入赛段[{}]",
+                circles, quotas, next.getName());
+        } catch (Exception e) {
+            log.warn("模板海选出口自动配置失败: {}", e.getMessage());
+        }
+    }
+
     private String buildRuleConfig(StageDef d) {
         if ("AUDITION".equals(d.mode())) {
-            return "{\"mode\":\"AUDITION\",\"format\":\"BO1\",\"circles\":1,"
+            // 海选为打分制(无 BO1/BO3);圈默认为空(0),由 createByTemplate 在裁判创建后自动配置
+            return "{\"mode\":\"AUDITION\",\"circles\":0,"
                 + "\"maxScore\":10,"
                 + "\"scoring\":{\"type\":\"TOTAL_SCORE\",\"matchMode\":\"VOTING\","
                 + "\"aggregateRule\":\"SUM\",\"refereeAggregateRule\":\"SUM\"},"

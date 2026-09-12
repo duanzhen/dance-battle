@@ -74,8 +74,7 @@
               <span
                 class="text-[8px] font-bold px-1.5 py-0.5 rounded-full"
                 :class="{
-                  'bg-blue-600/20 text-blue-400': stage.status === 'DRAFT',
-                  'bg-neutral-700 text-neutral-400': stage.status === 'PENDING',
+                  'bg-blue-600/20 text-blue-400': stage.status === 'DRAFT' || stage.status === 'PENDING',
                   'bg-green-600/20 text-green-400': stage.status === 'GAMING',
                   'bg-amber-600/20 text-amber-400': stage.status === 'SETTLED',
                   'bg-red-600/20 text-red-400': stage.status === 'DISCARD'
@@ -105,8 +104,7 @@
             <span
               class="text-[10px] font-bold px-2 py-1 rounded"
               :class="{
-                'bg-blue-600/20 text-blue-400': currentStage.status === 'DRAFT',
-                'bg-neutral-700 text-neutral-400': currentStage.status === 'PENDING',
+                'bg-blue-600/20 text-blue-400': currentStage.status === 'DRAFT' || currentStage.status === 'PENDING',
                 'bg-green-600/20 text-green-400': currentStage.status === 'GAMING',
                 'bg-amber-600/20 text-amber-400': currentStage.status === 'SETTLED',
                 'bg-red-600/20 text-red-400': currentStage.status === 'DISCARD'
@@ -765,7 +763,7 @@ const tempWithdrawTarget = ref<string | number | null>(null);
 const getStatusText = (status: string) => {
   const map: Record<string, string> = {
     'DRAFT': '规划中',
-    'PENDING': '待开始',
+    'PENDING': '规划中',
     'GAMING': '进行中',
     'SETTLED': '已结束',
     'DISCARD': '已取消'

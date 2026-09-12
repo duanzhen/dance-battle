@@ -79,12 +79,12 @@ public class TStageBo extends BaseEntity {
     private String status;
 
     /**
-     * 起始队伍数量
+     * 起始选手数量
      */
     private Long teamCountStart;
 
     /**
-     * 晋级队伍数量
+     * 晋级选手数量
      */
     private Long teamCountEnd;
 

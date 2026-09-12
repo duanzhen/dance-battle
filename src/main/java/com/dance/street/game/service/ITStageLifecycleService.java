@@ -1,13 +1,10 @@
 package com.dance.street.game.service;
 
-import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
-import com.dance.street.game.domain.bo.AddGuestBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.AuditionResultVo;
-import com.dance.street.game.domain.vo.CircleAssignVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 
@@ -20,7 +17,7 @@ import java.util.List;
  */
 public interface ITStageLifecycleService {
 
-    /** 锁定参赛方名单并排种子顺位,赛段 DRAFT→PENDING */
+    /** 锁定参赛方名单并排种子顺位(业务状态保持 DRAFT,开始后进入 GAMING) */
     void initialize(InitializeStageBo bo);
 
     /** 按赛制生成对阵(TMatch/Participant/Round + promotion_rule 连线) */
@@ -55,6 +52,12 @@ public interface ITStageLifecycleService {
     void appendStageCompetitor(Long stageId, Long competitorId, Long targetMatchId);
 
     /**
+     * 同上,并支持「目标圈序号」:海选分圈尚未生成圈场次时,
+     * 后端先按配置补建 ZONE-1..n 计划圈,再把新选手挂入 zoneIndex 对应的圈。
+     */
+    void appendStageCompetitor(Long stageId, Long competitorId, Long targetMatchId, Integer zoneIndex);
+
+    /**
      * 编辑签到结果后重排落位:已改号的参赛方先从原圈场次移除,
      * 再按新号码挂入对应圈(按号分圈自动计算圈位;随机分圈可显式传 targetMatchId 换圈)。
      * 该参赛方已有打分记录时禁止移动。
@@ -68,20 +71,16 @@ public interface ITStageLifecycleService {
     void removeCheckInCompetitor(Long stageId, Long competitorId);
 
     /**
-     * GUEST 加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入。
-     * 仅创建参赛单位进入 GUEST 池,不自动挂入任何场次;导播按外部抽签结果设定种子顺序后,
-     * 由 initialize → generateMatches 生成对阵(GUEST 胜出即占晋级名额)。
-     */
-    TCompetitorVo addGuest(AddGuestBo bo);
-
-    /**
      * 按外部抽签结果批量设定赛段参赛方种子顺序(seedRank 1..n)。
      * 仅允许赛段尚未 initialize 时执行;返回参赛方数量。
      */
     int setSeedOrder(SeedOrderBo bo);
 
-    /** 海选分圈随机抽取:把已签到选手随机均衡分配到各圈场次(可重抽,赛段未开始时) */
-    List<CircleAssignVo> randomCircles(Long stageId);
+    /**
+     * 海选分圈「确保圈场次」:圈数按配置建齐(一个圈 = 一个 ZONE match,允许暂时空场)。
+     * 抽号/签到页打开时调用,保证顶部圈栏始终对应真实场次;已有场次开始或圈已建齐时为空操作。
+     */
+    void ensureAuditionCircles(Long stageId);
 
     /** 擂台赛:按轮转队列创建并开始下一场对决(胜者守擂、败者队尾、平局双方均排到队尾)。赛段须 GAMING 且无进行中对决 */
     void startNextArenaMatch(Long stageId);
@@ -116,8 +115,12 @@ public interface ITStageLifecycleService {
      */
     void resetStageToDraft(Long stageId);
 
-    /** 计算晋级:从已结算赛段取晋级者,在下一赛段创建新参赛方。返回晋级人数(幂等:已晋级返回 0) */
-    int calculateAdvancement(CalculateAdvancementBo bo);
+    /**
+     * 确认晋级:把已结算赛段的晋级者装配进下一赛段名单(名单整单装配的唯一内核)。
+     * 供导播台「跳过中间态确认」使用;常规路径由中间态确认名单直接调用名单服务。
+     * 返回带入人数(幂等:已装配返回 0)。
+     */
+    int calculateAdvancement(Long stageId);
 
     /**
      * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名
@@ -162,18 +165,6 @@ public interface ITStageLifecycleService {
      * (传入全部待定者即全部晋级,未选中的待定者标记淘汰)。返回调整的晋级人数。
      */
     int adjustAdvancement(Long stageId, List<Long> competitorIds);
-
-    /**
-     * 海选弃权/顶替(结算后、确认晋级前):
-     * <ul>
-     *   <li>仅传 withdrawnCompetitorId:标记晋级者弃权,其后的晋级者名次整体前移
-     *       (名额往前推;不顶替时末尾空位在淘汰赛中即轮空);</li>
-     *   <li>传 replacementCompetitorId:把任意被淘汰的选手顶替晋级,补齐到晋级名单末尾
-     *       (支持任意 被淘汰者→任意晋级者 的替换;顶替总数受晋级名额上限约束)。</li>
-     * </ul>
-     * 返回新晋级的顶替人数(仅弃权时返回 0)。
-     */
-    int promoteReplacement(Long stageId, Long withdrawnCompetitorId, Long replacementCompetitorId);
 
     /** 排名赛排名明细:按圈返回每位参赛者的总分与各维度聚合分(未公布时隐藏分数) */
     RankDetailVo getRankDetail(Long stageId);

@@ -197,7 +197,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
 
     /**
      * 选手改名联动:所属参赛单位名下仅有一个选手(且就是本人)时,同步更新参赛单位名称。
-     * 队伍(多个选手)不联动,避免个人改名覆盖队伍名。
+     * 多成员参赛方(如组队报名)不联动,避免个人改名覆盖参赛方名。
      */
     private void syncLinkedCompetitorName(Long competitorId, String newName, Long playerId) {
         List<TCompetitorMember> members = competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()
@@ -313,7 +313,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
             if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())
                 || StageModeEnum.RANK.getCode().equals(firstStage.getStageMode())) {
                 // 线下抽签指定圈(matchId)时挂入指定圈,否则系统按各圈剩余名额自动择优
-                stageLifecycleService.appendStageCompetitor(firstStage.getId(), competitorId, bo.getMatchId());
+                stageLifecycleService.appendStageCompetitor(firstStage.getId(), competitorId, bo.getMatchId(), bo.getZoneIndex());
             }
 
         } else if ("JOIN".equalsIgnoreCase(checkInType)) {
@@ -400,6 +400,9 @@ public class TPlayerServiceImpl implements ITPlayerService {
             || StageConstants.STAGE_DISCARD.equals(firstStage.getStatus())) {
             throw new RuntimeException("赛段已结束,无法编辑签到结果");
         }
+        if (StageConstants.STAGE_GAMING.equals(firstStage.getStatus())) {
+            throw new RuntimeException("赛段已开始,签到结果已锁定:开赛后仅支持新增签到,不能编辑/换号/换圈");
+        }
 
         boolean numberChanged = false;
         if (StringUtils.isNotBlank(bo.getCompetitorNumber())) {
@@ -484,8 +487,11 @@ public class TPlayerServiceImpl implements ITPlayerService {
             || StageConstants.STAGE_DISCARD.equals(firstStage.getStatus())) {
             throw new RuntimeException("赛段已结束,无法解除签到");
         }
+        if (StageConstants.STAGE_GAMING.equals(firstStage.getStatus())) {
+            throw new RuntimeException("赛段已开始,签到结果已锁定:开赛后仅支持新增签到,不能解除签到");
+        }
 
-        // 名下还有其他成员(如队伍):仅解除该选手本人,参赛单位及其场次保留
+        // 名下还有其他成员(多成员参赛方):仅解除该选手本人,参赛单位及其场次保留
         long memberCount = competitorMemberMapper.selectCount(Wrappers.<TCompetitorMember>lambdaQuery()
             .eq(TCompetitorMember::getCompetitorId, competitor.getId()));
         if (memberCount > 1) {

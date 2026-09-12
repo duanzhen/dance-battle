@@ -13,17 +13,17 @@
             <div class="text-xs text-neutral-500 mt-1">{{ getTemplateDetail(config.template) }}</div>
           </div>
 
-          <!-- 队伍数量 -->
+          <!-- 选手数量 -->
           <div class="grid grid-cols-2 gap-4">
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-              <div class="text-xs text-neutral-500 mb-1">参赛队伍数</div>
+              <div class="text-xs text-neutral-500 mb-1">参赛选手数</div>
               <div class="text-2xl font-bold text-white font-mono">{{ config.teamsCount }}</div>
-              <div class="text-xs text-neutral-600 mt-1">支队伍</div>
+              <div class="text-xs text-neutral-600 mt-1">名选手</div>
             </div>
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-              <div class="text-xs text-neutral-500 mb-1">晋级队伍数</div>
+              <div class="text-xs text-neutral-500 mb-1">晋级选手数</div>
               <div class="text-2xl font-bold text-amber-500 font-mono">{{ config.advanceCount }}</div>
-              <div class="text-xs text-neutral-600 mt-1">支晋级</div>
+              <div class="text-xs text-neutral-600 mt-1">名晋级</div>
             </div>
           </div>
 
@@ -31,6 +31,12 @@
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">比赛格式</div>
             <div class="text-lg font-medium text-white">{{ config.format }}</div>
+          </div>
+
+          <!-- 首轮配对方式(单轮模式) -->
+          <div v-if="config.singleRound" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+            <div class="text-xs text-neutral-500 mb-2">首轮配对</div>
+            <div class="text-sm font-medium text-white">{{ pairingLabel }}</div>
           </div>
 
           <!-- 结果公布模式:赛段开始后仍可修改(自动/手动/导播台判定) -->
@@ -51,7 +57,7 @@
           <!-- 赛制预览 -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">赛制概览</div>
-            <div class="text-sm text-neutral-300">{{ config.teamsCount }} 支队伍 → 单败淘汰 → {{ config.advanceCount }} 支队伍晋级</div>
+            <div class="text-sm text-neutral-300">{{ config.teamsCount }} 名选手 → 单败淘汰 → {{ config.advanceCount }} 名选手晋级</div>
             <div class="text-xs text-neutral-500 mt-1">共需 {{ Math.ceil(Math.log2(config.teamsCount)) }} 轮比赛</div>
           </div>
         </template>
@@ -68,13 +74,21 @@
                 <div class="text-[10px] text-neutral-600">{{ getTemplateDetail(config.template) }}</div>
               </div>
               <div>
-                <div class="text-xs text-neutral-500 mb-1">参赛队伍数</div>
+                <div class="text-xs text-neutral-500 mb-1">参赛选手数</div>
                 <div class="text-2xl font-bold text-white font-mono">{{ config.teamsCount }}</div>
               </div>
               <div>
-                <div class="text-xs text-neutral-500 mb-1">晋级队伍数</div>
+                <div class="text-xs text-neutral-500 mb-1">晋级选手数</div>
                 <div class="text-2xl font-bold text-white font-mono">{{ config.advanceCount }}</div>
               </div>
+            </div>
+            <!-- 首轮配对方式:创建配置的一部分,INIT 只读展示 -->
+            <div v-if="config.singleRound" class="mt-3 pt-3 border-t border-neutral-800 flex items-center justify-between">
+              <div>
+                <div class="text-xs text-neutral-500">首轮配对方式</div>
+                <div class="text-[10px] text-neutral-600 mt-0.5">{{ pairingHint }}</div>
+              </div>
+              <div class="text-sm font-bold text-amber-500">{{ pairingLabel }}</div>
             </div>
           </div>
 
@@ -96,10 +110,10 @@
             </div>
           </div>
 
-          <!-- 队伍数量 (创建配置,创建后锁定) -->
+          <!-- 选手数量 (创建配置,创建后锁定) -->
           <div v-if="currentMode === ConfigMode.CREATE" class="grid grid-cols-2 gap-6">
             <div>
-              <label class="text-xs text-neutral-500 mb-2 block">参赛队伍数</label>
+              <label class="text-xs text-neutral-500 mb-2 block">参赛选手数</label>
               <div class="relative">
                 <input
                   type="number"
@@ -108,11 +122,11 @@
                   class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   @input="handleUpdate"
                 />
-                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">支队伍</div>
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">名选手</div>
               </div>
             </div>
             <div>
-              <label class="text-xs text-neutral-500 mb-2 block">晋级队伍数</label>
+              <label class="text-xs text-neutral-500 mb-2 block">晋级选手数</label>
               <div class="relative">
                 <input
                   type="number"
@@ -121,9 +135,53 @@
                   class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   @input="handleUpdate"
                 />
-                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">支晋级</div>
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">名晋级</div>
               </div>
             </div>
+          </div>
+
+          <!-- 首轮配对方式 (创建配置,创建后锁定) -->
+          <div v-if="currentMode === ConfigMode.CREATE" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs text-neutral-500">首轮配对方式</span>
+              <span class="text-[10px] text-neutral-600">仅单轮模式(每轮一赛段)下生效</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                @click="selectPairingMode('SEQUENTIAL')"
+                class="rounded-lg border px-3 py-2 text-left transition-all"
+                :class="
+                  (config.pairingMode || defaultPairing) === 'SEQUENTIAL'
+                    ? 'border-amber-500 bg-amber-500/10'
+                    : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'
+                "
+              >
+                <div
+                  class="text-xs font-bold"
+                  :class="(config.pairingMode || defaultPairing) === 'SEQUENTIAL' ? 'text-amber-400' : 'text-neutral-200'"
+                >
+                  顺序配对
+                </div>
+                <div class="text-[10px] text-neutral-500 mt-0.5">1-2、3-4…按名单顺序相邻</div>
+              </button>
+              <button
+                type="button"
+                @click="selectPairingMode('SEED')"
+                class="rounded-lg border px-3 py-2 text-left transition-all"
+                :class="
+                  (config.pairingMode || defaultPairing) === 'SEED'
+                    ? 'border-amber-500 bg-amber-500/10'
+                    : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'
+                "
+              >
+                <div class="text-xs font-bold" :class="(config.pairingMode || defaultPairing) === 'SEED' ? 'text-amber-400' : 'text-neutral-200'">
+                  种子交叉(头尾)
+                </div>
+                <div class="text-[10px] text-neutral-500 mt-0.5">1-N、2-(N-1)…强种子分散</div>
+              </button>
+            </div>
+            <p class="text-[10px] text-neutral-600 mt-1.5">{{ pairingHint }}</p>
           </div>
 
           <!-- INIT 模式: 创建配置只读 + 初始配置可编辑 -->
@@ -184,9 +242,12 @@
             <!-- 预览 -->
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
-              <div class="text-sm text-neutral-300">{{ config.teamsCount }} 支队伍 → 单败淘汰 → {{ config.advanceCount }} 支队伍晋级</div>
+              <div class="text-sm text-neutral-300">{{ config.teamsCount }} 名选手 → 单败淘汰 → {{ config.advanceCount }} 名选手晋级</div>
               <div class="text-xs text-neutral-500 mt-1">共需 {{ Math.ceil(Math.log2(config.teamsCount)) }} 轮比赛</div>
             </div>
+
+            <!-- 出口去向:胜者/败者送到哪个下游赛段(不配则默认胜者进下一赛段) -->
+            <StageExitConfig :stage="localStage" />
           </template>
         </template>
       </div>
@@ -199,11 +260,14 @@ import { ref, watch, onMounted, computed } from 'vue';
 import { Trophy } from 'lucide-vue-next';
 import { KnockoutTemplate, KnockoutConfig, StageData, ConfigMode } from './types';
 import ScoringTransitionConfig from './ScoringTransitionConfig.vue';
+import StageExitConfig from './StageExitConfig.vue';
 
 // Props
 const props = defineProps<{
   stage: StageData;
   mode?: ConfigMode;
+  /** 上一赛段类型(用于默认配对方式:海选/排名后默认 SEED) */
+  prevStageMode?: string;
 }>();
 
 // Emits
@@ -222,6 +286,7 @@ const config = ref<
   KnockoutConfig & {
     playThirdPlace?: boolean;
     singleRound?: boolean;
+    pairingMode?: string;
     publishMode?: string;
     scoring?: any;
     transition?: any;
@@ -233,6 +298,7 @@ const config = ref<
   advanceCount: 16,
   playThirdPlace: false,
   singleRound: false,
+  pairingMode: '',
   publishMode: 'AUTO',
   scoring: {
     type: 'WIN_LOSS_DRAW',
@@ -251,9 +317,9 @@ const templates = [
   { value: KnockoutTemplate.FINAL, label: '决赛', detail: '2进1' },
   { value: KnockoutTemplate.SEMI_FINAL, label: '半决赛', detail: '4进2' },
   { value: KnockoutTemplate.QUARTER_FINAL, label: '1/4决赛', detail: '8进4' },
-  { value: KnockoutTemplate.ROUND_16, label: '16进8', detail: '16支队伍' },
-  { value: KnockoutTemplate.ROUND_32, label: '32进16', detail: '32支队伍' },
-  { value: KnockoutTemplate.ROUND_64, label: '64进32', detail: '64支队伍' },
+  { value: KnockoutTemplate.ROUND_16, label: '16进8', detail: '16名选手' },
+  { value: KnockoutTemplate.ROUND_32, label: '32进16', detail: '32名选手' },
+  { value: KnockoutTemplate.ROUND_64, label: '64进32', detail: '64名选手' },
   { value: KnockoutTemplate.CUSTOM, label: '自定义', detail: '手动设置' }
 ];
 
@@ -280,6 +346,7 @@ const parseConfig = () => {
       config.value.template = inferTemplate(config.value.teamsCount, config.value.advanceCount);
     }
     if (ko.singleRound !== undefined) config.value.singleRound = ko.singleRound;
+    config.value.pairingMode = ko.pairingMode !== undefined ? ko.pairingMode : '';
     if (ko.publishMode !== undefined) config.value.publishMode = ko.publishMode;
     if (ko.thirdPlaceMatch !== undefined) config.value.playThirdPlace = ko.thirdPlaceMatch;
     if (parsed.scoring) config.value.scoring = parsed.scoring;
@@ -310,6 +377,7 @@ const serializeConfig = () => {
       teamsCount: config.value.teamsCount,
       advanceCount: config.value.advanceCount,
       singleRound: config.value.singleRound,
+      pairingMode: config.value.pairingMode || defaultPairing.value,
       publishMode: config.value.publishMode,
       thirdPlaceMatch: config.value.playThirdPlace
     },
@@ -318,11 +386,31 @@ const serializeConfig = () => {
   });
 };
 
+// 默认配对方式:上一赛段为海选/排名时种子交叉(SEED),否则顺序相邻(SEQUENTIAL)
+const defaultPairing = computed(() => (props.prevStageMode === 'AUDITION' || props.prevStageMode === 'RANK' ? 'SEED' : 'SEQUENTIAL'));
+
+// 生效配对方式:显式配置优先,未配置用默认
+const effectivePairingMode = computed(() => config.value.pairingMode || defaultPairing.value);
+
+const pairingLabel = computed(() => (effectivePairingMode.value === 'SEED' ? '种子交叉(头尾)' : '顺序配对'));
+
+const pairingHint = computed(() => {
+  if (props.prevStageMode === 'AUDITION' || props.prevStageMode === 'RANK') {
+    return `上一赛段为${props.prevStageMode === 'AUDITION' ? '海选赛' : '排名赛'},默认种子交叉(头尾);按抽签顺序相邻则切换为顺序配对`;
+  }
+  return '没有前置海选时按名单/抽签顺序默认顺序配对;需要头尾交叉(如 1 对 16)时请选择种子交叉';
+});
+
+const selectPairingMode = (mode: 'SEQUENTIAL' | 'SEED') => {
+  config.value.pairingMode = mode;
+  handleUpdate();
+};
+
 // 选择模板
 const selectTemplate = (template: KnockoutTemplate) => {
   config.value.template = template;
 
-  // 根据模板自动设置队伍数
+  // 根据模板自动设置选手数
   const templateMap: Record<KnockoutTemplate, { teams: number; advance: number }> = {
     [KnockoutTemplate.FINAL]: { teams: 2, advance: 1 },
     [KnockoutTemplate.SEMI_FINAL]: { teams: 4, advance: 2 },

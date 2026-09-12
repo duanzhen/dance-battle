@@ -197,6 +197,8 @@
             </div>
             <div class="text-xs text-neutral-500 mt-2">晋级率:{{ ((config.advanceCount / config.scale) * 100).toFixed(1) }}%</div>
           </div>
+
+          <StageExitConfig :stage="localStage" />
         </template>
       </div>
     </div>
@@ -207,6 +209,7 @@
 import { ref, watch, onMounted, computed } from 'vue';
 import { Trophy } from 'lucide-vue-next';
 import { StageData, ConfigMode } from './types';
+import StageExitConfig from './StageExitConfig.vue';
 
 // Props
 const props = defineProps<{

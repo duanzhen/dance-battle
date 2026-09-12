@@ -54,9 +54,24 @@ public class TCompetitorVo implements Serializable {
     private Long sourceCompetitorId;
 
     /**
-     * 0:个人, 1:队伍
+     * 直接来源赛段ID
      */
-    @ExcelProperty(value = "0:个人, 1:队伍")
+    private Long sourceStageId;
+
+    /**
+     * 名单快照写入行标记(apply 置 1;签到/手工行为 0)
+     */
+    private Long fromRoster;
+
+    /**
+     * 入场性质:ADVANCE/REVIVE/GUEST/MANUAL/CHECKIN
+     */
+    private String entryTag;
+
+    /**
+     * 参赛方类型(保留字段;系统统一按选手处理,多成员即组队)
+     */
+    @ExcelProperty(value = "类型")
     private Long type;
 
     /**

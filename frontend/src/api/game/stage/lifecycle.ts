@@ -37,24 +37,10 @@ export const generateMatches = (data: GenerateMatchesForm) => {
   });
 };
 
-export interface CircleCompetitorInfo {
-  competitorId: string | number;
-  name: string;
-  number: string;
-  slotIndex: number;
-}
-
-export interface CircleAssignVo {
-  matchId: string | number;
-  matchName: string;
-  displayZone: string;
-  competitors: CircleCompetitorInfo[];
-}
-
-/** 海选分圈随机抽取:已签到选手随机分到各圈场次(可重抽,赛段未开始时) */
-export const randomCircles = (id: string | number): AxiosPromise<CircleAssignVo[]> => {
+/** 海选分圈确保圈场次:按配置建齐 ZONE 圈(一个圈 = 一个 match),幂等 */
+export const ensureAuditionCircles = (id: string | number) => {
   return request({
-    url: '/game/stage/' + id + '/random-circles',
+    url: '/game/stage/' + id + '/ensure-circle-slots',
     method: 'post'
   });
 };
@@ -96,30 +82,5 @@ export const startNextArenaMatch = (id: string | number) => {
   return request({
     url: '/game/stage/' + id + '/arena-next',
     method: 'post'
-  });
-};
-
-/** 计算晋级(MANUAL 模式显式触发),返回晋级人数 */
-export const calculateAdvancement = (id: string | number, data?: { seedOverrides?: Record<string, number> }): AxiosPromise<number> => {
-  return request({
-    url: '/game/stage/' + id + '/calculate-advancement',
-    method: 'post',
-    data: data || {}
-  });
-};
-
-/**
- * 海选弃权/顶替(结算后、确认晋级前):
- * 仅传 withdrawnCompetitorId=标记弃权,其后晋级者名次整体前移(不顶替时末尾空位即轮空);
- * 传 replacementCompetitorId=把任意被淘汰的选手顶替晋级,补齐到晋级名单末尾。
- */
-export const promoteReplacement = (
-  stageId: string | number,
-  data: { withdrawnCompetitorId?: string | number; replacementCompetitorId?: string | number }
-) => {
-  return request({
-    url: '/game/stage/' + stageId + '/promote-replacement',
-    method: 'post',
-    data
   });
 };

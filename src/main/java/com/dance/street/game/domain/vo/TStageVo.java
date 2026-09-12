@@ -11,6 +11,7 @@ import lombok.Data;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.Date;
+import java.util.List;
 
 
 
@@ -94,15 +95,15 @@ public class TStageVo implements Serializable {
     private String status;
 
     /**
-     * 起始队伍数量
+     * 起始选手数量
      */
-    @ExcelProperty(value = "起始队伍数量")
+    @ExcelProperty(value = "起始选手数量")
     private Long teamCountStart;
 
     /**
-     * 晋级队伍数量
+     * 晋级选手数量
      */
-    @ExcelProperty(value = "晋级队伍数量")
+    @ExcelProperty(value = "晋级选手数量")
     private Long teamCountEnd;
 
     /**
@@ -134,5 +135,10 @@ public class TStageVo implements Serializable {
      * 开启后中间态未确认时也可点开始赛段,弹窗确认后自动确认晋级再开始
      */
     private Boolean skipConfirm;
+
+    /**
+     * 名单摘要(roster;无名单/未加载时为 null)
+     */
+    private List<TStageRosterVo> incoming;
 
 }

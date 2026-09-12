@@ -104,32 +104,6 @@ export const getAuditionResult = (stageId: string | number) => {
 };
 
 /**
- * GUEST 加入赛段(除海选外任意赛段,赛段规划/未开始态 DRAFT/PENDING 且未初始化时可加;
- * 仅创建参赛单位进入 GUEST 池,不自动挂入场次,由导播排定种子顺序后 initialize 生成对阵)
- * @param stageId 赛段ID
- * @param data { name, type?, number?, playerId? }
- */
-export const addStageGuest = (
-  stageId: string | number,
-  data: {
-    name: string;
-    type?: number;
-    number?: string;
-    playerId?: string | number;
-    /** GUEST 落位模式:AUTO(自动:SEED 淘汰赛顶前,其余队尾)/FRONT(顶前)/TAIL(队尾)/SPECIFIED(指定种子位) */
-    placement?: string;
-    /** placement=SPECIFIED 时的种子位(1-based) */
-    seedRank?: number;
-  }
-) => {
-  return request({
-    url: '/game/stage/' + stageId + '/guest',
-    method: 'post',
-    data
-  });
-};
-
-/**
  * 按外部抽签结果批量设定赛段参赛方种子顺序(seedRank 1..n,仅未初始化时允许)
  * @param stageId 赛段ID
  * @param competitorIds 按抽签结果排列的参赛方ID(顺序即种子顺序)

@@ -18,7 +18,7 @@ public class GroupConfig implements Serializable {
 
     /** 分组数量 */
     private Integer groupCount;
-    /** 每组队伍数 */
+    /** 每组选手数 */
     private Integer teamsPerGroup;
     /** 胜积分 */
     private Integer winPoints;

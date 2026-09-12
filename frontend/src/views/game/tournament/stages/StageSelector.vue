@@ -76,7 +76,7 @@ const modeMap: Record<string, string> = {
 };
 const statusMap: Record<string, string> = {
   DRAFT: '规划中',
-  PENDING: '未开始',
+  PENDING: '规划中',
   GAMING: '进行中',
   SETTLED: '已结束',
   DISCARD: '已取消'

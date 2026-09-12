@@ -11,7 +11,7 @@ import java.util.List;
  * 淘汰赛对阵生成。
  *
  * <p>核心:标准种子位排布(蛇形镜像 [1,N,2,N-1,...] 避免强强过早相遇)、
- * 队伍数非 2 的幂时高种子对手位填 BYE 轮空、后续轮占位 + 胜者去向连线。</p>
+ * 选手数非 2 的幂时高种子对手位填 BYE 轮空、后续轮占位 + 胜者去向连线。</p>
  */
 public class KnockoutGenerator implements StageGenerator {
 

@@ -6,7 +6,7 @@
       <div class="space-y-6">
         <!-- STARTED 模式: 创建+初始配置只读展示 -->
         <template v-if="currentMode === ConfigMode.STARTED">
-          <!-- 队伍信息 -->
+          <!-- 选手信息 -->
           <div class="grid grid-cols-2 gap-4">
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-1">进入总人数</div>
@@ -32,6 +32,8 @@
             <div class="text-sm text-neutral-300">共 {{ config.scale }} 人进入擂台赛（擂主 1 人 + 攻擂 {{ challengerCount }} 人）</div>
             <div class="text-sm text-neutral-300 mt-1">单场判胜负,胜利记 1 分</div>
           </div>
+
+          <StageExitConfig :stage="localStage" />
         </template>
 
         <!-- CREATE/INIT 模式: 可编辑 -->
@@ -51,9 +53,9 @@
             </div>
           </div>
 
-          <!-- 队伍设置 (创建配置,创建后锁定) -->
+          <!-- 选手设置 (创建配置,创建后锁定) -->
           <div v-if="currentMode === ConfigMode.CREATE">
-            <label class="text-xs text-neutral-500 mb-2 block">队伍设置</label>
+            <label class="text-xs text-neutral-500 mb-2 block">选手设置</label>
             <div>
               <label class="text-xs text-neutral-600 mb-1 block">进入擂台赛总人数</label>
               <input
@@ -115,6 +117,7 @@
 import { ref, watch, onMounted, computed } from 'vue';
 import { Target } from 'lucide-vue-next';
 import { ArenaConfig, StageData, ConfigMode } from './types';
+import StageExitConfig from './StageExitConfig.vue';
 
 // Props
 const props = defineProps<{
@@ -149,7 +152,7 @@ const parseConfig = () => {
     if (props.stage.ruleConfig) {
       const parsed = JSON.parse(props.stage.ruleConfig);
       config.value = { ...config.value, ...parsed };
-      // 兼容旧配置:只有攻擂队伍数时,推导进入总人数
+      // 兼容旧配置:只有攻擂选手数时,推导进入总人数
       if (config.value.scale == null && config.value.challengerCount != null) {
         config.value.scale = Number(config.value.challengerCount) + 1;
       }

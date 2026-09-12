@@ -51,11 +51,11 @@
           <div v-if="config.template === KnockoutTemplate.CUSTOM" class="custom-config mt-4">
             <div class="grid grid-cols-2 gap-4">
               <div>
-                <label class="block text-sm text-neutral-400 mb-1">参赛队伍数</label>
+                <label class="block text-sm text-neutral-400 mb-1">参赛选手数</label>
                 <el-input-number v-model="config.teamsCount" :min="2" :max="256" class="w-full" />
               </div>
               <div>
-                <label class="block text-sm text-neutral-400 mb-1">晋级队伍数</label>
+                <label class="block text-sm text-neutral-400 mb-1">晋级选手数</label>
                 <el-input-number v-model="config.advanceCount" :min="1" :max="config.teamsCount - 1" class="w-full" />
               </div>
             </div>
@@ -71,7 +71,7 @@
               <el-input-number v-model="config.groupCount" :min="2" :max="16" class="w-full" />
             </div>
             <div>
-              <label class="block text-sm text-neutral-400 mb-1">每组队伍数</label>
+              <label class="block text-sm text-neutral-400 mb-1">每组选手数</label>
               <el-input-number v-model="config.teamsPerGroup" :min="2" :max="16" class="w-full" />
             </div>
             <div>
@@ -213,9 +213,9 @@ const knockoutTemplates = [
   { value: KnockoutTemplate.FINAL, label: '决赛', description: '冠军争夺战' },
   { value: KnockoutTemplate.SEMI_FINAL, label: '半决赛', description: '4进2' },
   { value: KnockoutTemplate.QUARTER_FINAL, label: '1/4决赛', description: '8进4' },
-  { value: KnockoutTemplate.ROUND_16, label: '16进8', description: '16支队伍' },
-  { value: KnockoutTemplate.ROUND_32, label: '32进16', description: '32支队伍' },
-  { value: KnockoutTemplate.ROUND_64, label: '64进32', description: '64支队伍' },
+  { value: KnockoutTemplate.ROUND_16, label: '16进8', description: '16名选手' },
+  { value: KnockoutTemplate.ROUND_32, label: '32进16', description: '32名选手' },
+  { value: KnockoutTemplate.ROUND_64, label: '64进32', description: '64名选手' },
   { value: KnockoutTemplate.CUSTOM, label: '自定义', description: '自定义参赛和晋级数' }
 ];
 
@@ -271,8 +271,7 @@ const initConfig = () => {
       config.value = {
         advanceCondition: 'score',
         advanceCount: 16,
-        format: 'BO1',
-        circles: 1,
+        circles: 0,
         circleAdvanceCounts: []
       } as AuditionConfig;
       break;
@@ -296,7 +295,7 @@ const selectStageType = (mode: StageMode) => {
 const selectTemplate = (template: KnockoutTemplate) => {
   config.value.template = template;
 
-  // 根据模板自动设置队伍数
+  // 根据模板自动设置选手数
   const templateMap: Record<KnockoutTemplate, { teams: number; advance: number }> = {
     [KnockoutTemplate.FINAL]: { teams: 2, advance: 1 },
     [KnockoutTemplate.SEMI_FINAL]: { teams: 4, advance: 2 },
@@ -351,7 +350,7 @@ const handleClose = () => {
   dialogVisible.value = false;
 };
 
-// 监听淘汰赛模板变化，同步队伍数
+// 监听淘汰赛模板变化，同步选手数
 watch(
   () => config.value.template,
   (newTemplate) => {

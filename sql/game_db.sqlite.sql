@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS `t_competitor` (
   `tournament_id` INTEGER NOT NULL,
   `stage_id` INTEGER NOT NULL,
   `source_competitor_id` INTEGER,
+  `source_stage_id` INTEGER,
+  `from_roster` INTEGER NOT NULL DEFAULT 0,
+  `entry_tag` TEXT,
   `type` INTEGER DEFAULT 0,
   `name` TEXT,
   `number` TEXT,
@@ -249,6 +252,9 @@ CREATE TABLE IF NOT EXISTS `t_stage` (
   `members` INTEGER DEFAULT 1,
   `visual_col_index` INTEGER,
   `rule_config` TEXT,
+  `roster_config_json` TEXT,
+  `roster_applied` INTEGER DEFAULT 0,
+  `roster_skipped` INTEGER DEFAULT 0,
   `status` TEXT DEFAULT 'DRAFT',
   `team_count_start` INTEGER DEFAULT 0,
   `team_count_end` INTEGER DEFAULT 0,
@@ -353,3 +359,30 @@ CREATE TABLE IF NOT EXISTS `t_login_account` (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_username` ON `t_login_account` (`username`);
+
+--
+-- Table structure for table `t_stage_roster_override`
+--
+
+CREATE TABLE IF NOT EXISTS `t_stage_roster_override` (
+  `id` INTEGER NOT NULL,
+  `tenant_id` INTEGER NOT NULL,
+  `tournament_id` INTEGER NOT NULL,
+  `target_stage_id` INTEGER NOT NULL,
+  `op` TEXT NOT NULL,
+  `source_competitor_id` INTEGER,
+  `player_id` INTEGER,
+  `guest_name` TEXT,
+  `guest_type` INTEGER NOT NULL DEFAULT 0,
+  `guest_number` TEXT,
+  `seed_rank` INTEGER,
+  `create_by` INTEGER,
+  `create_time` TEXT,
+  `update_by` INTEGER,
+  `update_time` TEXT,
+  `remark` TEXT,
+  PRIMARY KEY (`id`)
+);
+
+CREATE INDEX IF NOT EXISTS `idx_override_target` ON `t_stage_roster_override` (`target_stage_id`);
+CREATE INDEX IF NOT EXISTS `idx_override_tournament` ON `t_stage_roster_override` (`tournament_id`);

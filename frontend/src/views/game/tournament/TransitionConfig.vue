@@ -13,8 +13,547 @@
     </div>
 
     <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-8 space-y-8">
+      <!-- 名单来源摘要(多来源组/自定义来源时显示;默认单来源组隐藏) -->
+      <div
+        v-if="rosterSummaryText"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-xs text-amber-400"
+      >
+        <span class="font-bold uppercase tracking-wider text-[10px] text-amber-500/80">名单来源</span>
+        <span>{{ rosterSummaryText }}</span>
+      </div>
+
+      <!-- 入边来源(只读):来源组在「赛段配置 · 出口去向」维护,中间态只展示 -->
+      <div v-if="!targetLocked" class="rounded-lg border border-neutral-800 bg-black/40 p-3 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">选手来源 · {{ totalGroupCount }} 组</span>
+          <span class="text-[10px] text-neutral-600">来源在「赛段配置 · 出口去向」中维护</span>
+        </div>
+        <div v-if="rosters.length === 0" class="text-[10px] text-neutral-600">暂无名单来源,刷新后仍为空请检查赛段创建</div>
+        <div
+          v-for="p in rosters"
+          :key="String(p.id)"
+          class="rounded bg-neutral-900/70 border border-neutral-800 px-2 py-1 text-[11px] space-y-1"
+        >
+          <div class="flex items-center gap-2">
+            <span class="text-neutral-500 font-mono">名单</span>
+            <span class="ml-auto px-1.5 py-0.5 rounded text-[9px]" :class="rosterStateClass(p.state)">
+              {{ rosterStateLabel(p.state) }}
+            </span>
+            <button
+              v-if="p.state === 'READY' || p.state === 'WAIT_SOURCE'"
+              @click="handleSkipRoster(p)"
+              class="px-1.5 py-0.5 text-[9px] rounded border border-neutral-700 text-neutral-500 hover:text-neutral-300 transition-colors"
+              title="跳过(0人/不需要)"
+            >
+              跳过
+            </button>
+          </div>
+          <div v-for="(g, gi) in groupsOfRoster(p)" :key="'g' + gi" class="flex items-center gap-2">
+            <span class="text-[10px] text-neutral-300 flex-1 min-w-0 truncate">{{ groupText(g) }}</span>
+          </div>
+
+          <!-- 含 MANUAL 组的名单:按组点选候选 -->
+          <div v-if="shouldOfferManualPicker(p)" class="pl-1">
+            <div class="flex items-center justify-between text-[9px] text-neutral-500 mb-1">
+              <span
+                >手动选择参赛者(已选 {{ pickedCountOf(p) }}<template v-if="p.quota && p.quota > 0"> / {{ p.quota }}</template
+                >)</span
+              >
+              <span>{{ manualCandidates[String(p.id)]?.length || 0 }} 名候选</span>
+            </div>
+            <div v-if="manualLoading && !manualCandidates[String(p.id)]" class="text-[9px] text-neutral-600">候选加载中...</div>
+            <div v-else-if="!manualCandidates[String(p.id)] || manualCandidates[String(p.id)].length === 0" class="text-[9px] text-neutral-600">
+              无符合来源规则的候选
+            </div>
+            <label
+              v-for="c in manualCandidates[String(p.id)] || []"
+              :key="String(c.id)"
+              class="flex items-center gap-2 px-1.5 py-0.5 rounded hover:bg-neutral-800/60 cursor-pointer"
+            >
+              <input type="checkbox" class="accent-amber-500" :checked="isPicked(p, c)" @change="toggleManualPick(p, c)" />
+              <span class="min-w-0 flex-1">
+                <span v-if="c._groupLabel" class="block text-[8px] text-amber-500/80 truncate">{{ c._groupLabel }}</span>
+                <span class="block truncate text-neutral-300">
+                  {{ c.name }}<span v-if="c.number" class="text-neutral-600"> #{{ c.number }}</span>
+                </span>
+              </span>
+              <span class="ml-auto text-neutral-600 text-[9px] flex-none">{{ c.finalRank != null ? '第' + c.finalRank + '名' : '' }}</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 本赛段名单:拖动排序、× 移出,加人走「＋ 加人」弹窗 -->
+      <div v-if="rosters.length > 0" class="rounded-lg border border-neutral-800 bg-black/40 p-3 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[12px] font-bold text-neutral-500 uppercase tracking-wider">
+            本赛段名单 · {{ listItems.length }} 人
+          </span>
+          <div class="flex items-center gap-2">
+            <span v-if="overridePreview?.capacity" class="text-[11px] text-neutral-600">
+              计划 {{ overridePreview.capacity }} 人
+            </span>
+            <template v-if="targetMode === 'KNOCKOUT' && isSeedKnockoutTransition && !rosterSealed && !targetLocked">
+              <button
+                @click="clearRosterOrder"
+                class="px-2 py-1 text-[12px] rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors flex items-center gap-1"
+                title="恢复为按来源名次排列的原始顺序"
+              >
+                <RotateCcw class="w-3 h-3" /> 恢复
+              </button>
+            </template>
+            <button
+              v-if="!rosterSealed && !targetLocked && targetMode !== 'AUDITION'"
+              @click="openAddDialog"
+              class="px-2 py-1 text-[12px] rounded border border-amber-500/30 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
+            >
+              ＋ 加人
+            </button>
+          </div>
+        </div>
+
+        <div class="px-1 text-[11px]">
+          <span v-if="overridePreview?.applied" class="text-green-500">名单已确认</span>
+          <span v-else-if="overridePreview?.skipped" class="text-neutral-500">已跳过(本赛段不带人)</span>
+          <span v-else-if="overridePreview?.ready === false" class="text-orange-400">
+            来源赛段还没结束,以下是预期名单
+          </span>
+          <span v-else class="text-neutral-500">
+            {{
+              targetMode === 'KNOCKOUT'
+                ? '拖动选手:放到别人身上是交换,放到空位是搬过去(原位留空);× 移出;加人点右上角「＋ 加人」'
+                : targetMode === 'ARENA'
+                  ? '拖动可调整出场顺序(1 号位为擂主);× 移出;加人点右上角「＋ 加人」'
+                : '拖动可调整顺序,× 移出;加人点右上角「＋ 加人」'
+            }}
+          </span>
+        </div>
+        <p v-for="(w, wi) in overridePreview?.warnings || []" :key="'w' + wi" class="text-orange-400/90 px-1">
+          ⚠ {{ w }}
+        </p>
+
+        <!-- 名单已确认/已跳过/赛段已开始:只能看不能改 -->
+        <div
+          v-if="rosterSealed || targetLocked"
+          class="px-2 py-1.5 rounded bg-neutral-900/50 border border-neutral-800 text-[11px] text-neutral-500"
+        >
+          {{ targetLocked ? '赛段已开始,名单已锁定,只能查看;如需调整请先重置赛段。' : '名单已定,如需调整请先在下方「重置赛段」。' }}
+        </div>
+
+        <!-- 淘汰赛:左半区/右半区对战树(名单即对阵框架,空位照常占位) -->
+        <div v-if="targetMode === 'KNOCKOUT'" class="grid grid-cols-2 gap-3">
+          <div v-for="zone in BRACKET_ZONES" :key="zone.key" class="space-y-2">
+            <div class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center pb-1 border-b border-neutral-800">
+              {{ zone.label }}
+            </div>
+            <div
+              v-for="p in bracketPairsOf(zone.key)"
+              :key="zone.key + p.position"
+              class="rounded-lg bg-black border border-neutral-800 p-2"
+            >
+              <div class="space-y-1.5">
+                <template v-for="side in BRACKET_SIDES" :key="side">
+                  <div
+                    v-if="p[side]"
+                    class="flex items-center gap-2 px-2 h-9 rounded bg-neutral-900/60 border transition-colors"
+                    :class="[
+                      bracketDragItem === p[side] ? 'border-amber-500/60 bg-amber-500/10 opacity-60' : 'border-neutral-800',
+                      bracketDropKey === slotKeyOf(p, side) ? 'border-amber-500 ring-1 ring-amber-500/50' : '',
+                      bracketEditable ? 'cursor-grab active:cursor-grabbing' : ''
+                    ]"
+                    :draggable="bracketEditable"
+                    @dragstart="onBracketSlotDragStart(p[side], p, side, $event)"
+                    @dragend="onBracketSlotDragEnd"
+                    @dragover.prevent="onBracketSlotDragOver(p, side)"
+                    @dragleave="onBracketSlotDragLeave(p, side)"
+                    @drop.stop.prevent="onBracketSlotDrop(p, side)"
+                    :title="bracketEditable ? '拖到另一个位置即可交换' : ''"
+                  >
+                    <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none">
+                      {{ slotSeedAt(p, side) }}
+                    </span>
+                    <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p[side].name || '未命名' }}</span>
+                    <span
+                      v-if="entryTagLabel(p[side].entryTag)"
+                      class="text-[10px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-400 flex-none"
+                      >{{ entryTagLabel(p[side].entryTag) }}</span
+                    >
+                    <button
+                      v-if="!rosterSealed && !targetLocked"
+                      @click.stop="askRemoveItem(p[side])"
+                      class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 transition-colors flex items-center justify-center flex-none"
+                      title="移出名单"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div
+                    v-else
+                    class="flex items-center gap-2 px-2 h-9 rounded bg-neutral-900/30 border border-dashed transition-colors"
+                    :class="[
+                      bracketDropKey === slotKeyOf(p, side)
+                        ? 'border-amber-500 ring-1 ring-amber-500/50'
+                        : 'border-neutral-800'
+                    ]"
+                    @dragover.prevent="onBracketSlotDragOver(p, side)"
+                    @dragleave="onBracketSlotDragLeave(p, side)"
+                    @drop.stop.prevent="onBracketSlotDrop(p, side)"
+                  >
+                    <!-- 结构对齐有人时的格子,保证两种状态高度一致 -->
+                    <span
+                      class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold flex-none"
+                      :class="bracketDropKey === slotKeyOf(p, side)
+                        ? 'bg-amber-500/20 text-amber-400'
+                        : 'bg-neutral-800 text-neutral-500'"
+                    >
+                      {{ slotSeedAt(p, side) }}
+                    </span>
+                    <span
+                      class="flex-1 min-w-0 text-sm truncate"
+                      :class="bracketDropKey === slotKeyOf(p, side) ? 'text-amber-400' : 'text-neutral-600'"
+                    >
+                      空位
+                    </span>
+                    <span class="w-6 h-6 flex-none"></span>
+                  </div>
+                  <div v-if="side === 'left'" class="text-center text-[10px] text-neutral-700">VS</div>
+                </template>
+              </div>
+            </div>
+            <div
+              v-if="bracketPairsOf(zone.key).length === 0"
+              class="text-[11px] text-neutral-600 text-center py-4"
+            >
+              赛段还没有设置参赛人数,无法预览对阵框架
+            </div>
+          </div>
+        </div>
+
+        <!-- 其他赛段模式:上下拖动即排序,× 移出;加人走右上角弹窗 -->
+        <div v-else class="space-y-2">
+        <div
+          v-if="targetMode !== 'ARENA'"
+          class="rounded bg-neutral-900/70 border border-neutral-800 overflow-y-auto custom-scrollbar max-h-96 p-1 pt-1 space-y-0.5"
+        >
+          <div v-if="listItems.length === 0 && emptySlots.length === 0" class="text-[11px] text-neutral-600 text-center py-6">
+            还没有人进来;点右上角「＋ 加人」添加
+          </div>
+          <div
+            v-for="(it, idx) in listItems"
+            :key="'r' + idx"
+            draggable="true"
+            @dragstart="onDragStartItem(idx)"
+            @dragend="onDragEnd"
+            @dragover.prevent="hoverIndex = idx"
+            @drop.stop.prevent="onDropToRoster(idx)"
+            class="flex items-center gap-2 px-1.5 h-7 rounded cursor-grab text-[12px]"
+            :class="dragIndex !== null && hoverIndex === idx ? 'bg-amber-500/10 border-t border-amber-500/50' : 'hover:bg-neutral-800/60'"
+          >
+            <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank ?? idx + 1 }}</span>
+            <span class="flex-1 min-w-0 truncate text-neutral-300">{{ it.name || '未命名' }}</span>
+            <span class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(it.entryTag) }}</span>
+            <button
+              v-if="!rosterSealed && !targetLocked"
+              @click.stop="askRemoveItem(it)"
+              class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
+            >
+              ×
+            </button>
+          </div>
+          <!-- 还没到齐时按计划人数补空位,位置和出场次序对得上 -->
+          <div
+            v-for="n in emptySlots"
+            :key="'slot-' + n"
+            class="flex items-center gap-2 px-1.5 h-7 rounded text-[12px] text-neutral-700"
+          >
+            <span class="font-mono w-5 flex-none">{{ n }}</span>
+            <span class="flex-1 min-w-0">空位</span>
+          </div>
+        </div>
+
+          <!-- 小组赛:蛇形分组预览 -->
+          <div v-if="targetMode === 'GROUP'" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div v-for="(g, gi) in groupPreview" :key="gi" class="rounded-lg bg-black border border-neutral-800 p-2">
+              <div class="text-[10px] font-bold text-amber-500 mb-1">G{{ gi + 1 }}</div>
+              <div v-for="c in g" :key="c.id" class="text-xs text-neutral-300 truncate py-0.5">
+                {{ c.name }}<span v-if="entryTagLabel(c.entryTag)" class="text-neutral-500"> ·{{ entryTagLabel(c.entryTag) }}</span>
+              </div>
+              <div v-if="g.length === 0" class="text-[10px] text-neutral-600">空组</div>
+            </div>
+          </div>
+
+          <!-- 擂台赛:出场队列(1 号位=擂主,拖动可调整出场顺序;只列进入擂台赛的人) -->
+          <div v-else-if="targetMode === 'ARENA'" class="space-y-1">
+            <div class="flex items-center justify-between px-1 pb-1">
+              <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">出场顺序</span>
+              <span class="text-[10px] text-neutral-600">1 号位为擂主,拖动可调整顺序</span>
+            </div>
+            <div
+              v-for="(c, idx) in rosterRows"
+              :key="itemKeyOf(c)"
+              draggable="true"
+              @dragstart="onArenaDragStart(idx)"
+              @dragend="onDragEnd"
+              @dragover.prevent="arenaHoverIndex = idx"
+              @drop.stop.prevent="onDropToArena(idx)"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border cursor-grab"
+              :class="[
+                idx === 0 ? 'border-amber-500/40' : 'border-neutral-800',
+                arenaDragIndex !== null && arenaHoverIndex === idx
+                  ? 'border-amber-500 ring-1 ring-amber-500/50'
+                  : ''
+              ]"
+            >
+              <span
+                class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold flex-none"
+                :class="idx === 0 ? 'bg-amber-500 text-neutral-900' : 'bg-neutral-800 text-neutral-400'"
+                >{{ idx + 1 }}</span
+              >
+              <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
+              <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{
+                entryTagLabel(c.entryTag)
+              }}</span>
+              <button
+                v-if="!rosterSealed && !targetLocked"
+                @click.stop="askRemoveItem(c)"
+                class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
+                title="移出擂台赛名单"
+              >
+                ×
+              </button>
+            </div>
+            <!-- 还没到齐时按计划人数补空位,位置和出场次序对得上 -->
+            <div
+              v-for="n in emptySlots"
+              :key="'arena-slot-' + n"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border border-dashed border-neutral-800 text-[12px] text-neutral-700"
+            >
+              <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-500 flex-none">{{ n }}</span>
+              <span class="flex-1 min-w-0">空位</span>
+            </div>
+            <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">
+              还没有人进来;点右上角「＋ 加人」添加
+            </div>
+          </div>
+
+          <!-- 排名赛:圈分配预览 -->
+          <div v-else-if="targetMode === 'RANK'" class="grid grid-cols-2 gap-2">
+            <div v-for="(ccl, ci) in circlePreview" :key="ci" class="rounded-lg bg-black border border-neutral-800 p-2">
+              <div class="text-[10px] font-bold text-amber-500 mb-1">ZONE-{{ ci + 1 }}</div>
+              <div v-for="c in ccl" :key="c.id" class="text-xs text-neutral-300 truncate py-0.5">
+                {{ c.name }}<span v-if="entryTagLabel(c.entryTag)" class="text-neutral-500"> ·{{ entryTagLabel(c.entryTag) }}</span>
+              </div>
+              <div v-if="ccl.length === 0" class="text-[10px] text-neutral-600">空圈</div>
+            </div>
+          </div>
+        </div>
+
+        <p class="text-[11px] text-neutral-600 leading-relaxed">
+          这里的手工调整只影响本赛段名单,不会改动来源赛段结果;确认名单后名单锁定。
+        </p>
+      </div>
+
+      <!-- 加人:直接输入姓名(外卡),或从其他赛段选人;落位可选 顶上/替换 -->
+      <GameDialog
+        v-model="addDialogVisible"
+        width="520px"
+        title="加人"
+        :subtitle="`加入「${targetStageName}」名单`"
+        :icon="UserPlus"
+        :close-on-click-modal="false"
+      >
+        <div class="flex gap-2 mb-3">
+          <button
+            type="button"
+            @click="addMode = 'name'"
+            class="flex-1 py-1.5 text-[12px] rounded border transition-colors"
+            :class="addMode === 'name' ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200'"
+          >
+            输入姓名
+          </button>
+          <button
+            type="button"
+            @click="switchToStageMode"
+            class="flex-1 py-1.5 text-[12px] rounded border transition-colors"
+            :class="addMode === 'stage' ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200'"
+          >
+            从其他赛段选人
+          </button>
+        </div>
+
+        <div v-if="addMode === 'name'" class="space-y-2">
+          <input v-model="addName" class="cfg-input w-full" placeholder="姓名或选手姓名" />
+        </div>
+        <div v-else class="space-y-2">
+          <el-select
+            v-model="addStageId"
+            class="w-full add-select"
+            popper-class="add-select-popper"
+            placeholder="选择赛段"
+            @change="loadAddStagePeople"
+          >
+            <el-option
+              v-for="s in addStages"
+              :key="String(s.id)"
+              :label="s.name"
+              :value="String(s.id)"
+            />
+          </el-select>
+          <el-select
+            v-model="addPersonId"
+            class="w-full add-select"
+            popper-class="add-select-popper"
+            placeholder="选择人员"
+            :disabled="!addStageId"
+          >
+            <el-option
+              v-for="c in addStagePeople"
+              :key="String(c.id)"
+              :label="`${c.name}${c.finalRank ? ' · 第' + c.finalRank + '名' : ''}`"
+              :value="String(c.id)"
+            />
+          </el-select>
+          <div v-if="addStageId && addStagePeople.length === 0" class="text-[11px] text-neutral-600">
+            该赛段没有可加入的人员。
+          </div>
+        </div>
+
+        <!-- 落位方式 -->
+        <div class="mt-4 pt-4 border-t border-neutral-800 space-y-2">
+          <div class="text-[11px] text-neutral-500">加进来的位置</div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              @click="addPlacement = 'INSERT'"
+              class="px-3 py-1.5 text-[12px] rounded border transition-colors"
+              :class="placementBtnClass('INSERT')"
+              title="插到指定位置:第 1 位就是顶前,最后一位就是加到末尾;后面的人依次后移"
+            >
+              插入
+            </button>
+            <button
+              type="button"
+              @click="addPlacement = 'REPLACE'"
+              class="px-3 py-1.5 text-[12px] rounded border transition-colors"
+              :class="placementBtnClass('REPLACE')"
+            >
+              替换
+            </button>
+          </div>
+          <p class="text-[11px] text-neutral-600 leading-relaxed">
+            <template v-if="addPlacement === 'INSERT'">
+              插到选中的人前面:他和他后面的人依次后移一位(插第 1 个之前 = 顶前);
+              名单已满时最后一名会被挤出去。
+            </template>
+            <template v-else>选择被替换的人(或一个空位),新人放到那个位置,其他人不动。</template>
+          </p>
+          <el-select
+            v-if="addPlacement === 'REPLACE'"
+            v-model="addReplaceKey"
+            class="w-full add-select"
+            popper-class="add-select-popper"
+            placeholder="选择要替换的人或空位"
+            filterable
+          >
+            <el-option
+              v-for="it in listItems"
+              :key="itemKeyOf(it)"
+              :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'}`"
+              :value="itemKeyOf(it)"
+            />
+            <!-- 也可以直接落到空位上(空位不占人,只是把新人放到那个位置) -->
+            <el-option
+              v-for="n in emptySlots"
+              :key="'slot-' + n"
+              :label="`#${n} 空位`"
+              :value="'slot:' + n"
+            />
+          </el-select>
+          <el-select
+            v-else-if="addPlacement === 'INSERT'"
+            v-model="addReplaceKey"
+            class="w-full add-select"
+            popper-class="add-select-popper"
+            placeholder="选择插到谁前面"
+            filterable
+          >
+            <el-option
+              v-for="it in listItems"
+              :key="itemKeyOf(it)"
+              :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'} 之前`"
+              :value="itemKeyOf(it)"
+            />
+          </el-select>
+        </div>
+
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <button
+              class="px-3 py-1.5 text-[12px] rounded border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors"
+              @click="addDialogVisible = false"
+            >
+              取消
+            </button>
+            <button
+              class="px-3.5 py-1.5 text-[12px] rounded bg-amber-500 text-neutral-900 font-medium hover:bg-amber-400 disabled:opacity-40 transition-colors"
+              :disabled="addSubmitting || (addPlacement === 'REPLACE' && !addReplaceKey)"
+              @click="submitAdd"
+            >
+              {{ addSubmitting ? '提交中...' : '加入名单' }}
+            </button>
+          </div>
+        </template>
+      </GameDialog>
+
+      <!-- 移出确认:顶上 or 留空位 -->
+      <GameDialog
+        v-model="removeDialogVisible"
+        width="440px"
+        title="移出名单"
+        subtitle="选择移出后其他人的位置怎么处理"
+        :icon="UserMinus"
+      >
+        <div class="text-[13px] text-neutral-300 leading-relaxed">
+          把
+          <span class="text-amber-400 font-medium">{{ removeDialogItem?.name || '未命名' }}</span>
+          <span v-if="removeDialogSeed"> （第 {{ removeDialogSeed }} 位）</span>
+          移出「{{ targetStageName }}」名单?
+        </div>
+        <div class="mt-3 space-y-2 text-[12px]">
+          <div class="rounded border border-neutral-800 bg-black/40 px-3 py-2 text-neutral-400">
+            <span class="text-neutral-200">后续的人顶上</span>:他后面的人整体前移一位,名单保持连续。
+          </div>
+          <div class="rounded border border-neutral-800 bg-black/40 px-3 py-2 text-neutral-400">
+            <span class="text-neutral-200">留下空位</span>:他的位置空着,后面的人不动(空位可稍后再补人)。
+          </div>
+        </div>
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <button
+              class="px-3 py-1.5 text-[12px] rounded border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors"
+              @click="removeDialogVisible = false"
+            >
+              取消
+            </button>
+            <button
+              class="px-3.5 py-1.5 text-[12px] rounded border border-neutral-600 text-neutral-200 hover:bg-neutral-800 transition-colors"
+              @click="confirmRemoveItem(true)"
+            >
+              后续的人顶上
+            </button>
+            <button
+              class="px-3.5 py-1.5 text-[12px] rounded bg-amber-500 text-neutral-900 font-medium hover:bg-amber-400 transition-colors"
+              @click="confirmRemoveItem(false)"
+            >
+              留下空位
+            </button>
+          </div>
+        </template>
+      </GameDialog>
+
       <!-- 目标赛段已开始:整页锁定 -->
-      <div v-if="targetLocked" class="flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
+      <!-- 名单卡片会在锁定态显示同样的提示,这里只在没有名单卡片时兜底 -->
+      <div v-if="targetLocked && rosters.length === 0" class="flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
         <Lock class="w-4 h-4 flex-none" />
         <span>{{ targetStageName }} 已开始,中间态调整已锁定,如需调整请先重置该赛段。</span>
       </div>
@@ -38,7 +577,7 @@
             :disabled="confirmingAdvancement || targetLocked"
             class="flex-none px-4 py-2 rounded-lg bg-amber-500 text-neutral-900 text-xs font-bold hover:bg-amber-400 disabled:opacity-40 transition-colors"
           >
-            {{ confirmingAdvancement ? '提交中...' : draftDirty ? '确认并提交' : '确认晋级' }}
+            {{ confirmingAdvancement ? '提交中...' : '确认晋级' }}
           </button>
           <span v-else-if="advancementConfirmed" class="flex-none text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-500">已确认</span>
         </div>
@@ -85,535 +624,29 @@
         </div>
       </div>
 
-      <!-- 海选弃权/顶替(结算后、确认晋级前) -->
-      <div v-if="isAuditionSource && sourceStage?.status === 'SETTLED' && !advancementConfirmed" class="space-y-4 border-t border-neutral-800 pt-6">
-        <div class="flex items-center justify-between">
-          <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">晋级名单</h4>
-          <span class="text-xs text-neutral-500">晋级者弃权后,可手动把名次靠下的淘汰者顶上来,或不顶替(对手轮空晋级)</span>
-        </div>
-
-        <div class="space-y-1.5">
-          <div class="text-[11px] text-neutral-500 mb-1">晋级者</div>
-          <div
-            v-for="c in auditionAdvancersVisible"
-            :key="c.id"
-            class="flex items-center gap-3 px-3 py-2 rounded-lg bg-black border border-neutral-800"
-          >
-            <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name }}</span>
-            <span class="text-[10px] font-mono text-amber-400 flex-none">{{ c.score != null ? c.score.toFixed(1) + ' 分' : '--' }}</span>
-            <span class="text-[10px] text-neutral-600 flex-none">#{{ c.finalRank }}</span>
-            <button
-              @click="handleWithdraw(c)"
-              :disabled="withdrawing"
-              class="px-2 py-1 text-[10px] rounded border border-red-900/30 text-red-400 hover:bg-red-900/10 disabled:opacity-40"
-            >
-              弃权
-            </button>
-          </div>
-          <p v-if="auditionAdvancersVisible.length === 0" class="text-[10px] text-neutral-600">暂无晋级者</p>
-        </div>
-
-        <div v-if="auditionWithdrawn.length > 0" class="space-y-1.5">
-          <div class="text-[11px] text-neutral-500 mb-1">已弃权(可顶替)</div>
-          <div v-for="w in auditionWithdrawn" :key="w.id" class="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-500/5 border border-red-900/30">
-            <span class="flex-1 min-w-0 text-sm text-neutral-400 line-through truncate">{{ w.name }}</span>
-            <select v-model="replacementByWithdrawn[w.id]" class="bg-black border border-neutral-700 rounded px-2 py-1 text-xs text-white">
-              <option :value="null">不顶替(对手轮空晋级)</option>
-              <option v-for="r in auditionReplacements" :key="r.id" :value="r.id">{{ r.name }} #{{ r.finalRank }}</option>
-            </select>
-            <button
-              @click="handlePromote(w)"
-              :disabled="promoting"
-              class="px-2 py-1 text-[10px] rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-40"
-            >
-              顶替
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 下一赛段参赛方:上一赛段晋级者与新增 GUEST 统一落位(与预排逻辑一致) -->
-      <div class="space-y-4 border-t border-neutral-800 pt-6">
-        <div class="flex items-center justify-between">
-          <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">下一赛段参赛方 · {{ targetStageName }}</h4>
-          <div class="flex items-center gap-2 flex-none">
-            <span class="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-400">{{ targetModeLabel }}</span>
-            <span v-if="draftDirty" class="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
-              未提交调整
-            </span>
-            <button
-              v-if="draftDirty"
-              @click="resetDraft"
-              class="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-neutral-400 hover:text-red-500 hover:border-red-900/40 transition-colors"
-            >
-              撤销调整
-            </button>
-            <!-- 已确认晋级后的后续调整:单独保存(种子顺序/移除 GUEST 等) -->
-            <button
-              v-if="advancementConfirmed && draftDirty && !targetLocked"
-              @click="handleSaveDraft"
-              :disabled="savingDraft"
-              class="text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
-            >
-              {{ savingDraft ? '保存中...' : '保存调整' }}
-            </button>
-            <!-- 海选→首个淘汰赛 SEED 模式:随机交换上下位置(1/3 恒在上、2/4 恒在下) -->
-            <template v-if="isSeedKnockoutTransition && !targetLocked">
-              <button
-                @click="randomSwapTopBottom"
-                class="text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
-                title="对每场配对随机交换上下位置;1/3 号种子固定在上、2/4 号种子固定在下"
-              >
-                <Shuffle class="w-3 h-3" /> 随机交换上下
-              </button>
-              <button
-                @click="restoreSeedOrder"
-                class="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:border-neutral-600 transition-colors flex items-center gap-1"
-                title="恢复为按海选名次排列的原始种子位置"
-              >
-                <RotateCcw class="w-3 h-3" /> 恢复
-              </button>
-            </template>
-            <span
-              v-if="targetStage?.teamCountStart"
-              class="text-[10px] px-2 py-0.5 rounded bg-black border border-neutral-800 text-neutral-500"
-              :class="sortedDirect.length >= targetStage.teamCountStart ? 'text-amber-400 border-amber-500/30' : ''"
-            >
-              已 {{ sortedDirect.length }} / 计划 {{ targetStage.teamCountStart }} 人(轮空占位也算)
-            </span>
-          </div>
-        </div>
-
-        <!-- 参赛方调整:晋级者与 GUEST 统一按赛制预排落位 -->
-        <div class="space-y-3">
-          <p v-if="targetMode !== 'AUDITION'" class="text-xs text-neutral-500 leading-relaxed">
-            上一赛段晋级者与新增 GUEST 在此统一调整,与上方预排逻辑一致,按{{ targetModeLabel }}落位:
-            <template v-if="targetMode === 'GROUP'">蛇形分组进入各小组</template>
-            <template v-else-if="targetMode === 'ARENA'">按种子顺序进入擂台轮转队列</template>
-            <template v-else-if="targetMode === 'RANK'">按种子顺序均分到各圈</template>
-            <template v-else>
-              进入淘汰赛对战树<template v-if="directPairingMode === 'SEED'">;首尾交叉模式下 GUEST 自动顶替前几名种子位,原参赛者顺延</template>
-            </template>
-            ,换位即调整预排顺序;GUEST 可直接添加。
-          </p>
-
-          <!-- 添加 GUEST 表单 -->
-          <div class="flex items-end gap-2">
-            <div class="flex-1">
-              <label class="text-xs text-neutral-500 mb-1 block">GUEST 名称</label>
-              <input
-                v-model="directForm.name"
-                type="text"
-                maxlength="50"
-                :disabled="!canAddGuest"
-                class="w-full bg-black border border-neutral-700 rounded-lg p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50"
-                placeholder="GUEST 名称"
-              />
-            </div>
-            <div class="w-24">
-              <label class="text-xs text-neutral-500 mb-1 block">类型</label>
-              <select
-                v-model="directForm.type"
-                :disabled="!canAddGuest"
-                class="w-full bg-black border border-neutral-700 rounded-lg p-2 text-sm text-white focus:border-amber-500 focus:outline-none appearance-none disabled:opacity-50"
-              >
-                <option :value="0">个人</option>
-                <option :value="1">队伍</option>
-              </select>
-            </div>
-            <div class="w-28">
-              <label class="text-xs text-neutral-500 mb-1 block">选手号</label>
-              <input
-                v-model="directForm.number"
-                type="text"
-                maxlength="20"
-                :disabled="!canAddGuest"
-                class="w-full bg-black border border-neutral-700 rounded-lg p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50"
-                placeholder="留空自动生成"
-              />
-            </div>
-            <div class="w-28">
-              <label class="text-xs text-neutral-500 mb-1 block">落位</label>
-              <select
-                v-model="directForm.placement"
-                :disabled="!canAddGuest"
-                class="w-full bg-black border border-neutral-700 rounded-lg p-2 text-sm text-white focus:border-amber-500 focus:outline-none appearance-none disabled:opacity-50"
-              >
-                <option value="FRONT">顶前</option>
-                <option value="TAIL">队尾</option>
-                <option value="SPECIFIED">指定种子</option>
-                <option value="AUTO">自动</option>
-              </select>
-            </div>
-            <div v-if="directForm.placement === 'SPECIFIED'" class="w-24">
-              <label class="text-xs text-neutral-500 mb-1 block">种子位</label>
-              <input
-                v-model.number="directForm.specifiedSeed"
-                type="number"
-                min="1"
-                :disabled="!canAddGuest"
-                class="w-full bg-black border border-neutral-700 rounded-lg p-2 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50"
-                placeholder="1..N"
-              />
-            </div>
-            <button
-              @click="addDirectGuest"
-              :disabled="!canAddGuest"
-              class="h-[38px] px-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold hover:bg-amber-500/20 disabled:opacity-40 transition-colors flex items-center gap-1"
-            >
-              <UserPlus class="w-3.5 h-3.5" /> 添加 GUEST
-            </button>
-          </div>
-
-          <div v-if="directLoading" class="text-sm text-neutral-500 py-3 text-center">加载参赛方中...</div>
-          <div v-else-if="sortedDirect.length === 0" class="text-sm text-neutral-600 py-3 text-center">
-            暂无参赛者,等待上一赛段结算后在此调整晋级者顺序,或添加 GUEST
-          </div>
-          <template v-else>
-            <!-- 淘汰赛目标:两列对战树换位 -->
-            <div v-if="targetMode === 'KNOCKOUT'" class="grid grid-cols-2 gap-4">
-              <div class="space-y-2">
-                <div class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center pb-1 border-b border-neutral-800">左半区</div>
-                <div v-for="p in directLeftPairs" :key="'DL' + p.position" class="rounded-lg bg-black border border-neutral-800 p-2">
-                  <!-- <div class="text-[10px] text-neutral-600 font-mono mb-1 px-1">#{{ p.position }}</div> -->
-                  <div class="space-y-1.5">
-                    <div v-if="p.left" class="flex items-center gap-2 px-2 py-1.5 rounded bg-neutral-900/60 border border-neutral-800">
-                      <span
-                        class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none"
-                        >{{ slotSeedAt(p, 'left') }}</span
-                      >
-                      <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p.left.name }}</span>
-                      <span
-                        v-if="isGuestComp(p.left)"
-                        class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 flex-none"
-                        >GUEST</span
-                      >
-                      <span
-                        v-if="p.left._local"
-                        class="text-[10px] px-1 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/30 flex-none"
-                        >新增</span
-                      >
-                      <button
-                        v-if="isGuestComp(p.left) && canDirectAdd"
-                        @click.stop="removeDirectGuest(p.left)"
-                        class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 disabled:opacity-40 transition-colors flex items-center justify-center flex-none"
-                        title="移除 GUEST"
-                      >
-                        <Trash2 class="w-3 h-3" />
-                      </button>
-                      <div v-if="canDirectAdd" class="flex items-center gap-0.5 flex-none">
-                        <button
-                          @click="moveDirectBracketSeed(p, 'left', -1)"
-                          :disabled="!canDirectMoveUp(p, 'left')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列上移"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          @click="moveDirectBracketSeed(p, 'left', 1)"
-                          :disabled="!canDirectMoveDown(p, 'left')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列下移"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          v-if="p.right"
-                          @click="swapDirectPair(p)"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="左右互换"
-                        >
-                          ⇄
-                        </button>
-                      </div>
-                    </div>
-                    <div v-else class="px-2 py-1.5 rounded bg-neutral-900/30 border border-dashed border-neutral-800 text-[10px] text-neutral-600">
-                      {{ slotSeedAt(p, 'left') }} 号 · 空位
-                    </div>
-                    <div class="text-center text-[10px] text-neutral-700">VS</div>
-                    <div v-if="p.right" class="flex items-center gap-2 px-2 py-1.5 rounded bg-neutral-900/60 border border-neutral-800">
-                      <span
-                        class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none"
-                        >{{ slotSeedAt(p, 'right') }}</span
-                      >
-                      <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p.right.name }}</span>
-                      <span
-                        v-if="isGuestComp(p.right)"
-                        class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 flex-none"
-                        >GUEST</span
-                      >
-                      <span
-                        v-if="p.right._local"
-                        class="text-[10px] px-1 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/30 flex-none"
-                        >新增</span
-                      >
-                      <button
-                        v-if="isGuestComp(p.right) && canDirectAdd"
-                        @click.stop="removeDirectGuest(p.right)"
-                        class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 disabled:opacity-40 transition-colors flex items-center justify-center flex-none"
-                        title="移除 GUEST"
-                      >
-                        <Trash2 class="w-3 h-3" />
-                      </button>
-                      <div v-if="canDirectAdd" class="flex items-center gap-0.5 flex-none">
-                        <button
-                          @click="moveDirectBracketSeed(p, 'right', -1)"
-                          :disabled="!canDirectMoveUp(p, 'right')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列上移"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          @click="moveDirectBracketSeed(p, 'right', 1)"
-                          :disabled="!canDirectMoveDown(p, 'right')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列下移"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          v-if="p.left"
-                          @click="swapDirectPair(p)"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="左右互换"
-                        >
-                          ⇄
-                        </button>
-                      </div>
-                    </div>
-                    <div v-else class="px-2 py-1.5 rounded bg-neutral-900/30 border border-dashed border-neutral-800 text-[10px] text-neutral-600">
-                      {{ slotSeedAt(p, 'right') }} 号 · 空位
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="space-y-2">
-                <div class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center pb-1 border-b border-neutral-800">右半区</div>
-                <div v-for="p in directRightPairs" :key="'DR' + p.position" class="rounded-lg bg-black border border-neutral-800 p-2">
-                  <!-- <div class="text-[10px] text-neutral-600 font-mono mb-1 px-1">#{{ p.position }}</div> -->
-                  <div class="space-y-1.5">
-                    <div v-if="p.left" class="flex items-center gap-2 px-2 py-1.5 rounded bg-neutral-900/60 border border-neutral-800">
-                      <span
-                        class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none"
-                        >{{ slotSeedAt(p, 'left') }}</span
-                      >
-                      <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p.left.name }}</span>
-                      <span
-                        v-if="isGuestComp(p.left)"
-                        class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 flex-none"
-                        >GUEST</span
-                      >
-                      <button
-                        v-if="isGuestComp(p.left) && canDirectAdd"
-                        @click.stop="removeDirectGuest(p.left)"
-                        class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 disabled:opacity-40 transition-colors flex items-center justify-center flex-none"
-                        title="移除 GUEST"
-                      >
-                        <Trash2 class="w-3 h-3" />
-                      </button>
-                      <div v-if="canDirectAdd" class="flex items-center gap-0.5 flex-none">
-                        <button
-                          @click="moveDirectBracketSeed(p, 'left', -1)"
-                          :disabled="!canDirectMoveUp(p, 'left')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列上移"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          @click="moveDirectBracketSeed(p, 'left', 1)"
-                          :disabled="!canDirectMoveDown(p, 'left')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列下移"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          v-if="p.right"
-                          @click="swapDirectPair(p)"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="左右互换"
-                        >
-                          ⇄
-                        </button>
-                      </div>
-                    </div>
-                    <div v-else class="px-2 py-1.5 rounded bg-neutral-900/30 border border-dashed border-neutral-800 text-[10px] text-neutral-600">
-                      {{ slotSeedAt(p, 'left') }} 号 · 空位
-                    </div>
-                    <div class="text-center text-[10px] text-neutral-700">VS</div>
-                    <div v-if="p.right" class="flex items-center gap-2 px-2 py-1.5 rounded bg-neutral-900/60 border border-neutral-800">
-                      <span
-                        class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none"
-                        >{{ slotSeedAt(p, 'right') }}</span
-                      >
-                      <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p.right.name }}</span>
-                      <span
-                        v-if="isGuestComp(p.right)"
-                        class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 flex-none"
-                        >GUEST</span
-                      >
-                      <button
-                        v-if="isGuestComp(p.right) && canDirectAdd"
-                        @click.stop="removeDirectGuest(p.right)"
-                        class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 disabled:opacity-40 transition-colors flex items-center justify-center flex-none"
-                        title="移除 GUEST"
-                      >
-                        <Trash2 class="w-3 h-3" />
-                      </button>
-                      <div v-if="canDirectAdd" class="flex items-center gap-0.5 flex-none">
-                        <button
-                          @click="moveDirectBracketSeed(p, 'right', -1)"
-                          :disabled="!canDirectMoveUp(p, 'right')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列上移"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          @click="moveDirectBracketSeed(p, 'right', 1)"
-                          :disabled="!canDirectMoveDown(p, 'right')"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="同列下移"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          v-if="p.left"
-                          @click="swapDirectPair(p)"
-                          class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          title="左右互换"
-                        >
-                          ⇄
-                        </button>
-                      </div>
-                    </div>
-                    <div v-else class="px-2 py-1.5 rounded bg-neutral-900/30 border border-dashed border-neutral-800 text-[10px] text-neutral-600">
-                      {{ slotSeedAt(p, 'right') }} 号 · 空位
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 小组/擂台/排名目标:扁平列表换位 + 模式专属落位预览 -->
-            <div v-else class="space-y-3">
-              <div class="space-y-1">
-                <div
-                  v-for="(c, i) in sortedDirect"
-                  :key="c.id"
-                  class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border border-neutral-800"
-                >
-                  <span class="w-7 h-7 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none">{{
-                    c.seedRank || '-'
-                  }}</span>
-                  <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name }}</span>
-                  <span v-if="c.number" class="text-[10px] text-neutral-600 flex-none">#{{ c.number }}</span>
-                  <span
-                    v-if="isGuestComp(c)"
-                    class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 flex-none"
-                    >GUEST</span
-                  >
-                  <span v-if="c._local" class="text-[10px] px-1 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/30 flex-none"
-                    >新增</span
-                  >
-                  <button
-                    v-if="isGuestComp(c) && canDirectAdd"
-                    @click.stop="removeDirectGuest(c)"
-                    class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 disabled:opacity-40 transition-colors flex items-center justify-center flex-none"
-                    title="移除 GUEST"
-                  >
-                    <Trash2 class="w-3 h-3" />
-                  </button>
-                  <div v-if="canDirectAdd" class="flex items-center gap-0.5 flex-none">
-                    <button
-                      @click="moveDirectSeed(i, -1)"
-                      :disabled="i === 0"
-                      class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                      title="上移"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      @click="moveDirectSeed(i, 1)"
-                      :disabled="i === sortedDirect.length - 1"
-                      class="w-6 h-6 rounded border border-neutral-700 text-neutral-400 hover:text-amber-500 hover:border-amber-500/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                      title="下移"
-                    >
-                      ↓
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 小组赛:蛇形分组预览 -->
-              <div v-if="targetMode === 'GROUP'" class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                <div v-for="(g, gi) in groupPreview" :key="gi" class="rounded-lg bg-black border border-neutral-800 p-2">
-                  <div class="text-[10px] font-bold text-amber-500 mb-1">G{{ gi + 1 }}</div>
-                  <div v-for="c in g" :key="c.id" class="text-xs text-neutral-300 truncate py-0.5">
-                    {{ c.name }}<span v-if="isGuestComp(c)" class="text-amber-400"> ·GUEST</span>
-                  </div>
-                  <div v-if="g.length === 0" class="text-[10px] text-neutral-600">空组</div>
-                </div>
-              </div>
-
-              <!-- 擂台赛:队列预览 -->
-              <div v-else-if="targetMode === 'ARENA'" class="space-y-1">
-                <div
-                  v-for="c in arenaQueuePreview"
-                  :key="c.id"
-                  class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border border-neutral-800"
-                  :class="c.queueIndex === 1 ? 'border-amber-500/30' : ''"
-                >
-                  <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none">{{
-                    c.queueIndex
-                  }}</span>
-                  <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name }}</span>
-                  <span
-                    v-if="isGuestComp(c)"
-                    class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 flex-none"
-                    >GUEST</span
-                  >
-                </div>
-              </div>
-
-              <!-- 排名赛:圈分配预览 -->
-              <div v-else-if="targetMode === 'RANK'" class="grid grid-cols-2 gap-2">
-                <div v-for="(ccl, ci) in circlePreview" :key="ci" class="rounded-lg bg-black border border-neutral-800 p-2">
-                  <div class="text-[10px] font-bold text-amber-500 mb-1">ZONE-{{ ci + 1 }}</div>
-                  <div v-for="c in ccl" :key="c.id" class="text-xs text-neutral-300 truncate py-0.5">
-                    {{ c.name }}<span v-if="isGuestComp(c)" class="text-amber-400"> ·GUEST</span>
-                  </div>
-                  <div v-if="ccl.length === 0" class="text-[10px] text-neutral-600">空圈</div>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- 海选目标:不支持 GUEST 加入 -->
-          <p v-if="targetMode === 'AUDITION'" class="text-xs text-amber-400/80 leading-relaxed">
-            海选赛段不支持添加 GUEST,GUEST 选手走签到/补签到流程。
-          </p>
-        </div>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { ArrowRight, SlidersHorizontal, Lock, UserPlus, Trash2, Shuffle, RotateCcw } from 'lucide-vue-next';
+import { ArrowRight, SlidersHorizontal, Lock, RotateCcw, UserPlus, UserMinus } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { getStage, getStagePreBracket, adjustStageAdvancement, addStageGuest, setStageSeedOrder } from '@/api/game/stage';
-import { calculateAdvancement } from '@/api/game/stage/lifecycle';
+import GameDialog from '@/components/GameDialog/index.vue';
+import { getStage, listStage, adjustStageAdvancement } from '@/api/game/stage';
+import {
+  applyStageRoster,
+  getStageRoster,
+  skipStageRoster,
+  getRosterCandidates,
+  addRosterOverride,
+  deleteRosterOverride,
+  getRosterPreview,
+  setRosterOrder
+} from '@/api/game/stage/roster';
 import { seedLayout } from '@/utils/seedLayout';
-import { promoteReplacement } from '@/api/game/stage/lifecycle';
-import { listCompetitor, delCompetitor } from '@/api/game/competitor';
-import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listCompetitor } from '@/api/game/competitor';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 // Props
@@ -623,6 +656,10 @@ const props = defineProps<{
   targetStageId: string | number;
   targetStageName: string;
   transitionIndex: number;
+  /** 目标赛段入边池摘要(池化;StageFlow 从 stage.incoming 传入) */
+  incoming?: any[];
+  /** 赛段名映射(用于展示非相邻来源名称) */
+  stageNames?: Record<string, string>;
 }>();
 
 const emit = defineEmits<{
@@ -630,12 +667,9 @@ const emit = defineEmits<{
   confirmed: [targetStageId: string | number];
 }>();
 
-// 预排参赛者与保存状态
-const preStatus = ref('');
-const preSeeds = ref<any[]>([]);
+// 晋级确认状态
 const advSaving = ref(false);
 const confirmingAdvancement = ref(false);
-const savingDraft = ref(false);
 const pendingAdvancers = ref<any[]>([]);
 const selectedAdvanceIds = ref<string[]>([]);
 const sourceStage = ref<any>(null);
@@ -643,147 +677,6 @@ const targetStage = ref<any>(null);
 
 /** 来源赛段是否为排名赛(同分待定晋级调整仅排名赛需要) */
 const isRankSource = computed(() => sourceStage.value?.stageMode === 'RANK');
-
-/** 来源赛段是否为海选(弃权/顶替调整) */
-const isAuditionSource = computed(() => sourceStage.value?.stageMode === 'AUDITION');
-
-// 海选弃权/顶替状态
-const auditionAdvancers = ref<any[]>([]);
-const auditionWithdrawn = ref<any[]>([]);
-const auditionReplacements = ref<any[]>([]);
-const replacementByWithdrawn = reactive<Record<string, string | number | null>>({});
-const withdrawing = ref(false);
-const promoting = ref(false);
-
-/** 海选总分:存在场次参赛方明细的 scoreValue 上,按 competitorId 建映射 */
-const loadAuditionScores = async (stageId: string | number): Promise<Map<string, number | null>> => {
-  const scoreMap = new Map<string, number | null>();
-  try {
-    const mr: any = await listMatch({ stageId, pageNum: 1, pageSize: 1000 } as any);
-    const matches = mr?.data?.data || mr?.data || [];
-    // 主赛分数优先:二海(同分加赛)只决定谁晋级,晋级名单的分数与名次仍用原海选分
-    const normalMatches = matches.filter((m: any) => !String(m.remark || '').startsWith('同分加赛'));
-    const tiebreakerMatches = matches.filter((m: any) => String(m.remark || '').startsWith('同分加赛'));
-    const loadParts = async (list: any[]) => {
-      const partsList = await Promise.all(
-        list.map(async (m: any) => {
-          try {
-            const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 999 } as any);
-            return pr?.data?.data || pr?.data || [];
-          } catch {
-            return [];
-          }
-        })
-      );
-      return partsList.flat();
-    };
-    // 先写主赛分
-    (await loadParts(normalMatches)).forEach((p: any) => {
-      if (p.competitorId != null) {
-        scoreMap.set(String(p.competitorId), p.scoreValue != null ? Number(p.scoreValue) : null);
-      }
-    });
-    // 二海分只兜底补缺(正常情况二海选手都在主赛里,不会覆盖原分)
-    (await loadParts(tiebreakerMatches)).forEach((p: any) => {
-      if (p.competitorId != null && !scoreMap.has(String(p.competitorId))) {
-        scoreMap.set(String(p.competitorId), p.scoreValue != null ? Number(p.scoreValue) : null);
-      }
-    });
-  } catch (e) {
-    console.warn('加载海选分数失败:', e);
-  }
-  return scoreMap;
-};
-
-/** 加载海选晋级者/已弃权者/可顶替淘汰者(按名次取前若干) */
-const loadAuditionWithdrawal = async () => {
-  if (!isAuditionSource.value || sourceStage.value?.status !== 'SETTLED') {
-    auditionAdvancers.value = [];
-    auditionWithdrawn.value = [];
-    auditionReplacements.value = [];
-    return;
-  }
-  try {
-    const sid = sourceStage.value.id;
-    const [advResp, repResp] = await Promise.all([
-      listCompetitor({ stageId: sid, outcomeStatus: 'ADVANCE', pageNum: 1, pageSize: 1000 } as any),
-      listCompetitor({ stageId: sid, outcomeStatus: 'ELIMINATED', pageNum: 1, pageSize: 1000 } as any)
-    ]);
-    const adv = (advResp.data || (advResp as any).data || []) as any[];
-    const rep = (repResp.data || (repResp as any).data || []) as any[];
-    const scoreMap = await loadAuditionScores(sid);
-    auditionAdvancers.value = adv
-      .filter((c) => c.outcomeStatus === 'ADVANCE')
-      .map((c) => ({ ...c, score: scoreMap.get(String(c.id)) ?? null }))
-      .sort((a, b) => {
-        const sa = a.score == null ? -1 : a.score;
-        const sb = b.score == null ? -1 : b.score;
-        // 分数从高到低,同分按名次升序稳定排列
-        return sb - sa || (a.finalRank || 9999) - (b.finalRank || 9999);
-      });
-    // WITHDRAWN 需单独查询
-    const wdResp: any = await listCompetitor({ stageId: sid, outcomeStatus: 'WITHDRAWN', pageNum: 1, pageSize: 1000 } as any);
-    auditionWithdrawn.value = (wdResp.data || (wdResp as any).data || []).filter((c: any) => c.outcomeStatus === 'WITHDRAWN');
-    auditionReplacements.value = rep.filter((c) => c.outcomeStatus === 'ELIMINATED').sort((a, b) => (a.finalRank || 9999) - (b.finalRank || 9999));
-    auditionWithdrawn.value.forEach((w: any) => {
-      if (replacementByWithdrawn[w.id] === undefined) {
-        replacementByWithdrawn[w.id] = null;
-      }
-    });
-  } catch (error) {
-    console.warn('加载海选弃权/顶替信息失败:', error);
-    auditionAdvancers.value = [];
-    auditionWithdrawn.value = [];
-    auditionReplacements.value = [];
-  }
-};
-
-/** 晋级者弃权(不顶替,对手轮空晋级) */
-const handleWithdraw = async (c: any) => {
-  if (!sourceStage.value) return;
-  try {
-    await ElMessageBox.confirm(`确认「${c.name}」弃权?弃权后不再占用晋级名额,可另行顶替。`, '海选弃权', {
-      type: 'warning',
-      confirmButtonText: '确认弃权',
-      cancelButtonText: '取消'
-    });
-  } catch {
-    return;
-  }
-  withdrawing.value = true;
-  try {
-    await promoteReplacement(sourceStage.value.id, { withdrawnCompetitorId: c.id });
-    ElMessage.success(`「${c.name}」已弃权`);
-    await loadAuditionWithdrawal();
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '弃权失败');
-  } finally {
-    withdrawing.value = false;
-  }
-};
-
-/** 顶替:用所选淘汰者替换已弃权者(选"不顶替"则仅提示) */
-const handlePromote = async (w: any) => {
-  if (!sourceStage.value) return;
-  const replacementId = replacementByWithdrawn[w.id];
-  if (!replacementId) {
-    ElMessage.info('已选择不顶替,对手将在淘汰赛中轮空晋级');
-    return;
-  }
-  promoting.value = true;
-  try {
-    await promoteReplacement(sourceStage.value.id, {
-      withdrawnCompetitorId: w.id,
-      replacementCompetitorId: replacementId
-    });
-    ElMessage.success('顶替晋级完成');
-    await loadAuditionWithdrawal();
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '顶替失败');
-  } finally {
-    promoting.value = false;
-  }
-};
 
 const modeLabelMap: Record<string, string> = {
   AUDITION: '海选赛',
@@ -793,13 +686,622 @@ const modeLabelMap: Record<string, string> = {
   RANK: '排名赛'
 };
 
-const isGuestComp = (c: any) => c?.remark === 'GUEST';
-
 /** 目标赛段已开始(非 DRAFT/PENDING)时锁定整页中间态调整 */
 const targetLocked = computed(() => {
   const status = targetStage.value?.status;
   return status != null && status !== 'DRAFT' && status !== 'PENDING';
 });
+
+/** 目标赛段名单摘要:优先用接口实时数据,接口失败时回退到 StageFlow 传入的摘要 */
+const rosterItems = ref<any[] | null>(null);
+const rosters = computed<any[]>(() => rosterItems.value ?? props.incoming ?? []);
+
+/** 名单行的来源组:后端始终以 config_json.groups 返回,不做旧列回退 */
+const groupsOfRoster = (p: any): any[] => p?.groups ?? [];
+
+const totalGroupCount = computed(() => rosters.value.reduce((sum, p) => sum + groupsOfRoster(p).length, 0));
+
+/** 是否仅"上一赛段 ADVANCE AUTO"单一来源组:是则保持简单交互(不弹来源摘要) */
+const singleDefaultRoster = computed(() => {
+  const list = rosters.value;
+  if (list.length === 0) return false;
+  if (list.length > 1) return false;
+  const p = list[0];
+  const groups = groupsOfRoster(p);
+  if (groups.length !== 1) return false;
+  const g = groups[0];
+  if (g.sourceStageId == null) return false;
+  if (sourceStage.value && String(g.sourceStageId) !== String(sourceStage.value.id)) return false;
+  return (g.fillMode || 'AUTO') === 'AUTO' && (g.resultFilter || 'ADVANCE') === 'ADVANCE';
+});
+
+/** 多来源组/自定义来源模式:显示来源摘要,确认动作切换为整单装配 */
+const sourceGroupMode = computed(() => {
+  const list = rosters.value;
+  return list.length > 0 && !singleDefaultRoster.value;
+});
+
+/** 名单是否全部可装配(无 WAIT_SOURCE) */
+const rostersReadyForApply = computed(() => {
+  const list = rosters.value;
+  if (list.length === 0) return false;
+  return list.every((p) => p.state !== 'WAIT_SOURCE');
+});
+
+const sourceNameOf = (id: string | number | null | undefined): string => {
+  if (id == null) return '外部/签到';
+  if (props.stageNames && props.stageNames[String(id)]) return props.stageNames[String(id)];
+  if (String(id) === String(props.sourceStageId)) return props.sourceStageName;
+  return '赛段 #' + id;
+};
+
+const rankTextOf = (g: any): string => {
+  if (g.rankStart == null && g.rankEnd == null) return '';
+  const range = `${g.rankStart ?? ''}~${g.rankEnd ?? '末'}名`;
+  return g.rankByZone ? `圈内${range}` : `全场${range}`;
+};
+
+/** ZONE-2 → 第2圈 */
+const zoneTextOf = (zone?: string | null): string => {
+  const m = /^ZONE-(\d+)$/.exec(zone || '');
+  return m ? `第${m[1]}圈` : (zone || '');
+};
+
+const groupText = (g: any): string => {
+  const quota = g.quota && g.quota > 0 ? ` 前${g.quota}` : '';
+  const zone = g.zone ? `·${zoneTextOf(g.zone)}` : '';
+  return `${sourceNameOf(g.sourceStageId)}${zone}·${resultLabelOf(g.resultFilter)}${quota}·${fillLabelOf(g.fillMode)}${
+    rankTextOf(g) ? `·${rankTextOf(g)}` : ''
+  }`;
+};
+
+const resultLabelOf = (filter?: string): string => {
+  if (filter === 'ADVANCE') return '晋级';
+  if (filter === 'ELIMINATED') return '落选';
+  if (filter === 'ANY') return '不限';
+  return filter || '不限';
+};
+
+const fillLabelOf = (fill?: string): string => {
+  if (fill === 'MANUAL') return '手动';
+  if (fill === 'STREAM') return '流式';
+  return '自动';
+};
+
+const rosterSummaryText = computed(() => {
+  if (!sourceGroupMode.value) return '';
+  return rosters.value.flatMap((p) => groupsOfRoster(p).map((g) => groupText(g))).join(' + ');
+});
+
+const rosterStateLabel = (state?: string): string => {
+  const map: Record<string, string> = {
+    WAIT_SOURCE: '等来源结算',
+    READY: '就绪',
+    CONFIRMED: '已带入',
+    SKIPPED: '跳过'
+  };
+  return (state && map[state]) || state || '—';
+};
+
+const rosterStateClass = (state?: string): string => {
+  const map: Record<string, string> = {
+    WAIT_SOURCE: 'bg-neutral-800 text-neutral-400 border border-neutral-700',
+    READY: 'bg-amber-500/10 text-amber-400 border border-amber-500/30',
+    CONFIRMED: 'bg-green-500/10 text-green-400 border border-green-500/30',
+    SKIPPED: 'bg-neutral-800 text-neutral-500 border border-neutral-700'
+  };
+  return map[state || ''] || 'bg-neutral-800 text-neutral-400 border border-neutral-700';
+};
+
+const loadRosters = async () => {
+  try {
+    const resp: any = await getStageRoster(props.targetStageId);
+    rosterItems.value = resp?.data ? [resp.data] : [];
+  } catch {
+    rosterItems.value = props.incoming || [];
+  }
+  await loadManualCandidates();
+  await refreshOverrideTargets();
+  await loadSourceStageModes();
+};
+
+// ---- MANUAL 来源组:候选点选 ----
+const manualPicks = ref<Record<string, string[]>>({});
+const manualCandidates = ref<Record<string, any[]>>({});
+const manualLoading = ref(false);
+
+const shouldOfferManualPicker = (roster: any): boolean =>
+  roster?.state === 'READY' && groupsOfRoster(roster).some((g) => g.fillMode === 'MANUAL');
+
+const manualCandidateRows = async (roster: any): Promise<any[]> => {
+  try {
+    const resp: any = await getRosterCandidates(roster.id);
+    const groups: any[] = resp?.data?.groups ?? [];
+    const rows: any[] = [];
+    for (const g of groups) {
+      for (const c of g.competitors || []) {
+        rows.push({ ...c, _groupLabel: g.label });
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+};
+
+const loadManualCandidates = async () => {
+  const manualRosters = rosters.value.filter(shouldOfferManualPicker);
+  if (manualRosters.length === 0) {
+    manualCandidates.value = {};
+    return;
+  }
+  manualLoading.value = true;
+  try {
+    const next: Record<string, any[]> = {};
+    for (const p of manualRosters) {
+      next[String(p.id)] = await manualCandidateRows(p);
+      manualPicks.value[String(p.id)] = manualPicks.value[String(p.id)] || [];
+    }
+    manualCandidates.value = next;
+  } finally {
+    manualLoading.value = false;
+  }
+};
+
+const isPicked = (roster: any, candidate: any): boolean => (manualPicks.value[String(roster.id)] || []).includes(String(candidate.id));
+
+const pickedCountOf = (roster: any): number => manualPicks.value[String(roster.id)]?.length || 0;
+
+const toggleManualPick = (roster: any, candidate: any) => {
+  const key = String(roster.id);
+  const list = manualPicks.value[key] || [];
+  const idx = list.indexOf(String(candidate.id));
+  const quota = Number(roster.quota) || 0;
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    if (quota > 0 && list.length >= quota) {
+      ElMessage.warning(`该来源最多选择 ${quota} 名`);
+      return;
+    }
+    list.push(String(candidate.id));
+  }
+  manualPicks.value[key] = [...list];
+};
+
+/** 装配提交时的手动选择映射(仅含已选且未被跳过的 MANUAL 来源组) */
+const buildManualSelections = (): Record<string, (string | number)[]> => {
+  const selections: Record<string, (string | number)[]> = {};
+  for (const p of rosters.value) {
+    if (p.state === 'SKIPPED' || p.state === 'CONFIRMED') continue;
+    if (!groupsOfRoster(p).some((g) => g.fillMode === 'MANUAL')) continue;
+    const picks = manualPicks.value[String(p.id)] || [];
+    if (picks.length > 0) {
+      selections[String(p.id)] = picks;
+    }
+  }
+  return selections;
+};
+
+const handleSkipRoster = async (roster: any) => {
+  try {
+    await ElMessageBox.confirm('确认跳过本赛段的全部名单来源?本赛段将不带入任何人。', '跳过名单', {
+      type: 'warning',
+      confirmButtonText: '跳过',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+  try {
+    await skipStageRoster(roster.id);
+    ElMessage.success('已跳过名单');
+    await loadRosters();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '跳过失败');
+  }
+};
+
+// ---- 本赛段名单:手工增删改(两列拖动) ----
+const firstRoster = computed<any>(() => rosters.value[0] || null);
+const overridesOf = (roster: any): any[] => roster?.overrides ?? [];
+const overridePreview = ref<any>(null);
+const listItems = ref<any[]>([]);
+const dragIndex = ref<number | null>(null);
+const hoverIndex = ref<number | null>(null);
+/** 擂台赛出场队列的拖动状态(1 号位=擂主) */
+const arenaDragIndex = ref<number | null>(null);
+const arenaHoverIndex = ref<number | null>(null);
+
+/** 名单已确认/已跳过:只能看不能改 */
+const rosterSealed = computed(() => !!overridePreview.value?.applied || !!overridePreview.value?.skipped);
+
+/** 名单还差多少人到计划规模:多出来的位置显示为空位 */
+const emptySlots = computed(() => {
+  const cap = Number(overridePreview.value?.capacity || 0);
+  if (cap <= 0) return [];
+  // 空位 = 计划范围内没有任何人占用的种子位(删人后原来的位置保持空白)
+  const used = new Set(
+    listItems.value.map((i) => Number(i.seedRank)).filter((n) => Number.isFinite(n) && n > 0)
+  );
+  const out: number[] = [];
+  for (let n = 1; n <= cap; n++) {
+    if (!used.has(n)) out.push(n);
+  }
+  return out;
+});
+
+/** 名单按出场次序排列(落位预览与对战树共用) */
+const rosterRows = computed<any[]>(() =>
+  [...listItems.value].sort(
+    (a, b) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER)
+  )
+);
+
+const onDragStartItem = (idx: number) => {
+  dragIndex.value = idx;
+};
+
+const onDragEnd = () => {
+  dragIndex.value = null;
+  hoverIndex.value = null;
+  arenaDragIndex.value = null;
+  arenaHoverIndex.value = null;
+};
+
+/** 保存当前顺序:位置即出场次序 */
+const persistOrder = async () => {
+  const p = firstRoster.value;
+  if (!p) return;
+  try {
+    await setRosterOrder(
+      p.id,
+      listItems.value.map((i) => ({
+        sourceCompetitorId: i.sourceCompetitorId ?? undefined,
+        overrideId: i.overrideId ?? undefined,
+        // 显式带种子位:删掉的人原来的位置留空,后面的不顶上
+        seedRank: i.seedRank ?? undefined
+      }))
+    );
+  } catch (e: any) {
+    const status = e?.response?.status;
+    if (status === 404 || status === 405) {
+      ElMessage.error('保存顺序失败:后端未更新该接口,请重启后端服务后重试');
+    } else {
+      ElMessage.error(e?.response?.data?.msg || e?.message || '顺序保存失败');
+    }
+  }
+};
+
+/** 移出名单:人工补入/外卡=撤销该条调整,来源带入=记一条移出 */
+/** 移出确认弹窗:可选「后续的人顶上」或「留下空位」 */
+const removeDialogVisible = ref(false);
+const removeDialogItem = ref<any>(null);
+/** 被移出者原来的种子位(供弹窗说明) */
+const removeDialogSeed = computed(() => Number(removeDialogItem.value?.seedRank) || 0);
+
+const askRemoveItem = (item: any) => {
+  if (!item || rosterSealed.value || targetLocked.value) return;
+  removeDialogItem.value = item;
+  removeDialogVisible.value = true;
+};
+
+/**
+ * 执行移出。
+ *
+ * @param fillGap true=后面的人整体顶上一位;false=原地留空位(后面的不动)
+ */
+const confirmRemoveItem = async (fillGap: boolean) => {
+  const item = removeDialogItem.value;
+  removeDialogVisible.value = false;
+  removeDialogItem.value = null;
+  const p = firstRoster.value;
+  if (!p || !item) return;
+  const seed = Number(item.seedRank) || 0;
+  const rest = listItems.value.filter((x) => x !== item);
+  listItems.value = fillGap
+    ? rest.map((x) => {
+        const s = Number(x.seedRank) || 0;
+        return s > seed ? { ...x, seedRank: s - 1 } : x;
+      })
+    : rest;
+  try {
+    if (item.overrideId) {
+      await deleteRosterOverride(p.id, item.overrideId);
+    } else {
+      await addRosterOverride(p.id, { op: 'REMOVE', sourceCompetitorId: item.sourceCompetitorId });
+    }
+    await persistOrder();
+    await loadRosters();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '移出失败');
+    await loadRosters();
+  }
+};
+
+/** 列表内拖动 = 调整顺序 */
+const onDropToRoster = async (idx: number) => {
+  if (dragIndex.value != null) {
+    const from = dragIndex.value;
+    onDragEnd();
+    if (from === idx) return;
+    const arr = [...listItems.value];
+    const [moved] = arr.splice(from, 1);
+    arr.splice(idx > from ? idx - 1 : idx, 0, moved);
+    // 列表拖动 = 重新排序:按新的行序重新编号(1..N)
+    listItems.value = arr.map((it, i) => ({ ...it, seedRank: i + 1 }));
+    await persistOrder();
+    await loadRosters();
+  }
+};
+
+// ---- 擂台赛出场队列:拖动调整出场顺序(1 号位=擂主) ----
+const onArenaDragStart = (idx: number) => {
+  arenaDragIndex.value = idx;
+};
+
+/** 落到某一行 = 插到该位置;队列位置即出场顺序,拖动后按 1..N 重新编号 */
+const onDropToArena = async (idx: number) => {
+  const from = arenaDragIndex.value;
+  arenaDragIndex.value = null;
+  arenaHoverIndex.value = null;
+  if (from == null || from === idx || rosterSealed.value || targetLocked.value) {
+    return;
+  }
+  const arr = [...rosterRows.value];
+  const [moved] = arr.splice(from, 1);
+  arr.splice(idx > from ? idx - 1 : idx, 0, moved);
+  listItems.value = arr.map((it, i) => ({ ...it, seedRank: i + 1 }));
+  await persistOrder();
+  await loadRosters();
+};
+
+// ---- 加人弹窗:输入姓名(外卡) / 从其他赛段选人 ----
+const addDialogVisible = ref(false);
+const addMode = ref<'name' | 'stage'>('name');
+const addName = ref('');
+const addStageId = ref('');
+const addPersonId = ref('');
+const addStagePeople = ref<any[]>([]);
+const addStages = ref<any[]>([]);
+const addSubmitting = ref(false);
+/** 加入位置:INSERT 插入到指定位置(第 1 位=顶前,末位=加到末尾)/ REPLACE 替换指定的人或空位 */
+const addPlacement = ref<'INSERT' | 'REPLACE'>('INSERT');
+const addReplaceKey = ref('');
+
+/** 名单项唯一键(源选手或人工新增行) */
+const itemKeyOf = (it: any): string =>
+  it?.overrideId != null ? 'o' + it.overrideId : 'c' + (it?.sourceCompetitorId ?? '');
+/** 名单是否已满(满了则不能直接加到末尾) */
+const rosterFull = computed(() => {
+  const cap = Number(overridePreview.value?.capacity || 0);
+  return cap > 0 && listItems.value.length >= cap;
+});
+const placementBtnClass = (mode: 'INSERT' | 'REPLACE') =>
+  addPlacement.value === mode
+    ? 'border-amber-500/60 text-amber-400 bg-amber-500/10'
+    : 'border-neutral-700 text-neutral-400 hover:text-neutral-200';
+
+const openAddDialog = () => {
+  addMode.value = 'name';
+  addName.value = '';
+  addStageId.value = '';
+  addPersonId.value = '';
+  addStagePeople.value = [];
+  // 默认:满员时插到第 1 位(等于原「顶前」),未满时插到最后一个之前
+  const lastItem = listItems.value[listItems.value.length - 1];
+  addReplaceKey.value = rosterFull.value
+    ? (listItems.value.length > 0 ? itemKeyOf(listItems.value[0]) : '')
+    : (lastItem ? itemKeyOf(lastItem) : '');
+  addPlacement.value = 'INSERT';
+  addDialogVisible.value = true;
+};
+
+/** 本赛事推进链上位于目标赛段之前的赛段(可从中取人) */
+const loadAddStages = async () => {
+  if (addStages.value.length > 0) return;
+  const target = targetStage.value;
+  if (!target) return;
+  try {
+    const resp: any = await listStage({ tournamentId: target.tournamentId, pageNum: 1, pageSize: 200 } as any);
+    const all: any[] = resp?.data || [];
+    const byId = new Map(all.map((s) => [String(s.id), s]));
+    const out: any[] = [];
+    const seen = new Set<string>();
+    let cur: any = byId.get(String(target.prevStageId));
+    while (cur && !seen.has(String(cur.id))) {
+      seen.add(String(cur.id));
+      out.unshift(cur);
+      cur = byId.get(String(cur.prevStageId));
+    }
+    addStages.value = out;
+  } catch {
+    addStages.value = [];
+  }
+};
+
+const switchToStageMode = async () => {
+  addMode.value = 'stage';
+  await loadAddStages();
+};
+
+const loadAddStagePeople = async () => {
+  addPersonId.value = '';
+  addStagePeople.value = [];
+  if (!addStageId.value) return;
+  const inList = new Set(listItems.value.map((i) => String(i.sourceCompetitorId)));
+  try {
+    const resp: any = await listCompetitor({ stageId: addStageId.value, pageNum: 1, pageSize: 1000 } as any);
+    const rows: any[] = resp.data?.rows ?? resp.data?.data ?? resp.data ?? [];
+    addStagePeople.value = rows
+      .filter((c) => !inList.has(String(c.id)) && c.outcomeStatus !== 'WITHDRAWN')
+      // 擂台赛只收「晋级进来的人」:淘汰/落选的不出现在可选列表里
+      .filter((c) => targetMode.value !== 'ARENA' || c.outcomeStatus === 'ADVANCE')
+      .sort((a, b) => (a.finalRank || 9999) - (b.finalRank || 9999));
+  } catch {
+    addStagePeople.value = [];
+  }
+};
+
+const submitAdd = async () => {
+  const p = firstRoster.value;
+  if (!p) return;
+  if (addMode.value === 'name' && !addName.value.trim()) {
+    ElMessage.warning('请填写姓名');
+    return;
+  }
+  if (addMode.value === 'stage' && !addPersonId.value) {
+    ElMessage.warning('请选择要加入的人员');
+    return;
+  }
+  if (addPlacement.value === 'REPLACE' && !addReplaceKey.value) {
+    ElMessage.warning('请选择要替换的人或空位');
+    return;
+  }
+  if (addPlacement.value === 'INSERT' && !addReplaceKey.value) {
+    ElMessage.warning('请选择插到谁前面');
+    return;
+  }
+  addSubmitting.value = true;
+  try {
+    // 1) 先腾位置
+    //  - 替换:移出被替换的那个人(也可以选空位,那就谁都不动)
+    //  - 插入且名单已满:挤出最后一名(插到第 1 位时等价于"顶前,最后一名出去")
+    const replaceToSlot = addPlacement.value === 'REPLACE' && addReplaceKey.value.startsWith('slot:');
+    const replacedIndex = replaceToSlot
+      ? -1
+      : listItems.value.findIndex((it) => itemKeyOf(it) === addReplaceKey.value);
+    const bySeedDesc = [...listItems.value].sort(
+      (a, b) => (Number(b.seedRank) || 0) - (Number(a.seedRank) || 0)
+    );
+    const replacedSeed = replaceToSlot
+      ? Number(addReplaceKey.value.slice(5)) || 0
+      : (replacedIndex >= 0 ? Number(listItems.value[replacedIndex]?.seedRank) || 0 : 0);
+    // 插入:新人占被选中者的位置,他和后面所有人 +1
+    if (addPlacement.value === 'INSERT') {
+      if (replacedSeed <= 0) {
+        ElMessage.warning('请选择插到谁前面');
+        return;
+      }
+    }
+    const outItem = addPlacement.value === 'REPLACE'
+      ? (replacedIndex >= 0 ? listItems.value[replacedIndex] : null)
+      : (addPlacement.value === 'INSERT' && rosterFull.value)
+        ? bySeedDesc[0]
+        : null;
+    if (outItem) {
+      if (outItem.overrideId) {
+        await deleteRosterOverride(p.id, outItem.overrideId);
+      } else {
+        await addRosterOverride(p.id, { op: 'REMOVE', sourceCompetitorId: outItem.sourceCompetitorId });
+      }
+    }
+
+    // 2) 加人
+    let newOverrideId: string | number | null = null;
+    if (addMode.value === 'name') {
+      const created: any = await addRosterOverride(p.id, {
+        // 不再区分个人/选手:选手就是一个参赛方,选手只是多几个成员
+        op: 'ADD_GUEST', guestName: addName.value.trim(), guestType: 0
+      });
+      newOverrideId = created?.data?.id ?? created?.id ?? null;
+    } else {
+      // 之前被手工移出过的人:加回来 = 撤销那条移出
+      const removed = overridesOf(p).filter(
+        (o) => o.op === 'REMOVE' && o.sourceCompetitorId != null
+          && String(o.sourceCompetitorId) === String(addPersonId.value)
+      );
+      if (removed.length > 0) {
+        for (const o of removed) await deleteRosterOverride(p.id, o.id);
+      } else {
+        const created: any = await addRosterOverride(p.id, {
+          op: 'ADD_SOURCE', sourceCompetitorId: addPersonId.value
+        });
+        newOverrideId = created?.data?.id ?? created?.id ?? null;
+      }
+    }
+
+    // 3) 落位:按显式种子位摆放(删人/换位后原来的位置保持空白,不自动顶上)
+    await loadRosters();
+    {
+      const arr = [...listItems.value];
+      let idx = newOverrideId != null
+        ? arr.findIndex((it) => String(it.overrideId) === String(newOverrideId))
+        : -1;
+      if (idx < 0) {
+        idx = arr.length - 1;
+      }
+      if (idx >= 0) {
+        const newItem = arr[idx];
+        const others = arr.filter((_, i) => i !== idx);
+        const bySeed = (a: any, b: any) => (Number(a.seedRank) || 0) - (Number(b.seedRank) || 0);
+        if (addPlacement.value === 'INSERT') {
+          // 插入:新人占目标位,目标位及其后所有人 +1
+          const shifted = others.map((it) => {
+            const s = Number(it.seedRank) || 0;
+            return s >= replacedSeed ? { ...it, seedRank: s + 1 } : it;
+          });
+          newItem.seedRank = replacedSeed;
+          listItems.value = [...shifted, newItem].sort(bySeed);
+        } else {
+          // 替换:新人顶替被替换者原来的位置
+          newItem.seedRank = replacedSeed || (Number(newItem.seedRank) || 0);
+          listItems.value = [...others, newItem].sort(bySeed);
+        }
+        await persistOrder();
+        await loadRosters();
+      }
+    }
+    ElMessage.success(addPlacement.value === 'INSERT'
+      ? `已插入第 ${replacedSeed} 位,后面的人依次后移`
+      : '已替换入名单');
+    addDialogVisible.value = false;
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '加入名单失败');
+  } finally {
+    addSubmitting.value = false;
+  }
+};
+
+const entryTagLabel = (tag?: string): string => {
+  const map: Record<string, string> = {
+    ADVANCE: '晋级',
+    REVIVE: '复活',
+    GUEST: '外卡',
+    MANUAL: '手动',
+    CHECKIN: '签到'
+  };
+  return (tag && map[tag]) || tag || '';
+};
+
+const refreshOverrideTargets = async () => {
+  const p = firstRoster.value;
+  if (!p) {
+    overridePreview.value = null;
+    listItems.value = [];
+    return;
+  }
+  try {
+    const resp: any = await getRosterPreview(p.id);
+    overridePreview.value = resp?.data || null;
+    listItems.value = (resp?.data?.items || []).map((i: any) => ({ ...i }));
+  } catch {
+    listItems.value = [];
+  }
+};
+
+const modeLabel = (mode?: string): string => (mode && modeLabelMap[mode]) || mode || '';
+
+const statusLabel = (status?: string): string => {
+  const map: Record<string, string> = {
+    DRAFT: '规划中',
+    PENDING: '规划中',
+    GAMING: '进行中',
+    SETTLED: '已结束',
+    DISCARD: '已取消'
+  };
+  return (status && map[status]) || status || '';
+};
 
 const loadSourceConfig = async () => {
   try {
@@ -808,7 +1310,6 @@ const loadSourceConfig = async () => {
     const rule = JSON.parse(sourceStage.value.ruleConfig || '{}');
     const t = rule.transition || {};
     await loadPendingAdvancers();
-    await loadAuditionWithdrawal();
   } catch {
     console.warn('加载转场配置失败');
   }
@@ -852,7 +1353,7 @@ const saveAdvancement = async () => {
     await adjustStageAdvancement(sourceStage.value.id, selectedAdvanceIds.value);
     ElMessage.success('同分晋级调整已保存');
     await loadPendingAdvancers();
-    await loadPreBracket();
+    await loadRosters();
   } catch (e: any) {
     console.error('保存同分晋级调整失败:', e);
     ElMessage.error(e?.response?.data?.msg || '保存失败');
@@ -861,32 +1362,10 @@ const saveAdvancement = async () => {
   }
 };
 
-const loadPreBracket = async () => {
-  try {
-    const resp: any = await getStagePreBracket(props.targetStageId);
-    preStatus.value = resp.data?.status || '';
-    preSeeds.value = (resp.data?.seededCompetitors || [])
-      .slice()
-      .sort((a: any, b: any) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER));
-    rebuildDraft();
-  } catch {
-    preSeeds.value = [];
-    preStatus.value = '';
-    rebuildDraft();
-  }
-};
-
-/** 预排配对状态文案 */
-const pairStatusText = (status?: string) => {
-  const map: Record<string, string> = { WINNER: '已定', TBD: '待定', BYE: '轮空' };
-  return (status && map[status]) || status || '';
-};
-
 const loadTargetStage = async () => {
   try {
     const resp: any = await getStage(props.targetStageId);
     targetStage.value = resp.data;
-    await loadDirectCompetitors();
   } catch {
     targetStage.value = null;
   }
@@ -914,8 +1393,17 @@ const slotSeedAt = (pair: any, side: 'left' | 'right') => {
 const computePairs = (list: any[], pairingMode: string, plannedSize = 0) => {
   const sorted = [...list].sort((a, b) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER));
   const n = sorted.length;
-  if (!n) return [];
   const size = Math.max(n, plannedSize || 0);
+  // 名单还空着时也要按赛段计划铺满空位,让导播提前看到整个对阵框架
+  if (n === 0 && (plannedSize || 0) < 2) return [];
+  // 按"种子位"取人(不是按数组下标):删人留空位时,空位照常显示为空
+  const bySeed = new Map<number, any>();
+  sorted.forEach((it) => {
+    if (it.seedRank != null) {
+      bySeed.set(Number(it.seedRank), it);
+    }
+  });
+  const at = (seedNo: number) => bySeed.get(seedNo) ?? null;
   const out: any[] = [];
   if (pairingMode === 'SEED') {
     const bs = nextPowerOfTwo(Math.max(size, 2));
@@ -929,10 +1417,10 @@ const computePairs = (list: any[], pairingMode: string, plannedSize = 0) => {
       out.push({
         position: i + 1,
         zone: i < half ? 'LEFT' : 'RIGHT',
-        left: l <= n ? sorted[l - 1] : null,
-        right: r <= n ? sorted[r - 1] : null,
-        leftStatus: l <= n ? 'WINNER' : 'BYE',
-        rightStatus: r <= n ? 'WINNER' : 'BYE'
+        left: at(l),
+        right: at(r),
+        leftStatus: at(l) ? 'WINNER' : 'BYE',
+        rightStatus: at(r) ? 'WINNER' : 'BYE'
       });
     }
   } else {
@@ -942,31 +1430,141 @@ const computePairs = (list: any[], pairingMode: string, plannedSize = 0) => {
       out.push({
         position: i + 1,
         zone: i < half ? 'LEFT' : 'RIGHT',
-        left: sorted[2 * i] || null,
-        right: sorted[2 * i + 1] || null,
-        leftStatus: sorted[2 * i] ? 'WINNER' : 'BYE',
-        rightStatus: sorted[2 * i + 1] ? 'WINNER' : 'BYE'
+        left: at(2 * i + 1),
+        right: at(2 * i + 2),
+        leftStatus: at(2 * i + 1) ? 'WINNER' : 'BYE',
+        rightStatus: at(2 * i + 2) ? 'WINNER' : 'BYE'
       });
     }
   }
   return out;
 };
 
-// ---- GUEST 直入目标赛段:按目标赛段模式的专属落位逻辑 ----
-const directForm = reactive({ name: '', type: 0, number: '', placement: 'FRONT', specifiedSeed: null as number | null });
-const directCompetitors = ref<any[]>([]);
-const draftParticipants = ref<any[]>([]);
-const draftRemovedIds = ref<string[]>([]);
-const draftDirty = ref(false);
-const directLoading = ref(false);
+// ---- 本赛段名单的两列对战树:由名单预览(规则 + 人工调整)驱动 ----
+const BRACKET_ZONES = [
+  { key: 'LEFT', label: '左半区' },
+  { key: 'RIGHT', label: '右半区' }
+] as const;
+const BRACKET_SIDES = ['left', 'right'] as const;
 
-/** 晋级名单:目标赛段已加/草稿中的 GUEST 会挤掉名次靠后的晋级者,只显示剩余名额内的晋级者 */
-const auditionAdvancersVisible = computed(() => {
-  const plan = Number(targetStage.value?.teamCountStart) || 0;
-  const guestCount = (draftParticipants.value || []).filter((c: any) => !c._removed && isGuestComp(c)).length;
-  const capacity = plan > 0 ? Math.max(0, plan - guestCount) : Number.MAX_SAFE_INTEGER;
-  return capacity <= 0 ? [] : auditionAdvancers.value.filter((c) => (c.finalRank ?? 9999) <= capacity);
-});
+const bracketPairs = computed<any[]>(() =>
+  computePairs(
+    listItems.value,
+    directPairingMode.value,
+    Number(overridePreview.value?.capacity || targetStage.value?.teamCountStart) || 0
+  )
+);
+
+const bracketPairsOf = (zone: string) => bracketPairs.value.filter((p) => p.zone === zone);
+
+/** 对战树换位:拖一个位置到另一个位置即交换(名单锁定后不可拖) */
+const bracketEditable = computed(() => !rosterSealed.value && !targetLocked.value);
+const bracketDragItem = ref<any>(null);
+const bracketDropKey = ref('');
+
+const slotKeyOf = (pair: any, side: 'left' | 'right') => `${pair.zone}-${pair.position}-${side}`;
+
+const onBracketSlotDragStart = (item: any, pair: any, side: 'left' | 'right', e: DragEvent) => {
+  if (!bracketEditable.value || !item) {
+    e.preventDefault();
+    return;
+  }
+  bracketDragItem.value = item;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(item.sourceCompetitorId ?? item.name ?? ''));
+  }
+};
+
+const onBracketSlotDragOver = (pair: any, side: 'left' | 'right') => {
+  if (bracketDragItem.value) {
+    bracketDropKey.value = slotKeyOf(pair, side);
+  }
+};
+
+const onBracketSlotDragLeave = (pair: any, side: 'left' | 'right') => {
+  if (bracketDropKey.value === slotKeyOf(pair, side)) {
+    bracketDropKey.value = '';
+  }
+};
+
+const onBracketSlotDragEnd = () => {
+  bracketDragItem.value = null;
+  bracketDropKey.value = '';
+};
+
+/** 搬到指定种子位(原位置空出来,后面的不顶上) */
+const moveRosterSeed = async (item: any, seed: number) => {
+  if (!item || !Number.isFinite(seed) || seed <= 0) return;
+  const cap = Number(overridePreview.value?.capacity || 0);
+  if (seed > cap && cap > 0) {
+    ElMessage.warning(`第 ${seed} 位超出赛段计划人数(${cap})`);
+    return;
+  }
+  item.seedRank = seed;
+  listItems.value = [...listItems.value].sort(
+    (x, y) => (Number(x.seedRank) || 0) - (Number(y.seedRank) || 0)
+  );
+  await persistOrder();
+  await loadRosters();
+};
+
+/** 放到另一个选手上:交换两人的出场位置;放到空位上:搬过去(原位置空着) */
+const onBracketSlotDrop = async (pair: any, side: 'left' | 'right') => {
+  const from = bracketDragItem.value;
+  const to = pair[side];
+  const targetSeed = Number(slotSeedAt(pair, side));
+  onBracketSlotDragEnd();
+  if (!from) {
+    return;
+  }
+  if (to) {
+    if (from === to) return;
+    await swapRosterSeeds(from, to);
+    return;
+  }
+  await moveRosterSeed(from, targetSeed);
+};
+
+/** 交换两人的出场位置:交换次序后整份顺序落库(位置即出场次序) */
+const swapRosterSeeds = async (a: any, b: any) => {
+  if (!a || !b || a.seedRank == null || b.seedRank == null) return;
+  const t = a.seedRank;
+  a.seedRank = b.seedRank;
+  b.seedRank = t;
+  listItems.value = [...listItems.value].sort(
+    (x, y) => (x.seedRank ?? Number.MAX_SAFE_INTEGER) - (y.seedRank ?? Number.MAX_SAFE_INTEGER)
+  );
+  await persistOrder();
+  await loadRosters();
+};
+
+/** 恢复:清掉全部手工顺序,回到按来源名次自动排列 */
+const clearRosterOrder = async () => {
+  const p = firstRoster.value;
+  if (!p || rosterSealed.value) return;
+  const seeds = overridesOf(p).filter((o) => o.op === 'SEED');
+  if (seeds.length === 0) {
+    ElMessage.info('当前没有手工调整过的顺序');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm('恢复为按来源名次自动排列的原始顺序?', '恢复顺序', {
+      type: 'warning',
+      confirmButtonText: '恢复',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+  try {
+    for (const o of seeds) await deleteRosterOverride(p.id, o.id);
+    ElMessage.success('已恢复自动顺序');
+    await loadRosters();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '恢复失败');
+  }
+};
 
 /** 目标赛段模式:决定 GUEST 直入的落位方式 */
 const targetMode = computed(() => targetStage.value?.stageMode || '');
@@ -982,392 +1580,95 @@ const targetRuleConfig = computed(() => {
 /** 目标淘汰赛配对模式:与后端 generateMatches 口径一致——
  *  承接上一淘汰赛胜者时强制 SEQUENTIAL(覆盖本赛段配置的 SEED);
  *  否则优先取配置,未配置时按上一赛段推断(海选/排名后=SEED,其余=SEQUENTIAL) */
+/** 名单来源赛段(去重) */
+const sourceStageIdsOfRoster = computed<string[]>(() => {
+  const p = rosters.value[0];
+  if (!p) return [];
+  return Array.from(
+    new Set(groupsOfRoster(p).map((g) => g.sourceStageId).filter((id) => id != null).map((id) => String(id)))
+  );
+});
+
+const sourceStageModes = ref<Record<string, string>>({});
+
+/** 拉取名来源赛段的赛制(用于判断种子是否来自名次;带缓存) */
+const loadSourceStageModes = async () => {
+  for (const id of sourceStageIdsOfRoster.value) {
+    if (sourceStageModes.value[id] !== undefined) continue;
+    try {
+      const resp: any = await getStage(id);
+      sourceStageModes.value[id] = resp?.data?.stageMode || '';
+    } catch {
+      sourceStageModes.value[id] = '';
+    }
+  }
+};
+
+/**
+ * 首轮配对方式:与后端生成对阵、预排同一口径。
+ * 显式配置优先;未配置时,种子来自名次(名单来源里有海选/排名,或直接前驱是海选/排名)就用种子摆位(头尾交叉)。
+ */
 const directPairingMode = computed(() => {
-  const prevMode = sourceStage.value?.stageMode;
-  if (prevMode === 'KNOCKOUT') return 'SEQUENTIAL';
   const m = targetRuleConfig.value?.knockout?.pairingMode;
-  if (m) return String(m).toUpperCase();
-  return prevMode === 'AUDITION' || prevMode === 'RANK' ? 'SEED' : 'SEQUENTIAL';
+  if (m && String(m).trim()) {
+    return String(m).trim().toUpperCase() === 'SEED' ? 'SEED' : 'SEQUENTIAL';
+  }
+  const seedsFromRanking = Object.values(sourceStageModes.value).some(
+    (mode) => mode === 'AUDITION' || mode === 'RANK'
+  );
+  const prevMode = sourceStage.value?.stageMode;
+  if (seedsFromRanking || prevMode === 'AUDITION' || prevMode === 'RANK') return 'SEED';
+  return 'SEQUENTIAL';
 });
 const directGroupCount = computed(() => Number(targetRuleConfig.value?.group?.groupCount) || 1);
 const directCircles = computed(() => Number(targetRuleConfig.value?.circles) || 1);
 
-/** 晋级是否已确认:下一赛段已写入来自上一赛段的晋级者(sourceCompetitorId 非空) */
-const advancementConfirmed = computed(() => directCompetitors.value.some((c) => c.sourceCompetitorId != null));
-
-/** GUEST 直入窗口:目标赛段 DRAFT/PENDING 且未初始化 */
-const canDirectAdd = computed(() => {
-  const s = targetStage.value;
-  if (!s) return false;
-  return !s.isInitialized && (s.status === 'DRAFT' || s.status === 'PENDING');
-});
-
-/** 是否可新增 GUEST:确认晋级后名单已提交,不再允许追加(重排/移除仍可在开始前调整) */
-const canAddGuest = computed(() => canDirectAdd.value && !advancementConfirmed.value);
-
-/** 参赛方草稿(按种子号排序,排除已标记移除);所有调整先落草稿,确认晋级时统一提交后端 */
-const sortedDirect = computed(() =>
-  [...draftParticipants.value]
-    .filter((c) => !c._removed)
-    .sort((a, b) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER))
+/** 晋级是否已确认:目标赛段名单快照已物化(唯一口径) */
+const advancementConfirmed = computed(
+  () => !!overridePreview.value?.applied || rosters.value.some((p) => p.state === 'CONFIRMED')
 );
 
-/**
- * 重建参赛方草稿:下一赛段实际参赛方(GUEST/已确认晋级者) + 预排待写入的晋级者(PREVIEW)。
- * 中间态调整不限于 GUEST——没有 GUEST 时晋级者同样可在此手动重排。
- */
-const rebuildDraft = () => {
-  const fromB = (directCompetitors.value || []).map((c) => ({
-    ...c,
-    _local: false,
-    _advancer: false,
-    _removed: false
-  }));
-  let rows = [...fromB];
-  if (preStatus.value === 'PREVIEW' && preSeeds.value.length > 0) {
-    const bIds = new Set(fromB.map((c) => String(c.id)));
-    const advancers = preSeeds.value
-      .filter((s) => s.competitorId != null && !bIds.has(String(s.competitorId)))
-      .map((s) => ({
-        id: s.competitorId,
-        tournamentId: targetStage.value?.tournamentId,
-        name: s.name,
-        number: s.number,
-        seedRank: s.seedRank,
-        remark: null,
-        outcomeStatus: 'PENDING',
-        sourceCompetitorId: s.competitorId,
-        _local: false,
-        _advancer: true,
-        _removed: false
-      }));
-    rows = [...fromB, ...advancers];
-    // 默认种子:已落库参赛方(如 GUEST)保持原种子位,晋级者按 finalRank 顺序
-    // 填入未被占用的种子空位(与后端 getPreBracket 口径一致)——GUEST 占高位时
-    // 晋级者自动填充其前/后空位,而不是一律排在最高种子之后(避免超出对战树范围/前段空位)
-    const occupied = new Set<number>();
-    rows.forEach((r) => {
-      if (!r._advancer && r.seedRank != null) {
-        occupied.add(Number(r.seedRank));
+/** 确认名单:规则 + 覆盖合并后整单装配为下一赛段参赛行(唯一流转路径) */
+const handleConfirmAdvancement = async () => {
+  if (!rostersReadyForApply.value) {
+    ElMessage.error('仍有来源未就绪(等待来源赛段结算),暂不能确认名单');
+    return;
+  }
+  const selections = buildManualSelections();
+  for (const p of rosters.value) {
+    if (p.state !== 'READY') continue;
+    for (const g of groupsOfRoster(p)) {
+      if (g.fillMode === 'MANUAL' && !(selections[String(p.id)] || []).length) {
+        ElMessage.error(`来源组「${groupText(g)}」需要手动选择参赛者,或先点击"跳过"`);
+        return;
       }
-    });
-    const plan = Number(targetStage.value?.teamCountStart) || Math.max(rows.length, ...rows.map((r) => r.seedRank || 0));
-    let cursor = 1;
-    for (const a of rows
-      .filter((r) => r._advancer)
-      .sort((x, y) => (x.seedRank ?? Number.MAX_SAFE_INTEGER) - (y.seedRank ?? Number.MAX_SAFE_INTEGER))) {
-      while (cursor <= plan && occupied.has(cursor)) {
-        cursor++;
-      }
-      if (cursor > plan) {
-        a._removed = true; // 名额已满:超出计划的晋级者不进入
-        continue;
-      }
-      a.seedRank = cursor;
-      occupied.add(cursor);
-      cursor++;
     }
   }
-  draftParticipants.value = rows;
-  draftRemovedIds.value = [];
-  draftDirty.value = false;
-};
-
-const resetDraft = () => {
-  rebuildDraft();
-};
-
-/** 确认晋级:所有流转必须经过中间态,确认后 A 的晋级者按预排/种子覆盖写入 B */
-const handleConfirmAdvancement = async () => {
-  if (!sourceStage.value) return;
   confirmingAdvancement.value = true;
   try {
-    const hasAdvancers = draftParticipants.value.some((c) => c._advancer);
-    const overrides = draftDirty.value || hasAdvancers ? await submitDraft() : undefined;
-    await calculateAdvancement(sourceStage.value.id, overrides);
-    ElMessage.success(`已确认晋级到「${props.targetStageName}」`);
+    await applyStageRoster(props.targetStageId, {
+      manualSelections: selections
+    });
+    ElMessage.success(`已确认名单到「${props.targetStageName}」`);
     emit('confirmed', props.targetStageId);
     await loadAll();
   } catch (e: any) {
-    console.error('确认晋级失败:', e);
-    ElMessage.error(e?.response?.data?.msg || '确认晋级失败');
+    console.error('名单装配失败:', e);
+    ElMessage.error(e?.response?.data?.msg || '名单装配失败');
   } finally {
     confirmingAdvancement.value = false;
   }
 };
 
-/** 已确认晋级后的草稿调整(种子顺序/移除 GUEST 等)单独保存 */
-const handleSaveDraft = async () => {
-  if (!advancementConfirmed.value || savingDraft.value || targetLocked.value) return;
-  savingDraft.value = true;
-  try {
-    await submitDraft();
-    ElMessage.success('已保存调整');
-    await loadAll();
-  } catch (e: any) {
-    console.error('保存调整失败:', e);
-    ElMessage.error(e?.response?.data?.msg || '保存调整失败');
-  } finally {
-    savingDraft.value = false;
-  }
-};
-
-const loadDirectCompetitors = async () => {
-  if (!targetStage.value || targetMode.value === 'AUDITION') {
-    directCompetitors.value = [];
-    rebuildDraft();
-    return;
-  }
-  directLoading.value = true;
-  try {
-    const resp: any = await listCompetitor({
-      stageId: targetStage.value.id,
-      pageNum: 1,
-      pageSize: 1000
-    } as any);
-    directCompetitors.value = resp.data || [];
-    rebuildDraft();
-  } catch {
-    directCompetitors.value = [];
-    rebuildDraft();
-  } finally {
-    directLoading.value = false;
-  }
-};
-
-/** 草稿内 GUEST 落位:FRONT/SEED 顶前(按已有 GUEST 数 +1),TAIL 队尾,SPECIFIED 指定种子位 */
-const draftRankFor = (active: any[]): number | null => {
-  const p = directForm.placement || 'AUTO';
-  const plan = Number(targetStage.value?.teamCountStart) || 0;
-  if (p === 'SPECIFIED') {
-    const r = Number(directForm.specifiedSeed);
-    if (!Number.isFinite(r) || r < 1 || (plan > 0 && r > plan)) {
-      ElMessage.warning(`指定种子位需为 1..${plan || 'N'} 的正整数`);
-      return null;
-    }
-    return r;
-  }
-  const front = p === 'FRONT' || (p === 'AUTO' && directPairingMode.value === 'SEED');
-  if (front) {
-    return active.filter((c) => c.remark === 'GUEST').length + 1;
-  }
-  return active.reduce((m, c) => Math.max(m, c.seedRank || 0), 0) + 1;
-};
-
-/** 添加 GUEST:先落草稿,不提交后端;确认晋级时统一提交 */
-const addDirectGuest = () => {
-  if (!targetStage.value) return;
-  if (!directForm.name.trim()) {
-    ElMessage.warning('请输入 GUEST 名称');
-    return;
-  }
-  const active = draftParticipants.value.filter((c) => !c._removed);
-  const plan = Number(targetStage.value?.teamCountStart) || 0;
-  // 草稿已满时,新 GUEST 挤掉名次靠后的普通晋级者,总人数不超计划
-  if (plan > 0 && active.length >= plan) {
-    const bottom = [...active]
-      .filter((c) => c.remark !== 'GUEST' && !c._local)
-      // 草稿晋级者只有 seedRank(预排位次),按当前顺序最后一位挤掉,避免误伤第一名
-      .sort((a: any, b: any) => (b.seedRank ?? 9999) - (a.seedRank ?? 9999))[0];
-    if (!bottom) {
-      ElMessage.warning(`赛段计划 ${plan} 人已全部为 GUEST,无法继续添加`);
-      return;
-    }
-    draftParticipants.value = draftParticipants.value.map((c) => (c.id === bottom.id ? { ...c, _removed: true } : c));
-    ElMessage.info(`GUEST 将挤掉晋级者「${bottom.name}」`);
-  }
-  const rank = draftRankFor(active);
-  if (rank == null) return;
-  const entry = {
-    id: 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-    tournamentId: targetStage.value.tournamentId,
-    name: directForm.name.trim(),
-    type: directForm.type,
-    number: directForm.number.trim() || undefined,
-    seedRank: rank,
-    remark: 'GUEST',
-    outcomeStatus: 'PENDING',
-    _local: true,
-    _removed: false
-  };
-  const front = rank === 1 && (directForm.placement === 'FRONT' || (directForm.placement === 'AUTO' && directPairingMode.value === 'SEED'));
-  draftParticipants.value = draftParticipants.value.map((c) => {
-    if (c._removed || c.seedRank == null || c.seedRank < rank) return c;
-    // FRONT 顶前:仅普通参赛者顺延,已有 GUEST 保持 1..G
-    if (front && c.remark === 'GUEST') return c;
-    return { ...c, seedRank: c.seedRank + 1 };
-  });
-  draftParticipants.value.push(entry);
-  draftDirty.value = true;
-  directForm.name = '';
-  directForm.number = '';
-  directForm.placement = 'FRONT';
-  directForm.specifiedSeed = null;
-  ElMessage.success('GUEST 已加入草稿,确认晋级时一并提交');
-};
-
-/** 提交参赛方草稿:新增 GUEST → 删除标记项 → 设定已落库参赛方种子 → 返回晋级者 seedOverrides */
-const submitDraft = async (): Promise<Record<string, number> | undefined> => {
-  if (!targetStage.value) return undefined;
-  const order = sortedDirect.value;
-  const idMap = new Map<string, string>();
-  for (const g of order) {
-    if (!g._local) continue;
-    const res: any = await addStageGuest(targetStage.value.id, {
-      name: g.name,
-      type: g.type,
-      number: g.number || undefined,
-      placement: 'TAIL'
-    });
-    const realId = res?.data?.id;
-    if (!realId) throw new Error('添加 GUEST 未返回 ID');
-    idMap.set(g.id, String(realId));
-  }
-  for (const id of draftRemovedIds.value) {
-    await delCompetitor(id);
-  }
-  // 已落库参赛方(GUEST 与既有参赛者):按草稿最终顺序原子设定种子
-  const placed = order.filter((c) => !c._advancer).map((c) => idMap.get(c.id) ?? c.id);
-  if (placed.length > 0) {
-    await setStageSeedOrder(targetStage.value.id, placed);
-  }
-  // 预排晋级者:以 seedOverrides 指定最终种子位,由 calculateAdvancement 写入
-  const overrides: Record<string, number> = {};
-  for (const a of order) {
-    if (a._advancer) {
-      overrides[String(a.id)] = a.seedRank;
-    }
-  }
-  draftDirty.value = false;
-  return Object.keys(overrides).length > 0 ? overrides : undefined;
-};
-
-/** 交换两个槽位的种子号(选手随新种子换位),仅改草稿 */
-const swapDirectSeeds = (a: any, b: any) => {
-  const rankA = a.seedRank;
-  a.seedRank = b.seedRank;
-  b.seedRank = rankA;
-  draftDirty.value = true;
-};
-
-/** 扁平列表上移/下移(小组/擂台/排名共用) */
-const moveDirectSeed = (index: number, dir: -1 | 1) => {
-  const list = sortedDirect.value;
-  const target = index + dir;
-  if (target < 0 || target >= list.length) return;
-  swapDirectSeeds(list[index], list[target]);
-};
-
-const removeDirectGuest = async (c: any) => {
-  try {
-    await ElMessageBox.confirm(`移除 GUEST「${c.name}」?该操作将在确认晋级时一并提交。`, '移除 GUEST', {
-      type: 'warning',
-      confirmButtonText: '移除',
-      cancelButtonText: '取消'
-    });
-  } catch {
-    return;
-  }
-  if (c._local) {
-    draftParticipants.value = draftParticipants.value.filter((x) => x.id !== c.id);
-  } else {
-    c._removed = true;
-    draftRemovedIds.value = [...new Set([...draftRemovedIds.value, String(c.id)])];
-  }
-  draftDirty.value = true;
-};
-
-/** 淘汰赛目标:两列对战树 */
-const directPairs = computed(() =>
-  targetMode.value === 'KNOCKOUT' ? computePairs(sortedDirect.value, directPairingMode.value, Number(targetStage.value?.teamCountStart) || 0) : []
-);
-const directLeftPairs = computed(() => directPairs.value.filter((p) => p.zone === 'LEFT'));
-const directRightPairs = computed(() => directPairs.value.filter((p) => p.zone === 'RIGHT'));
-
-const directColumnSlots = (zone: string) => {
-  const list: { pair: any; side: 'left' | 'right'; seed: any }[] = [];
-  for (const p of directPairs.value) {
-    if (p.zone !== zone) continue;
-    if (p.left?.seedRank != null) list.push({ pair: p, side: 'left', seed: p.left });
-    if (p.right?.seedRank != null) list.push({ pair: p, side: 'right', seed: p.right });
-  }
-  return list;
-};
-
-const canDirectMoveUp = (pair: any, side: 'left' | 'right') => {
-  const slots = directColumnSlots(pair.zone);
-  const idx = slots.findIndex((s) => s.pair === pair && s.side === side);
-  return idx > 0;
-};
-const canDirectMoveDown = (pair: any, side: 'left' | 'right') => {
-  const slots = directColumnSlots(pair.zone);
-  const idx = slots.findIndex((s) => s.pair === pair && s.side === side);
-  return idx >= 0 && idx < slots.length - 1;
-};
-
-const moveDirectBracketSeed = (pair: any, side: 'left' | 'right', dir: -1 | 1) => {
-  const slots = directColumnSlots(pair.zone);
-  const idx = slots.findIndex((s) => s.pair === pair && s.side === side);
-  if (idx < 0) return;
-  const target = slots[idx + dir];
-  if (!target) return;
-  const a = pair[side];
-  const b = target.pair[target.side];
-  if (!a || !b || a.seedRank == null || b.seedRank == null) return;
-  swapDirectSeeds(a, b);
-};
-
-const swapDirectPair = (pair: any) => {
-  if (!pair.left || !pair.right || pair.left.seedRank == null || pair.right.seedRank == null) return;
-  swapDirectSeeds(pair.left, pair.right);
-};
-
 /** 海选→首个淘汰赛(SEED 模式)的中间态随机交换入口 */
 const isSeedKnockoutTransition = computed(() => targetMode.value === 'KNOCKOUT' && directPairingMode.value === 'SEED');
-
-/**
- * 随机交换上下位置:对每场配对 50% 概率交换上下;
- * 涉及 1/2/3/4 号种子时固定 1、3 在上、2、4 在下(不做随机)。
- */
-const randomSwapTopBottom = () => {
-  if (!isSeedKnockoutTransition.value || targetLocked.value) return;
-  let swapped = 0;
-  for (const pair of directPairs.value) {
-    if (!pair.left || !pair.right) continue;
-    const l = slotSeedAt(pair, 'left'); // 上方槽位的种子号
-    const r = slotSeedAt(pair, 'right'); // 下方槽位的种子号
-    const lTop = l === 1 || l === 3;
-    const rTop = r === 1 || r === 3;
-    const lBottom = l === 2 || l === 4;
-    const rBottom = r === 2 || r === 4;
-    let doSwap: boolean;
-    if (lTop || rTop || lBottom || rBottom) {
-      // 前四种子:1/3 必须在上面、2/4 必须在下面
-      doSwap = rTop || lBottom;
-    } else {
-      doSwap = Math.random() < 0.5;
-    }
-    if (doSwap) {
-      swapDirectPair(pair);
-      swapped++;
-    }
-  }
-  ElMessage.success(swapped > 0 ? `已随机交换 ${swapped} 场上下位置(1/3 恒在上、2/4 恒在下)` : '随机结果与当前一致,无需交换');
-};
-
-/** 恢复:按后端预排(海选名次)重建原始种子位置 */
-const restoreSeedOrder = () => {
-  if (targetLocked.value) return;
-  rebuildDraft();
-  ElMessage.success('已恢复原始种子位置');
-};
 
 /** 小组赛落位预览:蛇形分组(与 GroupGenerator.snakeSplit 一致) */
 const groupPreview = computed(() => {
   if (targetMode.value !== 'GROUP') return [];
   const gc = Math.max(1, directGroupCount.value);
   const groups: any[][] = Array.from({ length: gc }, () => []);
-  sortedDirect.value.forEach((c, i) => {
+  rosterRows.value.forEach((c, i) => {
     const row = Math.floor(i / gc);
     const col = i % gc;
     const g = row % 2 === 0 ? col : gc - 1 - col;
@@ -1379,7 +1680,8 @@ const groupPreview = computed(() => {
 /** 排名赛落位预览:非随机分圈时按种子顺序均分(与 RankGenerator 一致) */
 const circlePreview = computed(() => {
   if (targetMode.value !== 'RANK') return [];
-  const n = sortedDirect.value.length;
+  const rows = rosterRows.value;
+  const n = rows.length;
   const circles = Math.max(1, directCircles.value);
   const base = Math.floor(n / circles);
   const rem = n % circles;
@@ -1387,32 +1689,23 @@ const circlePreview = computed(() => {
   let cursor = 0;
   for (let c = 0; c < circles; c++) {
     const count = base + (c < rem ? 1 : 0);
-    out.push(sortedDirect.value.slice(cursor, cursor + count));
+    out.push(rows.slice(cursor, cursor + count));
     cursor += count;
   }
   return out;
 });
 
-/** 擂台赛落位预览:初始队列 = 种子顺序(与 computeArenaQueue 一致) */
-const arenaQueuePreview = computed(() => sortedDirect.value.map((c, i) => ({ ...c, queueIndex: i + 1 })));
-
 const loadAll = () => {
   loadSourceConfig();
-  loadPreBracket();
   loadTargetStage();
+  loadRosters();
 };
 
 // 切换转场(来源/目标赛段变化)时整体刷新
 watch([() => props.sourceStageId, () => props.targetStageId], () => {
-  directForm.name = '';
-  directForm.type = 0;
-  directForm.number = '';
-  directForm.placement = 'FRONT';
-  directForm.specifiedSeed = null;
-  directCompetitors.value = [];
-  draftParticipants.value = [];
-  draftRemovedIds.value = [];
-  draftDirty.value = false;
+  rosterItems.value = null;
+  manualPicks.value = {};
+  manualCandidates.value = {};
   loadAll();
 });
 
@@ -1453,6 +1746,49 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 加人弹窗下拉:深色主题适配(面板挂在 body,需全局选择器) */
+:global(.game-dialog .add-select .el-select__wrapper) {
+  background-color: #0a0a0a;
+  box-shadow: 0 0 0 1px #262626 inset;
+  min-height: 36px;
+  padding: 2px 10px;
+  border-radius: 8px;
+}
+:global(.game-dialog .add-select .el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px #404040 inset;
+}
+:global(.game-dialog .add-select .el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px #f59e0b inset;
+}
+:global(.game-dialog .add-select .el-select__wrapper.is-disabled) {
+  background-color: #171717;
+  box-shadow: 0 0 0 1px #333 inset;
+}
+:global(.game-dialog .add-select .el-select__placeholder) {
+  color: #6b6b6b;
+}
+:global(.game-dialog .add-select .el-select__selected-item) {
+  color: #e5e5e5;
+}
+:global(.add-select-popper) {
+  background: #171717 !important;
+  border: 1px solid #262626 !important;
+}
+:global(.add-select-popper .el-select-dropdown__list) {
+  padding: 4px;
+}
+:global(.add-select-popper .el-select-dropdown__item) {
+  color: #d4d4d4;
+  border-radius: 6px;
+}
+:global(.add-select-popper .el-select-dropdown__item.is-hovering) {
+  background: #262626;
+}
+:global(.add-select-popper .el-select-dropdown__item.is-selected) {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out;
 }

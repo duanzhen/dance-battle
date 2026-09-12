@@ -22,16 +22,11 @@ import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.PreBracketVo;
-import com.dance.street.game.domain.vo.CircleAssignVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.bo.TStageBo;
-import com.dance.street.game.domain.bo.CalculateAdvancementBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
-import com.dance.street.game.domain.bo.AddGuestBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
-import com.dance.street.game.domain.bo.PromoteReplacementBo;
-import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
@@ -175,14 +170,15 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 海选分圈随机抽取:把已签到选手随机均衡分配到各圈场次(可重抽,赛段未开始时)
+     * 海选分圈「确保圈场次」:抽号/签到页打开时按配置建齐 ZONE 圈(一个圈 = 一个 match)。
      */
     @SaCheckPermission("game:stage:edit")
-    @Log(title = "随机抽取圈", businessType = BusinessType.UPDATE)
+    @Log(title = "确保海选圈场次", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
-    @PostMapping("/{id}/random-circles")
-    public R<List<CircleAssignVo>> randomCircles(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
-        return R.ok(tStageLifecycleService.randomCircles(id));
+    @PostMapping("/{id}/ensure-circle-slots")
+    public R<Void> ensureCircleSlots(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        tStageLifecycleService.ensureAuditionCircles(id);
+        return R.ok();
     }
 
     /**
@@ -258,22 +254,6 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 计算晋级(MANUAL 模式显式调用):把本赛段晋级者推进下一赛段。返回晋级人数。
-     */
-    @SaCheckPermission("game:stage:edit")
-    @Log(title = "计算晋级", businessType = BusinessType.UPDATE)
-    @RepeatSubmit()
-    @PostMapping("/{id}/calculate-advancement")
-    public R<Integer> calculateAdvancement(@NotNull(message = "赛段ID不能为空") @PathVariable Long id,
-                                           @RequestBody(required = false) CalculateAdvancementBo bo) {
-        if (bo == null) {
-            bo = new CalculateAdvancementBo();
-        }
-        bo.setStageId(id);
-        return R.ok(tStageLifecycleService.calculateAdvancement(bo));
-    }
-
-    /**
      * 导出海选结果:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名
      */
     @SaCheckPermission("game:stage:query")
@@ -292,21 +272,6 @@ public class TStageController extends BaseController {
     @GetMapping("/{id}/audition-result")
     public R<AuditionResultVo> auditionResult(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
         return R.ok(tStageLifecycleService.queryAuditionResult(id));
-    }
-
-    /**
-     * GUEST 加入:除海选外任意赛段,在赛段规划/未开始态(DRAFT/PENDING)且未初始化时加入;
-     * 仅创建参赛单位进入 GUEST 池,不自动挂入任何场次;由导播按外部抽签结果设定种子顺序后,
-     * initialize → generateMatches 生成对阵(GUEST 胜出即占晋级名额)。
-     */
-    @SaCheckPermission("game:stage:edit")
-    @Log(title = "赛段 GUEST", businessType = BusinessType.INSERT)
-    @RepeatSubmit()
-    @PostMapping("/{stageId}/guest")
-    public R<TCompetitorVo> addGuest(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
-                                     @Validated @RequestBody AddGuestBo bo) {
-        bo.setStageId(stageId);
-        return R.ok(tStageLifecycleService.addGuest(bo));
     }
 
     /**
@@ -333,25 +298,6 @@ public class TStageController extends BaseController {
     public R<Integer> adjustAdvancement(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
                                         @RequestBody List<Long> competitorIds) {
         return R.ok(tStageLifecycleService.adjustAdvancement(stageId, competitorIds));
-    }
-
-    /**
-     * 海选弃权/顶替(结算后、确认晋级前):
-     * 仅传 withdrawnCompetitorId = 标记弃权,其后晋级者名次整体前移(不顶替时末尾空位即轮空);
-     * 传 replacementCompetitorId = 把任意被淘汰的选手顶替晋级,补齐到晋级名单末尾
-     * (支持任意 被淘汰者→任意晋级者 的替换)。
-     */
-    @SaCheckPermission("game:stage:edit")
-    @Log(title = "海选弃权顶替", businessType = BusinessType.UPDATE)
-    @RepeatSubmit()
-    @PostMapping("/{stageId}/promote-replacement")
-    public R<Integer> promoteReplacement(@NotNull(message = "赛段ID不能为空") @PathVariable Long stageId,
-                                         @RequestBody(required = false) PromoteReplacementBo bo) {
-        if (bo == null) {
-            bo = new PromoteReplacementBo();
-        }
-        return R.ok(tStageLifecycleService.promoteReplacement(
-            stageId, bo.getWithdrawnCompetitorId(), bo.getReplacementCompetitorId()));
     }
 
     /**

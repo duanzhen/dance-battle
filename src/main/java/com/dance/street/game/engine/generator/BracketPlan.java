@@ -10,7 +10,7 @@ import java.util.List;
 @Data
 public class BracketPlan {
 
-    /** 标准化后的队伍数(2 的幂) */
+    /** 标准化后的选手数(2 的幂) */
     private int bracketSize;
 
     /** 所有场次计划 */

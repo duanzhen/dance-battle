@@ -90,7 +90,7 @@ public class GroupGenerator implements StageGenerator {
 
     /**
      * Round-Robin(circle method):返回各轮的配对(0-indexed 索引)。
-     * 队伍数为奇数时补一个 -1(BYE),与 BYE 的配对被跳过。
+     * 选手数为奇数时补一个 -1(BYE),与 BYE 的配对被跳过。
      */
     static List<List<int[]>> roundRobinRounds(int teamCount) {
         List<Integer> teams = new ArrayList<>();

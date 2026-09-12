@@ -194,7 +194,7 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
 
     /**
      * 参赛单位改名联动:名下仅有一个选手时,同步更新该选手姓名。
-     * 队伍(多个选手)不联动,避免把队伍名覆盖到个人档案。
+     * 多成员参赛方(如组队报名)不联动,避免把参赛方名覆盖到个人档案。
      */
     private void syncLinkedPlayerName(Long competitorId, String newName) {
         List<TCompetitorMember> members = competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()

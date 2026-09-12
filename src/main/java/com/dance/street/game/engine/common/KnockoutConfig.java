@@ -18,9 +18,9 @@ public class KnockoutConfig implements Serializable {
 
     /** 模板:FINAL/SEMI_FINAL/QUARTER_FINAL/ROUND_16/ROUND_32/ROUND_64/CUSTOM */
     private String template;
-    /** 参赛队伍数 */
+    /** 参赛选手数 */
     private Integer teamsCount;
-    /** 晋级到下一赛段的队伍数 */
+    /** 晋级到下一赛段的选手数 */
     private Integer advanceCount;
     /** 是否进行季军赛 */
     private Boolean thirdPlaceMatch;

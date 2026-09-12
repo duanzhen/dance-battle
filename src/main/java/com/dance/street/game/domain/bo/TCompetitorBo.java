@@ -44,7 +44,7 @@ public class TCompetitorBo extends BaseEntity {
     private Long sourceCompetitorId;
 
     /**
-     * 0:个人, 1:队伍
+     * 参赛方类型(保留字段;系统统一按选手处理,多成员即组队)
      */
     private Long type;
 

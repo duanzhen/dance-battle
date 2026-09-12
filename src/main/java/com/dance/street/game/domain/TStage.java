@@ -73,17 +73,32 @@ public class TStage extends TenantEntity {
     private String ruleConfig;
 
     /**
+     * 名单来源组(JSON:{"groups":[...]},唯一事实源)
+     */
+    private String rosterConfigJson;
+
+    /**
+     * 名单快照是否已物化(apply 成功置 1)
+     */
+    private Long rosterApplied;
+
+    /**
+     * 名单是否显式跳过(本赛段不带人)
+     */
+    private Long rosterSkipped;
+
+    /**
      * 状态
      */
     private String status;
 
     /**
-     * 起始队伍数量
+     * 起始选手数量
      */
     private Long teamCountStart;
 
     /**
-     * 晋级队伍数量
+     * 晋级选手数量
      */
     private Long teamCountEnd;
 

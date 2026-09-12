@@ -31,13 +31,17 @@ public abstract class AbstractSseEmitterManager {
     protected abstract void sseMonitor();
 
     /**
-     * 向单个连接发送心跳 comment。
+     * 向单个连接发送心跳(命名事件 ping)。
+     *
+     * <p>用命名事件而不是 comment:comment 不会触发浏览器的 onmessage,
+     * 客户端无法据此判断"连接还活着",会误判空闲而反复强制重连(表现为页面周期性闪烁)。
+     * 命名事件客户端可按需监听(只更新存活时间,不触发业务刷新)。</p>
      *
      * @return true=发送成功;false=连接已失效(已 complete,调用方应移除)
      */
     protected boolean sendHeartbeat(SseEmitter emitter) {
         try {
-            emitter.send(SseEmitter.event().comment("heartbeat"));
+            emitter.send(SseEmitter.event().name("ping").data("{}"));
             return true;
         } catch (Exception e) {
             try {

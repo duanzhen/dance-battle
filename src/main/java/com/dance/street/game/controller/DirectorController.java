@@ -97,10 +97,7 @@ public class DirectorController {
         if (prevId == null) {
             throw new ServiceException("该赛段没有上一赛段,无需确认晋级");
         }
-        com.dance.street.game.domain.bo.CalculateAdvancementBo bo =
-            new com.dance.street.game.domain.bo.CalculateAdvancementBo();
-        bo.setStageId(prevId);
-        return R.ok(stageLifecycleService.calculateAdvancement(bo));
+        return R.ok(stageLifecycleService.calculateAdvancement(prevId));
     }
 
     /**

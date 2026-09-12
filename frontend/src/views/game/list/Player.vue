@@ -20,7 +20,7 @@
 
         <el-input
           v-model="searchKeyword"
-          :placeholder="displayMode === 'player' ? '搜索选手姓名' : '搜索参赛队伍'"
+          :placeholder="displayMode === 'player' ? '搜索选手姓名' : '搜索参赛选手'"
           size="small"
           :prefix-icon="Users"
           clearable
@@ -32,7 +32,7 @@
     <!-- 第二行：说明 + 操作按钮(移动端纵向堆叠、按钮换行) -->
     <div class="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 pb-4">
       <div class="flex flex-wrap items-center gap-2 min-w-0">
-        <span class="text-xs text-neutral-500 hidden lg:inline">管理参赛选手名单及战队归属</span>
+        <span class="text-xs text-neutral-500 hidden lg:inline">管理选手档案与参赛名单</span>
         <span class="px-2 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-[10px] text-neutral-300 flex items-center gap-1 flex-shrink-0">
           选手 {{ playerStats.total }} · 已签到 {{ playerStats.checkedIn }}
         </span>
@@ -47,7 +47,6 @@
       <div class="flex flex-wrap items-center gap-1.5 toolbar-buttons">
         <el-button type="warning" size="small" :icon="Plus" @click="handleAdd" class="amber-button">添加选手</el-button>
         <el-button size="small" @click="showImportDialog = true" class="import-button">批量导入</el-button>
-        <el-button v-if="canRandomCircles" size="small" :icon="Shuffle" @click="handleRandomCircles" class="import-button"> 随机抽取圈 </el-button>
         <el-segmented v-model="displayMode" :options="displayModeOptions" size="small" class="amber-segmented" @change="handleModeChange" />
         <el-button size="small" circle :icon="RefreshCw" class="import-button" title="刷新" @click="refreshAll" />
       </div>
@@ -99,6 +98,14 @@
                 >
                   NO.{{ player.competitorVo.number }}
                 </span>
+                <!-- 所在圈(以圈裁判命名) -->
+                <span
+                  v-if="player.competitorId && circleLabelOf(player.competitorId)"
+                  class="px-1.5 py-0.5 bg-sky-500/10 border border-sky-500/30 rounded text-[10px] text-sky-400 flex-shrink-0"
+                  title="所在圈(以裁判命名)"
+                >
+                  {{ circleLabelOf(player.competitorId) }}
+                </span>
               </div>
               <div v-if="player.remark" class="text-xs text-neutral-400 truncate">{{ player.remark }}</div>
             </div>
@@ -138,7 +145,7 @@
 
           <!-- 编辑签到结果(已签到) -->
           <button
-            v-if="player.competitorId"
+            v-if="player.competitorId && !checkInLocked"
             @click.stop="handleEditCheckIn(player)"
             class="bg-amber-500/20 text-amber-500 hover:bg-amber-500 hover:text-white p-1.5 rounded-full transition-all shadow-md flex items-center justify-center"
             title="编辑签到结果"
@@ -158,7 +165,7 @@
         </div>
       </TransitionGroup>
 
-      <!-- 显示参赛队伍列表 -->
+      <!-- 显示参赛选手列表 -->
       <TransitionGroup v-else name="card">
         <div
           v-for="competitor in filteredCompetitors"
@@ -182,7 +189,14 @@
               <div v-if="competitor.remark" class="text-xs text-neutral-400 truncate">{{ competitor.remark }}</div>
             </div>
 
-            <div class="flex items-center gap-2 text-[10px] text-neutral-500 font-mono flex-shrink-0">
+            <div class="flex items-center gap-2 text-[10px] font-mono flex-shrink-0 flex-wrap">
+              <span
+                v-if="circleLabelOf(competitor.id)"
+                class="px-1.5 py-0.5 bg-sky-500/10 border border-sky-500/30 rounded text-[10px] text-sky-400"
+                title="所在圈(以裁判命名)"
+              >
+                {{ circleLabelOf(competitor.id) }}
+              </span>
               <span v-if="competitor.seedRank !== null">SEED: {{ competitor.seedRank }}</span>
             </div>
           </div>
@@ -283,57 +297,12 @@
         </div>
       </div>
     </Teleport>
-
-    <!-- 随机抽取圈结果弹窗 -->
-    <Teleport to="body">
-      <div
-        v-if="circleResult && circleResult.length > 0"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        @click.self="circleResult = null"
-      >
-        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-2xl mx-4 shadow-2xl max-h-[80vh] flex flex-col" @click.stop>
-          <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
-            <h3 class="text-sm font-bold text-neutral-100 flex items-center gap-2"><Shuffle class="w-4 h-4 text-amber-500" /> 随机抽取圈结果</h3>
-            <button @click="circleResult = null" class="dialog-close-btn">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div class="p-5 overflow-y-auto space-y-4">
-            <div v-for="circle in circleResult" :key="circle.matchId" class="rounded-lg border border-neutral-800 bg-black/30 overflow-hidden">
-              <div class="px-4 py-2.5 bg-neutral-800/60 border-b border-neutral-800 flex items-center justify-between">
-                <span class="text-xs font-bold text-amber-400">{{ circle.matchName }}</span>
-                <span class="text-[10px] text-neutral-500">{{ circle.competitors.length }} 人</span>
-              </div>
-              <div class="p-3 flex flex-wrap gap-1.5">
-                <span
-                  v-for="comp in circle.competitors"
-                  :key="comp.competitorId"
-                  class="px-2 py-1 rounded bg-neutral-800 border border-neutral-700 text-[11px] text-neutral-300"
-                >
-                  {{ comp.number ? 'NO.' + comp.number : '' }} {{ comp.name }}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div class="px-5 py-4 border-t border-neutral-800 flex justify-end">
-            <button
-              @click="circleResult = null"
-              class="px-4 py-2 text-xs font-bold text-neutral-900 bg-amber-500 hover:bg-amber-400 rounded-lg transition-colors"
-            >
-              知道了
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick } from 'vue';
-import { Users, Plus, User, Check, Clock, UserRoundCheck, Shuffle, File, RefreshCw } from 'lucide-vue-next';
+import { Users, Plus, User, Check, Clock, UserRoundCheck, File, RefreshCw } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers } from '@/api/game/player';
 import { download } from '@/utils/request';
@@ -341,7 +310,10 @@ import { PlayerVO, PlayerForm as PlayerFormType } from '@/api/game/player/types'
 import { listCompetitor } from '@/api/game/competitor';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { getFirstStage, getStage } from '@/api/game/stage';
-import { randomCircles, CircleAssignVo } from '@/api/game/stage/lifecycle';
+import { ensureAuditionCircles } from '@/api/game/stage/lifecycle';
+import { listMatch } from '@/api/game/match';
+import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchReferee } from '@/api/game/matchReferee';
 import PlayerForm from './PlayerForm.vue';
 import CheckInDialog from './CheckInDialog.vue';
 
@@ -353,7 +325,7 @@ const props = defineProps<{
 const displayMode = ref<'player' | 'competitor'>('player');
 const displayModeOptions = [
   { label: '选手', value: 'player' },
-  { label: '参赛队伍', value: 'competitor' }
+  { label: '参赛选手', value: 'competitor' }
 ];
 const searchKeyword = ref('');
 const filterUncheckInOnly = ref(false);
@@ -366,10 +338,12 @@ const firstStageId = ref<string | number | null>(null);
 const checkInDialogRef = ref<InstanceType<typeof CheckInDialog> | null>(null);
 const currentCheckInPlayer = ref<PlayerVO | null>(null);
 
-// 海选分圈随机抽取状态
-const firstStageInfo = ref<{ stageMode?: string; status?: string; circles?: number } | null>(null);
-const circleResult = ref<CircleAssignVo[] | null>(null);
-const drawingCircles = ref(false);
+// 首个赛段信息(判断海选进行中提示)
+const firstStageInfo = ref<{ stageMode?: string; status?: string } | null>(null);
+
+// 参赛方 -> 所在圈标签(以圈裁判命名;无裁判回退「第N圈」)
+const circleLabels = ref<Record<string, string>>({});
+const circleLabelOf = (competitorId?: string | number | null) => (competitorId == null ? '' : circleLabels.value[String(competitorId)] || '');
 
 // 海选赛段已开始:提示签到后会自动加入当前场次继续参赛
 const auditionGaming = computed(() => {
@@ -377,17 +351,17 @@ const auditionGaming = computed(() => {
   return !!info && info.stageMode === 'AUDITION' && info.status === 'GAMING';
 });
 
+// 赛段已开始/结束后,签到结果锁定:只能新增签到,不能编辑/解除
+const checkInLocked = computed(() => {
+  const status = firstStageInfo.value?.status;
+  return status === 'GAMING' || status === 'SETTLED' || status === 'DISCARD';
+});
+
 // 选手数量与已签到数量
 const playerStats = computed(() => {
   const total = players.value.length;
   const checkedIn = players.value.filter((p) => p.competitorId).length;
   return { total, checkedIn };
-});
-
-// 仅分圈海选、赛段未开始时显示"随机抽取圈"
-const canRandomCircles = computed(() => {
-  const info = firstStageInfo.value;
-  return !!info && info.stageMode === 'AUDITION' && (info.circles ?? 1) > 1 && (info.status === 'DRAFT' || info.status === 'PENDING');
 });
 
 // 批量导入状态
@@ -417,7 +391,7 @@ const filteredPlayers = computed(() => {
   return result;
 });
 
-// 过滤后的参赛队伍列表（按号码排序）
+// 过滤后的参赛选手列表（按号码排序）
 const filteredCompetitors = computed(() => {
   let result = competitors.value;
 
@@ -458,7 +432,7 @@ const loadPlayers = async () => {
   }
 };
 
-// 加载参赛队伍列表
+// 加载参赛选手列表
 const loadCompetitors = async () => {
   if (!props.tournamentId || !firstStageId.value) {
     competitors.value = [];
@@ -474,9 +448,64 @@ const loadCompetitors = async () => {
     });
     competitors.value = response.data || [];
   } catch (error) {
-    console.error('加载参赛队伍失败:', error);
-    ElMessage.error('加载参赛队伍失败');
+    console.error('加载参赛选手失败:', error);
+    ElMessage.error('加载参赛选手失败');
     competitors.value = [];
+  }
+};
+
+// 加载「参赛方 -> 所在圈」映射:圈名以该圈裁判命名(无裁判回退第N圈)
+const loadCircleLabels = async () => {
+  circleLabels.value = {};
+  if (!props.tournamentId || !firstStageId.value) return;
+  try {
+    const stageRes = await getStage(firstStageId.value);
+    const stage: any = stageRes.data || (stageRes as any).data;
+    if (!stage || stage.stageMode !== 'AUDITION') return;
+    // 圈 = 真实 match:确保已按配置建齐,再统计各圈人数归属
+    try {
+      await ensureAuditionCircles(firstStageId.value);
+    } catch {
+      // 幂等接口,失败时按现有场次继续(可能尚未配置分圈)
+    }
+    const matchRes: any = await listMatch({ stageId: firstStageId.value, pageNum: 1, pageSize: 99 } as any);
+    const matches: any[] = Array.isArray(matchRes?.data) ? matchRes.data : matchRes?.data?.data || [];
+    const zones = matches.filter((m) => m.displayZone && String(m.displayZone).startsWith('ZONE-'));
+    if (zones.length === 0) {
+      return;
+    }
+    const refRes: any = await listMatchReferee(firstStageId.value);
+    const refRows: any[] = refRes?.data || [];
+    const namesByMatch: Record<string, string[]> = {};
+    refRows.forEach((r) => {
+      if (r.matchId != null && r.refereeName) {
+        const key = String(r.matchId);
+        (namesByMatch[key] = namesByMatch[key] || []).push(r.refereeName);
+      }
+    });
+    const map: Record<string, string> = {};
+    await Promise.all(
+      zones.map(async (m) => {
+        const zoneNo = String(m.displayZone).replace('ZONE-', '');
+        const refNames = namesByMatch[String(m.id)];
+        const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneNo}圈`;
+        try {
+          const pRes: any = await listMatchParticipant({ matchId: m.id } as any);
+          const parts: any[] = Array.isArray(pRes?.data) ? pRes.data : pRes?.data?.data || [];
+          parts.forEach((p) => {
+            if (p.competitorId != null) {
+              map[String(p.competitorId)] = label;
+            }
+          });
+        } catch {
+          // 单圈加载失败不阻塞整体
+        }
+      })
+    );
+    circleLabels.value = map;
+  } catch (error) {
+    console.warn('加载圈标签失败:', error);
+    circleLabels.value = {};
   }
 };
 
@@ -503,7 +532,7 @@ const restoreScroll = (positions: { el: HTMLElement; top: number }[]) => {
   });
 };
 
-// 同时刷新选手和参赛队伍列表
+// 同时刷新选手和参赛选手列表
 const refreshAll = async () => {
   const positions = captureScroll();
   if (!props.tournamentId) {
@@ -526,8 +555,8 @@ const refreshAll = async () => {
     }
     await loadFirstStageInfo();
 
-    // 同时加载选手和参赛队伍
-    await Promise.all([loadPlayers(), loadCompetitors()]);
+    // 同时加载选手、参赛选手与圈归属
+    await Promise.all([loadPlayers(), loadCompetitors(), loadCircleLabels()]);
   } catch (error) {
     console.error('加载数据失败:', error);
   } finally {
@@ -579,58 +608,27 @@ const handleEditCheckIn = (player: PlayerVO) => {
     ElMessage.warning('无法编辑：缺少赛事或赛段信息');
     return;
   }
+  if (checkInLocked.value) {
+    ElMessage.warning('赛段已开始，签到结果已锁定：开赛后仅支持新增签到，不能编辑');
+    return;
+  }
   currentCheckInPlayer.value = player;
   checkInDialogRef.value?.open(player);
 };
 
-// 加载首个赛段信息(判断是否分圈海选,控制"随机抽取圈"按钮)
+// 加载首个赛段信息(海选进行中提示用)
 const loadFirstStageInfo = async () => {
   firstStageInfo.value = null;
   if (!firstStageId.value) return;
   try {
     const resp = await getStage(firstStageId.value);
     const data = resp.data as any;
-    let circles = 1;
-    try {
-      if (data.ruleConfig) {
-        const rc = JSON.parse(data.ruleConfig);
-        if (rc && typeof rc.circles === 'number') circles = rc.circles;
-      }
-    } catch {
-      // 忽略解析失败
-    }
     firstStageInfo.value = {
       stageMode: data.stageMode,
-      status: data.status,
-      circles
+      status: data.status
     };
   } catch (e) {
     console.error('加载赛段信息失败:', e);
-  }
-};
-
-// 随机抽取圈:把已签到选手随机均衡分到各圈场次(可重抽)
-const handleRandomCircles = async () => {
-  if (!firstStageId.value) return;
-  try {
-    await ElMessageBox.confirm('随机抽取圈会把已签到选手随机均衡分到各圈场次，可重复抽取直到满意，确定？', '随机抽取圈', {
-      type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消'
-    });
-  } catch {
-    return;
-  }
-  drawingCircles.value = true;
-  try {
-    const resp = await randomCircles(firstStageId.value);
-    circleResult.value = (resp.data || []) as CircleAssignVo[];
-    ElMessage.success(`已随机分到 ${circleResult.value.length} 圈`);
-    await refreshAll();
-  } catch (e: any) {
-    ElMessage.error(e?.msg || e?.message || '随机抽取圈失败');
-  } finally {
-    drawingCircles.value = false;
   }
 };
 

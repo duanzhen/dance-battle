@@ -16,8 +16,7 @@
               <div
                 class="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 text-[10px] font-bold rounded-full shadow-lg z-20 flex items-center gap-1"
                 :class="{
-                  'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-blue-500/30': stage.status === 'DRAFT',
-                  'bg-neutral-700 text-neutral-300': stage.status === 'PENDING',
+                  'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-blue-500/30': stage.status === 'DRAFT' || stage.status === 'PENDING',
                   'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-amber-500/30': stage.status === 'GAMING',
                   'bg-gradient-to-r from-green-600 to-green-500 text-white shadow-green-500/30': stage.status === 'SETTLED',
                   'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-red-500/30': stage.status === 'DISCARD'
@@ -25,6 +24,13 @@
               >
                 {{ getStatusText(stage.status) }}
               </div>
+              <!-- <span
+                v-if="incomingBadge(stage)"
+                :title="incomingTooltip(stage)"
+                class="absolute -top-1 -right-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500 text-neutral-900 shadow-lg z-20 cursor-help"
+              >
+                {{ incomingBadge(stage) }}
+              </span> -->
               <span class="text-xs font-mono text-neutral-500 uppercase tracking-wider">赛段 {{ index + 1 }}</span>
               <h3
                 class="text-sm font-bold text-center px-2 truncate w-full"
@@ -84,7 +90,22 @@
           >
             <Plus class="w-5 h-5" />
           </button>
+          <!-- <button
+            v-if="hasFlowView"
+            @click="flowExpanded = !flowExpanded"
+            class="ml-4 px-3 py-1.5 text-[11px] rounded-lg border transition-all flex items-center gap-1.5 flex-none"
+            :class="
+              flowExpanded
+                ? 'border-amber-500 text-amber-500 bg-amber-500/10'
+                : 'border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-neutral-300'
+            "
+            title="查看名单流向(来源→赛段)"
+          >
+            <GitFork class="w-3.5 h-3.5" />
+            {{ flowExpanded ? '收起名单流向' : '名单流向' }}
+          </button> -->
         </div>
+        <RosterFlowView v-if="flowExpanded && hasFlowView" :stages="stages" @open-stage="handleFlowOpenStage" />
       </div>
     </div>
 
@@ -142,6 +163,7 @@
                   :is="getStageConfigComponent(selectedCreateMode)"
                   :stage="tempStage"
                   :mode="ConfigMode.CREATE"
+                  :prev-stage-mode="createPrevStageMode"
                   @update="handleTempStageUpdate"
                 />
               </div>
@@ -187,6 +209,7 @@
               :is="getStageConfigComponent(currentStage.stageMode)"
               :stage="currentStage as StageData"
               :mode="currentConfigMode"
+              :prev-stage-mode="prevStageModeOf(currentStage)"
               @update="handleStageUpdate"
             />
             <div v-if="!getStageConfigComponent(currentStage.stageMode)" class="bg-neutral-900 border border-neutral-800 rounded-xl p-8 text-center">
@@ -204,6 +227,7 @@
                 :stages="stages"
                 @update="handleStageUpdate"
                 @delete="handleDeleteStage"
+                @refresh="loadStages(true)"
               />
             </div>
           </div>
@@ -230,6 +254,8 @@
           :target-stage-id="stages[selection.id + 1].id"
           :target-stage-name="stages[selection.id + 1].name"
           :transition-index="selection.id"
+          :incoming="stages[selection.id + 1].incoming"
+          :stage-names="stageNameMap"
           @confirmed="handleAdvancementConfirmed"
         />
       </div>
@@ -249,10 +275,11 @@
 
 <script setup lang="ts">
 import { ref, computed, markRaw, onMounted, onUnmounted } from 'vue';
-import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered } from 'lucide-vue-next';
+import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered, GitFork } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
 import { listStage, addStage as addStageApi, updateStage as updateStageApi, delStage as delStageApi } from '@/api/game/stage';
 import { StageVO, StageForm } from '@/api/game/stage/types';
+import { RosterVO } from '@/api/game/stage/rosterTypes';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import StageSidebar from './stages/StageSidebar.vue';
 import TransitionConfig from './TransitionConfig.vue';
@@ -262,6 +289,7 @@ import AuditionStageConfig from './stages/AuditionStageConfig.vue';
 import ArenaStageConfig from './stages/ArenaStageConfig.vue';
 import RankingStageConfig from './stages/RankingStageConfig.vue';
 import StageCompetitorList from './stages/StageCompetitorList.vue';
+import RosterFlowView from './RosterFlowView.vue';
 import { StageMode, StageData, ConfigMode } from './stages/types';
 
 // --- 类型定义 ---
@@ -279,6 +307,7 @@ interface Stage {
   remark?: string; // 备注
   isInitialized?: boolean; // 是否已完成初始化配置
   tournamentId?: string; // 赛事ID
+  incoming?: RosterVO[]; // 名单摘要(roster)
 }
 
 // 通知父页面赛段链已变化(删除赛段后需要刷新大屏组件绑定)
@@ -305,6 +334,53 @@ const safeId = (id: any): string | null => {
 const stageStartText = (stage: Pick<Stage, 'stageMode' | 'teamCountStart'>) => {
   if (stage.stageMode === StageMode.AUDITION) return '不限';
   return stage.teamCountStart ?? 0;
+};
+
+/** 来源组列表(收敛模型:一行池内含多组;默认单组隐藏) */
+const visibleGroups = (stage: Stage): any[] => {
+  const rosters = stage.incoming || [];
+  if (rosters.length === 0) return [];
+  // 收敛模型:后端始终返回 config_json.groups,不做旧列回退
+  const groupsOfRoster = (p: any): any[] => p?.groups ?? [];
+  const groups = rosters.flatMap((p) => groupsOfRoster(p).map((g) => ({ ...p, ...g })));
+  const first = groups[0];
+  const isEntryCheckinGroup = (g: any): boolean => g.sourceStageId == null && (g.fillMode || '') === 'STREAM';
+  const defaultOnly =
+    groups.length === 1 &&
+    (isEntryCheckinGroup(first) ||
+      (String(first.sourceStageId ?? '') === String(stage.prevStageId ?? '') &&
+        first.resultFilter === 'ADVANCE' &&
+        (first.fillMode || 'AUTO') === 'AUTO'));
+  return defaultOnly ? [] : groups;
+};
+
+const incomingBadge = (stage: Stage): string => {
+  const groups = visibleGroups(stage);
+  if (groups.length === 0) return '';
+  return groups.length > 1 ? `${groups.length}组来源` : '自定义来源';
+};
+
+const incomingTooltip = (stage: Stage): string => {
+  return visibleGroups(stage)
+    .map((g) => {
+      const source = stages.value.find((s) => String(s.id) === String(g.sourceStageId));
+      const name = source?.name || (g.sourceStageId == null ? '外部/签到' : '未知赛段');
+      const result = g.resultFilter === 'ELIMINATED' ? '落选' : g.resultFilter === 'ADVANCE' ? '晋级' : g.resultFilter || '不限';
+      const zone = g.zone ? zoneText(g.zone) : '';
+      const rank = g.rankStart != null || g.rankEnd != null
+        ? `${g.rankByZone ? '圈内' : '全场'}第${g.rankStart ?? ''}~${g.rankEnd ?? '末'}名`
+        : '';
+      const quota = g.quota && g.quota > 0 ? `取前${g.quota}` : '';
+      const mode = g.fillMode === 'MANUAL' ? '手动' : g.fillMode === 'STREAM' ? '流式签到' : '自动';
+      return [name, zone, result, rank, quota, mode].filter(Boolean).join('·');
+    })
+    .join('\n');
+};
+
+/** ZONE-2 → 第2圈(无法识别时原样返回) */
+const zoneText = (zone?: string | null): string => {
+  const m = /^ZONE-(\d+)$/.exec(zone || '');
+  return m ? `第${m[1]}圈` : (zone || '');
 };
 
 // --- 加载赛段数据 ---
@@ -336,7 +412,8 @@ const loadStages = async (keepSelection: boolean = false) => {
       nextStageId: safeId(item.nextStageId),
       remark: item.remark,
       isInitialized: item.isInitialized === 1,
-      tournamentId: String(item.tournamentId || '')
+      tournamentId: String(item.tournamentId || ''),
+      incoming: item.incoming
     }));
 
     // 按照双向链表顺序排序
@@ -445,7 +522,7 @@ const insertAfterName = computed(() => {
 const defaultConfigs: Record<StageMode, any> = {
   [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
-  [StageMode.AUDITION]: { format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
+  [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
   [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
   [StageMode.RANK]: {
     mode: 'RANK',
@@ -517,6 +594,47 @@ const currentStage = computed(() => {
   return stages.value.find((s) => s.id === selection.value.id);
 });
 
+/** 赛段名映射(供转场工作区展示非相邻来源名称) */
+const stageNameMap = computed<Record<string, string>>(() => Object.fromEntries(stages.value.map((s) => [String(s.id), s.name])));
+
+/**
+ * 是否展示"名单流向"展开按钮。
+ * 重新开启:恢复"每赛段一列(赛段卡+池卡)"的既有版式,仅保留赛段卡右缘统一出线。
+ */
+const FLOW_VIEW_ENABLED = true;
+const hasFlowView = computed(() => FLOW_VIEW_ENABLED && stages.value.some((s) => visibleGroups(s).length > 0));
+const flowExpanded = ref(false);
+
+/** 点击流向图中的池:跳到其目标赛段的名单工作区(前驱箭头)或赛段编辑 */
+const handleFlowOpenStage = (stageId: string) => {
+  const idx = stages.value.findIndex((s) => String(s.id) === String(stageId));
+  if (idx > 0) {
+    selection.value = { type: 'TRANSITION', id: idx - 1 };
+  } else if (idx === 0) {
+    selection.value = { type: 'STAGE', id: String(stageId) };
+  }
+  isCreatingStage.value = false;
+  flowExpanded.value = false;
+};
+
+// 当前赛段的上一赛段类型(淘汰赛默认配对方式等配置按此推导)
+const prevStageModeOf = (stage?: Stage | null): string => {
+  if (!stage?.prevStageId) return '';
+  const prev = stages.value.find((s) => String(s.id) === String(stage.prevStageId));
+  return prev?.stageMode || '';
+};
+
+// 新建赛段时的上一赛段类型:插入到某赛段后=该赛段;追加到末尾=当前最后一个赛段
+const createPrevStageMode = computed(() => {
+  let prev: Stage | undefined;
+  if (insertAfterStageId.value) {
+    prev = stages.value.find((s) => String(s.id) === String(insertAfterStageId.value));
+  } else if (stages.value.length > 0) {
+    prev = stages.value[stages.value.length - 1];
+  }
+  return prev?.stageMode || '';
+});
+
 // 计算当前配置模式
 const currentConfigMode = computed<ConfigMode>(() => {
   if (isCreatingStage.value) {
@@ -536,7 +654,7 @@ const currentConfigMode = computed<ConfigMode>(() => {
 const getStatusText = (status: Stage['status']) => {
   const statusMap = {
     'DRAFT': '规划中',
-    'PENDING': '未开始',
+    'PENDING': '规划中',
     'GAMING': '进行中',
     'SETTLED': '已结束',
     'DISCARD': '已取消'
@@ -659,7 +777,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
     const defaultConfigs: Record<string, any> = {
       [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
-      [StageMode.AUDITION]: { format: 'BO1', advanceCondition: 'score', advanceCount: 16 },
+      [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
       [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
       [StageMode.RANK]: {
         mode: 'RANK',
@@ -710,7 +828,8 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       tournamentId: String(tournamentId.value),
       name: name,
       stageMode: stageMode,
-      format: config.format || 'BO3',
+      // 海选为打分制,无 BO1/BO3;其余赛制按配置
+      format: stageMode === StageMode.AUDITION ? '' : (config.format || 'BO3'),
       teamCountStart: stageMode === StageMode.AUDITION ? 0 : config.teamsCount || config.scale || 0,
       teamCountEnd: config.advanceCount || config.advanceQuota || 0,
       status: status,

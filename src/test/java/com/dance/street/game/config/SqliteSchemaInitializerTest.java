@@ -41,8 +41,9 @@ class SqliteSchemaInitializerTest {
 
         List<String> tables = queryStrings(dataSource,
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-        assertEquals(14, tables.size());
+        assertEquals(16, tables.size());
         assertTrue(tables.contains("t_tournament"));
+        assertTrue(tables.contains("t_stage_roster_override"));
         assertTrue(tables.contains("t_vis_widget"));
         assertTrue(tables.contains("t_login_account"));
 

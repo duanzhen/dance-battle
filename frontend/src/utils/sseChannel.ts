@@ -7,8 +7,10 @@
  * - 重连补偿:连接(含断线重连)建立后触发 onRefresh,让订阅方做一次全量刷新,
  *   补回断线期间错过的事件;
  * - 移动端适配:锁屏/切应用/网络切换导致连接被系统挂起或静默断开时,
- *   页面恢复可见(visibilitychange/pageshow)、网络恢复(online)立即重连;
- *   另有定时健康检查 + 空闲看门狗(后端 60s 心跳注释),兜底"半死"连接;
+ *   页面恢复可见(visibilitychange/pageshow)、网络恢复(online)按需重连;
+ *   另有定时健康检查 + 空闲看门狗(后端 60s 命名事件 ping 心跳),兜底"半死"连接;
+ * - 只在连接确实不健康时才重连:连接正常时切标签页/回前台不再强拆重连,
+ *   避免"重连 → 全量刷新"把页面刷得一直闪;
  * - 首次连接建立不触发 onRefresh(订阅方挂载时已自行拉取),避免重复请求。
  */
 
@@ -33,8 +35,26 @@ const channels = new Map<string, SseChannelConn>();
 
 const MAX_RETRY_DELAY = 30000;
 const HEARTBEAT_CHECK_INTERVAL = 20000;
-/** 空闲超时:后端每 60s 发送 comment 心跳,超过 90s 未收到任何数据视为连接已死 */
-const IDLE_TIMEOUT = 90000;
+/** 空闲超时:后端每 60s 发送 ping 心跳,超过 150s 未收到任何数据视为连接已死 */
+const IDLE_TIMEOUT = 150000;
+
+/** 连接是否健康:存在、未关闭、且最近收到过消息或心跳 */
+const isHealthy = (conn: SseChannelConn) => {
+  const es = conn.es;
+  if (!es || es.readyState === EventSource.CLOSED) {
+    return false;
+  }
+  return Date.now() - conn.lastEventAt <= IDLE_TIMEOUT;
+};
+
+/** 只在连接不健康时重连(回前台/网络恢复等场景调用) */
+const reconnectIfUnhealthy = (conn: SseChannelConn) => {
+  if (conn.closed) return;
+  // 已有重连计划(退避等待中)时不打断,避免把指数退避重置成"每 20s 猛重试一次"
+  if (conn.retryTimer) return;
+  if (isHealthy(conn)) return;
+  reconnect(conn, true);
+};
 
 /** 关闭旧连接并按(可选重置)退避策略重开;immediate=true 时立即重连并重置退避 */
 const reconnect = (conn: SseChannelConn, immediate = false) => {
@@ -60,14 +80,7 @@ const reconnect = (conn: SseChannelConn, immediate = false) => {
 /** 健康检查:连接已关闭/缺失,或长时间未收到任何数据(含心跳)时强制重连 */
 const ensureAlive = (conn: SseChannelConn) => {
   if (conn.closed) return;
-  const es = conn.es;
-  if (!es || es.readyState === EventSource.CLOSED) {
-    reconnect(conn, true);
-    return;
-  }
-  if (Date.now() - conn.lastEventAt > IDLE_TIMEOUT) {
-    reconnect(conn, true);
-  }
+  reconnectIfUnhealthy(conn);
 };
 
 const open = (conn: SseChannelConn) => {
@@ -79,6 +92,11 @@ const open = (conn: SseChannelConn) => {
   }
   const es = new EventSource(conn.buildUrl());
   conn.es = es;
+
+  // 心跳:仅更新存活时间,不触发业务刷新(命名事件不进 onmessage)
+  es.addEventListener('ping', () => {
+    conn.lastEventAt = Date.now();
+  });
 
   es.onopen = () => {
     conn.retryDelay = 1000;
@@ -137,14 +155,14 @@ const open = (conn: SseChannelConn) => {
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      channels.forEach((c) => reconnect(c, true));
+      channels.forEach(reconnectIfUnhealthy);
     }
   });
   window.addEventListener('pageshow', () => {
-    channels.forEach((c) => reconnect(c, true));
+    channels.forEach(reconnectIfUnhealthy);
   });
   window.addEventListener('online', () => {
-    channels.forEach((c) => reconnect(c, true));
+    channels.forEach(reconnectIfUnhealthy);
   });
   setInterval(() => {
     channels.forEach(ensureAlive);

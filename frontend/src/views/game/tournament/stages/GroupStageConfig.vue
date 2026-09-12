@@ -14,7 +14,7 @@
               <div class="text-xs text-neutral-600 mt-1">个小组</div>
             </div>
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-              <div class="text-xs text-neutral-500 mb-1">每组队伍</div>
+              <div class="text-xs text-neutral-500 mb-1">每组选手</div>
               <div class="text-2xl font-bold text-white font-mono">{{ config.teamsPerGroup }}</div>
               <div class="text-xs text-neutral-600 mt-1">支/组</div>
             </div>
@@ -34,10 +34,12 @@
           <!-- 赛制概览 -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">赛制概览</div>
-            <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 支队伍</div>
+            <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 名选手</div>
             <div class="text-sm text-neutral-300 mt-1">总参赛：{{ totalTeams }} 支 → 晋级：{{ totalAdvance }} 支</div>
             <div class="text-xs text-neutral-500 mt-2">每队比赛：{{ config.teamsPerGroup - 1 }} 场</div>
           </div>
+
+          <StageExitConfig :stage="localStage" />
         </template>
 
         <!-- CREATE/INIT 模式: 可编辑 -->
@@ -58,13 +60,13 @@
             </div>
           </template>
 
-          <!-- 分组设置 (创建配置:分组数量/每组队伍数;初始配置:每组晋级数) -->
+          <!-- 分组设置 (创建配置:分组数量/每组选手数;初始配置:每组晋级数) -->
           <div v-if="currentMode === ConfigMode.CREATE || currentMode === ConfigMode.INIT">
             <div v-if="currentMode === ConfigMode.CREATE" class="text-xs text-neutral-500 mb-3">创建配置</div>
             <div class="flex items-center justify-between mb-2">
               <label class="text-xs text-neutral-500">分组设置</label>
               <span v-if="currentMode === ConfigMode.INIT" class="text-[10px] text-neutral-600">
-                分组数量/每组队伍数为创建配置,已锁定;每组晋级数可改
+                分组数量/每组选手数为创建配置,已锁定;每组晋级数可改
               </span>
             </div>
             <div class="grid grid-cols-3 gap-6">
@@ -82,7 +84,7 @@
                 <div v-else class="text-2xl font-bold text-white font-mono">{{ config.groupCount }}</div>
               </div>
               <div>
-                <label class="text-xs text-neutral-600 mb-1 block">每组队伍数</label>
+                <label class="text-xs text-neutral-600 mb-1 block">每组选手数</label>
                 <input
                   v-if="currentMode === ConfigMode.CREATE"
                   type="number"
@@ -178,8 +180,8 @@
             <!-- 预览 -->
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
-              <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 支队伍</div>
-              <div class="text-sm text-neutral-300 mt-1">总参赛：{{ totalTeams }} 支队伍 → 晋级：{{ totalAdvance }} 支队伍</div>
+              <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 名选手</div>
+              <div class="text-sm text-neutral-300 mt-1">总参赛：{{ totalTeams }} 名选手 → 晋级：{{ totalAdvance }} 名选手</div>
               <div class="text-xs text-neutral-500 mt-2">每队比赛场次：{{ config.teamsPerGroup - 1 }} 场</div>
             </div>
           </template>
@@ -194,6 +196,7 @@ import { ref, watch, onMounted, computed } from 'vue';
 import { Users } from 'lucide-vue-next';
 import { GroupConfig, StageData, ConfigMode } from './types';
 import ScoringTransitionConfig from './ScoringTransitionConfig.vue';
+import StageExitConfig from './StageExitConfig.vue';
 
 // Props
 const props = defineProps<{
@@ -235,7 +238,7 @@ const config = ref<GroupConfig & { headToHeadFirst?: boolean; tiebreakerPlayoff?
   transition: {}
 });
 
-// 计算总队伍数
+// 计算总选手数
 const totalTeams = computed(() => config.value.groupCount * config.value.teamsPerGroup);
 
 // 计算总晋级数

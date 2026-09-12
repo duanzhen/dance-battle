@@ -10,7 +10,7 @@
         <!-- 海选赛:号码牌 / 分数排名 排序切换 -->
         <template v-if="isAudition">
           <button
-            @click="sortMode = 'NUMBER'"
+            @click="pickSort('NUMBER')"
             class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors flex items-center gap-1"
             :class="sortBtnClass('NUMBER')"
             title="按签到时抽签的号码牌排序"
@@ -19,7 +19,7 @@
             号码排序
           </button>
           <button
-            @click="sortMode = 'SCORE'"
+            @click="pickSort('SCORE')"
             class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors flex items-center gap-1"
             :class="sortBtnClass('SCORE')"
             title="按分数排名排序"
@@ -36,9 +36,25 @@
             <Download class="w-3.5 h-3.5" />
             {{ exporting ? '导出中...' : '导出结果' }}
           </button>
+          <!-- 多圈海选:分圈 tab,每圈排名独立显示 -->
+          <div
+            v-if="circleOptions.length > 1"
+            class="flex items-center gap-0.5 rounded-lg border border-neutral-700 bg-neutral-900 p-0.5"
+            title="切换查看各圈(每圈按圈内名次排名)"
+          >
+            <button
+              v-for="opt in circleTabs"
+              :key="opt.key"
+              @click="selectedCircleKey = opt.key"
+              class="px-2.5 py-1 rounded text-[11px] font-bold transition-colors"
+              :class="circleTabClass(opt.key)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
         </template>
         <span class="text-neutral-500">共</span>
-        <span class="text-amber-500 font-mono">{{ competitors.length }}</span>
+        <span class="text-amber-500 font-mono">{{ visibleCount }}</span>
         <span class="text-neutral-500">名</span>
       </div>
     </div>
@@ -58,8 +74,9 @@
 
     <!-- 选手列表 -->
     <div v-else class="flex-1 overflow-y-auto">
-      <div v-if="canArrange" class="flex-none px-3 sm:px-6 py-2 border-b border-neutral-800/50 text-[11px] text-neutral-500">
-        按外部抽签结果拖动排序,保存后 seedRank 依次 1..n,生成对阵时按此顺序配对
+      <div v-if="canArrange && !circleFiltered" class="flex-none px-3 sm:px-6 py-2 border-b border-neutral-800/50 text-[11px] text-neutral-500">
+        <template v-if="sortPicked">当前为排序视图(不可拖动);再次点击排序按钮可切回拖动排序</template>
+        <template v-else>按外部抽签结果拖动排序,保存后 seedRank 依次 1..n,生成对阵时按此顺序配对</template>
       </div>
       <div class="divide-y divide-neutral-800/50">
         <div
@@ -71,7 +88,7 @@
             'hover:bg-neutral-900/50',
             dragIndex === index ? 'bg-amber-500/5 border-y border-amber-500/20' : ''
           ]"
-          :draggable="canArrange"
+          :draggable="canArrange && !circleFiltered && !sortPicked"
           @dragstart="onDragStart(index, $event)"
           @dragover="onDragOver(index, $event)"
           @drop="onDrop(index)"
@@ -137,14 +154,20 @@
                     已弃权
                   </span>
                 </template>
+                <!-- 所属圈(以裁判命名) -->
                 <span
-                  v-if="competitor.type === 1"
-                  class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                  v-if="isAudition && circleLabelOf(competitor.id)"
+                  class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-sky-500/10 text-sky-400 border border-sky-500/30"
+                  title="所在圈(以裁判命名)"
                 >
-                  队伍
+                  {{ circleLabelOf(competitor.id) }}
                 </span>
-                <span v-else class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-green-500/10 text-green-500 border border-green-500/20">
-                  个人
+                <span
+                  v-if="isAudition && competitor.outcomeStatus === 'PENDING' && inTiebreaker(competitor.id)"
+                  class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/40"
+                  title="同分进入二海(加赛)待判罚"
+                >
+                  二海待定
                 </span>
                 <span
                   v-if="isGuest(competitor)"
@@ -171,11 +194,11 @@
               </span>
             </div>
 
-            <!-- 最终排名(淘汰赛不展示) -->
-            <div v-if="competitor.finalRank && !isKnockout" class="flex-shrink-0 w-16 text-center">
-              <div class="text-xs text-neutral-500">排名</div>
-              <div class="text-lg font-bold" :class="getFinalRankClass(competitor.finalRank)">
-                {{ competitor.finalRank }}
+            <!-- 最终排名(淘汰赛不展示);分圈查看时显示该圈的圈内名次 -->
+            <div v-if="rankOf(competitor) && !isKnockout" class="flex-shrink-0 w-16 text-center">
+              <div class="text-xs text-neutral-500">{{ circleFiltered ? '圈内排名' : '排名' }}</div>
+              <div class="text-lg font-bold" :class="getFinalRankClass(rankOf(competitor) as number)">
+                {{ rankOf(competitor) }}
               </div>
             </div>
 
@@ -201,6 +224,9 @@ import { listCompetitor, updateCompetitor } from '@/api/game/competitor';
 import { setStageSeedOrder } from '@/api/game/stage';
 import { exportAuditionResult, getAuditionResult } from '@/api/game/stage';
 import { withdrawArenaCompetitor } from '@/api/game/stage/lifecycle';
+import { listMatch } from '@/api/game/match';
+import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchReferee } from '@/api/game/matchReferee';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import FileSaver from 'file-saver';
@@ -220,8 +246,28 @@ const competitors = ref<CompetitorVO[]>([]);
 const exporting = ref(false);
 /** 海选赛:competitorId -> 累计总分(t_match_participant.score_value 汇总) */
 const scoreByCompetitor = ref<Record<string, number>>({});
-/** 海选赛排序:号码牌 / 分数排名(默认号码牌) */
+/** 海选分圈:competitorId -> 所在圈标签(以裁判命名) */
+const circleLabels = ref<Record<string, string>>({});
+/** 海选分圈:competitorId -> ZONE 键(供圈筛选) */
+const circleZones = ref<Record<string, string>>({});
+/** 海选分圈选项(按 displayRow 排序) */
+const circleOptions = ref<{ key: string; label: string }[]>([]);
+/** 圈内名次:competitorId -> 圈内名次(rank_in_match,结算后由后端写入) */
+const circleRanks = ref<Record<string, number>>({});
+/** 当前查看的圈:多圈时默认第一圈(每圈排名独立显示),可切"全部圈" */
+const selectedCircleKey = ref<string>('ALL');
+const circleFiltered = computed(() => selectedCircleKey.value !== 'ALL' && circleOptions.value.length > 1);
+/** 分圈 tab:各圈 + 全部圈 */
+const circleTabs = computed(() => [...circleOptions.value, { key: 'ALL', label: '全部圈' }]);
+const circleTabClass = (key: string) =>
+  selectedCircleKey.value === key
+    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/40'
+    : 'text-neutral-400 border border-transparent hover:text-neutral-200';
+/** 海选同分加赛(二海/三海…)参赛方(结果定案前用于标记"二海待定") */
+const tiebreakerCompetitorIds = ref<Set<string>>(new Set());
+/** 海选赛排序:号码牌 / 分数排名;sortPicked=用户主动点过排序按钮(赛前也立即生效) */
 const sortMode = ref<'NUMBER' | 'SCORE'>('NUMBER');
+const sortPicked = ref(false);
 
 const isAudition = computed(() => props.stageMode === 'AUDITION');
 const isKnockout = computed(() => props.stageMode === 'KNOCKOUT');
@@ -248,24 +294,66 @@ const scoreOf = (c: CompetitorVO): number | null => {
   const v = scoreByCompetitor.value[String(c.id)];
   return v == null ? null : v;
 };
+/** 当前排序是否已生效:赛段开始后默认按号码排序;赛前仅在用户点过排序按钮时生效(否则保留拖动顺序) */
+const sortApplied = computed(() => sortPicked.value || !canArrange.value);
 /** 排序按钮样式 */
 const sortBtnClass = (mode: 'NUMBER' | 'SCORE') =>
-  sortMode.value === mode
+  sortApplied.value && sortMode.value === mode
     ? 'bg-amber-500/15 text-amber-400 border-amber-500/40'
     : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:text-neutral-200 hover:border-neutral-600';
+/** 点击排序按钮:再次点同一个则取消,回到"可拖动顺序" */
+const pickSort = (mode: 'NUMBER' | 'SCORE') => {
+  if (sortPicked.value && sortMode.value === mode) {
+    sortPicked.value = false;
+    return;
+  }
+  sortMode.value = mode;
+  sortPicked.value = true;
+};
+/** 分圈查看时的圈内名次:优先后端名次;未结算时按圈内分数实时计算(同分按号码牌定先后,与后端一致) */
+const circleRankOf = (c: CompetitorVO): number | null => {
+  const id = String(c.id);
+  const settled = circleRanks.value[id];
+  if (settled != null) {
+    return settled;
+  }
+  const zone = circleZones.value[id];
+  if (!zone) {
+    return null;
+  }
+  const peers = competitors.value.filter((x) => circleZones.value[String(x.id)] === zone);
+  const mine = scoreOf(c);
+  if (mine == null || peers.length === 0) {
+    return null;
+  }
+  // 分数降序、同分按号码牌升序 → 位次即圈内名次
+  const ahead = peers.filter((x) => {
+    const s = scoreOf(x);
+    if (s == null) return false;
+    if (s !== mine) return s > mine;
+    return numOf(x) < numOf(c);
+  }).length;
+  return ahead + 1;
+};
+/** 排名列取值:分圈看圈内名次,全部圈看赛段名次 */
+const rankOf = (c: CompetitorVO): number | null =>
+  circleFiltered.value ? circleRankOf(c) : (c.finalRank ?? null);
 /** 展示列表:海选赛未初始化时保持种子顺序(供拖拽排位);初始化/结算后按所选方式排序 */
 const displayList = computed(() => {
-  if (!isAudition.value || canArrange.value) {
-    return competitors.value;
+  let list = [...competitors.value];
+  if (isAudition.value && sortApplied.value) {
+    if (sortMode.value === 'SCORE') {
+      list.sort((a, b) => (scoreOf(b) ?? -1) - (scoreOf(a) ?? -1) || numOf(a) - numOf(b));
+    } else {
+      list.sort((a, b) => numOf(a) - numOf(b) || String(a.number || '').localeCompare(String(b.number || '')));
+    }
   }
-  const list = [...competitors.value];
-  if (sortMode.value === 'SCORE') {
-    list.sort((a, b) => (scoreOf(b) ?? -1) - (scoreOf(a) ?? -1) || numOf(a) - numOf(b));
-  } else {
-    list.sort((a, b) => numOf(a) - numOf(b) || String(a.number || '').localeCompare(String(b.number || '')));
+  if (circleFiltered.value) {
+    list = list.filter((c) => circleZones.value[String(c.id)] === selectedCircleKey.value);
   }
   return list;
 });
+const visibleCount = computed(() => displayList.value.length);
 
 // GUEST 标记:remark == GUEST(由后端 addGuest 写入)
 const isGuest = (competitor: CompetitorVO) => competitor.remark === 'GUEST';
@@ -387,6 +475,7 @@ const saveSeedOrder = async () => {
 const loadScores = async () => {
   if (!isAudition.value) {
     scoreByCompetitor.value = {};
+    tiebreakerCompetitorIds.value = new Set();
     return;
   }
   try {
@@ -399,9 +488,93 @@ const loadScores = async () => {
       }
     });
     scoreByCompetitor.value = map;
+    const tbIds = new Set<string>();
+    (data?.tiebreakers || []).forEach((tb: any) => {
+      (tb?.competitors || []).forEach((c: any) => {
+        if (c.competitorId != null) {
+          tbIds.add(String(c.competitorId));
+        }
+      });
+    });
+    tiebreakerCompetitorIds.value = tbIds;
   } catch (e) {
     console.error('加载海选赛分数失败:', e);
     scoreByCompetitor.value = {};
+    tiebreakerCompetitorIds.value = new Set();
+  }
+};
+
+const circleLabelOf = (competitorId?: string | number | null) => (competitorId == null ? '' : circleLabels.value[String(competitorId)] || '');
+const inTiebreaker = (competitorId?: string | number | null) => competitorId != null && tiebreakerCompetitorIds.value.has(String(competitorId));
+
+// 加载「参赛方 -> 所在圈」映射(圈名以裁判命名,无裁判回退第N圈)
+const loadCircleLabels = async () => {
+  circleLabels.value = {};
+  circleZones.value = {};
+  circleRanks.value = {};
+  circleOptions.value = [];
+  selectedCircleKey.value = 'ALL';
+  if (!isAudition.value) return;
+  try {
+    const matchRes: any = await listMatch({ stageId: props.stageId, pageNum: 1, pageSize: 99 } as any);
+    const matches: any[] = Array.isArray(matchRes?.data) ? matchRes.data : matchRes?.data?.data || [];
+    const zones = matches
+      .filter((m) => m.displayZone && String(m.displayZone).startsWith('ZONE-') && !String(m.remark || '').startsWith('同分加赛'))
+      .sort((a, b) => (Number(a.displayRow) || 0) - (Number(b.displayRow) || 0) || String(a.id).localeCompare(String(b.id)));
+    if (zones.length < 2) {
+      return;
+    }
+    const refRes: any = await listMatchReferee(props.stageId);
+    const refRows: any[] = refRes?.data || [];
+    const namesByMatch: Record<string, string[]> = {};
+    refRows.forEach((r) => {
+      if (r.matchId != null && r.refereeName) {
+        const key = String(r.matchId);
+        (namesByMatch[key] = namesByMatch[key] || []).push(r.refereeName);
+      }
+    });
+    const map: Record<string, string> = {};
+    const zoneMap: Record<string, string> = {};
+    const rankMap: Record<string, number> = {};
+    const options: { key: string; label: string }[] = [];
+    await Promise.all(
+      zones.map(async (m: any) => {
+        const zoneKey = String(m.displayZone);
+        const refNames = namesByMatch[String(m.id)];
+        const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneKey.replace('ZONE-', '')}圈`;
+        options.push({ key: zoneKey, label });
+        try {
+          const pRes: any = await listMatchParticipant({ matchId: m.id } as any);
+          const parts: any[] = Array.isArray(pRes?.data) ? pRes.data : pRes?.data?.data || [];
+          parts.forEach((p: any) => {
+            if (p.competitorId != null) {
+              const cid = String(p.competitorId);
+              map[cid] = label;
+              zoneMap[cid] = zoneKey;
+              if (p.rankInMatch != null) {
+                rankMap[cid] = Number(p.rankInMatch);
+              }
+            }
+          });
+        } catch {
+          // 单圈加载失败不阻塞整体
+        }
+      })
+    );
+    options.sort((a, b) =>
+      Number(String(a.key).replace('ZONE-', '')) - Number(String(b.key).replace('ZONE-', '')));
+    circleLabels.value = map;
+    circleZones.value = zoneMap;
+    circleRanks.value = rankMap;
+    circleOptions.value = options;
+    // 多圈:默认展示第一圈(每圈排名独立),需要看全员再切"全部圈"
+    selectedCircleKey.value = options.length > 1 ? options[0].key : 'ALL';
+  } catch (e) {
+    console.warn('加载圈标签失败:', e);
+    circleLabels.value = {};
+    circleZones.value = {};
+    circleRanks.value = {};
+    circleOptions.value = [];
   }
 };
 
@@ -422,15 +595,18 @@ const handleExportAudition = async () => {
 };
 
 // 加载参赛选手列表
-const loadCompetitors = async () => {
+/** silent=true 时后台静默刷新:不显示"加载中"占位,避免事件驱动刷新把列表刷得闪 */
+const loadCompetitors = async (silent = false) => {
   if (!props.stageId) {
     competitors.value = [];
     return;
   }
 
-  loading.value = true;
-  editingId.value = null;
-  editingName.value = '';
+  if (!silent) {
+    loading.value = true;
+    editingId.value = null;
+    editingName.value = '';
+  }
   try {
     const { data } = await listCompetitor({ stageId: props.stageId, pageNum: 1, pageSize: 1000 });
     competitors.value = data || [];
@@ -442,11 +618,14 @@ const loadCompetitors = async () => {
       competitors.value.sort((a, b) => (a.seedRank || 999) - (b.seedRank || 999));
     }
     await loadScores();
+    await loadCircleLabels();
   } catch (error) {
     console.error('加载参赛选手失败:', error);
     competitors.value = [];
   } finally {
-    loading.value = false;
+    if (!silent) {
+      loading.value = false;
+    }
   }
 };
 
@@ -507,7 +686,7 @@ onUnmounted(() => {
 /** 赛事事件回调:重连补偿(null)或事件属于本赛段(签到/参赛方变化等)时刷新 */
 const handleTournamentEvent = (data: any) => {
   if (!data || data.stageId == null || String(data.stageId) === String(props.stageId)) {
-    loadCompetitors();
+    loadCompetitors(true);
   }
 };
 </script>

@@ -20,7 +20,7 @@ export interface CompetitorVO {
   sourceCompetitorId: string | number;
 
   /**
-   * 0:个人, 1:队伍
+   * 0:个人, 1:选手
    */
   type: number;
 
@@ -97,7 +97,7 @@ export interface CompetitorForm extends BaseEntity {
   sourceCompetitorId?: string | number;
 
   /**
-   * 0:个人, 1:队伍
+   * 0:个人, 1:选手
    */
   type?: number;
 
@@ -149,7 +149,7 @@ export interface CompetitorQuery extends PageQuery {
   sourceCompetitorId?: string | number;
 
   /**
-   * 0:个人, 1:队伍
+   * 0:个人, 1:选手
    */
   type?: number;
 

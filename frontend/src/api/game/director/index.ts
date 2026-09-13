@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { attachEnvelope } from '@/utils/apiEnvelope';
 
 /**
  * 手机导播台 API:使用赛事 auth_key 认证(Authorization: Bearer auth_key),
@@ -11,14 +12,15 @@ export function setDirectorAuthKey(key: string) {
   directorAuthKey = key;
 }
 
-const directorRequest = axios.create({
+// 统一响应拆包:与管理端 utils/request 一致,请求结果就是 { code, msg, data } 信封
+const directorRequest = attachEnvelope(axios.create({
   baseURL: import.meta.env.VITE_APP_BASE_API,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json;charset=utf-8',
     clientid: import.meta.env.VITE_APP_CLIENT_ID
   }
-});
+}) as any);
 
 directorRequest.interceptors.request.use((config) => {
   if (directorAuthKey) {
@@ -149,5 +151,41 @@ export function directorPublishResult(id: string | number) {
   return directorRequest({
     url: `/game/director/match/${id}/publish-result`,
     method: 'post'
+  });
+}
+
+// ==================== 自由对抗(手动加场 + 手动选晋级) ====================
+
+/** 本赛段参赛选手(选人对战 / 勾选晋级用) */
+export function listDirectorStageCompetitors(stageId: string | number) {
+  return directorRequest({
+    url: `/game/director/stage/${stageId}/competitors`,
+    method: 'get'
+  });
+}
+
+/** 手动添加一场对战(线下抽签/指认确定的两名选手) */
+export function directorCreateFreeMatch(stageId: string | number, data: { competitorAId: string | number; competitorBId: string | number }) {
+  return directorRequest({
+    url: `/game/director/stage/${stageId}/free-match`,
+    method: 'post',
+    data
+  });
+}
+
+/** 删除一场对战(误加时使用,已结算场次需先重置) */
+export function directorDeleteFreeMatch(matchId: string | number) {
+  return directorRequest({
+    url: `/game/director/match/${matchId}/free-match`,
+    method: 'delete'
+  });
+}
+
+/** 手动选择晋级者(任意人数),未选中的标记淘汰 */
+export function directorSaveFreeMatchAdvancers(stageId: string | number, competitorIds: (string | number)[]) {
+  return directorRequest({
+    url: `/game/director/stage/${stageId}/free-match-advancers`,
+    method: 'put',
+    data: { competitorIds }
   });
 }

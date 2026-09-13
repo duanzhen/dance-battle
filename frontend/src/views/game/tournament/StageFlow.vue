@@ -275,7 +275,7 @@
 
 <script setup lang="ts">
 import { ref, computed, markRaw, onMounted, onUnmounted } from 'vue';
-import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered, GitFork } from 'lucide-vue-next';
+import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered, GitFork, Swords } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
 import { listStage, addStage as addStageApi, updateStage as updateStageApi, delStage as delStageApi } from '@/api/game/stage';
 import { StageVO, StageForm } from '@/api/game/stage/types';
@@ -287,6 +287,7 @@ import KnockoutStageConfig from './stages/KnockoutStageConfig.vue';
 import GroupStageConfig from './stages/GroupStageConfig.vue';
 import AuditionStageConfig from './stages/AuditionStageConfig.vue';
 import ArenaStageConfig from './stages/ArenaStageConfig.vue';
+import FreeMatchStageConfig from './stages/FreeMatchStageConfig.vue';
 import RankingStageConfig from './stages/RankingStageConfig.vue';
 import StageCompetitorList from './stages/StageCompetitorList.vue';
 import RosterFlowView from './RosterFlowView.vue';
@@ -524,6 +525,7 @@ const defaultConfigs: Record<StageMode, any> = {
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
   [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
   [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
+  [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },
   [StageMode.RANK]: {
     mode: 'RANK',
     scale: 32,
@@ -551,7 +553,8 @@ const stageTypes = [
   { mode: StageMode.KNOCKOUT, label: '淘汰赛', description: '单败淘汰制', icon: Trophy },
   { mode: StageMode.AUDITION, label: '海选赛', description: '海选晋级·人数不限', icon: Mic },
   { mode: StageMode.ARENA, label: '擂台赛', description: 'SEVEN TO SMOKE', icon: Target },
-  { mode: StageMode.RANK, label: '排名赛', description: '多维度打分排名', icon: ListOrdered }
+  { mode: StageMode.RANK, label: '排名赛', description: '多维度打分排名', icon: ListOrdered },
+  { mode: StageMode.FREE_MATCH, label: '自由对抗', description: '手动加场·手动晋级', icon: Swords }
 ];
 
 const stageModeLabels: Record<string, string> = {
@@ -559,7 +562,8 @@ const stageModeLabels: Record<string, string> = {
   [StageMode.GROUP]: '小组赛',
   [StageMode.AUDITION]: '海选赛',
   [StageMode.ARENA]: '擂台赛',
-  [StageMode.RANK]: '排名赛'
+  [StageMode.RANK]: '排名赛',
+  [StageMode.FREE_MATCH]: '自由对抗'
 };
 const getStageModeLabel = (mode: string) => stageModeLabels[mode] || mode;
 
@@ -578,6 +582,7 @@ const stageConfigComponents = {
   [StageMode.KNOCKOUT]: markRaw(KnockoutStageConfig),
   [StageMode.GROUP]: markRaw(GroupStageConfig),
   [StageMode.AUDITION]: markRaw(AuditionStageConfig),
+  [StageMode.FREE_MATCH]: markRaw(FreeMatchStageConfig),
   [StageMode.ARENA]: markRaw(ArenaStageConfig),
   [StageMode.RANK]: markRaw(RankingStageConfig)
 };
@@ -779,6 +784,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
       [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
       [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
+      [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },
       [StageMode.RANK]: {
         mode: 'RANK',
         scale: 32,

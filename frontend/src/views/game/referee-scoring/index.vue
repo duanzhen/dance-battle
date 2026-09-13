@@ -597,6 +597,7 @@ import { ElMessage } from 'element-plus';
 import logo from '@/assets/logo/logo.png';
 import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore } from '@/api/game/referee/scoring';
 import { subscribeChannel } from '@/utils/sseChannel';
+import { payloadOf } from '@/utils/apiEnvelope';
 
 const route = useRoute();
 
@@ -1247,8 +1248,7 @@ const refresh = async () => {
   if (submitting.value) return;
   try {
     const resp = await getRefereeMyMatch(stageId.value ?? undefined, matchId.value ?? undefined);
-    // 原生 axios 无响应拦截器,resp.data 为 R 信封,需取 data.data
-    const data = resp.data?.data ?? resp.data;
+    const data = payloadOf<any>(resp);
     const nextStageId = data?.stage?.id;
     const nextMatchId = data?.match?.id;
     const nextRoundId = data?.currentRound?.id ?? null;
@@ -1274,8 +1274,7 @@ const loadData = async (stageIdParam?: number, matchIdParam?: number, selectAfte
   error.value = '';
   try {
     const resp = await getRefereeMyMatch(stageIdParam, matchIdParam);
-    // 原生 axios 无响应拦截器,resp.data 为 R 信封,需取 data.data
-    applyData(resp.data?.data ?? resp.data);
+    applyData(payloadOf<any>(resp));
     // 海选:刷新后按需选中选手(默认第一个未评;提交后跳下一位),只滚动一次
     if (isAudition.value) {
       autoSelectNext(selectAfter ?? null);

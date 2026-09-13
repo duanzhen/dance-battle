@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { attachEnvelope } from '@/utils/apiEnvelope';
 
 let refereeAuthKey: string | null = null;
 
@@ -6,14 +7,15 @@ export function setRefereeAuthKey(key: string) {
   refereeAuthKey = key;
 }
 
-const refereeRequest = axios.create({
+// 统一响应拆包:与管理端 utils/request 一致,请求结果就是 { code, msg, data } 信封
+const refereeRequest = attachEnvelope(axios.create({
   baseURL: import.meta.env.VITE_APP_BASE_API,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json;charset=utf-8',
     'clientid': import.meta.env.VITE_APP_CLIENT_ID
   }
-});
+}) as any);
 
 refereeRequest.interceptors.request.use((config) => {
   if (refereeAuthKey) {

@@ -1,11 +1,15 @@
 package com.dance.street.game.controller;
 
+import com.dance.street.game.domain.bo.FreeMatchAdvanceBo;
+import com.dance.street.game.domain.bo.FreeMatchBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TCompetitorBo;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.vo.MatchResultVo;
+import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.TTournamentVo;
@@ -16,6 +20,7 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
+import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITTournamentService;
@@ -27,6 +32,7 @@ import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.log.annotation.Log;
 import org.dromara.common.log.enums.BusinessType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 import java.util.Objects;
@@ -45,6 +51,7 @@ public class DirectorController {
     private final ITTournamentService tournamentService;
     private final ITStageService stageService;
     private final ITMatchService matchService;
+    private final ITCompetitorService competitorService;
     private final ITStageLifecycleService stageLifecycleService;
     private final ITMatchResultService matchResultService;
     private final TStageMapper stageMapper;
@@ -203,6 +210,52 @@ public class DirectorController {
         assertStageInTournament(currentTournament(request), id);
         stageLifecycleService.tempWithdrawArenaCompetitor(id, competitorId);
         return R.ok();
+    }
+
+    /**
+     * 自由对抗:本赛段参赛选手(供导播台选人对战 / 勾选晋级)
+     */
+    @GetMapping("/stage/{id}/competitors")
+    public R<List<TCompetitorVo>> stageCompetitors(@PathVariable("id") Long id, HttpServletRequest request) {
+        assertStageInTournament(currentTournament(request), id);
+        TCompetitorBo bo = new TCompetitorBo();
+        bo.setStageId(id);
+        return R.ok(competitorService.queryList(bo));
+    }
+
+    /**
+     * 自由对抗:手动添加一场对战(线下抽签/指认确定的两名选手),返回新建场次ID
+     */
+    @Log(title = "导播台自由对添加对战", businessType = BusinessType.INSERT)
+    @PostMapping("/stage/{id}/free-match")
+    public R<Long> createFreeMatch(@PathVariable("id") Long id,
+                                   @Validated @RequestBody FreeMatchBo bo,
+                                   HttpServletRequest request) {
+        assertStageInTournament(currentTournament(request), id);
+        return R.ok(stageLifecycleService.createFreeMatch(id, bo.getCompetitorAId(), bo.getCompetitorBId()));
+    }
+
+    /**
+     * 自由对抗:删除一场对战(误加时使用,已结算场次需先重置)
+     */
+    @Log(title = "导播台自由对删除对战", businessType = BusinessType.DELETE)
+    @DeleteMapping("/match/{id}/free-match")
+    public R<Void> deleteFreeMatch(@PathVariable("id") Long id, HttpServletRequest request) {
+        assertMatchInTournament(currentTournament(request), id);
+        stageLifecycleService.deleteFreeMatch(id);
+        return R.ok();
+    }
+
+    /**
+     * 自由对抗:手动选择晋级者(任意人数),未选中的标记淘汰
+     */
+    @Log(title = "导播台自由对选择晋级", businessType = BusinessType.UPDATE)
+    @PutMapping("/stage/{id}/free-match-advancers")
+    public R<Integer> selectFreeMatchAdvancers(@PathVariable("id") Long id,
+                                               @RequestBody FreeMatchAdvanceBo bo,
+                                               HttpServletRequest request) {
+        assertStageInTournament(currentTournament(request), id);
+        return R.ok(stageLifecycleService.selectFreeMatchAdvancers(id, bo.getCompetitorIds()));
     }
 
     /**

@@ -124,6 +124,8 @@
                 ? '拖动选手:放到别人身上是交换,放到空位是搬过去(原位留空);× 移出;加人点右上角「＋ 加人」'
                 : targetMode === 'ARENA'
                   ? '拖动可调整出场顺序(1 号位为擂主);× 移出;加人点右上角「＋ 加人」'
+                : targetMode === 'FREE_MATCH'
+                  ? '自由对抗只要名单:不排序,点右上角「＋ 加人」补充,× 移出'
                 : '拖动可调整顺序,× 移出;加人点右上角「＋ 加人」'
             }}
           </span>
@@ -232,7 +234,7 @@
         <!-- 其他赛段模式:上下拖动即排序,× 移出;加人走右上角弹窗 -->
         <div v-else class="space-y-2">
         <div
-          v-if="targetMode !== 'ARENA'"
+          v-if="targetMode !== 'ARENA' && targetMode !== 'FREE_MATCH'"
           class="rounded bg-neutral-900/70 border border-neutral-800 overflow-y-auto custom-scrollbar max-h-96 p-1 pt-1 space-y-0.5"
         >
           <div v-if="listItems.length === 0 && emptySlots.length === 0" class="text-[11px] text-neutral-600 text-center py-6">
@@ -330,6 +332,35 @@
             >
               <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-500 flex-none">{{ n }}</span>
               <span class="flex-1 min-w-0">空位</span>
+            </div>
+            <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">
+              还没有人进来;点右上角「＋ 加人」添加
+            </div>
+          </div>
+
+          <!-- 自由对抗:纯名单,只加人/减人,不排顺序(对手由现场抽签/指认) -->
+          <div v-else-if="targetMode === 'FREE_MATCH'" class="space-y-1">
+            <div class="flex items-center justify-between px-1 pb-1">
+              <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">参赛名单</span>
+              <span class="text-[10px] text-neutral-600">不排序:对手由现场抽签 / 指认决定</span>
+            </div>
+            <div
+              v-for="(c, idx) in rosterRows"
+              :key="itemKeyOf(c)"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border border-neutral-800"
+            >
+              <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
+              <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{
+                entryTagLabel(c.entryTag)
+              }}</span>
+              <button
+                v-if="!rosterSealed && !targetLocked"
+                @click.stop="askRemoveItem(c)"
+                class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
+                title="移出名单"
+              >
+                ×
+              </button>
             </div>
             <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">
               还没有人进来;点右上角「＋ 加人」添加
@@ -683,7 +714,8 @@ const modeLabelMap: Record<string, string> = {
   KNOCKOUT: '淘汰赛',
   GROUP: '小组赛',
   ARENA: '擂台赛',
-  RANK: '排名赛'
+  RANK: '排名赛',
+  FREE_MATCH: '自由对抗'
 };
 
 /** 目标赛段已开始(非 DRAFT/PENDING)时锁定整页中间态调整 */

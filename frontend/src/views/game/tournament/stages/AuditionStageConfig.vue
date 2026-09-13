@@ -140,7 +140,7 @@
                 </select>
                 <span v-else class="text-neutral-300">{{ config.maxScore }} 分制</span>
               </label>
-              <span class="text-[11px] text-neutral-600">支持 2 位小数（如 9.75 / 97.50）</span>
+              <!-- <span class="text-[11px] text-neutral-600">支持 2 位小数（如 9.75 / 97.50）</span> -->
             </div>
           </div>
         </template>

@@ -123,6 +123,22 @@
         </div>
 
         <!-- 擂台赛配置 -->
+        <div v-if="selectedStageMode === StageMode.FREE_MATCH" class="config-section">
+          <h4 class="section-title">自由对抗配置</h4>
+          <div>
+            <label class="block text-sm text-neutral-400 mb-1">比赛格式</label>
+            <el-select v-model="config.format" class="w-full">
+              <el-option label="BO1" value="BO1" />
+              <el-option label="BO3" value="BO3" />
+              <el-option label="BO5" value="BO5" />
+            </el-select>
+          </div>
+          <p class="text-xs text-neutral-500 leading-relaxed mt-3">
+            对手由线下抽签 / 指认确定:比赛时在手机导播台手动添加对战(选两名选手),裁判正常判罚,系统只记录每场的对战选手与结果;
+            赛段结束前由导播台手动勾选晋级者(人数不限)。
+          </p>
+        </div>
+
         <div v-if="selectedStageMode === StageMode.ARENA" class="config-section">
           <h4 class="section-title">擂台赛配置</h4>
           <div class="grid grid-cols-2 gap-4">
@@ -156,9 +172,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { Trophy, Mic, Target } from 'lucide-vue-next';
+import { Trophy, Mic, Target, Swords } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
-import { StageMode, KnockoutTemplate, KnockoutConfig, GroupConfig, AuditionConfig, ArenaConfig, RankingConfig, StageTypeSelectEvent } from './types';
+import { StageMode, KnockoutTemplate, KnockoutConfig, GroupConfig, AuditionConfig, ArenaConfig, RankingConfig, FreeMatchConfig, StageTypeSelectEvent } from './types';
 
 // Props
 const props = defineProps<{
@@ -205,6 +221,12 @@ const stageTypes = [
     label: '排名赛',
     description: '多维度打分排名',
     icon: Trophy
+  },
+  {
+    mode: StageMode.FREE_MATCH,
+    label: '自由对抗',
+    description: '手动加场·手动晋级',
+    icon: Swords
   }
 ];
 
@@ -281,6 +303,14 @@ const initConfig = () => {
         format: 'BO1',
         drawBothScore: false
       } as ArenaConfig;
+      break;
+    case StageMode.FREE_MATCH:
+      // 自由对抗:纯手动赛制,只需要比赛格式;不自动结对、不自动晋级
+      config.value = {
+        mode: 'FREE_MATCH',
+        format: 'BO1',
+        scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' }
+      } as FreeMatchConfig;
       break;
   }
 };

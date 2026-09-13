@@ -18,7 +18,8 @@ export enum StageMode {
   GROUP = 'GROUP', // 小组赛
   AUDITION = 'AUDITION', // 海选赛
   ARENA = 'ARENA', // 擂台赛
-  RANK = 'RANK' // 排名赛
+  RANK = 'RANK', // 排名赛
+  FREE_MATCH = 'FREE_MATCH' // 自由对抗(线下抽签/指认对手,导播台手动加场与晋级)
 }
 
 // 淘汰赛模板类型
@@ -102,8 +103,13 @@ export interface ArenaConfig {
   drawBothScore?: boolean;
 }
 
+export interface FreeMatchConfig {
+  /** 纯手动赛制:对手由线下抽签/指认,系统只记录对战与结果 */
+  format: MatchFormat;
+}
+
 // 联合类型
-export type StageConfig = KnockoutConfig | GroupConfig | AuditionConfig | ArenaConfig | RankingConfig;
+export type StageConfig = KnockoutConfig | GroupConfig | AuditionConfig | ArenaConfig | RankingConfig | FreeMatchConfig;
 
 // 赛段数据接口
 export interface StageData {

@@ -148,6 +148,20 @@
                 <Play class="w-3.5 h-3.5" /> 开始下一场
               </button>
               <button
+                v-if="isFreeMatchStage && currentStage.status === 'GAMING'"
+                @click="openAddFreeMatch"
+                class="py-2.5 px-3 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-amber-600/15 text-amber-400 border border-amber-600/30 active:bg-amber-600/30"
+              >
+                <Swords class="w-3.5 h-3.5" /> 添加对战
+              </button>
+              <button
+                v-if="isFreeMatchStage && currentStage.status === 'GAMING'"
+                @click="openAdvancePicker"
+                class="py-2.5 px-3 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-blue-600/15 text-blue-400 border border-blue-600/30 active:bg-blue-600/30"
+              >
+                <CircleCheck class="w-3.5 h-3.5" /> 选择晋级
+              </button>
+              <button
                 v-if="currentStage.stageMode === 'ARENA' && currentStage.status === 'GAMING'"
                 @click="openTempWithdraw"
                 class="py-2.5 px-3 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30"
@@ -173,6 +187,9 @@
               <p v-if="currentStage.stageMode === 'ARENA'" class="text-[10px] text-blue-400/70">
                 点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，胜者守擂、败者排到队尾，平局时擂主与挑战者均排到队尾。
               </p>
+              <p v-if="isFreeMatchStage" class="text-[10px] text-blue-400/70">
+                自由对抗:名单确定后点「开始赛段」即可;比赛中点「添加对战」选两名选手生成一场,裁判正常判罚,系统只记录对战与结果;结束前点「选择晋级」手动勾选晋级者(人数不限)。
+              </p>
               <p v-else class="text-[10px] text-blue-400/70">
                 <template v-if="currentStage.awaitingAdvancement && currentStage.skipConfirm">
                   已开启「跳过中间态确认」：点击「开始赛段」将弹窗确认，自动按当前预排确认晋级并生成对阵。
@@ -183,7 +200,10 @@
               </p>
             </div>
             <div v-if="currentStage.status === 'GAMING'" class="mt-3 p-3 rounded-lg bg-green-500/5 border border-green-500/10">
-              <p class="text-[10px] text-green-400/70">赛段正在进行中，裁判可录入比分。完成后点击"完成赛段"结算排名。</p>
+              <p v-if="isFreeMatchStage" class="text-[10px] text-green-400/70">
+                赛段进行中:点「添加对战」选两名选手开新场;逐场判完后点「选择晋级」勾选晋级者,再点"完成赛段"。
+              </p>
+              <p v-else class="text-[10px] text-green-400/70">赛段正在进行中，裁判可录入比分。完成后点击"完成赛段"结算排名。</p>
             </div>
             <div v-if="currentStage.status === 'SETTLED'" class="mt-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10">
               <p class="text-[10px] text-amber-400/70">赛段已结算。晋级选手需在管理端「中间态」确认晋级后写入下一赛段，确认前下一赛段无法开始。</p>
@@ -469,6 +489,14 @@
                 >
                   重置
                 </button>
+                <!-- 自由对抗:误加的场次可直接删除(已结算需先重启) -->
+                <button
+                  v-if="isFreeMatchStage && match.status !== 'SETTLED'"
+                  @click="handleDeleteFreeMatch(match)"
+                  class="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:scale-95 transition-transform"
+                >
+                  删除
+                </button>
                 <!-- 展开/收起:仅已结束场次查看各轮判罚明细与重启;进行中已实时展示无需展开 -->
                 <button
                   v-if="match.status === 'SETTLED'"
@@ -561,6 +589,102 @@
     </div>
   </div>
 
+  <!-- 自由对抗:添加对战(选两名选手,对手由现场抽签/指认) -->
+  <div v-if="addMatchVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div class="w-full max-w-sm bg-neutral-900 border border-neutral-700 rounded-xl p-4">
+      <h4 class="text-sm font-bold text-neutral-200 mb-1">添加对战</h4>
+      <p class="text-[10px] text-neutral-500 mb-3">选择本场对战的两名选手(顺序即左/右方)</p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[10px] text-neutral-500 mb-1">左方选手</label>
+          <el-select
+            v-model="addMatchForm.competitorAId"
+            placeholder="请选择左方选手"
+            filterable
+            class="w-full director-select"
+            popper-class="director-select-popper"
+            :teleported="true"
+          >
+            <el-option
+              v-for="c in freeMatchCompetitors"
+              :key="String(c.id)"
+              :label="competitorLabel(c)"
+              :value="String(c.id)"
+              :disabled="String(c.id) === String(addMatchForm.competitorBId)"
+            />
+          </el-select>
+        </div>
+        <div>
+          <label class="block text-[10px] text-neutral-500 mb-1">右方选手</label>
+          <el-select
+            v-model="addMatchForm.competitorBId"
+            placeholder="请选择右方选手"
+            filterable
+            class="w-full director-select"
+            popper-class="director-select-popper"
+            :teleported="true"
+          >
+            <el-option
+              v-for="c in freeMatchCompetitors"
+              :key="String(c.id)"
+              :label="competitorLabel(c)"
+              :value="String(c.id)"
+              :disabled="String(c.id) === String(addMatchForm.competitorAId)"
+            />
+          </el-select>
+        </div>
+        <p v-if="freeMatchCompetitors.length === 0" class="text-[10px] text-amber-400/80">
+          本赛段暂无选手:请先在中间态确认名单,或在导播台点「开始赛段」。
+        </p>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button class="flex-1 px-4 py-2 rounded-lg text-xs text-neutral-400 bg-neutral-800" @click="addMatchVisible = false">取消</button>
+        <button
+          class="flex-1 px-4 py-2 rounded-lg text-xs font-bold bg-amber-600 text-neutral-900 disabled:opacity-40"
+          :disabled="addMatchSubmitting || !addMatchForm.competitorAId || !addMatchForm.competitorBId"
+          @click="handleCreateFreeMatch"
+        >
+          {{ addMatchSubmitting ? '添加中...' : '添加对战' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自由对抗:选择晋级者(任意人数) -->
+  <div v-if="advanceVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div class="w-full max-w-sm bg-neutral-900 border border-neutral-700 rounded-xl p-4">
+      <h4 class="text-sm font-bold text-neutral-200 mb-1">选择晋级者</h4>
+      <p class="text-[10px] text-neutral-500 mb-2">人数不限;未勾选的选手将被标记为淘汰</p>
+      <div class="flex items-center gap-2 mb-2">
+        <button class="px-2 py-1 rounded text-[10px] bg-neutral-800 text-neutral-300" @click="advanceSelected = freeMatchCompetitors.map((c) => String(c.id))">全选</button>
+        <button class="px-2 py-1 rounded text-[10px] bg-neutral-800 text-neutral-300" @click="advanceSelected = []">清空</button>
+        <span class="ml-auto text-[10px] text-neutral-500">已选 {{ advanceSelected.length }} / {{ freeMatchCompetitors.length }}</span>
+      </div>
+      <div class="space-y-1 max-h-[45vh] overflow-y-auto">
+        <label
+          v-for="c in freeMatchCompetitors"
+          :key="String(c.id)"
+          class="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-neutral-800 bg-black cursor-pointer"
+        >
+          <input type="checkbox" class="accent-amber-500" :value="String(c.id)" v-model="advanceSelected" />
+          <span class="flex-1 min-w-0 truncate text-sm text-neutral-200">{{ c.name }}</span>
+          <span v-if="c.number" class="text-[10px] text-neutral-500">#{{ c.number }}</span>
+          <span v-if="c.outcomeStatus === 'ADVANCE'" class="text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-400">已晋级</span>
+        </label>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button class="flex-1 px-4 py-2 rounded-lg text-xs text-neutral-400 bg-neutral-800" @click="advanceVisible = false">取消</button>
+        <button
+          class="flex-1 px-4 py-2 rounded-lg text-xs font-bold bg-amber-600 text-neutral-900 disabled:opacity-40"
+          :disabled="advanceSubmitting"
+          @click="handleSaveAdvancers"
+        >
+          {{ advanceSubmitting ? '保存中...' : '保存晋级名单' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 临时弃权弹窗:选择哪位选手本轮跳过(排到队尾,后续仍参与排名) -->
   <div v-if="tempWithdrawVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
     <div class="w-full max-w-sm bg-neutral-900 border border-neutral-700 rounded-xl p-4">
@@ -600,7 +724,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Layers, Play, CircleCheck, ChevronRight, TimerReset } from 'lucide-vue-next';
+import { Layers, Play, CircleCheck, ChevronRight, TimerReset, Swords } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import logo from '@/assets/logo/logo.png';
 import {
@@ -619,12 +743,17 @@ import {
   directorSubmitResult,
   directorPublishResult,
   directorSetCurrentCompetitor,
-  directorGetCurrentCompetitor
+  directorGetCurrentCompetitor,
+  listDirectorStageCompetitors,
+  directorCreateFreeMatch,
+  directorDeleteFreeMatch,
+  directorSaveFreeMatchAdvancers
 } from '@/api/game/director';
 import { getArenaOverview } from '@/api/game/stage';
 import { getTournament } from '@/api/game/tournament';
 import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
+import { payloadOf, listOf } from '@/utils/apiEnvelope';
 
 const route = useRoute();
 
@@ -756,6 +885,16 @@ const canComplete = computed(() => {
 });
 const hasGamingMatch = computed(() => matches.value.some((m) => m.status === 'GAMING'));
 /** 临时弃权(擂台赛):按钮唤起弹窗,选择哪位选手本轮跳过(排到队尾,后续仍参与排名) */
+// 自由对抗:本赛段选手(选人对战 / 勾选晋级)
+const isFreeMatchStage = computed(() => currentStage.value?.stageMode === 'FREE_MATCH');
+const freeMatchCompetitors = ref<any[]>([]);
+const addMatchVisible = ref(false);
+const addMatchSubmitting = ref(false);
+const addMatchForm = ref<{ competitorAId: string; competitorBId: string }>({ competitorAId: '', competitorBId: '' });
+const advanceVisible = ref(false);
+const advanceSubmitting = ref(false);
+const advanceSelected = ref<string[]>([]);
+
 const tempWithdrawVisible = ref(false);
 const arenaQueue = ref<any[]>([]);
 const tempWithdrawTarget = ref<string | number | null>(null);
@@ -804,7 +943,7 @@ const loadStages = async () => {
 
   try {
     const resp = await listDirectorStages(tournamentId.value);
-    const data = resp.data?.data ?? resp.data;
+    const data = payloadOf<any[]>(resp) || [];
     const loadedStages: Stage[] = (data || []).map((item: any) => ({
       id: String(item.id),
       name: item.name,
@@ -860,7 +999,7 @@ const loadStages = async () => {
 const loadMatchesForStage = async (stageId: string) => {
   try {
     const resp = await listDirectorMatches(stageId);
-    const list = resp.data?.data ?? resp.data;
+    const list = listOf(resp);
     matches.value = (list || []).map((m: any) => ({
       id: String(m.id),
       name: m.name || `场次 #${m.id}`,
@@ -887,6 +1026,8 @@ const loadMatchesForStage = async (stageId: string) => {
     console.error('加载场次失败:', e);
     matches.value = [];
   }
+  // 自由对抗:同步拉本赛段选手名单,供「添加对战」「选择晋级」使用
+  await loadFreeMatchCompetitors(stageId);
   // 海选:拉取各场次当前标记的上场选手,供导播台高亮(大屏 widget 同步显示)
   currentCompetitorByMatch.value = {};
   if (currentStage.value?.stageMode === 'AUDITION' && matches.value.length > 0) {
@@ -894,7 +1035,10 @@ const loadMatchesForStage = async (stageId: string) => {
       matches.value.map(async (m) => {
         try {
           const cc: any = await directorGetCurrentCompetitor(m.id);
-          currentCompetitorByMatch.value[String(m.id)] = cc?.data ?? null;
+          // 统一拆包:当前选手是 R<Long>,信封 data 即选手 ID
+          const cur = payloadOf(cc);
+          currentCompetitorByMatch.value[String(m.id)] =
+            cur == null || typeof cur === 'object' ? null : String(cur);
         } catch {
           currentCompetitorByMatch.value[String(m.id)] = null;
         }
@@ -974,7 +1118,8 @@ const handleComplete = async () => {
 
     const stillGaming = stages.value.some((s) => s.status === 'GAMING');
     isLive.value = stillGaming;
-    if (res?.data?.data?.status && res.data.data.status !== 'SETTLED') {
+    const result = payloadOf<any>(res);
+    if (result?.status && result.status !== 'SETTLED') {
       ElMessage.warning(
         stage.stageMode === 'AUDITION' ? '海选产生二海(同分加赛),完成二海判罚后才能结束赛段' : '赛段仍有未完成场次,完成全部判罚后才能结束赛段'
       );
@@ -1041,13 +1186,121 @@ const handleArenaNext = async () => {
   }
 };
 
+// ---------------- 自由对抗:手动加场 / 删场 / 手动选晋级 ----------------
+
+/** 拉取本赛段选手名单(选人对战 / 勾选晋级用;按赛段自身模式判断,不依赖当前选中态) */
+const loadFreeMatchCompetitors = async (stageId: string) => {
+  const mode = stages.value.find((st: any) => String(st.id) === String(stageId))?.stageMode;
+  if (mode !== 'FREE_MATCH') {
+    freeMatchCompetitors.value = [];
+    return;
+  }
+  try {
+    const resp: any = await listDirectorStageCompetitors(stageId);
+    freeMatchCompetitors.value = listOf(resp);
+  } catch (e) {
+    console.error('加载自由对抗选手失败:', e);
+    freeMatchCompetitors.value = [];
+  }
+};
+
+/** 下拉/列表里的选手展示名:名字 + 号码 */
+const competitorLabel = (c: any) => (c?.number ? `${c.name} #${c.number}` : c?.name || '');
+
+const openAddFreeMatch = async () => {
+  addMatchForm.value = { competitorAId: '', competitorBId: '' };
+  // 打开就重新拉一次,避免挂载时机/赛事切换导致列表为空
+  const stageId = currentStage.value?.id;
+  if (stageId) await loadFreeMatchCompetitors(String(stageId));
+  addMatchVisible.value = true;
+};
+
+const handleCreateFreeMatch = async () => {
+  const stageId = currentStage.value?.id;
+  if (!stageId) return;
+  const { competitorAId, competitorBId } = addMatchForm.value;
+  if (!competitorAId || !competitorBId) {
+    ElMessage.warning('请选择两名选手');
+    return;
+  }
+  if (String(competitorAId) === String(competitorBId)) {
+    ElMessage.warning('同一名选手不能与自己对战');
+    return;
+  }
+  try {
+    addMatchSubmitting.value = true;
+    const resp: any = await directorCreateFreeMatch(stageId, { competitorAId, competitorBId });
+    const newMatchId = payloadOf(resp);
+    addMatchVisible.value = false;
+    // 添加后直接开始:裁判可立即判罚(开始失败时保留场次,导播台点「开始」即可)
+    if (newMatchId) {
+      try {
+        await directorStartMatch(newMatchId);
+        ElMessage.success('已添加并开始,裁判可以判罚');
+      } catch (e: any) {
+        console.error('自动开始对战失败:', e);
+        ElMessage.warning(e?.response?.data?.msg || e?.message || '对战已添加,但自动开始失败,请点「开始」');
+      }
+    }
+    await loadMatchesForStage(String(stageId));
+  } catch (e: any) {
+    console.error('添加对战失败:', e);
+    ElMessage.error(e?.response?.data?.msg || e?.message || '添加对战失败');
+  } finally {
+    addMatchSubmitting.value = false;
+  }
+};
+
+const handleDeleteFreeMatch = async (match: any) => {
+  if (!(await askConfirm(`确认删除「${match.leftName} vs ${match.rightName}」这场对战？该场记录会一并删除。`))) return;
+  try {
+    await directorDeleteFreeMatch(match.id);
+    ElMessage.success('已删除该场对战');
+    const stageId = currentStage.value?.id;
+    if (stageId) await loadMatchesForStage(String(stageId));
+  } catch (e: any) {
+    console.error('删除对战失败:', e);
+    ElMessage.error(e?.response?.data?.msg || e?.message || '删除对战失败');
+  }
+};
+
+const openAdvancePicker = async () => {
+  const stageId = currentStage.value?.id;
+  if (!stageId) return;
+  await loadFreeMatchCompetitors(String(stageId));
+  // 默认沿用当前已标记的晋级者,便于微调
+  advanceSelected.value = freeMatchCompetitors.value
+    .filter((c: any) => c.outcomeStatus === 'ADVANCE')
+    .map((c: any) => String(c.id));
+  advanceVisible.value = true;
+};
+
+const handleSaveAdvancers = async () => {
+  const stageId = currentStage.value?.id;
+  if (!stageId) return;
+  try {
+    advanceSubmitting.value = true;
+    const resp: any = await directorSaveFreeMatchAdvancers(stageId, advanceSelected.value);
+    advanceVisible.value = false;
+    const saved = payloadOf(resp);
+    ElMessage.success(`已保存晋级名单(${typeof saved === 'number' ? saved : advanceSelected.value.length} 人)`);
+    await loadMatchesForStage(String(stageId));
+    await loadFreeMatchCompetitors(String(stageId));
+  } catch (e: any) {
+    console.error('保存晋级名单失败:', e);
+    ElMessage.error(e?.response?.data?.msg || e?.message || '保存晋级名单失败');
+  } finally {
+    advanceSubmitting.value = false;
+  }
+};
+
 /** 擂台赛临时弃权弹窗:只列当前正在对决的两人供选择 */
 const openTempWithdraw = async () => {
   const stage = currentStage.value;
   if (!stage) return;
   try {
     const res: any = await getArenaOverview(stage.id);
-    const data = res?.data?.data ?? res?.data ?? res;
+    const data = payloadOf(res);
     const cur = data?.currentMatch || {};
     const list: any[] = [];
     if (cur.defender?.competitorId != null) {
@@ -1236,7 +1489,7 @@ onMounted(async () => {
   setDirectorAuthKey(key);
   try {
     const resp = await getDirectorTournament();
-    const t = resp.data?.data ?? resp.data;
+    const t = payloadOf<any>(resp);
     tournamentName.value = t?.name || '';
   } catch (e: any) {
     if (e?.response?.status === 401) {
@@ -1262,11 +1515,53 @@ onUnmounted(() => {
 });
 </script>
 
+<style>
+/* 下拉面板 teleport 到 body,需要非 scoped 样式才能命中 */
+.director-select-popper.el-popper {
+  background: #171717;
+  border: 1px solid #404040;
+}
+.director-select-popper .el-select-dropdown__item {
+  color: #e5e5e5;
+  font-size: 13px;
+}
+.director-select-popper .el-select-dropdown__item.is-hovering,
+.director-select-popper .el-select-dropdown__item:hover {
+  background: #262626;
+  color: #f59e0b;
+}
+.director-select-popper .el-select-dropdown__item.is-disabled {
+  color: #525252;
+}
+.director-select-popper .el-select-dropdown__empty {
+  color: #737373;
+  font-size: 12px;
+}
+</style>
+
 <style scoped>
 /* 不显示任何滚动条(仍可滚动) */
 :deep(*) {
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+
+/* 自由对抗选手下拉:沿用全局深色表单控件(.cfg-select)的观感 */
+.director-select :deep(.el-select__wrapper) {
+  background-color: #0a0a0a;
+  border: 1px solid #404040;
+  border-radius: 8px;
+  min-height: 36px;
+  box-shadow: none;
+  font-size: 13px;
+  color: #f5f5f5;
+}
+.director-select :deep(.el-select__wrapper.is-focused) {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+}
+.director-select :deep(.el-select__placeholder) {
+  color: #737373;
 }
 :deep(*)::-webkit-scrollbar {
   display: none;

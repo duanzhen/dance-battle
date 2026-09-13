@@ -83,6 +83,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -190,6 +191,11 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 擂台赛不生成对阵树:开始赛段后由导播台按轮转队列逐场创建对决
         if (StageModeEnum.ARENA.getCode().equals(stage.getStageMode())) {
             throw new ServiceException("擂台赛不生成对阵,开始赛段后由导播台逐场创建对决");
+        }
+        // 自由对抗不生成对阵:对手由线下抽签/指认,场次由导播台手动添加(不影响已加场次)
+        if (StageModeEnum.FREE_MATCH.getCode().equals(stage.getStageMode())) {
+            log.info("自由对抗赛段[{}]不生成对阵,场次由导播台手动添加", stage.getId());
+            return;
         }
         // 已结束/已取消的赛段不允许再生成对阵
         if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())
@@ -1226,6 +1232,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 一键开赛:无对阵时自动初始化(如未初始化)并生成对阵,淘汰赛/小组赛/海选均适用
         long exist = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stageId));
         boolean isArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
+        // 自由对抗:对手由线下抽签/指认,场次全部由导播台手动添加,开赛不生成任何对阵
+        boolean isFreeMatch = StageModeEnum.FREE_MATCH.getCode().equals(stage.getStageMode());
         if (exist == 0) {
             if (!Long.valueOf(1L).equals(stage.getIsInitialized())) {
                 InitializeStageBo initBo = new InitializeStageBo();
@@ -1234,7 +1242,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 // 初始化后重新读取赛段(状态/isInitialized 已更新)
                 stage = mustGetStage(stageId);
             }
-            if (!isArena) {
+            if (!isArena && !isFreeMatch) {
                 GenerateMatchesBo gm = new GenerateMatchesBo();
                 gm.setStageId(stageId);
                 generateMatches(gm);
@@ -3690,6 +3698,159 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
             .eq(TMatchParticipant::getMatchId, match.getId())
             .eq(TMatchParticipant::getCompetitorId, cid));
+    }
+
+    // ==================== 自由对抗(手动加场 + 手动晋级) ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long createFreeMatch(Long stageId, Long competitorAId, Long competitorBId) {
+        TStage stage = mustGetStage(stageId);
+        requireFreeMatchStage(stage);
+        if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
+            throw new ServiceException("赛段尚未开始,无法添加对战;请先在导播台点「开始赛段」");
+        }
+        if (competitorAId == null || competitorBId == null) {
+            throw new ServiceException("请选择两名对战的选手");
+        }
+        if (competitorAId.equals(competitorBId)) {
+            throw new ServiceException("同一名选手不能与自己对战");
+        }
+        TCompetitor a = requireStageCompetitor(stageId, competitorAId);
+        TCompetitor b = requireStageCompetitor(stageId, competitorBId);
+
+        long count = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stageId));
+        TMatch m = new TMatch();
+        m.setTournamentId(stage.getTournamentId());
+        m.setTenantId(stage.getTenantId());
+        m.setStageId(stageId);
+        m.setName("第" + (count + 1) + "场");
+        m.setDisplayRow(count + 1);
+        m.setDisplayCol(1L);
+        m.setDisplayZone("CENTER");
+        m.setStatus(StageConstants.MATCH_PENDING);
+        m.setMatchMode(MatchModeEnum.STANDARD.getCode());
+        matchMapper.insert(m);
+
+        TMatchRound round = new TMatchRound();
+        round.setTournamentId(stage.getTournamentId());
+        round.setTenantId(stage.getTenantId());
+        round.setMatchId(m.getId());
+        round.setRoundSequence(1L);
+        round.setStatus(StageConstants.MATCH_PENDING);
+        matchRoundMapper.insert(round);
+
+        insertFreeMatchParticipant(m, a.getId(), 0L);
+        insertFreeMatchParticipant(m, b.getId(), 1L);
+
+        log.info("自由对抗赛段[{}]手动添加第{}场对战:{} vs {}", stageId, count + 1, a.getName(), b.getName());
+        refereeSseNotifier.notifyStage(stageId, "stage");
+        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, m.getId(), "match");
+        return m.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteFreeMatch(Long matchId) {
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在");
+        }
+        TStage stage = mustGetStage(match.getStageId());
+        requireFreeMatchStage(stage);
+        if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
+            throw new ServiceException("已结算的对战不能删除;如需重来请先重置该场");
+        }
+        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, matchId).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        if (!roundIds.isEmpty()) {
+            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
+        }
+        participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, matchId));
+        matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, matchId));
+        matchMapper.deleteById(matchId);
+        log.info("自由对抗赛段[{}]删除对战场次[{}]", stage.getId(), matchId);
+        refereeSseNotifier.notifyStage(stage.getId(), "stage");
+        tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int selectFreeMatchAdvancers(Long stageId, List<Long> competitorIds) {
+        TStage stage = mustGetStage(stageId);
+        requireFreeMatchStage(stage);
+        if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
+            throw new ServiceException("赛段未在进行中,无法选择晋级者");
+        }
+        List<TCompetitor> comps = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stageId)
+            .orderByAsc(TCompetitor::getNumber)
+            .orderByAsc(TCompetitor::getId));
+        if (comps.isEmpty()) {
+            throw new ServiceException("赛段暂无参赛选手");
+        }
+        Set<Long> selected = competitorIds == null ? Set.of() : new LinkedHashSet<>(competitorIds);
+        Set<Long> stageIds = comps.stream().map(TCompetitor::getId).collect(Collectors.toSet());
+        for (Long cid : selected) {
+            if (cid == null || !stageIds.contains(cid)) {
+                throw new ServiceException("选手[{}]不属于本赛段", cid);
+            }
+        }
+        // 记录对战结果之外只做两件事:选中的标记晋级(名次按传入顺序),其余标记淘汰;退赛选手保持不动
+        long rank = 1L;
+        int advanced = 0;
+        for (TCompetitor c : comps) {
+            if (OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
+                continue;
+            }
+            boolean advance = selected.contains(c.getId());
+            TCompetitor upd = new TCompetitor();
+            upd.setId(c.getId());
+            upd.setOutcomeStatus(advance
+                ? OutcomeStatusEnum.ADVANCE.getCode() : OutcomeStatusEnum.ELIMINATED.getCode());
+            upd.setFinalRank(advance ? rank : null);
+            competitorMapper.updateById(upd);
+            if (advance) {
+                rank++;
+                advanced++;
+            }
+        }
+        log.info("自由对抗赛段[{}]手动选定晋级 {} 人:{}", stageId, advanced, selected);
+        refereeSseNotifier.notifyStage(stageId, "stage");
+        tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
+        return advanced;
+    }
+
+    /** 校验赛段为自由对抗模式 */
+    private void requireFreeMatchStage(TStage stage) {
+        if (!StageModeEnum.FREE_MATCH.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("仅自由对抗赛段支持手动添加对战/选择晋级");
+        }
+    }
+
+    /** 取本赛段参赛方,并排除已退赛选手 */
+    private TCompetitor requireStageCompetitor(Long stageId, Long competitorId) {
+        TCompetitor c = competitorMapper.selectById(competitorId);
+        if (c == null || !Objects.equals(c.getStageId(), stageId)) {
+            throw new ServiceException("选手不存在或不属于本赛段");
+        }
+        if (OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
+            throw new ServiceException("选手[{}]已退赛,无法安排对战", c.getName());
+        }
+        return c;
+    }
+
+    /** 自由对战场次的参赛方行 */
+    private void insertFreeMatchParticipant(TMatch match, Long competitorId, Long slotIndex) {
+        TMatchParticipant p = new TMatchParticipant();
+        p.setTournamentId(match.getTournamentId());
+        p.setTenantId(match.getTenantId());
+        p.setMatchId(match.getId());
+        p.setCompetitorId(competitorId);
+        p.setDisplaySlotIndex(slotIndex);
+        p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
+        participantMapper.insert(p);
     }
 
     @Override

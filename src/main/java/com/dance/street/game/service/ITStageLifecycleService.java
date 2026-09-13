@@ -86,6 +86,24 @@ public interface ITStageLifecycleService {
     void startNextArenaMatch(Long stageId);
 
     /**
+     * 自由对抗:导播台手动添加一场对战(线下抽签/指认确定的两名选手)。
+     *
+     * @return 新建场次ID(状态 PENDING,由导播台点「开始」进入判罚)
+     */
+    Long createFreeMatch(Long stageId, Long competitorAId, Long competitorBId);
+
+    /** 自由对抗:删除一场对战(误加时使用,已结算场次需先重置) */
+    void deleteFreeMatch(Long matchId);
+
+    /**
+     * 自由对抗:导播台手动选择晋级者(任意人数),未选中的标记为淘汰。
+     *
+     * @param competitorIds 晋级者,顺序即下一赛段的种子顺序
+     * @return 晋级人数
+     */
+    int selectFreeMatchAdvancers(Long stageId, List<Long> competitorIds);
+
+    /**
      * 擂台赛参赛选手弃权:标记 WITHDRAWN,不再参与排队/对阵/排名。
      * 进行中的对决包含该选手时作废该对决(避免对手白拿积分/对决悬挂),队列下一位补位。
      */

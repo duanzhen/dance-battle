@@ -32,6 +32,24 @@ class DatabaseSchemaInitializerTest {
     }
 
     @Test
+    void parseColumnDefinitionsSkipsTableConstraints() {
+        String ddl = "CREATE TABLE `t_x` (\n"
+            + "  `id` bigint NOT NULL,\n"
+            + "  `amount` decimal(10,2) DEFAULT NULL,\n"
+            + "  `remark` varchar(50) DEFAULT NULL COMMENT '标签A,标签B',\n"
+            + "  PRIMARY KEY (`id`),\n"
+            + "  KEY `idx_amount` (`amount`),\n"
+            + "  CONSTRAINT `fk_x` FOREIGN KEY (`id`) REFERENCES `t_y` (`id`)\n"
+            + ") ENGINE=InnoDB COMMENT='尾注(带括号,逗号)'";
+
+        java.util.Map<String, String> columns = DatabaseSchemaInitializer.parseColumnDefinitions(ddl);
+
+        // 类型里的逗号 decimal(10,2)、注释里的逗号都不应把定义切断;表级约束不算列
+        assertEquals(java.util.Set.of("id", "amount", "remark"), columns.keySet());
+        assertEquals("`amount` decimal(10,2) DEFAULT NULL", columns.get("amount"));
+    }
+
+    @Test
     void extractTableNameHandlesBacktickQuotedNames() {
         String ddl = "CREATE TABLE `t_tournament` (\n"
             + "  `id` bigint NOT NULL,\n"

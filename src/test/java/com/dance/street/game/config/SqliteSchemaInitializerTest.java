@@ -58,6 +58,34 @@ class SqliteSchemaInitializerTest {
     }
 
     @Test
+    void schemaInitializerAddsMissingColumnsToExistingTable() throws Exception {
+        DataSource dataSource = newSqliteDataSource();
+        // 造一个「旧版本」的 t_stage:表在,但缺实体上已有的 roster 三列
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE `t_stage` (`id` INTEGER NOT NULL, `name` TEXT, PRIMARY KEY (`id`))");
+            statement.execute("INSERT INTO `t_stage` (`id`, `name`) VALUES (1, '旧数据')");
+        }
+
+        new DatabaseSchemaInitializer(dataSource, "jdbc:sqlite::memory:", null, null, true)
+            .afterSingletonsInstantiated();
+
+        // 缺的列被自动补上(否则查询会报 no such column: roster_config_json)
+        List<String> columns = queryStrings(dataSource, "SELECT name FROM pragma_table_info('t_stage')");
+        assertTrue(columns.contains("roster_config_json"), "应补上 roster_config_json: " + columns);
+        assertTrue(columns.contains("roster_applied"), "应补上 roster_applied: " + columns);
+        assertTrue(columns.contains("roster_skipped"), "应补上 roster_skipped: " + columns);
+        // 只加列,不动已有数据
+        assertEquals(List.of("旧数据"), queryStrings(dataSource, "SELECT name FROM t_stage"));
+
+        // 重复执行幂等
+        new DatabaseSchemaInitializer(dataSource, "jdbc:sqlite::memory:", null, null, true)
+            .afterSingletonsInstantiated();
+        assertEquals(columns.size(),
+            queryStrings(dataSource, "SELECT name FROM pragma_table_info('t_stage')").size());
+    }
+
+    @Test
     void loginAccountServiceWorksOnSqlite() {
         DataSource dataSource = newSqliteDataSource();
         new DatabaseSchemaInitializer(dataSource, "jdbc:sqlite::memory:", null, null, true)

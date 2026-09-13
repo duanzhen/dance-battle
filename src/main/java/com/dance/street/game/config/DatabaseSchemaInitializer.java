@@ -19,7 +19,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,6 +43,8 @@ import java.util.regex.Pattern;
  *   <li>逐表查询元数据判断是否存在(MySQL 用 {@code information_schema},
  *       SQLite 用 {@code sqlite_master}),缺失的表以
  *       {@code CREATE TABLE IF NOT EXISTS} 创建(保留已有表与数据,绝不执行 DROP);</li>
+ *   <li>表已存在但缺列时(旧版本建的表 + 新版本新增字段),按脚本里的列定义
+ *       {@code ALTER TABLE ... ADD COLUMN} 补齐——同样只加列,不删不改已有列与数据;</li>
  *   <li>SQLite 额外执行脚本中的 {@code CREATE INDEX IF NOT EXISTS}(MySQL 索引内联在表定义中);</li>
  *   <li>可开关: {@code app.schema-init.enabled=false} 或环境变量
  *       {@code SCHEMA_INIT_ENABLED=false} 关闭。</li>
@@ -116,13 +123,15 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         int created = 0;
         int existed = 0;
         int failed = 0;
+        int added = 0;
         try (Connection connection = dataSource.getConnection()) {
             for (String ddl : ddlList) {
                 String table = extractTableName(ddl);
                 try {
                     if (tableExists(connection, table)) {
                         existed++;
-                        log.debug("数据表已存在,跳过: {}", table);
+                        log.debug("数据表已存在,跳过建表: {}", table);
+                        added += addMissingColumns(connection, table, ddl, false);
                     } else {
                         executeDdl(connection, withIfNotExists(ddl));
                         created++;
@@ -142,6 +151,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         } else {
             log.info("schema 自检完成: 已存在 {} 张,新建 {} 张", existed, created);
         }
+        logAddedColumns(added);
     }
 
     /** SQLite 建表:确保数据文件目录存在,再逐表/逐索引补齐(文件数据库无需建库) */
@@ -159,13 +169,15 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         int created = 0;
         int existed = 0;
         int failed = 0;
+        int added = 0;
         try (Connection connection = dataSource.getConnection()) {
             for (String ddl : ddlList) {
                 String table = extractTableName(ddl);
                 try {
                     if (sqliteTableExists(connection, table)) {
                         existed++;
-                        log.debug("数据表已存在,跳过: {}", table);
+                        log.debug("数据表已存在,跳过建表: {}", table);
+                        added += addMissingColumns(connection, table, ddl, true);
                     } else {
                         executeDdl(connection, withIfNotExists(ddl));
                         created++;
@@ -192,6 +204,13 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
             log.warn("schema 自检完成: 已存在 {} 张,新建 {} 张,失败 {} 项", existed, created, failed);
         } else {
             log.info("schema 自检完成: 已存在 {} 张,新建 {} 张", existed, created);
+        }
+        logAddedColumns(added);
+    }
+
+    private static void logAddedColumns(int added) {
+        if (added > 0) {
+            log.info("schema 自检: 为已有表补齐 {} 个缺失列", added);
         }
     }
 
@@ -262,6 +281,164 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         try (Statement statement = connection.createStatement()) {
             statement.execute(ddl);
         }
+    }
+
+    /**
+     * 表已存在时,把「脚本里有、库里没有」的列补上(只加列,不删不改)。
+     *
+     * <p>旧版本建过的表不会因为 {@code CREATE TABLE IF NOT EXISTS} 而更新结构,
+     * 新版本给实体加了字段后,查询就会报 {@code no such column}。这里按脚本里的
+     * 列定义做增量补齐,老库无需删库重建。</p>
+     *
+     * @return 实际补齐的列数
+     */
+    private static int addMissingColumns(Connection connection, String table, String ddl, boolean sqlite)
+        throws SQLException {
+        Map<String, String> scriptColumns = parseColumnDefinitions(ddl);
+        if (scriptColumns.isEmpty()) {
+            return 0;
+        }
+        Set<String> existing = existingColumns(connection, table, sqlite);
+        int added = 0;
+        for (Map.Entry<String, String> entry : scriptColumns.entrySet()) {
+            if (existing.contains(entry.getKey())) {
+                continue;
+            }
+            String sql = "ALTER TABLE `" + table + "` ADD COLUMN " + entry.getValue();
+            try {
+                executeDdl(connection, sql);
+                added++;
+                log.info("自动补列成功: {}.{}", table, entry.getKey());
+            } catch (SQLException e) {
+                // 例如 SQLite 不允许 ADD COLUMN 带 NOT NULL 且无默认值:打印可直接执行的 SQL 便于手工处理
+                log.warn("自动补列失败: {}.{} - {};可手动执行: {}", table, entry.getKey(), e.getMessage(), sql);
+            }
+        }
+        return added;
+    }
+
+    /** 读取已有表的列名(统一小写,忽略大小写差异) */
+    private static Set<String> existingColumns(Connection connection, String table, boolean sqlite)
+        throws SQLException {
+        Set<String> columns = new LinkedHashSet<>();
+        if (sqlite) {
+            try (Statement statement = connection.createStatement();
+                 ResultSet rs = statement.executeQuery("PRAGMA table_info(`" + table + "`)")) {
+                while (rs.next()) {
+                    columns.add(rs.getString("name").toLowerCase(Locale.ROOT));
+                }
+            }
+            return columns;
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ?")) {
+            ps.setString(1, connection.getCatalog());
+            ps.setString(2, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    columns.add(rs.getString(1).toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        return columns;
+    }
+
+    /**
+     * 从 CREATE TABLE 语句解析列定义:列名(小写) → 原始定义片段。
+     *
+     * <p>跳过 {@code PRIMARY KEY / KEY / INDEX / UNIQUE / CONSTRAINT / FOREIGN KEY / CHECK}
+     * 这类表级约束;切分时跟踪括号深度与引号状态,避免
+     * {@code decimal(10,2)}、{@code COMMENT '标签A,标签B'} 里的逗号被误当分隔符。</p>
+     */
+    static Map<String, String> parseColumnDefinitions(String ddl) {
+        int open = ddl.indexOf('(');
+        int close = open < 0 ? -1 : matchingParen(ddl, open);
+        if (close < 0) {
+            return Map.of();
+        }
+        Map<String, String> columns = new LinkedHashMap<>();
+        for (String raw : splitTopLevel(ddl.substring(open + 1, close))) {
+            String definition = raw.trim();
+            if (definition.isEmpty()) {
+                continue;
+            }
+            String head = definition.toUpperCase(Locale.ROOT);
+            if (head.startsWith("PRIMARY KEY") || head.startsWith("UNIQUE") || head.startsWith("KEY ")
+                || head.startsWith("INDEX ") || head.startsWith("CONSTRAINT")
+                || head.startsWith("FOREIGN KEY") || head.startsWith("CHECK ")) {
+                continue;
+            }
+            String name = firstToken(definition);
+            if (!name.isEmpty()) {
+                columns.put(name.toLowerCase(Locale.ROOT), definition);
+            }
+        }
+        return columns;
+    }
+
+    /** 找到与 {@code openIndex} 处 '(' 配对的 ')' 下标(忽略引号内的括号),找不到返回 -1 */
+    private static int matchingParen(String text, int openIndex) {
+        int depth = 0;
+        char quote = 0;
+        for (int i = openIndex; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (quote != 0) {
+                if (ch == quote) {
+                    quote = 0;
+                }
+            } else if (ch == '\'' || ch == '"' || ch == '`') {
+                quote = ch;
+            } else if (ch == '(') {
+                depth++;
+            } else if (ch == ')' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 按顶层逗号切分(忽略括号与引号内部的逗号) */
+    private static List<String> splitTopLevel(String body) {
+        List<String> parts = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int depth = 0;
+        char quote = 0;
+        for (int i = 0; i < body.length(); i++) {
+            char ch = body.charAt(i);
+            if (quote != 0) {
+                current.append(ch);
+                if (ch == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (ch == '\'' || ch == '"' || ch == '`') {
+                quote = ch;
+            } else if (ch == '(') {
+                depth++;
+            } else if (ch == ')') {
+                depth--;
+            } else if (ch == ',' && depth == 0) {
+                parts.add(current.toString());
+                current.setLength(0);
+                continue;
+            }
+            current.append(ch);
+        }
+        if (current.length() > 0) {
+            parts.add(current.toString());
+        }
+        return parts;
+    }
+
+    /** 取定义里的第一个 token 作为列名,去掉反引号/双引号/方括号 */
+    private static String firstToken(String definition) {
+        int end = 0;
+        while (end < definition.length() && !Character.isWhitespace(definition.charAt(end))) {
+            end++;
+        }
+        return definition.substring(0, end)
+            .replace("`", "").replace("\"", "").replace("[", "").replace("]", "").trim();
     }
 
     /**

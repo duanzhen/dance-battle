@@ -26,6 +26,7 @@ target/
 /nbdist/
 /.nb-gradle/
 build/
+__pycache__/
 e2e
 docs
 design

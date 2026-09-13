@@ -81,11 +81,14 @@ DEPLOY_MODE=distributed java -jar target/game-0.0.1-SNAPSHOT.jar
 # 运行配置: DEPLOY_MODE=standalone | 数据库=SQLite(jdbc:sqlite:./data/game.db) | Redis=本地模式(SSE 进程内广播、无分布式锁)
 ```
 
-需要连外部依赖时按目标显式声明即可，行为与 Jar 完全一致：
+native 产物在构建期（`process-aot`）就按单机形态裁剪，Redis 自动装配不会进镜像，因此**不支持 Redis 多实例联动**；好处是零配置必能启动（Redis 不可达也不会像 Jar 那样启动失败）。连 MySQL 仍可用；显式要求分布式会被挡住并提示改用 Jar/Docker：
 
 ```bash
+# 连 MySQL（Redis 仍是本地广播）
+DB_TYPE=mysql MYSQL_HOST=10.0.0.5 ./target/game
+
+# 需要 MySQL + Redis 多实例联动：用 native 会直接启动失败并提示改用 Jar/Docker
 DEPLOY_MODE=distributed MYSQL_HOST=10.0.0.5 REDIS_HOST=10.0.0.6 ./target/game
-DB_TYPE=mysql MYSQL_HOST=10.0.0.5 ./target/game        # 只要 MySQL，Redis 仍本地
 ```
 
 ### 方式一：Docker Compose

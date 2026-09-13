@@ -1,10 +1,9 @@
 package com.dance.street.game.domain.vo;
 
 import com.dance.street.game.domain.TMatchParticipant;
-import cn.idev.excel.annotation.ExcelIgnoreUnannotated;
-import cn.idev.excel.annotation.ExcelProperty;
-import org.dromara.common.excel.annotation.ExcelDictFormat;
-import org.dromara.common.excel.convert.ExcelDictConvert;
+import com.dance.street.game.excel.ExcelIgnoreUnannotated;
+import com.dance.street.game.excel.ExcelProperty;
+import com.dance.street.game.excel.ExcelDictFormat;
 import io.github.linpeilie.annotations.AutoMapper;
 import lombok.Data;
 

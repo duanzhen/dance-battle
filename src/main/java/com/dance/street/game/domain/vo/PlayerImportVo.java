@@ -1,7 +1,7 @@
 package com.dance.street.game.domain.vo;
 
-import cn.idev.excel.annotation.ExcelIgnoreUnannotated;
-import cn.idev.excel.annotation.ExcelProperty;
+import com.dance.street.game.excel.ExcelIgnoreUnannotated;
+import com.dance.street.game.excel.ExcelProperty;
 import lombok.Data;
 
 import java.io.Serial;

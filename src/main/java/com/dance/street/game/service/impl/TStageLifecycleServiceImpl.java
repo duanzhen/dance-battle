@@ -4,12 +4,11 @@ import java.math.BigDecimal;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import cn.idev.excel.ExcelWriter;
-import cn.idev.excel.write.metadata.WriteSheet;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.core.utils.StringUtils;
+import com.dance.street.game.excel.ExcelUtil;
 import com.dance.street.game.engine.common.PairingModeResolver;
 import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.domain.TCompetitor;
@@ -2253,38 +2252,35 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         tbHead.add(List.of("总分"));
         tbHead.add(List.of("结果"));
 
+        // 组装工作表:主表 + 二海/三海…各一张
+        List<ExcelUtil.RawSheet> sheets = new ArrayList<>();
+        sheets.add(new ExcelUtil.RawSheet("海选成绩", head, rows));
+        java.util.Set<String> usedSheetNames = new java.util.HashSet<>();
+        usedSheetNames.add("海选成绩");
+        for (AuditionResultVo.TiebreakerItem tb : result.getTiebreakers()) {
+            List<List<Object>> tbRows = new ArrayList<>();
+            for (AuditionResultVo.CompetitorItem c : tb.getCompetitors()) {
+                tbRows.add(auditionExportRow(c, referees, false, zoneLabels, multiCircle));
+            }
+            String sheetName = tiebreakerSheetName(tb.getRound());
+            String zoneLabel = zoneLabelOf(zoneLabels, tb.getZone());
+            if (multiCircle && StringUtils.isNotBlank(zoneLabel)) {
+                sheetName += "·" + zoneLabel;
+            }
+            if (!usedSheetNames.add(sheetName) && tb.getZone() != null) {
+                // 同名裁判同时绑多个圈等极端情况:追加圈号保证 sheet 不重名
+                sheetName += "·" + tb.getZone();
+                usedSheetNames.add(sheetName);
+            }
+            sheets.add(new ExcelUtil.RawSheet(sheetName, tbHead, tbRows));
+        }
+
         try {
             org.dromara.common.core.utils.file.FileUtils.setAttachmentResponseHeader(
                 response, "海选结果-" + stage.getName() + ".xlsx");
             response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8");
             try (jakarta.servlet.ServletOutputStream os = response.getOutputStream()) {
-                ExcelWriter writer = cn.idev.excel.FastExcel.write(os).build();
-                try {
-                    WriteSheet mainSheet = cn.idev.excel.FastExcel.writerSheet("海选成绩").head(head).build();
-                    writer.write(rows, mainSheet);
-                    // 二海/三海…:多圈时每圈独立一张 sheet,避免不同圈的加赛选手混在一起
-                    java.util.Set<String> usedSheetNames = new java.util.HashSet<>();
-                    for (AuditionResultVo.TiebreakerItem tb : result.getTiebreakers()) {
-                        List<List<Object>> tbRows = new ArrayList<>();
-                        for (AuditionResultVo.CompetitorItem c : tb.getCompetitors()) {
-                            tbRows.add(auditionExportRow(c, referees, false, zoneLabels, multiCircle));
-                        }
-                        String sheetName = tiebreakerSheetName(tb.getRound());
-                        String zoneLabel = zoneLabelOf(zoneLabels, tb.getZone());
-                        if (multiCircle && StringUtils.isNotBlank(zoneLabel)) {
-                            sheetName += "·" + zoneLabel;
-                        }
-                        if (!usedSheetNames.add(sheetName) && tb.getZone() != null) {
-                            // 同名裁判同时绑多个圈等极端情况:追加圈号保证 sheet 不重名
-                            sheetName += "·" + tb.getZone();
-                            usedSheetNames.add(sheetName);
-                        }
-                        WriteSheet tbSheet = cn.idev.excel.FastExcel.writerSheet(sheetName).head(tbHead).build();
-                        writer.write(tbRows, tbSheet);
-                    }
-                } finally {
-                    writer.finish();
-                }
+                ExcelUtil.exportSheets(sheets, os);
             }
         } catch (java.io.IOException e) {
             throw new ServiceException("导出海选结果失败: {}", e.getMessage());

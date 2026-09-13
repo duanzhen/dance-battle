@@ -1,0 +1,65 @@
+{
+  "types": [],
+  "lambdaCapturingTypes": [
+    {
+      "name": "com.dance.street.game.controller.DirectorController"
+    },
+    {
+      "name": "com.dance.street.game.controller.RefereeMatchController"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TCompetitorMemberServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TCompetitorServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TMatchParticipantServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TMatchRefereeServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TMatchResultServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TMatchRoundServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TMatchServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TPlayerServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TRefereeServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TRefereeStageServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TRoundScoreServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TScoredMatchServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TStageLifecycleServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TStageRosterServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TStageServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TTournamentServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TVisSceneServiceImpl"
+    },
+    {
+      "name": "com.dance.street.game.service.impl.TVisWidgetServiceImpl"
+    }
+  ]
+}

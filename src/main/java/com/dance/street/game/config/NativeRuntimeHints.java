@@ -20,10 +20,16 @@ import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.aot.hint.TypeReference;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.ImportRuntimeHints;
+import org.springframework.util.ClassUtils;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * GraalVM Native Image 运行期提示。
@@ -35,6 +41,16 @@ import org.springframework.context.annotation.ImportRuntimeHints;
  *   <li>规则引擎直接用独立 {@code ObjectMapper} 反序列化 POJO(AOT 无法感知这些类型);</li>
  *   <li>{@code SqliteFallbackEnvironmentPostProcessor} 中 {@code Class.forName} MySQL 驱动;</li>
  *   <li>运行时才从 classpath 读取的 mapper XML 与建表 SQL 资源。</li>
+ * </ul>
+ *
+ * <p>本类只能通过 Spring 的 {@code RuntimeHints} API 表达需求,以下两项没有对应 API,
+ * 以独立配置文件放在 {@code src/main/resources/META-INF/native-image/} 下:</p>
+ * <ul>
+ *   <li>{@code com.dance.street/game/serialization-config.json}:把使用 MyBatis-Plus
+ *       lambda 条件构造器的类登记为 {@code lambdaCapturingTypes}。缺这项时
+ *       {@code Wrappers.lambdaQuery()} 解析列名会抛
+ *       {@code ClassNotFoundException: XxxServiceImpl$$Lambda/0x...};</li>
+ *   <li>{@code agent-hints/reachability-metadata.json}:历史遗留的 agent 采集结果。</li>
  * </ul>
  */
 @Configuration(proxyBeanMethods = false)
@@ -139,6 +155,33 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 			AggregateRuleEnum.class
 	};
 
+	/**
+	 * 需要「整包注册反射」的包。
+	 *
+	 * <ul>
+	 *   <li>{@code com.dance.street.game.domain}:实体/VO/BO,MyBatis-Plus 的 Reflector
+	 *       反射调用其 getter/setter/构造器(含 vo/bo 子包);</li>
+	 *   <li>{@code org.dromara.common}:框架通用类,大量出现在 Spring MVC 方法签名里
+	 *       (如 {@code PageQuery}、{@code BaseEntity}),由数据绑定/参数解析器反射访问,
+	 *       Spring AOT 推断不到——缺注册会在首个带分页参数的查询上报
+	 *       {@code MissingReflectionRegistrationError}。</li>
+	 * </ul>
+	 *
+	 * <p>两个包加起来约 300 个类型,整包注册的镜像体积代价远小于逐个试错重建。</p>
+	 */
+	private static final String[] REFLECTIVE_PACKAGES = {
+			"com.dance.street.game.domain",
+			"org.dromara.common",
+	};
+
+	/**
+	 * MyBatis mapper 接口所在包。每个 mapper 在运行期由
+	 * {@code MybatisMapperProxyFactory#newInstance} 经 {@code Proxy.newProxyInstance}
+	 * 生成 JDK 动态代理,代理类必须在构建期注册,否则 native 启动即抛
+	 * {@code MissingReflectionRegistrationError}(JVM 下不会有任何提示)。
+	 */
+	private static final String MAPPER_PACKAGE = "com.dance.street.game.mapper";
+
 	@Override
 	public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
 		for (String impl : MYBATIS_LOG_IMPLS) {
@@ -160,26 +203,32 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 		}
 
 		// MyBatis-Plus 的 CRUD 通过 Reflector 反射调用实体 getter/setter/构造器
-		// (插入/更新/结果映射都会触发),缺注册会在首个写操作报
-		// MissingReflectionRegistrationError。包扫描一次性注册 domain 全部实体
-		// (含 vo/bo 子包),并沿父类链注册 TenantEntity 等基类(Reflector 会
-		// 通过 getMethods() 拿到继承的公共 getter/setter),以后新增实体无需再改 hints。
-		ClassPathScanningCandidateComponentProvider scanner =
-				new ClassPathScanningCandidateComponentProvider(false);
-		int registered = 0;
-		for (BeanDefinition definition : scanner.findCandidateComponents("com.dance.street.game.domain")) {
+		// (插入/更新/结果映射都会触发),Spring MVC 的数据绑定同样反射调用
+		// query/Body 对象的 getter/setter。包扫描一次性注册全部业务与框架类型,
+		// 并沿父类链注册 BaseEntity/TenantEntity 等基类(Reflector 会通过
+		// getMethods() 拿到继承的公共 getter/setter),以后新增实体无需再改 hints。
+		for (String packageName : REFLECTIVE_PACKAGES) {
+			registerPackage(hints, packageName, classLoader);
+		}
+
+		// mapper 动态代理注册:MyBatis 的 mapper bean 实际是接口的 JDK 代理,
+		// 只注册接口自身的反射信息不够——代理类本身必须显式登记。
+		int mappers = 0;
+		for (String className : scanClassNames(MAPPER_PACKAGE, classLoader)) {
 			try {
-				Class<?> type = Class.forName(definition.getBeanClassName(), false, classLoader);
-				for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
-					hints.reflection().registerType(c, MemberCategory.values());
+				Class<?> type = Class.forName(className, false, classLoader);
+				if (!type.isInterface()) {
+					continue;
 				}
-				registered++;
+				hints.proxies().registerJdkProxy(type);
+				hints.reflection().registerType(type, MemberCategory.values());
+				mappers++;
 			} catch (ClassNotFoundException | LinkageError e) {
-				log.warn("NativeRuntimeHints: domain 类加载失败: {} ({})",
-						definition.getBeanClassName(), e.toString());
+				log.warn("NativeRuntimeHints: mapper 接口加载失败: {} ({})",
+						className, e.toString());
 			}
 		}
-		log.info("NativeRuntimeHints: 已注册 {} 个 domain 类型(含继承链)", registered);
+		log.info("NativeRuntimeHints: 已注册 {} 个 mapper 动态代理", mappers);
 
 		// SqliteFallbackEnvironmentPostProcessor: Class.forName(com.mysql.cj.jdbc.Driver)
 		hints.reflection().registerType(TypeReference.of("com.mysql.cj.jdbc.Driver"),
@@ -192,6 +241,82 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 		// MyBatis-Plus Wrapper 条件表达式经 OGNL 反序列化 SerializedLambda,
 		// 缺注册会抛 UnsupportedFeatureError(SerializationConstructorAccessor not found)
 		hints.serialization().registerType(TypeReference.of("java.lang.invoke.SerializedLambda"));
+	}
+
+	/**
+	 * 扫描包内全部 class 文件并还原为类名。
+	 *
+	 * <p>{@code ClassPathScanningCandidateComponentProvider} 默认只认「具体类」,
+	 * 会漏掉接口(如 mapper)与无注解的普通类,这里直接按资源路径扫描,
+	 * 保证 domain 与 mapper 两类目标都能被完整枚举。</p>
+	 */
+	private static List<String> scanClassNames(String basePackage, ClassLoader classLoader) {
+		String packagePath = ClassUtils.convertClassNameToResourcePath(basePackage);
+		ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver(classLoader);
+		List<String> names = new ArrayList<>();
+		try {
+			for (Resource resource : resolver.getResources("classpath*:" + packagePath + "/**/*.class")) {
+				String uri = resource.getURI().toString();
+				int start = uri.indexOf('/' + packagePath + '/');
+				if (start < 0) {
+					continue;
+				}
+				String relative = uri.substring(start + 1, uri.length() - ".class".length());
+				String className = relative.replace('/', '.');
+				// 跳过匿名类(Foo$1):无规范名,且不会被按名反射引用
+				if (className.matches(".*\\$\\d+$")) {
+					continue;
+				}
+				names.add(className);
+			}
+		} catch (IOException e) {
+			log.warn("NativeRuntimeHints: 扫描包 {} 失败: {}", basePackage, e.toString());
+		}
+		return names;
+	}
+
+	/**
+	 * 整包注册反射。
+	 */
+	private static void registerPackage(RuntimeHints hints, String packageName, ClassLoader classLoader) {
+		int registered = 0;
+		for (String className : scanClassNames(packageName, classLoader)) {
+			try {
+				Class<?> type = Class.forName(className, false, classLoader);
+				// 匿名/局部类没有规范名(TypeReference.of 会拒绝),也无法被按名反射引用
+				if (type.isAnonymousClass() || type.isLocalClass()) {
+					continue;
+				}
+				for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+					hints.reflection().registerType(c, MemberCategory.values());
+				}
+				registerArrayHint(hints, className, classLoader);
+				registered++;
+			} catch (ClassNotFoundException | LinkageError e) {
+				log.warn("NativeRuntimeHints: 类加载失败: {} ({})", className, e.toString());
+			}
+		}
+		log.info("NativeRuntimeHints: 已注册 {} 个 {} 类型", registered, packageName);
+	}
+
+	/**
+	 * 同时注册 {@code T[]} 数组类型。
+	 *
+	 * <p>mapstruct-plus / Jackson 在「单对象 ↔ 集合」转换时会用
+	 * {@code Array.newInstance(组件类型, n)} 反射创建数组,而 native 下数组类型
+	 * 也需要显式登记,否则报
+	 * {@code Cannot reflectively instantiate the array class 'XxxVo[]'}。</p>
+	 */
+	private static void registerArrayHint(RuntimeHints hints, String className, ClassLoader classLoader) {
+		try {
+			Class<?> arrayType = Class.forName("[L" + className + ";", false, classLoader);
+			if (arrayType.getCanonicalName() == null) {
+				return;
+			}
+			hints.reflection().registerType(TypeReference.of(arrayType));
+		} catch (ClassNotFoundException | LinkageError e) {
+			log.warn("NativeRuntimeHints: 数组类型注册失败: {}[] ({})", className, e.toString());
+		}
 	}
 
 }

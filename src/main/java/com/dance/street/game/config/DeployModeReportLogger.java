@@ -30,10 +30,30 @@ public class DeployModeReportLogger implements SmartInitializingSingleton {
 
     @Override
     public void afterSingletonsInstantiated() {
+        String mode = DeployModeResolver.resolve(environment);
+        boolean redisAvailable = RedisUtils.isAvailable();
+
+        assertDistributedHasRedis(mode, redisAvailable);
+
         log.info("运行配置: DEPLOY_MODE={} | 数据库={} | Redis={}",
-            DeployModeResolver.resolve(environment),
+            mode,
             describeDataSource(environment.getProperty("spring.datasource.url", "")),
-            RedisUtils.isAvailable() ? "已启用(支持多实例联动)" : "本地模式(SSE 进程内广播、无分布式锁)");
+            redisAvailable ? "已启用(支持多实例联动)" : "本地模式(SSE 进程内广播、无分布式锁)");
+    }
+
+    /**
+     * 显式要求分布式却拿不到 Redis 客户端 = 配置错配,启动即失败,而不是静默按单机跑。
+     *
+     * <p>主要防的是 native 产物:它的 Redis 自动装配在 AOT 阶段就已被排除(见 pom 的
+     * native profile),运行期再设 {@code DEPLOY_MODE=distributed} 也不可能有 RedisClient。</p>
+     */
+    static void assertDistributedHasRedis(String mode, boolean redisAvailable) {
+        if (DeployModeResolver.DISTRIBUTED.equals(mode) && !redisAvailable) {
+            throw new IllegalStateException(
+                "DEPLOY_MODE=distributed 需要 MySQL + Redis 多实例联动,但当前进程没有可用的 Redis 客户端。"
+                    + "若使用的是 native 产物,它在构建期已按单机形态裁剪(不含 Redis 自动装配),"
+                    + "需要分布式请改用 Jar 或 Docker 部署;确要单机运行请设 DEPLOY_MODE=standalone。");
+        }
     }
 
     /** 只暴露数据源类型与地址(连接串不含密码,密码在独立属性里) */

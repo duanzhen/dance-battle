@@ -77,48 +77,15 @@ jobs:
       - name: Build Native Image
         run: mvn -B -Pnative -Dmaven.test.skip=true -Dnative.optimize=s -Dnative.maxHeapSize=96m -Dnative.activeProcessors=2 package
 
-      # 编译成功不等于能跑:native 缺运行期 hint 会在启动/首个查询时报错,
-      # 这里启动真实二进制做冒烟测试。
-      # 刻意不传 DEPLOY_MODE/DB_TYPE/REDIS_ENABLED:验证 native 产物"零配置"默认
-      # 走 standalone(SQLite + 本地 SSE,不连 MySQL/Redis),只指定数据/密钥落盘位置。
-      # 需要连 MySQL/Redis 时,运行时显式设 DEPLOY_MODE=distributed 或 DB_TYPE=mysql 即可。
-      - name: Smoke Test Native Binary
+      # 编译成功不等于能跑:native 缺运行期 hint 会在启动或「首个写操作」才报错
+      # (JVM 下完全看不出问题),所以必须对真实二进制发真实 HTTP 调用验收。
+      # scripts/native-e2e.sh 会启动二进制、自检「零配置=standalone+SQLite」,
+      # 再跑 scripts/native-e2e.py 的全部端到端场景(与 JVM 侧 e2e 同源:
+      # 两圈海选→复活→冠军、晋级线同分二海/三海、名次段边界同分、名单装配、查询与大屏 SSE)。
+      - name: Native E2E Tests
         run: |
-          set -e
-          mkdir -p /tmp/game-smoke
-          SERVER_PORT=18080 \
-          SQLITE_FALLBACK_URL='jdbc:sqlite:/tmp/game-smoke/game.db' \
-          JWT_SECRET_FILE=/tmp/game-smoke/jwt.key \
-          FILE_UPLOAD_PATH=/tmp/game-smoke/upload \
-          ./target/game > /tmp/game-smoke/run.log 2>&1 &
-          GAME_PID=$!
-          trap 'kill $GAME_PID 2>/dev/null || true' EXIT
-          for i in $(seq 1 60); do
-            if curl -fsS -o /dev/null http://127.0.0.1:18080/ 2>/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          echo "--- native 默认运行配置 ---"
-          for i in $(seq 1 30); do
-            grep -q '运行配置' /tmp/game-smoke/run.log && break
-            sleep 1
-          done
-          grep -E '运行配置' /tmp/game-smoke/run.log
-          grep -q 'DEPLOY_MODE=standalone' /tmp/game-smoke/run.log
-          grep -q '数据库=SQLite' /tmp/game-smoke/run.log
-          curl -fsS -X POST http://127.0.0.1:18080/login \
-            -H 'Content-Type: application/json' \
-            -d '{"username":"admin","password":"123456"}' | tee /tmp/game-smoke/login.json
-          grep -q '"code":200' /tmp/game-smoke/login.json
-          TOKEN=$(python3 -c "import sys,json;print(json.load(open('/tmp/game-smoke/login.json'))['data']['token'])")
-          curl -fsS -H "Authorization: Bearer $TOKEN" \
-            'http://127.0.0.1:18080/game/tournament/list?pageNum=1&pageSize=3' \
-            | tee /tmp/game-smoke/list.json
-          grep -q '"code":200' /tmp/game-smoke/list.json
-          RSS_KB=$(ps -o rss= -p $GAME_PID | tr -d ' ')
-          echo "Native process RSS: $((RSS_KB / 1024)) MB"
-          echo "Native smoke test passed"
+          chmod +x scripts/native-e2e.sh scripts/native-e2e.py
+          E2E_WORKDIR=/tmp/game-native-e2e ./scripts/native-e2e.sh ./target/game
 
       - name: Show Native Binary Size
         run: ls -lh target/game

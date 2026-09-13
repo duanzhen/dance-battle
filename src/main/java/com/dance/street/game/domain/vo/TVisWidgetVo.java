@@ -1,10 +1,9 @@
 package com.dance.street.game.domain.vo;
 
 import com.dance.street.game.domain.TVisWidget;
-import cn.idev.excel.annotation.ExcelIgnoreUnannotated;
-import cn.idev.excel.annotation.ExcelProperty;
-import org.dromara.common.excel.annotation.ExcelDictFormat;
-import org.dromara.common.excel.convert.ExcelDictConvert;
+import com.dance.street.game.excel.ExcelIgnoreUnannotated;
+import com.dance.street.game.excel.ExcelProperty;
+import com.dance.street.game.excel.ExcelDictFormat;
 import io.github.linpeilie.annotations.AutoMapper;
 import lombok.Data;
 
@@ -103,7 +102,7 @@ public class TVisWidgetVo implements Serializable {
     /**
      * 是否锁定：0-否 1-是（锁定后不可编辑）
      */
-    @ExcelProperty(value = "是否锁定：0-否 1-是", converter = ExcelDictConvert.class)
+    @ExcelProperty(value = "是否锁定：0-否 1-是")
     @ExcelDictFormat(readConverterExp = "锁=定后不可编辑")
     private Long locked;
 

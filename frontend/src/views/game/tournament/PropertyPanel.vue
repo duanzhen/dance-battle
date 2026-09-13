@@ -162,6 +162,7 @@
                   @update:textColor="handleUpdateProp('textColor', $event)"
                   @update:borderColor="handleUpdateProp('borderColor', $event)"
                   @update:bgColor="handleUpdateProp('bgColor', $event)"
+                  @update:showAvatar="handleUpdateProp('showAvatar', $event)"
                 />
               </div>
             </section>

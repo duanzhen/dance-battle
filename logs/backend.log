@@ -8,44 +8,44 @@
 
  :: Spring Boot ::                (v4.0.7)
 
-2026-09-13T13:46:57.408+08:00  INFO 70932 --- [dance-game] [           main] com.dance.street.game.GameApplication    : Starting GameApplication v0.0.1-SNAPSHOT using Java 21.0.12 with PID 70932 (/Users/duane/dance-battle/target/game-0.0.1-SNAPSHOT.jar started by duane in /Users/duane/dance-battle)
-2026-09-13T13:46:57.409+08:00  INFO 70932 --- [dance-game] [           main] com.dance.street.game.GameApplication    : No active profile set, falling back to 1 default profile: "default"
-2026-09-13T13:46:57.410+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.boot.SpringApplication               : Loading source class com.dance.street.game.GameApplication
-2026-09-13T13:46:57.434+08:00 DEBUG 70932 --- [dance-game] [           main] ConfigServletWebServerApplicationContext : Refreshing org.springframework.boot.web.server.servlet.context.AnnotationConfigServletWebServerApplicationContext@75e91545
-2026-09-13T13:46:58.759+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.t.s.TomcatServletWebServerFactory  : Code archive: /Users/duane/dance-battle/target/game-0.0.1-SNAPSHOT.jar
-2026-09-13T13:46:58.759+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.t.s.TomcatServletWebServerFactory  : Code archive: /Users/duane/dance-battle/target/game-0.0.1-SNAPSHOT.jar
-2026-09-13T13:46:58.760+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.t.s.TomcatServletWebServerFactory  : None of the document roots [src/main/webapp, public, static] point to a directory and will be ignored.
-2026-09-13T13:46:58.779+08:00  INFO 70932 --- [dance-game] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat initialized with port 8080 (http)
-2026-09-13T13:46:58.791+08:00  INFO 70932 --- [dance-game] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
-2026-09-13T13:46:58.791+08:00  INFO 70932 --- [dance-game] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.22]
-2026-09-13T13:46:58.835+08:00 DEBUG 70932 --- [dance-game] [           main] b.w.c.s.WebApplicationContextInitializer : Published root WebApplicationContext as ServletContext attribute with name [org.springframework.web.context.WebApplicationContext.ROOT]
-2026-09-13T13:46:58.837+08:00  INFO 70932 --- [dance-game] [           main] b.w.c.s.WebApplicationContextInitializer : Root WebApplicationContext: initialization completed in 1402 ms
-2026-09-13T13:46:58.857+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.w.s.ServletContextInitializerBeans : Mapping filters: characterEncodingFilter urls=[/*] order=-2147483648, formContentFilter urls=[/*] order=-9900, requestContextFilter urls=[/*] order=-105, saTokenContextFilterForServlet urls=[/*] order=-104, saTokenCorsFilterForJakartaServlet urls=[/*] order=-103, saFirewallCheckFilterForJakartaServlet urls=[/*] order=-102, uploadSecurityFilter urls=[/*] order=2147483647
-2026-09-13T13:46:58.857+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.w.s.ServletContextInitializerBeans : Mapping servlets: dispatcherServlet urls=[/]
-2026-09-13T13:46:58.881+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.s.f.OrderedRequestContextFilter    : Filter 'requestContextFilter' configured for use
-2026-09-13T13:46:58.882+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.s.f.OrderedCharacterEncodingFilter : Filter 'characterEncodingFilter' configured for use
-2026-09-13T13:46:58.882+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.s.filter.OrderedFormContentFilter  : Filter 'formContentFilter' configured for use
-2026-09-13T13:46:59.981+08:00  INFO 70932 --- [dance-game] [           main] o.s.b.w.a.WelcomePageHandlerMapping      : Adding welcome page: URL [file:frontend/dist/index.html]
-2026-09-13T13:47:00.000+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'com.dance.street.game'. Automatic @Repository and @Entity scanning is enabled.
-2026-09-13T13:47:00.068+08:00 DEBUG 70932 --- [dance-game] [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 158 mappings in 'requestMappingHandlerMapping'
-2026-09-13T13:47:00.078+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.w.s.handler.SimpleUrlHandlerMapping  : Patterns [/webjars/**, /**, /uploads/**] in 'resourceHandlerMapping'
-2026-09-13T13:47:00.088+08:00 DEBUG 70932 --- [dance-game] [           main] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 2 RequestBodyAdvice, 1 ResponseBodyAdvice
-2026-09-13T13:47:00.107+08:00 DEBUG 70932 --- [dance-game] [           main] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 2 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-09-13T14:10:00.111+08:00  INFO 74453 --- [dance-game] [           main] com.dance.street.game.GameApplication    : Starting GameApplication v0.0.1-SNAPSHOT using Java 21.0.12 with PID 74453 (/Users/duane/dance-battle/target/game-0.0.1-SNAPSHOT.jar started by duane in /Users/duane/dance-battle)
+2026-09-13T14:10:00.114+08:00  INFO 74453 --- [dance-game] [           main] com.dance.street.game.GameApplication    : No active profile set, falling back to 1 default profile: "default"
+2026-09-13T14:10:00.114+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.boot.SpringApplication               : Loading source class com.dance.street.game.GameApplication
+2026-09-13T14:10:00.140+08:00 DEBUG 74453 --- [dance-game] [           main] ConfigServletWebServerApplicationContext : Refreshing org.springframework.boot.web.server.servlet.context.AnnotationConfigServletWebServerApplicationContext@75e91545
+2026-09-13T14:10:00.877+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.t.s.TomcatServletWebServerFactory  : Code archive: /Users/duane/dance-battle/target/game-0.0.1-SNAPSHOT.jar
+2026-09-13T14:10:00.877+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.t.s.TomcatServletWebServerFactory  : Code archive: /Users/duane/dance-battle/target/game-0.0.1-SNAPSHOT.jar
+2026-09-13T14:10:00.877+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.t.s.TomcatServletWebServerFactory  : None of the document roots [src/main/webapp, public, static] point to a directory and will be ignored.
+2026-09-13T14:10:00.891+08:00  INFO 74453 --- [dance-game] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat initialized with port 8080 (http)
+2026-09-13T14:10:00.901+08:00  INFO 74453 --- [dance-game] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-09-13T14:10:00.901+08:00  INFO 74453 --- [dance-game] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.22]
+2026-09-13T14:10:00.915+08:00 DEBUG 74453 --- [dance-game] [           main] b.w.c.s.WebApplicationContextInitializer : Published root WebApplicationContext as ServletContext attribute with name [org.springframework.web.context.WebApplicationContext.ROOT]
+2026-09-13T14:10:00.915+08:00  INFO 74453 --- [dance-game] [           main] b.w.c.s.WebApplicationContextInitializer : Root WebApplicationContext: initialization completed in 775 ms
+2026-09-13T14:10:00.933+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.w.s.ServletContextInitializerBeans : Mapping filters: characterEncodingFilter urls=[/*] order=-2147483648, formContentFilter urls=[/*] order=-9900, requestContextFilter urls=[/*] order=-105, saTokenContextFilterForServlet urls=[/*] order=-104, saTokenCorsFilterForJakartaServlet urls=[/*] order=-103, saFirewallCheckFilterForJakartaServlet urls=[/*] order=-102, uploadSecurityFilter urls=[/*] order=2147483647
+2026-09-13T14:10:00.933+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.w.s.ServletContextInitializerBeans : Mapping servlets: dispatcherServlet urls=[/]
+2026-09-13T14:10:00.946+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.s.f.OrderedRequestContextFilter    : Filter 'requestContextFilter' configured for use
+2026-09-13T14:10:00.947+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.s.f.OrderedCharacterEncodingFilter : Filter 'characterEncodingFilter' configured for use
+2026-09-13T14:10:00.947+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.s.filter.OrderedFormContentFilter  : Filter 'formContentFilter' configured for use
+2026-09-13T14:10:01.458+08:00  INFO 74453 --- [dance-game] [           main] o.s.b.w.a.WelcomePageHandlerMapping      : Adding welcome page: URL [file:frontend/dist/index.html]
+2026-09-13T14:10:01.474+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.a.AutoConfigurationPackages        : @EnableAutoConfiguration was declared on a class in the package 'com.dance.street.game'. Automatic @Repository and @Entity scanning is enabled.
+2026-09-13T14:10:01.531+08:00 DEBUG 74453 --- [dance-game] [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 158 mappings in 'requestMappingHandlerMapping'
+2026-09-13T14:10:01.541+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.w.s.handler.SimpleUrlHandlerMapping  : Patterns [/webjars/**, /**, /uploads/**] in 'resourceHandlerMapping'
+2026-09-13T14:10:01.550+08:00 DEBUG 74453 --- [dance-game] [           main] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 2 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-09-13T14:10:01.567+08:00 DEBUG 74453 --- [dance-game] [           main] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 2 @ExceptionHandler, 1 ResponseBodyAdvice
 ____ ____    ___ ____ _  _ ____ _  _ 
 [__  |__| __  |  |  | |_/  |___ |\ | 
 ___] |  |     |  |__| | \_ |___ | \| 
 https://sa-token.cc (v1.45.0)
-2026-09-13T13:47:00.119+08:00  INFO 70932 --- [dance-game] [           main] m.e.s.MybatisPlusApplicationContextAware : Register ApplicationContext instances org.springframework.boot.web.server.servlet.context.AnnotationConfigServletWebServerApplicationContext@75e91545
-2026-09-13T13:47:00.144+08:00  INFO 70932 --- [dance-game] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
-2026-09-13T13:47:00.465+08:00  INFO 70932 --- [dance-game] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.sqlite.jdbc4.JDBC4Connection@1e32037d
-2026-09-13T13:47:00.466+08:00  INFO 70932 --- [dance-game] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
-2026-09-13T13:47:00.477+08:00  INFO 70932 --- [dance-game] [           main] c.d.s.g.c.DatabaseSchemaInitializer      : schema 自检完成: 已存在 16 张,新建 0 张
-2026-09-13T13:47:00.477+08:00 DEBUG 70932 --- [dance-game] [           main] ySourcesPropertyResolver$DefaultResolver : Found key 'DEPLOY_MODE' in PropertySource 'systemEnvironment' with value of type String
-2026-09-13T13:47:00.478+08:00  WARN 70932 --- [dance-game] [           main] o.dromara.common.redis.utils.RedisUtils  : RedissonClient 不可用,Redis 操作降级为本地模式(单机运行): No qualifying bean of type 'org.redisson.api.RedissonClient' available
-2026-09-13T13:47:00.478+08:00  INFO 70932 --- [dance-game] [           main] c.d.s.g.config.DeployModeReportLogger    : 运行配置: DEPLOY_MODE=standalone | 数据库=SQLite(jdbc:sqlite:./data/game.db) | Redis=本地模式(SSE 进程内广播、无分布式锁)
-2026-09-13T13:47:00.481+08:00  INFO 70932 --- [dance-game] [           main] c.d.s.game.config.JwtSecretInitializer   : Sa-Token JWT 密钥已就绪,来源: 密钥文件 ./data/jwt/dance-game-jwt-secret.key
-2026-09-13T13:47:00.501+08:00  INFO 70932 --- [dance-game] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat started on port 8080 (http) with context path '/'
-2026-09-13T13:47:00.506+08:00 DEBUG 70932 --- [dance-game] [           main] .s.b.a.l.ConditionEvaluationReportLogger : 
+2026-09-13T14:10:01.578+08:00  INFO 74453 --- [dance-game] [           main] m.e.s.MybatisPlusApplicationContextAware : Register ApplicationContext instances org.springframework.boot.web.server.servlet.context.AnnotationConfigServletWebServerApplicationContext@75e91545
+2026-09-13T14:10:01.601+08:00  INFO 74453 --- [dance-game] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-09-13T14:10:01.845+08:00  INFO 74453 --- [dance-game] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.sqlite.jdbc4.JDBC4Connection@5b1420f9
+2026-09-13T14:10:01.846+08:00  INFO 74453 --- [dance-game] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-09-13T14:10:01.858+08:00  INFO 74453 --- [dance-game] [           main] c.d.s.g.c.DatabaseSchemaInitializer      : schema 自检完成: 已存在 16 张,新建 0 张
+2026-09-13T14:10:01.859+08:00 DEBUG 74453 --- [dance-game] [           main] ySourcesPropertyResolver$DefaultResolver : Found key 'DEPLOY_MODE' in PropertySource 'systemEnvironment' with value of type String
+2026-09-13T14:10:01.860+08:00  WARN 74453 --- [dance-game] [           main] o.dromara.common.redis.utils.RedisUtils  : RedissonClient 不可用,Redis 操作降级为本地模式(单机运行): No qualifying bean of type 'org.redisson.api.RedissonClient' available
+2026-09-13T14:10:01.860+08:00  INFO 74453 --- [dance-game] [           main] c.d.s.g.config.DeployModeReportLogger    : 运行配置: DEPLOY_MODE=standalone | 数据库=SQLite(jdbc:sqlite:./data/game.db) | Redis=本地模式(SSE 进程内广播、无分布式锁)
+2026-09-13T14:10:01.863+08:00  INFO 74453 --- [dance-game] [           main] c.d.s.game.config.JwtSecretInitializer   : Sa-Token JWT 密钥已就绪,来源: 密钥文件 ./data/jwt/dance-game-jwt-secret.key
+2026-09-13T14:10:01.881+08:00  INFO 74453 --- [dance-game] [           main] o.s.boot.tomcat.TomcatWebServer          : Tomcat started on port 8080 (http) with context path '/'
+2026-09-13T14:10:01.884+08:00 DEBUG 74453 --- [dance-game] [           main] .s.b.a.l.ConditionEvaluationReportLogger : 
 
 
 ============================
@@ -723,50 +723,26 @@ Unconditional classes:
 
 
 
-2026-09-13T13:47:00.509+08:00  INFO 70932 --- [dance-game] [           main] com.dance.street.game.GameApplication    : Started GameApplication in 3.341 seconds (process running for 3.84)
-2026-09-13T13:47:00.510+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.a.ApplicationAvailabilityBean      : Application availability state LivenessState changed to CORRECT
-2026-09-13T13:47:00.512+08:00  INFO 70932 --- [dance-game] [           main] o.d.c.s.l.TournamentSseTopicListener     : 初始化赛事SSE主题订阅监听器成功
-2026-09-13T13:47:00.512+08:00  INFO 70932 --- [dance-game] [           main] .d.c.s.l.TournamentEventSseTopicListener : 初始化赛事事件SSE主题订阅监听器成功
-2026-09-13T13:47:00.512+08:00  INFO 70932 --- [dance-game] [           main] o.d.c.sse.listener.SseTopicListener      : 初始化SSE主题订阅监听器成功
-2026-09-13T13:47:00.512+08:00 DEBUG 70932 --- [dance-game] [           main] o.s.b.a.ApplicationAvailabilityBean      : Application availability state ReadinessState changed to ACCEPTING_TRAFFIC
-2026-09-13T13:47:11.356+08:00  INFO 70932 --- [dance-game] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
-2026-09-13T13:47:11.357+08:00  INFO 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
-2026-09-13T13:47:11.358+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected StandardServletMultipartResolver
-2026-09-13T13:47:11.358+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected AcceptHeaderLocaleResolver
-2026-09-13T13:47:11.360+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected org.springframework.web.servlet.view.DefaultRequestToViewNameTranslator@4d858eb0
-2026-09-13T13:47:11.360+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected org.springframework.web.servlet.support.SessionFlashMapManager@4177166e
-2026-09-13T13:47:11.361+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : enableLoggingRequestDetails='false': request parameters and headers will be masked to prevent unsafe logging of potentially sensitive data
-2026-09-13T13:47:11.361+08:00  INFO 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 4 ms
-2026-09-13T13:47:11.373+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : GET "/", parameters={}
-2026-09-13T13:47:11.378+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.b.w.a.WelcomePageHandlerMapping      : Mapped to ParameterizableViewController [view="forward:index.html"]
-2026-09-13T13:47:11.385+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.w.s.v.ContentNegotiatingViewResolver : Selected '*/*' given [*/*]
-2026-09-13T13:47:11.385+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.w.servlet.view.InternalResourceView  : View name [forward:], model {}
-2026-09-13T13:47:11.386+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.w.servlet.view.InternalResourceView  : Forwarding to [index.html]
-2026-09-13T13:47:11.391+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : "FORWARD" dispatch for GET "/index.html", parameters={}
-2026-09-13T13:47:11.393+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.w.s.handler.SimpleUrlHandlerMapping  : Mapped to ResourceHttpRequestHandler [URL [file:frontend/dist/], classpath [static/], ServletContext [/]]
-2026-09-13T13:47:11.406+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Exiting from "FORWARD" dispatch, status 200
-2026-09-13T13:47:11.407+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed 200 OK
-2026-09-13T13:47:30.598+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-2] o.s.web.servlet.DispatcherServlet        : GET "/login/passwordStatus", parameters={}
-2026-09-13T13:47:30.603+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-2] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to com.dance.street.game.controller.PasswordController#passwordStatus()
-2026-09-13T13:47:30.755+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-09-13T13:47:30.756+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-2] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT password FROM t_login_account WHERE username = ? LIMIT 1]
-2026-09-13T13:47:30.844+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-2] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [application/json, text/plain, */*] and supported [application/json, application/*+json]
-2026-09-13T13:47:30.846+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-2] m.m.a.RequestResponseBodyMethodProcessor : Writing [R(code=200, msg=操作成功, data={defaultPassword=true})]
-2026-09-13T13:47:30.871+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-2] o.s.web.servlet.DispatcherServlet        : Completed 200 OK
-2026-09-13T13:47:30.913+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-3] o.s.web.servlet.DispatcherServlet        : GET "/game/tournament/list?pageNum=1&pageSize=20", parameters={masked}
-2026-09-13T13:47:30.914+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-3] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to com.dance.street.game.controller.TTournamentController#list(TTournamentBo, PageQuery)
-2026-09-13T13:47:31.042+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-3] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [application/json, text/plain, */*] and supported [application/json, application/*+json]
-2026-09-13T13:47:31.044+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-3] m.m.a.RequestResponseBodyMethodProcessor : Writing [TableDataInfo(total=1, data=[TTournamentVo(id=2099004008896458754, name=345, coverImage=, coverImage (truncated)...]
-2026-09-13T13:47:31.048+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-3] o.s.web.servlet.DispatcherServlet        : Completed 200 OK
-2026-09-13T13:47:31.681+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-4] o.s.web.servlet.DispatcherServlet        : GET "/login/passwordStatus", parameters={}
-2026-09-13T13:47:31.681+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-4] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to com.dance.street.game.controller.PasswordController#passwordStatus()
-2026-09-13T13:47:31.682+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-4] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL query
-2026-09-13T13:47:31.682+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-4] o.s.jdbc.core.JdbcTemplate               : Executing prepared SQL statement [SELECT password FROM t_login_account WHERE username = ? LIMIT 1]
-2026-09-13T13:47:31.749+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-4] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [application/json, text/plain, */*] and supported [application/json, application/*+json]
-2026-09-13T13:47:31.750+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-4] m.m.a.RequestResponseBodyMethodProcessor : Writing [R(code=200, msg=操作成功, data={defaultPassword=true})]
-2026-09-13T13:47:31.750+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-4] o.s.web.servlet.DispatcherServlet        : Completed 200 OK
-2026-09-13T13:47:31.774+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-5] o.s.web.servlet.DispatcherServlet        : GET "/game/tournament/list?pageNum=1&pageSize=20", parameters={masked}
-2026-09-13T13:47:31.775+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-5] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped to com.dance.street.game.controller.TTournamentController#list(TTournamentBo, PageQuery)
-2026-09-13T13:47:31.784+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-5] m.m.a.RequestResponseBodyMethodProcessor : Using 'application/json', given [application/json, text/plain, */*] and supported [application/json, application/*+json]
-2026-09-13T13:47:31.784+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-5] m.m.a.RequestResponseBodyMethodProcessor : Writing [TableDataInfo(total=1, data=[TTournamentVo(id=2099004008896458754, name=345, coverImage=, coverImage (truncated)...]
-2026-09-13T13:47:31.785+08:00 DEBUG 70932 --- [dance-game] [nio-8080-exec-5] o.s.web.servlet.DispatcherServlet        : Completed 200 OK
+2026-09-13T14:10:01.886+08:00  INFO 74453 --- [dance-game] [           main] com.dance.street.game.GameApplication    : Started GameApplication in 1.99 seconds (process running for 2.243)
+2026-09-13T14:10:01.886+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.a.ApplicationAvailabilityBean      : Application availability state LivenessState changed to CORRECT
+2026-09-13T14:10:01.887+08:00  INFO 74453 --- [dance-game] [           main] o.d.c.sse.listener.SseTopicListener      : 初始化SSE主题订阅监听器成功
+2026-09-13T14:10:01.887+08:00  INFO 74453 --- [dance-game] [           main] o.d.c.s.l.TournamentSseTopicListener     : 初始化赛事SSE主题订阅监听器成功
+2026-09-13T14:10:01.888+08:00  INFO 74453 --- [dance-game] [           main] .d.c.s.l.TournamentEventSseTopicListener : 初始化赛事事件SSE主题订阅监听器成功
+2026-09-13T14:10:01.888+08:00 DEBUG 74453 --- [dance-game] [           main] o.s.b.a.ApplicationAvailabilityBean      : Application availability state ReadinessState changed to ACCEPTING_TRAFFIC
+2026-09-13T14:10:14.026+08:00  INFO 74453 --- [dance-game] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-09-13T14:10:14.026+08:00  INFO 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-09-13T14:10:14.026+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected StandardServletMultipartResolver
+2026-09-13T14:10:14.026+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected AcceptHeaderLocaleResolver
+2026-09-13T14:10:14.027+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected org.springframework.web.servlet.view.DefaultRequestToViewNameTranslator@1b9bd931
+2026-09-13T14:10:14.027+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Detected org.springframework.web.servlet.support.SessionFlashMapManager@3c00867f
+2026-09-13T14:10:14.027+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : enableLoggingRequestDetails='false': request parameters and headers will be masked to prevent unsafe logging of potentially sensitive data
+2026-09-13T14:10:14.027+08:00  INFO 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-09-13T14:10:14.033+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : GET "/", parameters={}
+2026-09-13T14:10:14.036+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.b.w.a.WelcomePageHandlerMapping      : Mapped to ParameterizableViewController [view="forward:index.html"]
+2026-09-13T14:10:14.040+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.w.s.v.ContentNegotiatingViewResolver : Selected '*/*' given [*/*]
+2026-09-13T14:10:14.041+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.w.servlet.view.InternalResourceView  : View name [forward:], model {}
+2026-09-13T14:10:14.041+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.w.servlet.view.InternalResourceView  : Forwarding to [index.html]
+2026-09-13T14:10:14.044+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : "FORWARD" dispatch for GET "/index.html", parameters={}
+2026-09-13T14:10:14.045+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.w.s.handler.SimpleUrlHandlerMapping  : Mapped to ResourceHttpRequestHandler [URL [file:frontend/dist/], classpath [static/], ServletContext [/]]
+2026-09-13T14:10:14.052+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Exiting from "FORWARD" dispatch, status 200
+2026-09-13T14:10:14.052+08:00 DEBUG 74453 --- [dance-game] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed 200 OK

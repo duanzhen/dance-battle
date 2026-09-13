@@ -1038,7 +1038,7 @@ export const useDirectorStore = defineStore('director', () => {
 
     if (type === 'BRACKET') {
       defaultName = `对战树 ${currentScene.value.widgets.length + 1}`;
-      dataConfig = { stageId: null, fontSize: 12, textColor: '#000000', borderColor: '', bgColor: '' };
+      dataConfig = { stageId: null, fontSize: 12, textColor: '#000000', borderColor: '', bgColor: '', showAvatar: false };
       defaultWidth = 600;
       defaultHeight = 500;
     }

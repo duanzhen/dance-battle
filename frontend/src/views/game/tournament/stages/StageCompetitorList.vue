@@ -7,7 +7,7 @@
         <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <!-- 海选赛:号码牌 / 分数排名 排序切换 -->
+        <!-- 海选赛:号码牌 / 名次 排序切换 -->
         <template v-if="isAudition">
           <button
             @click="pickSort('NUMBER')"
@@ -22,10 +22,10 @@
             @click="pickSort('SCORE')"
             class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors flex items-center gap-1"
             :class="sortBtnClass('SCORE')"
-            title="按分数排名排序"
+            title="按名次排序(结算后取最终名次,含二海结果;未结算时按分数实时推算)"
           >
             <Trophy class="w-3.5 h-3.5" />
-            分数排序
+            名次排序
           </button>
           <button
             @click="handleExportAudition"
@@ -265,7 +265,9 @@ const circleTabClass = (key: string) =>
     : 'text-neutral-400 border border-transparent hover:text-neutral-200';
 /** 海选同分加赛(二海/三海…)参赛方(结果定案前用于标记"二海待定") */
 const tiebreakerCompetitorIds = ref<Set<string>>(new Set());
-/** 海选赛排序:号码牌 / 分数排名;sortPicked=用户主动点过排序按钮(赛前也立即生效) */
+/** 二海/三海…分数:competitorId -> 最近一轮加赛得分(只在原始分相同时参与排序,不计入原始总分) */
+const tiebreakScoreByCompetitor = ref<Record<string, number>>({});
+/** 海选赛排序:号码牌 / 名次;sortPicked=用户主动点过排序按钮(赛前也立即生效) */
 const sortMode = ref<'NUMBER' | 'SCORE'>('NUMBER');
 const sortPicked = ref(false);
 
@@ -294,6 +296,22 @@ const scoreOf = (c: CompetitorVO): number | null => {
   const v = scoreByCompetitor.value[String(c.id)];
   return v == null ? null : v;
 };
+/** 二海/三海…得分;没参加过加赛返回 null */
+const tiebreakScoreOf = (c: CompetitorVO): number | null => {
+  const v = tiebreakScoreByCompetitor.value[String(c.id)];
+  return v == null ? null : v;
+};
+/**
+ * 海选名次口径(与后端结算一致):原始分降序 → 二海/三海分降序 → 号码牌升序。
+ * 二海分只在原始分相同时生效,所以不会把加赛选手顶到高分选手前面。
+ */
+const cmpAuditionRank = (a: CompetitorVO, b: CompetitorVO) => {
+  const byScore = (scoreOf(b) ?? -1) - (scoreOf(a) ?? -1);
+  if (byScore !== 0) return byScore;
+  const byTiebreak = (tiebreakScoreOf(b) ?? -1) - (tiebreakScoreOf(a) ?? -1);
+  if (byTiebreak !== 0) return byTiebreak;
+  return numOf(a) - numOf(b);
+};
 /** 当前排序是否已生效:赛段开始后默认按号码排序;赛前仅在用户点过排序按钮时生效(否则保留拖动顺序) */
 const sortApplied = computed(() => sortPicked.value || !canArrange.value);
 /** 排序按钮样式 */
@@ -310,7 +328,7 @@ const pickSort = (mode: 'NUMBER' | 'SCORE') => {
   sortMode.value = mode;
   sortPicked.value = true;
 };
-/** 分圈查看时的圈内名次:优先后端名次;未结算时按圈内分数实时计算(同分按号码牌定先后,与后端一致) */
+/** 分圈查看时的圈内名次:优先后端名次;未结算时按圈内分数实时计算(同分看二海分,再按号码牌,与后端一致) */
 const circleRankOf = (c: CompetitorVO): number | null => {
   const id = String(c.id);
   const settled = circleRanks.value[id];
@@ -326,24 +344,25 @@ const circleRankOf = (c: CompetitorVO): number | null => {
   if (mine == null || peers.length === 0) {
     return null;
   }
-  // 分数降序、同分按号码牌升序 → 位次即圈内名次
-  const ahead = peers.filter((x) => {
-    const s = scoreOf(x);
-    if (s == null) return false;
-    if (s !== mine) return s > mine;
-    return numOf(x) < numOf(c);
-  }).length;
+  // 原始分降序、同分按二海/三海分降序、再按号码牌升序 → 位次即圈内名次
+  const ahead = peers.filter((x) => scoreOf(x) != null && cmpAuditionRank(x, c) < 0).length;
   return ahead + 1;
 };
 /** 排名列取值:分圈看圈内名次,全部圈看赛段名次 */
 const rankOf = (c: CompetitorVO): number | null =>
   circleFiltered.value ? circleRankOf(c) : (c.finalRank ?? null);
+/** 名次排序键:结算后直接用后端最终名次(已含二海结果);未结算返回最大值排最后,由分数口径兜底 */
+const rankKeyOf = (c: CompetitorVO): number => {
+  const r = c.finalRank;
+  return r == null ? Number.MAX_SAFE_INTEGER : Number(r);
+};
 /** 展示列表:海选赛未初始化时保持种子顺序(供拖拽排位);初始化/结算后按所选方式排序 */
 const displayList = computed(() => {
   let list = [...competitors.value];
   if (isAudition.value && sortApplied.value) {
     if (sortMode.value === 'SCORE') {
-      list.sort((a, b) => (scoreOf(b) ?? -1) - (scoreOf(a) ?? -1) || numOf(a) - numOf(b));
+      // 名次排序:已结算按最终名次,未结算(无名次)的按分数/二海分实时推算
+      list.sort((a, b) => rankKeyOf(a) - rankKeyOf(b) || cmpAuditionRank(a, b));
     } else {
       list.sort((a, b) => numOf(a) - numOf(b) || String(a.number || '').localeCompare(String(b.number || '')));
     }
@@ -476,6 +495,7 @@ const loadScores = async () => {
   if (!isAudition.value) {
     scoreByCompetitor.value = {};
     tiebreakerCompetitorIds.value = new Set();
+    tiebreakScoreByCompetitor.value = {};
     return;
   }
   try {
@@ -489,18 +509,28 @@ const loadScores = async () => {
     });
     scoreByCompetitor.value = map;
     const tbIds = new Set<string>();
-    (data?.tiebreakers || []).forEach((tb: any) => {
-      (tb?.competitors || []).forEach((c: any) => {
-        if (c.competitorId != null) {
-          tbIds.add(String(c.competitorId));
-        }
+    const tbScores: Record<string, number> = {};
+    // 按加赛轮次升序铺开:同一选手打过二海又打三海时,以最后一轮得分为准
+    (data?.tiebreakers || [])
+      .slice()
+      .sort((a: any, b: any) => (a?.round ?? 0) - (b?.round ?? 0))
+      .forEach((tb: any) => {
+        (tb?.competitors || []).forEach((c: any) => {
+          if (c.competitorId == null) return;
+          const cid = String(c.competitorId);
+          tbIds.add(cid);
+          if (c.score != null) {
+            tbScores[cid] = Number(c.score);
+          }
+        });
       });
-    });
     tiebreakerCompetitorIds.value = tbIds;
+    tiebreakScoreByCompetitor.value = tbScores;
   } catch (e) {
     console.error('加载海选赛分数失败:', e);
     scoreByCompetitor.value = {};
     tiebreakerCompetitorIds.value = new Set();
+    tiebreakScoreByCompetitor.value = {};
   }
 };
 

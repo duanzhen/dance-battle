@@ -375,7 +375,7 @@
                     inputmode="decimal"
                     :value="keypadValue"
                     placeholder="0"
-                    class="w-full h-12 bg-black text-center text-2xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums mb-2"
+                    class="no-caret w-full h-12 bg-black text-center text-2xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums mb-2"
                     @input="onKeypadInput"
                     @keydown.enter.prevent="confirmKeypad"
                   />
@@ -813,7 +813,11 @@ const clearKeypad = () => {
   keypadValue.value = '';
 };
 
-/** 海选键盘直接输入:仅允许数字与一个小数点,按满分切换小数位与上限 */
+/**
+ * 海选键盘直接输入:仅允许数字与一个小数点,小数位按满分切换。
+ * 不做满分截断:敲超限数字不再被改写成满分(否则想打 15 会被吃成 10),
+ * 超出 0-满分 由提交时校验提示,分数原样保留给裁判自己改。
+ */
 const onKeypadInput = (e: Event) => {
   const el = e.target as HTMLInputElement;
   let v = el.value.replace(/[^0-9.]/g, '');
@@ -821,9 +825,9 @@ const onKeypadInput = (e: Event) => {
   if (dotIdx >= 0) {
     v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, '');
   }
-  const [intPart, decPart] = v.split('.');
-  const intNum = intPart ? Math.min(Number(intPart) || 0, keypadMax.value) : 0;
-  const intText = intPart === '' ? '' : String(intNum);
+  const [intRaw, decPart] = v.split('.');
+  // 去掉多余前导零(保留单个 0 与空串)
+  const intText = intRaw.replace(/^0+(?=\d)/, '');
   v = decPart !== undefined ? intText + '.' + decPart.slice(0, keypadDecimals.value) : intText;
   keypadValue.value = v;
   el.value = v;
@@ -1340,5 +1344,9 @@ onUnmounted(() => {
 .no-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+/* 打分输入框不显示闪烁光标:裁判打分/投屏录制时更干净 */
+.no-caret {
+  caret-color: transparent;
 }
 </style>

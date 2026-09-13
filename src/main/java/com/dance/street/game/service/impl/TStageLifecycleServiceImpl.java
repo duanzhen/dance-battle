@@ -2221,8 +2221,15 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         head.add(List.of("总分"));
         head.add(List.of("排名"));
+        // 排序口径与名单页「分数排名」一致:原始分降序 → 加赛(二海/三海)分降序 → 号码牌升序;
+        // 多圈时先按圈分组,与「排名」列的分圈名次保持一致
+        Map<Long, BigDecimal> tiebreakScore = auditionTiebreakScoreMap(result.getTiebreakers());
+        List<String> zoneOrder = auditionZoneMatches(stage.getId()).stream()
+            .map(TMatch::getDisplayZone).filter(Objects::nonNull).distinct().toList();
+        List<AuditionResultVo.CompetitorItem> mainItems = new ArrayList<>(result.getCompetitors());
+        mainItems.sort(auditionExportComparator(zoneOrder, tiebreakScore));
         List<List<Object>> rows = new ArrayList<>();
-        for (AuditionResultVo.CompetitorItem c : result.getCompetitors()) {
+        for (AuditionResultVo.CompetitorItem c : mainItems) {
             rows.add(auditionExportRow(c, referees, true, zoneLabels, multiCircle));
         }
 
@@ -2246,7 +2253,13 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         usedSheetNames.add("海选成绩");
         for (AuditionResultVo.TiebreakerItem tb : result.getTiebreakers()) {
             List<List<Object>> tbRows = new ArrayList<>();
-            for (AuditionResultVo.CompetitorItem c : tb.getCompetitors()) {
+            // 加赛表按该轮加赛总分降序(同分再按号码牌),即「谁赢了加赛谁在前」
+            List<AuditionResultVo.CompetitorItem> tbItems = new ArrayList<>(tb.getCompetitors());
+            tbItems.sort(Comparator
+                .comparing((AuditionResultVo.CompetitorItem c) -> c.getScore() == null ? new BigDecimal(-1) : c.getScore())
+                .reversed()
+                .thenComparingInt(c -> parseCompetitorNumber(c.getNumber())));
+            for (AuditionResultVo.CompetitorItem c : tbItems) {
                 tbRows.add(auditionExportRow(c, referees, false, zoneLabels, multiCircle));
             }
             String sheetName = tiebreakerSheetName(tb.getRound());
@@ -2272,6 +2285,51 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         } catch (java.io.IOException e) {
             throw new ServiceException("导出海选结果失败: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 加赛得分:competitorId -> 最深一轮(二海→三海…)的加赛总分。
+     * 只用于同原始分时的先后,不参与主表总分。
+     */
+    private Map<Long, BigDecimal> auditionTiebreakScoreMap(List<AuditionResultVo.TiebreakerItem> tiebreakers) {
+        Map<Long, BigDecimal> byCid = new HashMap<>();
+        if (tiebreakers == null || tiebreakers.isEmpty()) {
+            return byCid;
+        }
+        List<AuditionResultVo.TiebreakerItem> ordered = new ArrayList<>(tiebreakers);
+        ordered.sort(Comparator.comparingInt(t -> t.getRound() == null ? 0 : t.getRound()));
+        for (AuditionResultVo.TiebreakerItem tb : ordered) {
+            if (tb.getCompetitors() == null) {
+                continue;
+            }
+            for (AuditionResultVo.CompetitorItem c : tb.getCompetitors()) {
+                if (c.getCompetitorId() != null && c.getScore() != null) {
+                    byCid.put(c.getCompetitorId(), c.getScore());
+                }
+            }
+        }
+        return byCid;
+    }
+
+    /**
+     * 海选导出主表排序:圈序 → 原始分降序 → 加赛分降序 → 号码牌升序
+     * (与名单页「分数排名」同一口径,保证二海选手按加赛成绩排在前面)。
+     */
+    private Comparator<AuditionResultVo.CompetitorItem> auditionExportComparator(
+        List<String> zoneOrder, Map<Long, BigDecimal> tiebreakScore) {
+        Comparator<AuditionResultVo.CompetitorItem> byZone = Comparator.comparingInt(c -> {
+            int idx = c.getZone() == null ? -1 : zoneOrder.indexOf(c.getZone());
+            return idx < 0 ? Integer.MAX_VALUE : idx;
+        });
+        Comparator<AuditionResultVo.CompetitorItem> byScore = Comparator.comparing(
+                (AuditionResultVo.CompetitorItem c) -> c.getScore() == null ? new BigDecimal(-1) : c.getScore())
+            .reversed();
+        Comparator<AuditionResultVo.CompetitorItem> byTiebreak = Comparator.comparing(
+                (AuditionResultVo.CompetitorItem c) -> tiebreakScore.getOrDefault(c.getCompetitorId(), new BigDecimal(-1)))
+            .reversed();
+        Comparator<AuditionResultVo.CompetitorItem> byNumber =
+            Comparator.comparingInt(c -> parseCompetitorNumber(c.getNumber()));
+        return byZone.thenComparing(byScore).thenComparing(byTiebreak).thenComparing(byNumber);
     }
 
     /** 海选导出行:主表最后一列为排名,加赛表最后一列为结果 */

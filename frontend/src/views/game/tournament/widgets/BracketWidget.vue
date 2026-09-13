@@ -7,14 +7,17 @@
       <div v-else-if="isFinal" class="w-full h-full flex flex-col items-center justify-between gap-3 px-2 py-2">
         <!-- 冠军卡:顶部,窄宽度 -->
         <div class="final-card champion-card" :class="{ 'final-win': !!champion }">
+          <img v-if="showAvatar && champion?.avatar" :src="champion?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
           <span class="name" :style="fz(1)">{{ champion?.name || '' }}</span>
         </div>
         <!-- 左右半区:下方 -->
         <div class="flex items-center justify-between min-h-0 w-full">
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.left?.competitorId }">
+            <img v-if="showAvatar && finalists.left?.avatar" :src="finalists.left?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
             <span class="name" :style="fz(1)" :title="finalists.left?.name || ''">{{ finalists.left?.name || '' }}</span>
           </div>
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.right?.competitorId }">
+            <img v-if="showAvatar && finalists.right?.avatar" :src="finalists.right?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
             <span class="name" :style="fz(1)" :title="finalists.right?.name || ''">{{ finalists.right?.name || '' }}</span>
           </div>
         </div>
@@ -24,18 +27,22 @@
         <div class="flex-1 flex items-stretch justify-between gap-2 min-h-0">
           <div class="flex-none flex flex-col justify-between items-center min-h-0">
             <div class="final-card" :class="{ 'final-win': semi.left?.top?.win }">
+              <img v-if="showAvatar && semi.left?.top?.avatar" :src="semi.left?.top?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
+              <img v-if="showAvatar && semi.left?.bottom?.avatar" :src="semi.left?.bottom?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
             </div>
           </div>
           <div style="flex: 1; min-width: 0"></div>
           <div class="flex-none flex flex-col justify-between items-center min-h-0">
             <div class="final-card" :class="{ 'final-win': semi.right?.top?.win }">
+              <img v-if="showAvatar && semi.right?.top?.avatar" :src="semi.right?.top?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
+              <img v-if="showAvatar && semi.right?.bottom?.avatar" :src="semi.right?.bottom?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
             </div>
           </div>
@@ -65,9 +72,11 @@
         >
           <template v-for="(s, i) in leftSlots" :key="'l' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
+              <img v-if="showAvatar && s.leftAvatar" :src="s.leftAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
+              <img v-if="showAvatar && s.rightAvatar" :src="s.rightAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
@@ -81,9 +90,11 @@
         >
           <template v-for="(s, i) in rightSlots" :key="'r' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
+              <img v-if="showAvatar && s.leftAvatar" :src="s.leftAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
+              <img v-if="showAvatar && s.rightAvatar" :src="s.rightAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
               <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
@@ -102,6 +113,18 @@
           @update:model-value="$emit('update:stageId', $event)"
         />
         <!-- <p class="text-[10px] text-neutral-600 mt-2">对战树绑定淘汰赛赛段为标准对战树(配对按 SEED 标准种子对位或 SEQUENTIAL 相邻配对,已生成场次胜者高亮);绑定擂台赛段时展示该赛段 8 强名单(标准种子摆位,仅供展示)。</p> -->
+      </section>
+      <section>
+        <span class="section-title">显示选项</span>
+        <label class="flex items-center justify-between mt-2 cursor-pointer">
+          <span class="text-xs text-neutral-300">显示选手头像</span>
+          <input
+            type="checkbox"
+            :checked="showAvatar"
+            class="accent-amber-500 w-4 h-4"
+            @change="$emit('update:showAvatar', ($event.target as HTMLInputElement).checked)"
+          />
+        </label>
       </section>
       <section>
         <span class="section-title">样式配置</span>
@@ -169,6 +192,8 @@ const props = defineProps<{
   borderColor?: string;
   bgColor?: string;
   fontSize?: number;
+  /** 是否在名字前显示选手头像(默认不显示) */
+  showAvatar?: boolean;
 }>();
 const emit = defineEmits<{
   'update:stageId': [value: string | number | null];
@@ -176,6 +201,7 @@ const emit = defineEmits<{
   'update:borderColor': [value: string];
   'update:bgColor': [value: string];
   'update:fontSize': [value: number];
+  'update:showAvatar': [value: boolean];
 }>();
 
 // 样式配置:通过 CSS 变量作用于全部对战卡;未配置时回退默认样式(白字/灰边/透明底)
@@ -385,6 +411,8 @@ interface BracketSlot {
   status: string;
   leftName: string;
   rightName: string;
+  leftAvatar: string;
+  rightAvatar: string;
   leftScore: string;
   rightScore: string;
   leftWin: boolean;
@@ -399,6 +427,30 @@ const nameOf = (cid: any) => {
   if (cid == null) return '';
   const c = compById.value[cid];
   return c?.name || `#${cid}`;
+};
+
+/** 是否显示头像:配置项默认关闭 */
+const showAvatar = computed(() => props.showAvatar === true);
+
+/** 参赛方头像:取该参赛方关联选手中第一个有头像的(与当前场次/大屏组件同一口径) */
+const avatarOf = (cid: any): string => {
+  if (cid == null) return '';
+  const list = compById.value[cid]?.playerList;
+  if (!Array.isArray(list)) return '';
+  const hit = list.find((p: any) => !!p?.avatar);
+  return hit?.avatar || '';
+};
+
+/** 头像尺寸随字号联动,保持与名字同一视觉比例 */
+const avatarStyle = computed(() => {
+  const base = Math.max(6, Math.min(80, Number(props.fontSize) || 24));
+  const box = Math.round(base * 1.5);
+  return { width: `${box}px`, height: `${box}px` };
+});
+
+/** 头像加载失败(未传头像/资源 404)时隐藏,避免出现裂图方块 */
+const onAvatarError = (e: Event) => {
+  (e.target as HTMLImageElement).style.display = 'none';
 };
 
 const isWinner = (p: any) => p?.outcomeStatus === 'WIN' || (p?.rankInMatch === 1 && p?.scoreValue != null);
@@ -422,6 +474,8 @@ const arenaSlots = computed<BracketSlot[]>(() => {
           status: 'PENDING',
           leftName: '',
           rightName: '',
+          leftAvatar: '',
+          rightAvatar: '',
           leftScore: '',
           rightScore: '',
           leftWin: false,
@@ -448,6 +502,8 @@ const arenaSlots = computed<BracketSlot[]>(() => {
       status: 'PENDING',
       leftName: left?.name || '',
       rightName: right?.name || '',
+      leftAvatar: avatarOf(left?.id),
+      rightAvatar: avatarOf(right?.id),
       leftScore: '',
       rightScore: '',
       leftWin: false,
@@ -478,6 +534,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
         status: m.status || 'PENDING',
         leftName: left?.competitorId == null ? '轮空' : nameOf(left.competitorId) || '',
         rightName: right?.competitorId == null ? '轮空' : nameOf(right.competitorId) || '',
+        leftAvatar: avatarOf(left?.competitorId),
+        rightAvatar: avatarOf(right?.competitorId),
         leftScore: left?.scoreValue == null ? '' : String(left.scoreValue),
         rightScore: right?.scoreValue == null ? '' : String(right.scoreValue),
         leftWin: !!left && isWinner(left),
@@ -502,6 +560,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
           // 对应场次未打完(TBD)留空,模板回退显示「待定」;无对应场次/无参赛方=轮空
           leftName: p.left?.name || (p.leftStatus === 'BYE' ? '轮空' : ''),
           rightName: p.right?.name || (p.rightStatus === 'BYE' ? '轮空' : ''),
+          leftAvatar: avatarOf(p.left?.competitorId),
+          rightAvatar: avatarOf(p.right?.competitorId),
           leftScore: '',
           rightScore: '',
           leftWin: false,
@@ -533,6 +593,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
             status: 'PENDING',
             leftName: '',
             rightName: '',
+            leftAvatar: '',
+            rightAvatar: '',
             leftScore: '',
             rightScore: '',
             leftWin: false,
@@ -563,6 +625,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
         status: 'PENDING',
         leftName: left?.name || '轮空',
         rightName: right?.name || '轮空',
+        leftAvatar: avatarOf(left?.id),
+        rightAvatar: avatarOf(right?.id),
         leftScore: '',
         rightScore: '',
         leftWin: false,
@@ -587,6 +651,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
       status: 'PENDING',
       leftName: left?.name || '',
       rightName: right?.name || '轮空',
+      leftAvatar: avatarOf(left?.id),
+      rightAvatar: avatarOf(right?.id),
       leftScore: '',
       rightScore: '',
       leftWin: false,
@@ -628,9 +694,9 @@ const finalists = computed(() => {
     if (pair) {
       const toPreCard = (s: any, st: string) => {
         if (s) {
-          return { competitorId: s.competitorId, name: s.name || '', score: '' };
+          return { competitorId: s.competitorId, name: s.name || '', avatar: avatarOf(s.competitorId), score: '' };
         }
-        return { competitorId: null, name: st === 'BYE' ? '轮空' : '\u00A0', score: '' };
+        return { competitorId: null, name: st === 'BYE' ? '轮空' : '\u00A0', avatar: '', score: '' };
       };
       out.left = toPreCard(pair.left, pair.leftStatus);
       out.right = toPreCard(pair.right, pair.rightStatus);
@@ -647,6 +713,7 @@ const finalists = computed(() => {
   const toCard = (p: any) => ({
     competitorId: p.competitorId,
     name: nameOf(p.competitorId),
+    avatar: avatarOf(p.competitorId),
     score: p.scoreValue == null ? '' : String(p.scoreValue)
   });
   const a = ss[0];
@@ -670,7 +737,14 @@ const champion = computed(() => {
   }
   const ss = participantsByMatch.value[m.id] || [];
   const w = ss.find((p: any) => p.outcomeStatus === 'WIN' || (p.rankInMatch === 1 && p.scoreValue != null));
-  return w ? { competitorId: w.competitorId, name: nameOf(w.competitorId), score: w.scoreValue == null ? '' : String(w.scoreValue) } : null;
+  return w
+    ? {
+        competitorId: w.competitorId,
+        name: nameOf(w.competitorId),
+        avatar: avatarOf(w.competitorId),
+        score: w.scoreValue == null ? '' : String(w.scoreValue)
+      }
+    : null;
 });
 
 // 半决赛四角:两场各两名参赛者,左上/左下、右上/右下;
@@ -683,8 +757,12 @@ const semi = computed(() => {
   const build = (m: any) => {
     const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
     return {
-      top: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), win: isWinner(ss[0]) } : null,
-      bottom: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), win: isWinner(ss[1]) } : null
+      top: ss[0]
+        ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), avatar: avatarOf(ss[0].competitorId), win: isWinner(ss[0]) }
+        : null,
+      bottom: ss[1]
+        ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), avatar: avatarOf(ss[1].competitorId), win: isWinner(ss[1]) }
+        : null
     };
   };
   if (matches.value.length >= 2) {
@@ -702,20 +780,24 @@ const semi = computed(() => {
       const ss = (participantsByMatch.value[third.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
       const winner = ss.find((p: any) => isWinner(p)) || null;
       out.third = {
-        left: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId) } : null,
-        right: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId) } : null,
-        winner: winner ? { competitorId: winner.competitorId, name: nameOf(winner.competitorId) } : null,
+        left: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), avatar: avatarOf(ss[0].competitorId) } : null,
+        right: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), avatar: avatarOf(ss[1].competitorId) } : null,
+        winner: winner ? { competitorId: winner.competitorId, name: nameOf(winner.competitorId), avatar: avatarOf(winner.competitorId) } : null,
         status: third.status || 'PENDING'
       };
     }
     return out;
   }
   // 未生成正式场次(预排 2 对 / 种子 4 人):两列各一对 → 左上左下、右上右下
-  const toCard = (name: string, win: boolean) => ({ competitorId: null, name, win });
+  const toCard = (name: string, avatar: string, win: boolean) => ({ competitorId: null, name, avatar, win });
   const lp = leftSlots.value[0];
   const rp = rightSlots.value[0];
-  out.left = lp ? { top: toCard(lp.leftName, lp.leftWin), bottom: toCard(lp.rightName, lp.rightWin) } : null;
-  out.right = rp ? { top: toCard(rp.leftName, rp.leftWin), bottom: toCard(rp.rightName, rp.rightWin) } : null;
+  out.left = lp
+    ? { top: toCard(lp.leftName, lp.leftAvatar, lp.leftWin), bottom: toCard(lp.rightName, lp.rightAvatar, lp.rightWin) }
+    : null;
+  out.right = rp
+    ? { top: toCard(rp.leftName, rp.leftAvatar, rp.leftWin), bottom: toCard(rp.rightName, rp.rightAvatar, rp.rightWin) }
+    : null;
   return out;
 });
 
@@ -827,6 +909,14 @@ const handleTournamentEvent = (data: any) => {
   white-space: nowrap;
   min-width: 0;
   max-width: 100%;
+}
+/* 选手头像:圆形裁剪 + 描边,尺寸随字号由 avatarStyle 注入 */
+.bracket-avatar {
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid currentColor;
+  background: rgba(255, 255, 255, 0.08);
 }
 .final-win {
   background: var(--bracket-bg, transparent);

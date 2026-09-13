@@ -57,9 +57,6 @@ public class RuleConfigHolder implements Serializable {
     /** 分圈方式:true=随机抽取分场,false=按号码顺序均分;生成对阵时持久化,补签到按号落圈时读取 */
     private Boolean randomSplit;
 
-    /** 淘汰赛轮次序号(16强=1、8强=2、半决赛=3、决赛=4),仅生成场次命名时使用,不入库 */
-    private Integer knockoutRound;
-
     /** 结果公布模式(排名赛等使用):AUTO=实时公布 / MANUAL=导播台手动公布 / BATCH=全部完成后一次性公布 */
     private String publishMode;
 

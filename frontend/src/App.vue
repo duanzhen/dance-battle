@@ -51,11 +51,27 @@ const detectWeChatBrowser = (): boolean => {
   return /MicroMessenger/i.test(navigator.userAgent);
 };
 
-// 首次登录仍在使用默认密码时,全局强制弹出修改密码弹窗(不可关闭)
+/**
+ * 是否本地开发环境:dev server 或 localhost 访问都算。
+ * 本地开发时不强制改密,否则每次登录都会被弹窗挡一下。
+ * (正式部署仍会在首次登录、且密码为默认值时强制弹出)
+ */
+const isLocalDev = (): boolean => {
+  if (import.meta.env.DEV) {
+    return true;
+  }
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+};
+
+// 首次登录仍在使用默认密码时,全局强制弹出修改密码弹窗(不可关闭);本地开发跳过
 watch(
   () => useUserStore().defaultPassword,
   (value) => {
-    if (value) {
+    if (value && !isLocalDev()) {
       nextTick(() => {
         passwordDialogRef.value?.open(true);
       });

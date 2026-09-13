@@ -10,8 +10,10 @@ import java.util.List;
 /**
  * 淘汰赛对阵生成。
  *
- * <p>核心:标准种子位排布(蛇形镜像 [1,N,2,N-1,...] 避免强强过早相遇)、
- * 选手数非 2 的幂时高种子对手位填 BYE 轮空、后续轮占位 + 胜者去向连线。</p>
+ * <p>淘汰赛一律「每轮一赛段」:本生成器只出首轮 N/2 场,胜者由名单流转进入下一赛段,
+ * 不在同一赛段内生成后续轮次。核心是标准种子位排布
+ * (SEED 走 {@link #seedLayout(int)},强种子分散不提前相遇)与
+ * 选手数非 2 的幂时高种子对手位填 BYE 轮空。</p>
  */
 public class KnockoutGenerator implements StageGenerator {
 
@@ -23,91 +25,20 @@ public class KnockoutGenerator implements StageGenerator {
     @Override
     public BracketPlan generate(List<Long> seededCompetitorIds, RuleConfigHolder ruleConfig) {
         KnockoutConfig kc = ruleConfig != null ? ruleConfig.getKnockout() : null;
-        int round = ruleConfig != null && ruleConfig.getKnockoutRound() != null
-            ? ruleConfig.getKnockoutRound() : 1;
-        if (kc != null && Boolean.TRUE.equals(kc.getSingleRound())) {
-            return generateSingleRound(seededCompetitorIds, kc, round);
-        }
-        return generateMultiRound(seededCompetitorIds, kc);
-    }
-
-    /** 多轮模式:单赛段完整 bracket(首轮→…→决赛,跨轮连线) */
-    private BracketPlan generateMultiRound(List<Long> seededCompetitorIds, KnockoutConfig kc) {
-        int actualCount = seededCompetitorIds == null ? 0 : seededCompetitorIds.size();
-        int bracketSize = nextPowerOfTwo(Math.max(actualCount, 2));
-        int[] seeds = seedPositions(bracketSize);
-        int totalRounds = log2(bracketSize);
-        boolean thirdPlace = kc != null && Boolean.TRUE.equals(kc.getThirdPlaceMatch())
-            && totalRounds == 2; // 季军赛仅在半决赛(4 队)场景生成
-
-        List<MatchPlan> matches = new ArrayList<>();
-
-        // 第 1 轮:按种子位填充参赛方或 BYE
-        int r1Count = bracketSize / 2;
-        for (int i = 0; i < r1Count; i++) {
-            MatchPlan m = baseMatch(1, i, r1Count, totalRounds);
-            List<SlotPlan> slots = new ArrayList<>();
-            slots.add(seedSlot(0, seeds[2 * i], actualCount, seededCompetitorIds));
-            slots.add(seedSlot(1, seeds[2 * i + 1], actualCount, seededCompetitorIds));
-            m.setSlots(slots);
-            matches.add(m);
-        }
-
-        // 第 2..N 轮:全部占位(competitorId 待定,等上游胜者填入)
-        for (int r = 2; r <= totalRounds; r++) {
-            int count = bracketSize / (1 << r);
-            for (int i = 0; i < count; i++) {
-                MatchPlan m = baseMatch(r, i, count, totalRounds);
-                List<SlotPlan> slots = new ArrayList<>();
-                slots.add(emptySlot(0));
-                slots.add(emptySlot(1));
-                m.setSlots(slots);
-                matches.add(m);
-            }
-        }
-
-        // 季军赛(半决赛败者组):两场半决赛的败者互相对决,胜者为季军,在决赛(下一赛段)前举行
-        if (thirdPlace) {
-            for (MatchPlan mp : matches) {
-                if (mp.getRound() == 1) {
-                    mp.setLoserTargetRound(totalRounds + 1);
-                    mp.setLoserTargetMatchIndex(0);
-                    mp.setLoserTargetSlot(mp.getMatchIndex());
-                }
-            }
-            MatchPlan third = new MatchPlan();
-            third.setName("季军赛");
-            third.setRound(totalRounds + 1);
-            third.setMatchIndex(0);
-            third.setDisplayRow(2);
-            third.setDisplayCol(totalRounds + 1);
-            third.setDisplayZone("CENTER");
-            third.setThirdPlaceMatch(true);
-            third.setFinalMatch(false);
-            List<SlotPlan> slots = new ArrayList<>();
-            slots.add(emptySlot(0));
-            slots.add(emptySlot(1));
-            third.setSlots(slots);
-            matches.add(third);
-        }
-
-        BracketPlan plan = new BracketPlan();
-        plan.setBracketSize(bracketSize);
-        plan.setMatches(matches);
-        return plan;
+        return generateSingleRound(seededCompetitorIds, kc);
     }
 
     /**
-     * 单轮模式(每轮一赛段):只生成首轮 N/2 场,每场胜者全部晋级下一赛段(finalMatch)。
-     * 用于 32-16、16-8 等独立赛段,赛段间靠晋级流转(AdvancementService)串联。
+     * 淘汰赛对阵:只生成首轮 N/2 场,每场胜者全部晋级下一赛段(finalMatch)。
+     * 32-16、16-8 等独立赛段靠晋级流转串联,一个赛段就是一轮。
      * displayZone 前半 LEFT、后半 RIGHT,便于 widget 两列布局。
      */
-    private BracketPlan generateSingleRound(List<Long> seededCompetitorIds, KnockoutConfig kc, int round) {
+    private BracketPlan generateSingleRound(List<Long> seededCompetitorIds, KnockoutConfig kc) {
         int actualCount = seededCompetitorIds == null ? 0 : seededCompetitorIds.size();
         int bracketSize = nextPowerOfTwo(Math.max(actualCount, 2));
         int r1Count = bracketSize / 2;
         boolean seedPairing = kc != null && "SEED".equalsIgnoreCase(kc.getPairingMode());
-        // SEED=标准 bracket 摆位(8/16/32 查表);其余人数递归生成
+        // SEED=标准 bracket 摆位;SEQUENTIAL=相邻配对(1-2、3-4…)
         int[] layout = seedPairing ? seedLayout(bracketSize) : null;
 
         List<MatchPlan> matches = new ArrayList<>();
@@ -161,18 +92,6 @@ public class KnockoutGenerator implements StageGenerator {
         return plan;
     }
 
-    private MatchPlan baseMatch(int round, int index, int roundCount, int totalRounds) {
-        MatchPlan m = new MatchPlan();
-        m.setName("第" + (index + 1) + "场");
-        m.setRound(round);
-        m.setMatchIndex(index);
-        m.setDisplayCol(round);
-        m.setDisplayRow(index);
-        m.setDisplayZone(zoneOf(index, roundCount, totalRounds, round));
-        setDownstream(m, round, index, totalRounds);
-        return m;
-    }
-
     private SlotPlan seedSlot(int slotIndex, int seed, int actualCount, List<Long> seeded) {
         SlotPlan s = new SlotPlan();
         s.setSlotIndex(slotIndex);
@@ -183,29 +102,13 @@ public class KnockoutGenerator implements StageGenerator {
         return s;
     }
 
+    /** 占位槽(无参赛方,等上游/外部填入):季军赛初始为空位 */
     private SlotPlan emptySlot(int slotIndex) {
         SlotPlan s = new SlotPlan();
         s.setSlotIndex(slotIndex);
         s.setCompetitorId(null);
         s.setBye(false);
         return s;
-    }
-
-    private void setDownstream(MatchPlan m, int round, int index, int totalRounds) {
-        if (round >= totalRounds) {
-            m.setFinalMatch(true); // 胜者晋级下一赛段
-        } else {
-            m.setWinnerTargetRound(round + 1);
-            m.setWinnerTargetMatchIndex(index / 2);
-            m.setWinnerTargetSlot(index % 2);
-        }
-    }
-
-    private String zoneOf(int index, int roundCount, int totalRounds, int round) {
-        if (round == totalRounds) {
-            return "CENTER";
-        }
-        return index < roundCount / 2 ? "LEFT" : "RIGHT";
     }
 
     /**
@@ -284,11 +187,4 @@ public class KnockoutGenerator implements StageGenerator {
         return p;
     }
 
-    static int log2(int v) {
-        int r = 0;
-        while ((1 << r) < v) {
-            r++;
-        }
-        return r;
-    }
 }

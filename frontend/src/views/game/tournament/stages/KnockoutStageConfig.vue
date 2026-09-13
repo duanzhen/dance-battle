@@ -33,8 +33,8 @@
             <div class="text-lg font-medium text-white">{{ config.format }}</div>
           </div>
 
-          <!-- 首轮配对方式(单轮模式) -->
-          <div v-if="config.singleRound" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+          <!-- 首轮配对方式 -->
+          <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">首轮配对</div>
             <div class="text-sm font-medium text-white">{{ pairingLabel }}</div>
           </div>
@@ -83,7 +83,7 @@
               </div>
             </div>
             <!-- 首轮配对方式:创建配置的一部分,INIT 只读展示 -->
-            <div v-if="config.singleRound" class="mt-3 pt-3 border-t border-neutral-800 flex items-center justify-between">
+            <div class="mt-3 pt-3 border-t border-neutral-800 flex items-center justify-between">
               <div>
                 <div class="text-xs text-neutral-500">首轮配对方式</div>
                 <div class="text-[10px] text-neutral-600 mt-0.5">{{ pairingHint }}</div>
@@ -144,7 +144,7 @@
           <div v-if="currentMode === ConfigMode.CREATE" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="flex items-center justify-between mb-2">
               <span class="text-xs text-neutral-500">首轮配对方式</span>
-              <span class="text-[10px] text-neutral-600">仅单轮模式(每轮一赛段)下生效</span>
+              <span class="text-[10px] text-neutral-600">本赛段首轮生效</span>
             </div>
             <div class="grid grid-cols-2 gap-2">
               <button
@@ -208,10 +208,6 @@
                 <label v-if="config.teamsCount === 4" class="flex items-center justify-between">
                   <span class="text-sm text-neutral-300">季军赛</span>
                   <input type="checkbox" v-model="config.playThirdPlace" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-                </label>
-                <label class="flex items-center justify-between">
-                  <span class="text-sm text-neutral-300">单轮模式(每轮一赛段,胜者全晋级)</span>
-                  <input type="checkbox" v-model="config.singleRound" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
                 </label>
                 <div>
                   <span class="text-sm text-neutral-300 block mb-2">结果公布模式</span>
@@ -285,7 +281,6 @@ const currentMode = computed(() => props.mode || ConfigMode.INIT);
 const config = ref<
   KnockoutConfig & {
     playThirdPlace?: boolean;
-    singleRound?: boolean;
     pairingMode?: string;
     publishMode?: string;
     scoring?: any;
@@ -297,7 +292,6 @@ const config = ref<
   teamsCount: 32,
   advanceCount: 16,
   playThirdPlace: false,
-  singleRound: false,
   pairingMode: '',
   publishMode: 'AUTO',
   scoring: {
@@ -345,7 +339,6 @@ const parseConfig = () => {
     if (ko.template === undefined) {
       config.value.template = inferTemplate(config.value.teamsCount, config.value.advanceCount);
     }
-    if (ko.singleRound !== undefined) config.value.singleRound = ko.singleRound;
     config.value.pairingMode = ko.pairingMode !== undefined ? ko.pairingMode : '';
     if (ko.publishMode !== undefined) config.value.publishMode = ko.publishMode;
     if (ko.thirdPlaceMatch !== undefined) config.value.playThirdPlace = ko.thirdPlaceMatch;
@@ -376,7 +369,6 @@ const serializeConfig = () => {
       template: config.value.template,
       teamsCount: config.value.teamsCount,
       advanceCount: config.value.advanceCount,
-      singleRound: config.value.singleRound,
       pairingMode: config.value.pairingMode || defaultPairing.value,
       publishMode: config.value.publishMode,
       thirdPlaceMatch: config.value.playThirdPlace

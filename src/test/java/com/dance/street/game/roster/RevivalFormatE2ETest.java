@@ -434,7 +434,7 @@ class RevivalFormatE2ETest {
     }
 
     private String knockoutRule(Long teams, Long advance) {
-        return "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"singleRound\":true,\"teamsCount\":" + teams
+        return "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":" + teams
             + ",\"advanceCount\":" + advance + ",\"format\":\"BO1\",\"pairingMode\":\"SEQUENTIAL\"},"
             + "\"scoring\":{\"matchMode\":\"STANDARD\"}}";
     }

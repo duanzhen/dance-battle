@@ -275,7 +275,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
             sb.setTeamCountEnd(d.end());
             sb.setStatus("DRAFT");
             sb.setVisualColIndex((long) i);
-            sb.setRuleConfig(buildRuleConfig(d));
+            sb.setRuleConfig(buildRuleConfig(d, knockoutPairingMode(defs, i)));
             if (prevId != null) {
                 sb.setPrevStageId(prevId);
             }
@@ -623,7 +623,20 @@ public class TTournamentServiceImpl implements ITTournamentService {
         }
     }
 
-    private String buildRuleConfig(StageDef d) {
+    /**
+     * 模版内淘汰赛赛段的配对方式:只有紧接海选/排名赛的那一个赛段用种子交叉(头尾),
+     * 其余淘汰赛段承接上一赛段胜者的位置顺序配对(SEQUENTIAL)。
+     * 与生成对阵时的口径一致,避免配置写了种子交叉、实际却按位置顺序配对的错位。
+     */
+    private static String knockoutPairingMode(List<StageDef> defs, int index) {
+        if (index <= 0) {
+            return "SEQUENTIAL";
+        }
+        String prevMode = defs.get(index - 1).mode();
+        return ("AUDITION".equals(prevMode) || "RANK".equals(prevMode)) ? "SEED" : "SEQUENTIAL";
+    }
+
+    private String buildRuleConfig(StageDef d, String pairingMode) {
         if ("AUDITION".equals(d.mode())) {
             // 海选为打分制(无 BO1/BO3);圈默认为空(0),由 createByTemplate 在裁判创建后自动配置
             return "{\"mode\":\"AUDITION\",\"circles\":0,"
@@ -643,7 +656,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         return "{\"mode\":\"KNOCKOUT\",\"format\":\"BO1\","
             + "\"scoring\":{\"type\":\"WIN_LOSS_DRAW\",\"matchMode\":\"STANDARD\"},"
             + "\"knockout\":{\"teamsCount\":" + d.start()
-            + ",\"pairingMode\":\"SEED\",\"singleRound\":true,\"advanceCount\":" + d.end() + "},"
+            + ",\"pairingMode\":\"" + pairingMode + "\",\"advanceCount\":" + d.end() + "},"
             + "\"transition\":{}}";
     }
 

@@ -251,18 +251,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             persistCircleSplitMode(stage, randomSplit);
         }
         StageModeEnum mode = StageModeEnum.fromCode(stage.getStageMode());
-        // 单赛段多轮淘汰赛(未开启单轮模式)结算后只有冠军可晋级到下一赛段:
-        // 每场败者都会被标记淘汰,advanceCount 大于 1 的配置会被静默忽略,这里直接拒绝生成
-        if (StageModeEnum.KNOCKOUT.equals(mode)
-            && rc != null && rc.getKnockout() != null
-            && !Boolean.TRUE.equals(rc.getKnockout().getSingleRound())
-            && rc.getKnockout().getAdvanceCount() != null
-            && rc.getKnockout().getAdvanceCount() > 1) {
-            throw new ServiceException(
-                "单赛段多轮淘汰赛(未开启单轮模式)结算后仅冠军可晋级;当前配置晋级 {} 人,"
-                    + "如需 {} 人晋级到下一赛段请开启「单轮模式(每轮一赛段)」",
-                rc.getKnockout().getAdvanceCount(), rc.getKnockout().getAdvanceCount());
-        }
         // 承接上一淘汰赛胜者:按胜者位置顺序配对(SEQUENTIAL),不受本赛段 SEED 配置影响;
         // 从海选赛进入的淘汰赛,未显式配置时默认标准种子对位(1-16、2-15)
         if (StageModeEnum.KNOCKOUT.equals(mode)
@@ -359,9 +347,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
 
-        // 淘汰赛轮次序号:沿赛段链从第一个淘汰赛开始计数,用于场次命名 第{场次}场
+        // 淘汰赛:补齐空缺的配对方式,并统一到与中间态/大屏一致的判定口径
         if (StageModeEnum.KNOCKOUT.equals(mode) && rc != null) {
-            rc.setKnockoutRound(knockoutRoundNo(stage));
             normalizePairingMode(stage, rc);
         }
         BracketPlan plan = generatorFactory.generate(mode, seededIds, rc);
@@ -2689,28 +2676,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             return 0;
         }
         return rosterService.applyRoster(nextStageId, null);
-    }
-
-    /** 沿 prev 链从第一个淘汰赛赛段开始计数,返回当前赛段的轮次序号(16强=1、8强=2、半决赛=3、决赛=4) */
-    private int knockoutRoundNo(TStage stage) {
-        List<TStage> chain = new ArrayList<>();
-        TStage cur = stage;
-        Set<Long> seen = new HashSet<>();
-        while (cur != null && seen.add(cur.getId())) {
-            chain.add(cur);
-            cur = cur.getPrevStageId() != null ? stageMapper.selectById(cur.getPrevStageId()) : null;
-        }
-        Collections.reverse(chain);
-        int round = 0;
-        for (TStage s : chain) {
-            if (StageModeEnum.KNOCKOUT.getCode().equals(s.getStageMode())) {
-                round++;
-            }
-            if (s.getId().equals(stage.getId())) {
-                return round;
-            }
-        }
-        return 1;
     }
 
     private Long resolveNextStageId(TStage stage) {

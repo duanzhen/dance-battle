@@ -59,8 +59,10 @@ export function subscribeScreenControl(screenId: string | number, tournamentId: 
     key: `screen-control:${tid}`,
     buildUrl: () => {
       const screenIds = [...(m?.keys() ?? [])];
-      if (screenIds.length === 0) {
-        return '';
+      // 首次订阅时当前屏幕还没写进 m(见下方 m.set),用本次订阅的 screenId 兜底,
+      // 避免返回空串导致 EventSource 去请求当前页面地址
+      if (!screenIds.includes(sid)) {
+        screenIds.push(sid);
       }
       return `${baseUrl}/tournament/screen/control?authKey=${encodeURIComponent(authKey)}&clientid=${clientId}&screenIds=${encodeURIComponent(
         screenIds.join(',')

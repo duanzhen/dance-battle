@@ -42,36 +42,26 @@ public class SseEmitterManager extends AbstractSseEmitterManager {
         // 每个用户可以有多个 SSE 连接，通过 token 进行区分
         Map<String, SseEmitter> emitters = USER_TOKEN_EMITTERS.computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
 
-        // 关闭已存在的SseEmitter，防止超过最大连接数
-        SseEmitter oldEmitter = emitters.remove(token);
-        if (oldEmitter != null) {
-            oldEmitter.complete();
-        }
-
         // 创建一个新的 SseEmitter 实例，超时时间设置为一天 避免连接之后直接关闭浏览器导致连接停滞
         SseEmitter emitter = new SseEmitter(86400000L);
 
-        emitters.put(token, emitter);
+        // 同一 token 重连:先登记新连接再关闭旧连接;回调按 emitter 身份移除,
+        // 避免旧连接的关闭回调把刚登记的新连接从映射表里删掉(会表现为连接在但收不到消息)
+        SseEmitter oldEmitter = emitters.put(token, emitter);
 
         // 当 emitter 完成、超时或发生错误时，从映射表中移除对应的 token
-        emitter.onCompletion(() -> {
-            SseEmitter remove = emitters.remove(token);
-            if (remove != null) {
-                remove.complete();
+        emitter.onCompletion(() -> emitters.remove(token, emitter));
+        emitter.onTimeout(() -> emitters.remove(token, emitter));
+        emitter.onError((e) -> emitters.remove(token, emitter));
+
+        if (oldEmitter != null && oldEmitter != emitter) {
+            try {
+                // 关闭旧连接,防止超过最大连接数
+                oldEmitter.complete();
+            } catch (Exception ignore) {
+                // 旧连接已关闭时忽略
             }
-        });
-        emitter.onTimeout(() -> {
-            SseEmitter remove = emitters.remove(token);
-            if (remove != null) {
-                remove.complete();
-            }
-        });
-        emitter.onError((e) -> {
-            SseEmitter remove = emitters.remove(token);
-            if (remove != null) {
-                remove.complete();
-            }
-        });
+        }
 
         try {
             // 向客户端发送一条连接成功的事件

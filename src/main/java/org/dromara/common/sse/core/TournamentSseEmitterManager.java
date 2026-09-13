@@ -70,6 +70,15 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
     private final static Map<String, Set<String>> TERMINAL_SCREENS = new ConcurrentHashMap<>();
 
     /**
+     * 管理端多屏连接登记: terminalId -> 当前有效的 emitter。
+     * 用于重连时判断"旧连接的关闭回调"该不该清理登记:
+     * 同一 terminalId 重连时旧连接会被 complete,其回调若不做身份判断,
+     * 会把刚登记的新连接一起摘掉 → 客户端连接还在(只收心跳)但收不到业务消息,
+     * 表现为"断线后必须手动刷新"。
+     */
+    private final static Map<String, SseEmitter> TERMINAL_EMITTERS = new ConcurrentHashMap<>();
+
+    /**
      * 屏幕连接信息
      */
     public static class ScreenConnections {
@@ -207,31 +216,34 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
             ? connections.getManagers()
             : connections.getViewers();
 
-        // 关闭该终端已存在的连接
-        SseEmitter oldEmitter = emitters.remove(terminalId);
-        if (oldEmitter != null) {
-            oldEmitter.complete();
-        }
-
         // 创建新的 SSE 连接
         SseEmitter emitter = new SseEmitter(86400000L);
-        emitters.put(terminalId, emitter);
+        SseEmitter oldEmitter = emitters.put(terminalId, emitter);
 
-        // 设置连接回调
+        // 设置连接回调:按 emitter 身份移除,避免旧连接的回调误删新连接
         emitter.onCompletion(() -> {
-            emitters.remove(terminalId);
+            emitters.remove(terminalId, emitter);
             checkAndCleanupScreen(screenId);
         });
 
         emitter.onTimeout(() -> {
-            emitters.remove(terminalId);
+            emitters.remove(terminalId, emitter);
             checkAndCleanupScreen(screenId);
         });
 
         emitter.onError((e) -> {
-            emitters.remove(terminalId);
+            emitters.remove(terminalId, emitter);
             checkAndCleanupScreen(screenId);
         });
+
+        // 回调注册完成后再关闭该终端上的旧连接,旧连接回调不会影响新连接
+        if (oldEmitter != null && oldEmitter != emitter) {
+            try {
+                oldEmitter.complete();
+            } catch (Exception ignore) {
+                // 旧连接关闭失败忽略
+            }
+        }
 
         try {
             // 向客户端发送连接成功事件
@@ -265,6 +277,15 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
 
         SseEmitter emitter = new SseEmitter(86400000L);
         TERMINAL_SCREENS.put(terminalId, new HashSet<>(ids));
+        // 先登记新连接并挂好回调,再去替换旧连接:旧连接的关闭回调会因身份不符被忽略
+        SseEmitter previous = TERMINAL_EMITTERS.put(terminalId, emitter);
+        if (previous != null && previous != emitter) {
+            try {
+                previous.complete();
+            } catch (Exception ignore) {
+                // 旧连接关闭失败忽略
+            }
+        }
 
         for (String screenId : ids) {
             ScreenConnections connections = SCREEN_EMITTERS.computeIfAbsent(screenId, k -> new ScreenConnections());
@@ -278,20 +299,27 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
             }
         }
 
-        emitter.onCompletion(() -> removeTerminal(terminalId));
-        emitter.onTimeout(() -> removeTerminal(terminalId));
-        emitter.onError(e -> removeTerminal(terminalId));
+        emitter.onCompletion(() -> removeTerminal(terminalId, emitter));
+        emitter.onTimeout(() -> removeTerminal(terminalId, emitter));
+        emitter.onError(e -> removeTerminal(terminalId, emitter));
 
         try {
             emitter.send(SseEmitter.event().comment("connected"));
         } catch (IOException e) {
-            removeTerminal(terminalId);
+            removeTerminal(terminalId, emitter);
         }
         return emitter;
     }
 
-    /** 终端连接关闭:从该终端登记的所有屏幕中移除 */
-    private void removeTerminal(String terminalId) {
+    /**
+     * 终端连接关闭:从该终端登记的所有屏幕中移除。
+     * 仅当登记的还是这个 emitter 时才清理——重连时旧连接的回调不能把新连接摘掉。
+     */
+    private void removeTerminal(String terminalId, SseEmitter emitter) {
+        if (TERMINAL_EMITTERS.get(terminalId) != emitter) {
+            return;
+        }
+        TERMINAL_EMITTERS.remove(terminalId);
         Set<String> screenIds = TERMINAL_SCREENS.remove(terminalId);
         if (screenIds == null) {
             return;
@@ -299,7 +327,7 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         for (String screenId : screenIds) {
             ScreenConnections connections = SCREEN_EMITTERS.get(screenId);
             if (connections != null) {
-                connections.getManagers().remove(terminalId);
+                connections.getManagers().remove(terminalId, emitter);
                 checkAndCleanupScreen(screenId);
             }
         }
@@ -606,10 +634,10 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
 
         SCREEN_EMITTERS.forEach((screenId, connections) -> {
             // 检查管理端连接
-            checkAndSendHeartbeat(connections.getManagers());
+            checkAndSendHeartbeat(screenId, connections.getManagers());
 
             // 检查浏览端连接
-            checkAndSendHeartbeat(connections.getViewers());
+            checkAndSendHeartbeat(screenId, connections.getViewers());
 
             // 如果没有任何连接，标记移除
             if (connections.isEmpty()) {
@@ -654,11 +682,15 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
     /**
      * 检查并发送心跳
      */
-    private void checkAndSendHeartbeat(Map<String, SseEmitter> emitters) {
+    private void checkAndSendHeartbeat(String screenId, Map<String, SseEmitter> emitters) {
         if (MapUtil.isEmpty(emitters)) {
             return;
         }
         emitters.entrySet().removeIf(entry -> !sendHeartbeat(entry.getValue()));
+        // 还有连接在线说明屏幕仍在使用:刷新活跃时间,避免长时间不重连被 30 分钟超时注销
+        if (MapUtil.isNotEmpty(emitters)) {
+            updateScreenActivity(screenId);
+        }
     }
 
     // ========== 分布式消息发送相关方法 ==========

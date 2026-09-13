@@ -356,11 +356,20 @@ watch(
   () => startObserve()
 );
 
+// 赛事切换时必须重订 SSE:否则订阅还挂在旧赛事的连接上,页面要手动刷新才更新
 watch(
-  () => [props.stageId, props.tournamentId],
-  () => {
+  () => props.tournamentId,
+  (newTid, oldTid) => {
+    if (oldTid !== newTid) {
+      unsubscribeTournamentEvents(oldTid, handleTournamentEvent);
+      subscribeTournamentEvents(newTid, handleTournamentEvent);
+    }
     loadData();
   }
+);
+watch(
+  () => props.stageId,
+  () => loadData()
 );
 
 /** 事件回调:重连补偿(null)或事件属于本赛段时才刷新 */

@@ -56,6 +56,18 @@ const reconnectIfUnhealthy = (conn: SseChannelConn) => {
   reconnect(conn, true);
 };
 
+/** 计划一次开连接(去重):delay 毫秒后调用 open,期间其它重连请求会被忽略 */
+const scheduleOpen = (conn: SseChannelConn, delay: number) => {
+  if (conn.closed) return;
+  if (conn.retryTimer) {
+    clearTimeout(conn.retryTimer);
+  }
+  conn.retryTimer = setTimeout(() => {
+    conn.retryTimer = null;
+    open(conn);
+  }, delay);
+};
+
 /** 关闭旧连接并按(可选重置)退避策略重开;immediate=true 时立即重连并重置退避 */
 const reconnect = (conn: SseChannelConn, immediate = false) => {
   if (conn.closed) return;
@@ -67,11 +79,8 @@ const reconnect = (conn: SseChannelConn, immediate = false) => {
   if (immediate) {
     conn.retryDelay = 1000;
   }
-  if (conn.retryTimer) {
-    clearTimeout(conn.retryTimer);
-  }
   const jitter = Math.floor(Math.random() * 1000);
-  conn.retryTimer = setTimeout(() => open(conn), immediate ? 0 : conn.retryDelay + jitter);
+  scheduleOpen(conn, immediate ? 0 : conn.retryDelay + jitter);
   if (!immediate) {
     conn.retryDelay = Math.min(conn.retryDelay * 2, MAX_RETRY_DELAY);
   }
@@ -85,12 +94,32 @@ const ensureAlive = (conn: SseChannelConn) => {
 
 const open = (conn: SseChannelConn) => {
   if (conn.closed) return;
+  let url = '';
+  try {
+    url = conn.buildUrl() || '';
+  } catch {
+    url = '';
+  }
+  if (!url) {
+    // 订阅方暂时给不出地址(如屏幕控制通道刚订阅、屏幕列表还没写入)时稍后重试;
+    // 直接 new EventSource('') 会把当前页面地址当成 SSE 请求,产生一次无意义的失败连接
+    scheduleOpen(conn, 500);
+    return;
+  }
   try {
     conn.es?.close();
   } catch {
     // 忽略关闭旧连接异常
   }
-  const es = new EventSource(conn.buildUrl());
+  let es: EventSource;
+  try {
+    es = new EventSource(url);
+  } catch {
+    // URL 非法等同步异常:按退避重连,不让整个通道挂掉
+    scheduleOpen(conn, conn.retryDelay);
+    conn.retryDelay = Math.min(conn.retryDelay * 2, MAX_RETRY_DELAY);
+    return;
+  }
   conn.es = es;
 
   // 心跳:仅更新存活时间,不触发业务刷新(命名事件不进 onmessage)

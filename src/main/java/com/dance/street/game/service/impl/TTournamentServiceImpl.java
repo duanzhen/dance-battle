@@ -56,6 +56,7 @@ import java.util.Collection;
 import java.util.Objects;
 
 import tools.jackson.databind.ObjectMapper;
+import com.dance.street.game.engine.common.SnowflakeJson;
 
 /**
  * 赛事主Service业务层处理
@@ -551,17 +552,19 @@ public class TTournamentServiceImpl implements ITTournamentService {
         for (int i = 0; i < circles; i++) {
             quotas.add(base + (i < rem ? 1 : 0));
         }
-        List<List<Long>> circleRefs = new ArrayList<>();
+        // 用字符串写 ID:雪花 ID 超出 JS 安全整数范围,写成 JSON 数字会在前端 JSON.parse 时被四舍五入,
+        // 导致圈配置里的裁判 ID 匹配不上裁判列表(页面显示成 ID 而不是裁判名)。后端按 Long 解析不受影响。
+        List<List<String>> circleRefs = new ArrayList<>();
         for (int i = 0; i < circles; i++) {
             circleRefs.add(new ArrayList<>());
         }
         if (refereeIds != null) {
             for (int i = 0; i < refereeIds.size(); i++) {
-                circleRefs.get(i % circles).add(refereeIds.get(i));
+                circleRefs.get(i % circles).add(String.valueOf(refereeIds.get(i)));
             }
         }
         try {
-            ObjectMapper mapper = new ObjectMapper();
+            ObjectMapper mapper = SnowflakeJson.mapper();
             @SuppressWarnings("unchecked")
             Map<String, Object> raw = mapper.readValue(audition.getRuleConfig(), Map.class);
             if (raw == null) {

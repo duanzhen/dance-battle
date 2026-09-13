@@ -215,7 +215,8 @@ const saveConfig = async () => {
   try {
     loading.value = true;
     await updateTournament({
-      id: Number(tournamentId.value),
+      // 雪花 ID 超过 JS 安全整数,必须原样传字符串,Number() 会四舍五入成另一个 ID
+      id: tournamentId.value,
       name: matchInfo.value.title,
       status: matchInfo.value.stats.progress === 0 ? 0 : matchInfo.value.stats.progress === 50 ? 1 : 2,
       remark: ''

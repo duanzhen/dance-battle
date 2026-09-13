@@ -85,8 +85,8 @@
             <!-- 首轮配对方式:创建配置的一部分,INIT 只读展示 -->
             <div class="mt-3 pt-3 border-t border-neutral-800 flex items-center justify-between">
               <div>
-                <div class="text-xs text-neutral-500">首轮配对方式</div>
-                <div class="text-[10px] text-neutral-600 mt-0.5">{{ pairingHint }}</div>
+                <div class="text-xs text-neutral-500">配对方式</div>
+                <!-- <div class="text-[10px] text-neutral-600 mt-0.5">{{ pairingHint }}</div> -->
               </div>
               <div class="text-sm font-bold text-amber-500">{{ pairingLabel }}</div>
             </div>
@@ -384,7 +384,7 @@ const defaultPairing = computed(() => (props.prevStageMode === 'AUDITION' || pro
 // 生效配对方式:显式配置优先,未配置用默认
 const effectivePairingMode = computed(() => config.value.pairingMode || defaultPairing.value);
 
-const pairingLabel = computed(() => (effectivePairingMode.value === 'SEED' ? '种子交叉(头尾)' : '顺序配对'));
+const pairingLabel = computed(() => (effectivePairingMode.value === 'SEED' ? '头尾交叉' : '顺序配对'));
 
 const pairingHint = computed(() => {
   if (props.prevStageMode === 'AUDITION' || props.prevStageMode === 'RANK') {

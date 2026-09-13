@@ -18,7 +18,7 @@ import java.util.Map;
  */
 public final class RuleConfigParser {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = SnowflakeJson.mapper();
 
     private RuleConfigParser() {
     }

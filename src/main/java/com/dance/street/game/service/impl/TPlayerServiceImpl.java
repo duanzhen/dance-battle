@@ -28,6 +28,7 @@ import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.SnowflakeJson;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.service.ITPlayerService;
 import com.dance.street.game.service.ITCompetitorService;
@@ -58,7 +59,7 @@ import tools.jackson.databind.ObjectMapper;
 public class TPlayerServiceImpl implements ITPlayerService {
 
     /** tags 列的校验/序列化用独立 Jackson(不依赖 Spring 上下文),与 RuleConfigParser 同一套路 */
-    private static final ObjectMapper TAG_MAPPER = new ObjectMapper();
+    private static final ObjectMapper TAG_MAPPER = SnowflakeJson.mapper();
 
     private final TPlayerMapper baseMapper;
     private final ITCompetitorService competitorService;

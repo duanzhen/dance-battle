@@ -18,6 +18,7 @@ import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.ParticipantResultVo;
 import com.dance.street.game.engine.common.PromotionTarget;
+import com.dance.street.game.engine.common.SnowflakeJson;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.ScoringConfig;
@@ -74,7 +75,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final ScoringEngine scoringEngine = new ScoringEngine();
-    private static final tools.jackson.databind.ObjectMapper RESULT_MAPPER = new tools.jackson.databind.ObjectMapper();
+    /** 待公布结果 JSON:内部配置读写统一走雪花 ID 安全 mapper */
+    private static final tools.jackson.databind.ObjectMapper RESULT_MAPPER = SnowflakeJson.mapper();
 
     @Override
     @Transactional(rollbackFor = Exception.class)

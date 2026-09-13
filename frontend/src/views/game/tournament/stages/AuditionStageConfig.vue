@@ -348,16 +348,21 @@ const circlePlayerText = (i: number) => {
   return n == null ? '按实际签到' : `${n} 人`;
 };
 
+/** 裁判 ID -> 裁判名 */
+const refereeNameById = computed(() => {
+  const map: Record<string, string> = {};
+  referees.value.forEach((r) => {
+    map[String(r.id)] = r.name;
+  });
+  return map;
+});
+
 const circleRefereeText = (i: number) => {
   const actual = actualCircleReferees.value[i];
   if (actual) return actual;
   const ids: any[] = config.value.circleRefereeIds?.[i] || [];
   if (!ids.length) return '未指定';
-  const nameById: Record<string, string> = {};
-  referees.value.forEach((r) => {
-    nameById[String(r.id)] = r.name;
-  });
-  return ids.map((id: any) => nameById[String(id)] || String(id)).join(' / ');
+  return ids.map((id: any) => refereeNameById.value[String(id)] || String(id)).join(' / ');
 };
 
 const stageNameOf = (id: string | number | null | undefined): string =>

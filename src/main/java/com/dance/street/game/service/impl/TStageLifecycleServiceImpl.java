@@ -10,6 +10,7 @@ import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.core.utils.StringUtils;
 import com.dance.street.game.excel.ExcelUtil;
 import com.dance.street.game.engine.common.PairingModeResolver;
+import com.dance.street.game.engine.common.SnowflakeJson;
 import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TCompetitorMember;
@@ -1597,7 +1598,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             return;
         }
         try {
-            tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+            tools.jackson.databind.ObjectMapper mapper = SnowflakeJson.mapper();
             @SuppressWarnings("unchecked")
             Map<String, Object> raw = mapper.readValue(stage.getRuleConfig(), Map.class);
             raw.put("randomSplit", randomSplit);

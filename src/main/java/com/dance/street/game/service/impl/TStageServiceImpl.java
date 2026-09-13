@@ -30,6 +30,7 @@ import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.RuleConfigHolder;
+import com.dance.street.game.engine.common.SnowflakeJson;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.RosterConstants;
@@ -341,7 +342,7 @@ public class TStageServiceImpl implements ITStageService {
             return;
         }
         try {
-            ObjectMapper mapper = new ObjectMapper();
+            ObjectMapper mapper = SnowflakeJson.mapper();
             @SuppressWarnings("unchecked")
             Map<String, Object> rc = mapper.readValue(stage.getRuleConfig(), Map.class);
             if (rc == null) {
@@ -667,7 +668,7 @@ public class TStageServiceImpl implements ITStageService {
         if (widgets.isEmpty()) {
             return;
         }
-        ObjectMapper mapper = new ObjectMapper();
+        ObjectMapper mapper = SnowflakeJson.mapper();
         for (TVisWidget w : widgets) {
             if (StringUtils.isBlank(w.getDataConfig())) {
                 continue;

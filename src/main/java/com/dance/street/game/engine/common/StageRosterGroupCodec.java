@@ -18,7 +18,7 @@ import java.util.Map;
  */
 public final class StageRosterGroupCodec {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = SnowflakeJson.mapper();
 
     private StageRosterGroupCodec() {
     }

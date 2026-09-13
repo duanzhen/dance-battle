@@ -48,4 +48,3 @@ home
 docker/native/game
 # compose 的 .env(由 docker/.env.example 复制而来,含密码,勿提交)
 .env
-docker/jar/app.jar

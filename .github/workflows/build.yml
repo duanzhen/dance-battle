@@ -7,21 +7,62 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 两个镜像各一个 job,互不依赖、并行执行:
+#   jar-image    走根目录 Dockerfile(容器内自己 mvn package),与本地
+#                docker compose up --build、install.sh 完全同一条构建路径
+#   native-image 先编出 native 可执行文件,再装进不带 JRE 的最小镜像
+# 两个 job 都只产出镜像,不再上传 jar / 可执行文件作为 Actions artifact。
 jobs:
-  # 一次编译 → 两个镜像。
-  #
-  # 关键点:jar 和 native 可执行文件由**同一次** mvn -Pnative package 产出
-  # (native profile 本来就会执行 jar + repackage),之后两个镜像只做 COPY。
-  # 以前 jar 被编两遍:CI 里一遍,Docker 构建镜像时在容器内又跑一遍 maven。
-  #
-  # 产物只有两个镜像:
-  #   ghcr.io/<repo>:<tag>          jar 镜像(JRE 21)
-  #   ghcr.io/<repo>:<tag>-native   native 镜像(不带 JRE)
-  # 不再上传 jar / 可执行文件本身作为 Actions artifact。
-  images:
-    name: Build JAR + Native, Push Images
+  jar-image:
+    name: Jar Image (root Dockerfile)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # PR 上只构建不推送:用来验证根 Dockerfile 本身没坏
+      - name: Build & Push Jar Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=jar
+          cache-to: type=gha,mode=max,scope=jar
+
+  native-image:
+    name: Native Image
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # native 编译约 30-60 分钟,只在主干/标签/手动触发时做,PR 上跳过
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: write
@@ -35,10 +76,6 @@ jobs:
         with:
           node-version: 22
 
-      # 一个 JDK 同时构建 jar 与 native-image:
-      # pom 生效的是 maven.compiler.release=21,用 GraalVM 25 编出的字节码仍是 Java 21
-      # (可跑在 JRE 21 上,与镜像运行阶段一致),不需要再装一个 temurin 21。
-      # cache: maven 缓存 ~/.m2。
       - name: Setup GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
@@ -47,69 +84,33 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: 'maven'
 
-      - name: Build JAR (pull request only)
-        if: github.event_name == 'pull_request'
-        run: mvn -B -Dmaven.test.skip=true package
-
       # 小内存/小体积优化(目标 256MB 容器):
       #   -Dnative.optimize=s         按体积优化代码区,产物和 RSS 更小
       #   -Dnative.maxHeapSize=96m    限制运行期堆上限,避免按物理内存 80% 膨胀
       #   -Dnative.activeProcessors=2 限制线程池/Netty 按 CPU 扩池,减少 native 内存
       # 容器内存更大时可用 -Dnative.maxHeapSize=192m -Dnative.activeProcessors=4 覆盖
-      # 这一次调用同时产出 target/*.jar 与 target/game
-      - name: Build JAR + Native Image
-        if: github.event_name != 'pull_request'
+      - name: Build Native Executable
         run: mvn -B -Pnative -Dmaven.test.skip=true -Dnative.optimize=s -Dnative.maxHeapSize=96m -Dnative.activeProcessors=2 package
+
+      # native 镜像的构建上下文就是这个目录,只放可执行文件本身
+      - name: Stage Build Context
+        run: |
+          mkdir -p docker/native
+          cp target/game docker/native/game
+          chmod +x docker/native/game
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ---------- 镜像 1/2:jar 镜像(只 COPY 上面编好的 jar) ----------
-      - name: Stage JAR Build Context
-        run: |
-          mkdir -p docker/jar
-          cp target/game-0.0.1-SNAPSHOT.jar docker/jar/app.jar
-
-      - name: Extract metadata (jar)
-        id: meta-jar
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build & Push JAR Image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./docker/jar
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-jar.outputs.tags }}
-          labels: ${{ steps.meta-jar.outputs.labels }}
-          cache-from: type=gha,scope=jar
-          cache-to: type=gha,mode=max,scope=jar
-
-      # ---------- 镜像 2/2:native 镜像(只 COPY 上面编好的可执行文件) ----------
-      - name: Stage Native Build Context
-        if: github.event_name != 'pull_request'
-        run: |
-          mkdir -p docker/native
-          cp target/game docker/native/game
-          chmod +x docker/native/game
-
-      - name: Extract metadata (native)
-        if: github.event_name != 'pull_request'
-        id: meta-native
+      - name: Extract metadata
+        id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
@@ -123,12 +124,11 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build & Push Native Image
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: ./docker/native
           push: true
-          tags: ${{ steps.meta-native.outputs.tags }}
-          labels: ${{ steps.meta-native.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=native
           cache-to: type=gha,mode=max,scope=native

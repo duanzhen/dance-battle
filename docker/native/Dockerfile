@@ -1,11 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# native 可执行文件的运行镜像(与根目录 Dockerfile 的 jar 镜像并存)。
-#
-# 和 jar 镜像的区别:
-#   - 不需要 JRE:进程就是编译好的本地可执行文件,启动更快、内存更省;
-#   - 形态在构建期就裁剪为单机(standalone):SQLite + 进程内 SSE,不支持 Redis 多实例联动;
-#   - 只支持 linux/amd64:产物来自 CI 的 ubuntu-latest(x86_64)。
+# native 镜像(预构建产物版),CI 用。
 #
 # 构建上下文就是这个目录,因为根目录 .dockerignore 排除了 target/,
 # 而 native 产物必须进上下文。本地构建:

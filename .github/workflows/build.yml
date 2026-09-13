@@ -1,4 +1,4 @@
-name: Build & Docker
+name: Build & Push Images
 
 on:
   push:
@@ -8,16 +8,23 @@ on:
   workflow_dispatch:
 
 jobs:
-  # JAR 与 native 合并为一个 job。
-  # 原先拆成两个 job 时,两者都要 Setup Node + Setup JDK + mvn package:
-  # Maven 依赖要下两份,前端(npm install + vite build)也要各构建一次,纯属重复。
-  # 合并后共用同一个工作区、同一份 ~/.m2 缓存、同一次前端构建;
-  # native profile 本身仍会执行 jar + repackage,所以主干上一次 mvn 调用就同时产出两个产物。
-  # 本地验证: JAVA_HOME 指向 GraalVM JDK 25 时 mvn -Pnative package 产出 target/game 与 target/*.jar
-  build:
-    name: Build
+  # 一次编译 → 两个镜像。
+  #
+  # 关键点:jar 和 native 可执行文件由**同一次** mvn -Pnative package 产出
+  # (native profile 本来就会执行 jar + repackage),之后两个镜像只做 COPY。
+  # 以前 jar 被编两遍:CI 里一遍,Docker 构建镜像时在容器内又跑一遍 maven。
+  #
+  # 产物只有两个镜像:
+  #   ghcr.io/<repo>:<tag>          jar 镜像(JRE 21)
+  #   ghcr.io/<repo>:<tag>-native   native 镜像(不带 JRE)
+  # 不再上传 jar / 可执行文件本身作为 Actions artifact。
+  images:
+    name: Build JAR + Native, Push Images
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,10 +35,10 @@ jobs:
         with:
           node-version: 22
 
-      # 一个 JDK 同时构建 JAR 与 native-image:
+      # 一个 JDK 同时构建 jar 与 native-image:
       # pom 生效的是 maven.compiler.release=21,用 GraalVM 25 编出的字节码仍是 Java 21
-      # (可跑在 JRE 21 上,与 Dockerfile 运行阶段一致),因此不需要再装一个 temurin 21。
-      # cache: maven 缓存 ~/.m2,JAR 与 native 两个阶段共用同一份依赖。
+      # (可跑在 JRE 21 上,与镜像运行阶段一致),不需要再装一个 temurin 21。
+      # cache: maven 缓存 ~/.m2。
       - name: Setup GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
@@ -40,7 +47,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: 'maven'
 
-      # PR 上只出 JAR:native 编译约 30-60 分钟,没必要为每次 PR 付这个成本
       - name: Build JAR (pull request only)
         if: github.event_name == 'pull_request'
         run: mvn -B -Dmaven.test.skip=true package
@@ -50,35 +56,10 @@ jobs:
       #   -Dnative.maxHeapSize=96m    限制运行期堆上限,避免按物理内存 80% 膨胀
       #   -Dnative.activeProcessors=2 限制线程池/Netty 按 CPU 扩池,减少 native 内存
       # 容器内存更大时可用 -Dnative.maxHeapSize=192m -Dnative.activeProcessors=4 覆盖
-      # (native profile 也会执行 jar + repackage,所以这一次调用同时产出 JAR 与 native 可执行文件)
+      # 这一次调用同时产出 target/*.jar 与 target/game
       - name: Build JAR + Native Image
         if: github.event_name != 'pull_request'
         run: mvn -B -Pnative -Dmaven.test.skip=true -Dnative.optimize=s -Dnative.maxHeapSize=96m -Dnative.activeProcessors=2 package
-
-      - name: Upload JAR Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: game-jar
-          path: target/game-0.0.1-SNAPSHOT.jar
-          retention-days: 14
-
-      - name: Upload Native Binary
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: game-native-linux
-          path: target/game
-          retention-days: 14
-
-  docker:
-    name: Build & Push Docker Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -91,8 +72,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
+      # ---------- 镜像 1/2:jar 镜像(只 COPY 上面编好的 jar) ----------
+      - name: Stage JAR Build Context
+        run: |
+          mkdir -p docker/jar
+          cp target/game-0.0.1-SNAPSHOT.jar docker/jar/app.jar
+
+      - name: Extract metadata (jar)
+        id: meta-jar
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
@@ -102,54 +89,27 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build & Push Image
+      - name: Build & Push JAR Image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./docker/jar
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta-jar.outputs.tags }}
+          labels: ${{ steps.meta-jar.outputs.labels }}
+          cache-from: type=gha,scope=jar
+          cache-to: type=gha,mode=max,scope=jar
 
-  docker-native:
-    name: Build & Push Native Image
-    runs-on: ubuntu-latest
-    needs: build
-    # native 二进制只在非 PR 上产出,这里保持一致
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ---------- 镜像 2/2:native 镜像(只 COPY 上面编好的可执行文件) ----------
+      - name: Stage Native Build Context
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p docker/native
+          cp target/game docker/native/game
+          chmod +x docker/native/game
 
-      - name: Download Native Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: game-native-linux
-          path: docker/native
-
-      # artifact 往返可能丢掉可执行位(Docker COPY 会沿用上下文里的权限,必须先补回来)
-      - name: Make Binary Executable
-        run: chmod +x docker/native/game
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Image Locally
-        run: docker buildx build --load -t dance-game-native:ci ./docker/native
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
+      - name: Extract metadata (native)
+        if: github.event_name != 'pull_request'
+        id: meta-native
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
@@ -163,12 +123,12 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build & Push Native Image
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: ./docker/native
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # scope 与 jar 镜像的缓存分开,避免互相覆盖
+          tags: ${{ steps.meta-native.outputs.tags }}
+          labels: ${{ steps.meta-native.outputs.labels }}
           cache-from: type=gha,scope=native
           cache-to: type=gha,mode=max,scope=native

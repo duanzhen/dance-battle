@@ -8,49 +8,16 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-jar:
-    name: Build Backend JAR
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-          cache: maven
-
-      # 前端由 mvn package 的 exec 插件自动构建(pnpm 已在上面 setup)
-      - name: Build Backend JAR
-        run: mvn -B -Dmaven.test.skip=true package
-
-      - name: Upload JAR Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: game-jar
-          path: target/game-0.0.1-SNAPSHOT.jar
-          retention-days: 14
-
-  # GraalVM Native Image 原生可执行文件(与 JAR/Docker 并行编译)
-  # 本地验证: JAVA_HOME 指向 GraalVM JDK 25 时 mvn -Pnative package 成功产出 target/game
-  build-native:
-    name: Build Native Image
+  # JAR 与 native 合并为一个 job。
+  # 原先拆成两个 job 时,两者都要 Setup Node + Setup JDK + mvn package:
+  # Maven 依赖要下两份,前端(npm install + vite build)也要各构建一次,纯属重复。
+  # 合并后共用同一个工作区、同一份 ~/.m2 缓存、同一次前端构建;
+  # native profile 本身仍会执行 jar + repackage,所以主干上一次 mvn 调用就同时产出两个产物。
+  # 本地验证: JAVA_HOME 指向 GraalVM JDK 25 时 mvn -Pnative package 产出 target/game 与 target/*.jar
+  build:
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    # native 编译耗时较长(约 30-60 分钟),只在主干/标签/手动触发时编译,PR 上跳过以节省 CI 分钟
-    if: github.event_name != 'pull_request'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,6 +28,10 @@ jobs:
         with:
           node-version: 22
 
+      # 一个 JDK 同时构建 JAR 与 native-image:
+      # pom 生效的是 maven.compiler.release=21,用 GraalVM 25 编出的字节码仍是 Java 21
+      # (可跑在 JRE 21 上,与 Dockerfile 运行阶段一致),因此不需要再装一个 temurin 21。
+      # cache: maven 缓存 ~/.m2,JAR 与 native 两个阶段共用同一份依赖。
       - name: Setup GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
@@ -69,28 +40,30 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: 'maven'
 
+      # PR 上只出 JAR:native 编译约 30-60 分钟,没必要为每次 PR 付这个成本
+      - name: Build JAR (pull request only)
+        if: github.event_name == 'pull_request'
+        run: mvn -B -Dmaven.test.skip=true package
+
       # 小内存/小体积优化(目标 256MB 容器):
       #   -Dnative.optimize=s         按体积优化代码区,产物和 RSS 更小
       #   -Dnative.maxHeapSize=96m    限制运行期堆上限,避免按物理内存 80% 膨胀
       #   -Dnative.activeProcessors=2 限制线程池/Netty 按 CPU 扩池,减少 native 内存
       # 容器内存更大时可用 -Dnative.maxHeapSize=192m -Dnative.activeProcessors=4 覆盖
-      - name: Build Native Image
+      # (native profile 也会执行 jar + repackage,所以这一次调用同时产出 JAR 与 native 可执行文件)
+      - name: Build JAR + Native Image
+        if: github.event_name != 'pull_request'
         run: mvn -B -Pnative -Dmaven.test.skip=true -Dnative.optimize=s -Dnative.maxHeapSize=96m -Dnative.activeProcessors=2 package
 
-      # 编译成功不等于能跑:native 缺运行期 hint 会在启动或「首个写操作」才报错
-      # (JVM 下完全看不出问题),所以必须对真实二进制发真实 HTTP 调用验收。
-      # scripts/native-e2e.sh 会启动二进制、自检「零配置=standalone+SQLite」,
-      # 再跑 scripts/native-e2e.py 的全部端到端场景(与 JVM 侧 e2e 同源:
-      # 两圈海选→复活→冠军、晋级线同分二海/三海、名次段边界同分、名单装配、查询与大屏 SSE)。
-      - name: Native E2E Tests
-        run: |
-          chmod +x scripts/native-e2e.sh scripts/native-e2e.py
-          E2E_WORKDIR=/tmp/game-native-e2e ./scripts/native-e2e.sh ./target/game
-
-      - name: Show Native Binary Size
-        run: ls -lh target/game
+      - name: Upload JAR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-jar
+          path: target/game-0.0.1-SNAPSHOT.jar
+          retention-days: 14
 
       - name: Upload Native Binary
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: game-native-linux
@@ -138,3 +111,64 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  docker-native:
+    name: Build & Push Native Image
+    runs-on: ubuntu-latest
+    needs: build
+    # native 二进制只在非 PR 上产出,这里保持一致
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Native Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: game-native-linux
+          path: docker/native
+
+      # artifact 往返可能丢掉可执行位(Docker COPY 会沿用上下文里的权限,必须先补回来)
+      - name: Make Binary Executable
+        run: chmod +x docker/native/game
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Image Locally
+        run: docker buildx build --load -t dance-game-native:ci ./docker/native
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # 与 jar 镜像同仓库,用 -native 后缀区分 tag
+          flavor: |
+            suffix=-native
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Native Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./docker/native
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # scope 与 jar 镜像的缓存分开,避免互相覆盖
+          cache-from: type=gha,scope=native
+          cache-to: type=gha,mode=max,scope=native

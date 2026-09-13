@@ -2,6 +2,7 @@ package com.dance.street.game.service.impl;
 
 import org.dromara.common.core.utils.MapstructUtils;
 import org.dromara.common.core.utils.StringUtils;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -38,10 +39,12 @@ import com.dance.street.game.service.TournamentEventNotifier;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 选手自然人Service业务层处理
@@ -53,6 +56,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Service
 public class TPlayerServiceImpl implements ITPlayerService {
+
+    /** tags 列的校验/序列化用独立 Jackson(不依赖 Spring 上下文),与 RuleConfigParser 同一套路 */
+    private static final ObjectMapper TAG_MAPPER = new ObjectMapper();
 
     private final TPlayerMapper baseMapper;
     private final ITCompetitorService competitorService;
@@ -540,11 +546,56 @@ public class TPlayerServiceImpl implements ITPlayerService {
             player.setTournamentId(tournamentId);
             player.setName(name.trim());
             player.setIdCard(vo.getIdCard());
-            player.setTags(vo.getTags());
+            player.setTags(normalizeTags(vo.getTags()));
             player.setRemark(vo.getRemark());
             baseMapper.insert(player);
             count++;
         }
         return count;
+    }
+
+    /**
+     * 规范化导入的「标签」列。
+     *
+     * <p>{@code t_player.tags} 在 MySQL 里是 json 列(存 {@code ["种子","GUEST"]}),而让填表人
+     * 在 Excel 里手写 JSON 太别扭,所以两种写法都接受:</p>
+     * <ul>
+     *   <li>合法 JSON 数组 → 原样保留;</li>
+     *   <li>否则按 {@code ,}、{@code ，}、{@code ;}、{@code ；} 拆开、去空白后序列化成 JSON 数组;</li>
+     *   <li>拆不出任何标签(含 null/空白)→ {@code null},而不是空串(空串同样不是合法 JSON)。</li>
+     * </ul>
+     *
+     * <p>判断「是合法 JSON」必须用严格解析:Hutool 的 {@code JSONUtil} 是宽松解析,
+     * 会把 {@code [种子]} 也判定为合法数组,原样写库后 MySQL 依旧报 Invalid JSON text。</p>
+     */
+    static String normalizeTags(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String text = raw.trim();
+        if (text.startsWith("[")) {
+            try {
+                if (TAG_MAPPER.readTree(text).isArray()) {
+                    return text;
+                }
+            } catch (Exception ignored) {
+                // 不是合法 JSON 数组(如 [种子]):退化为按分隔符拆,避免写库直接 500
+            }
+        }
+        List<String> tags = new ArrayList<>();
+        for (String part : text.split("[,，;；]")) {
+            String tag = part.trim();
+            if (!tag.isEmpty()) {
+                tags.add(tag);
+            }
+        }
+        if (tags.isEmpty()) {
+            return null;
+        }
+        try {
+            return TAG_MAPPER.writeValueAsString(tags);
+        } catch (Exception e) {
+            throw new ServiceException("标签序列化失败: {}", e.getMessage());
+        }
     }
 }

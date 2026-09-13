@@ -6,3 +6,4 @@ frontend/dist
 **/.DS_Store
 *.log
 upload
+docker/native/game

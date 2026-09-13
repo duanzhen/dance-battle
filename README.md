@@ -33,8 +33,8 @@ dance-battle/
 ├── src/main/resources               配置文件 + mapper XML
 ├── frontend/                        Vue3 前端源码
 ├── sql/game_db.sql                  数据库初始化脚本(13 张业务表)
-├── Dockerfile / docker-compose.yml  容器化部署
-├── .env.example                     环境变量示例
+├── Dockerfile                       镜像定义
+├── docker/                          容器编排(compose + .env.example)
 └── .github/workflows/build.yml      CI:构建 jar + 推送 Docker 镜像
 ```
 
@@ -95,8 +95,8 @@ DEPLOY_MODE=distributed MYSQL_HOST=10.0.0.5 REDIS_HOST=10.0.0.6 ./target/game
 
 ```bash
 cd dance-game
-cp .env.example .env     # 按需修改密码
-docker compose up -d --build
+cp docker/.env.example docker/.env     # 按需修改密码(compose 从 compose 文件所在目录读 .env)
+docker compose -f docker/docker-compose.yml up -d --build
 ```
 
 启动后访问 <http://localhost>（默认端口 80，可通过 `SERVER_PORT` 环境变量修改）。Compose 会：
@@ -186,7 +186,7 @@ JWT 密钥默认写入 `/data/jwt`（与 SQLite 数据库同卷），一个 `app
 一条命令起单机并持久化（命名卷，容器删除重建不丢数据）：
 
 ```bash
-docker compose -f docker-compose.standalone.yml up -d --build
+docker compose -f docker/docker-compose.standalone.yml up -d --build
 ```
 
 ## 环境变量

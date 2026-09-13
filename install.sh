@@ -127,8 +127,10 @@ bootstrap_project() {
     local dir="$1"
 
     # 已在项目目录内直接运行(本地 clone / 源码目录)
-    if [ -f docker-compose.yml ] && [ -f .env.example ]; then
-        PROJECT_DIR="$(pwd)"
+    # 容器化文件统一放在 docker/ 子目录,compose 与 .env 都在那里
+    # (compose 从 compose 文件所在目录读 .env,相对路径也以该目录为基准)
+    if [ -f docker/docker-compose.yml ] && [ -f docker/.env.example ]; then
+        PROJECT_DIR="$(pwd)/docker"
         info "已在项目目录内运行: ${PROJECT_DIR}"
         return 0
     fi
@@ -145,7 +147,9 @@ bootstrap_project() {
     mkdir -p "$dir"
 
     cat > "$dir/docker-compose.yml" <<'COMPOSE_EOF'
-# 由 install.sh 自动生成, 与仓库 docker-compose.yml 保持同步
+# 由 install.sh 自动生成, 与仓库 docker/docker-compose.yml 保持同步
+# 项目名固定, 避免命名卷随部署目录名漂移(否则升级后会新建空卷)
+name: dance-game
 services:
   mysql:
     image: ${MYSQL_IMAGE:-mysql:8.0}
@@ -184,6 +188,7 @@ services:
 
   app:
     build:
+      # 源码按仓库布局拷进部署目录, Dockerfile 在其根目录, 上下文就是部署目录本身
       context: .
       dockerfile: Dockerfile
     image: ${APP_IMAGE:-dance-game-app:latest}
@@ -199,11 +204,23 @@ services:
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DATABASE: game_db
+      # 固定 root:编排里的 mysql 服务只创建 root 账号,改成别的名字会连不上
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # 部署模式:auto(默认,探测失败自动降级)/ standalone(强制 SQLite + 本地 SSE)/
+      # distributed(强制 MySQL + Redis,连不上直接启动失败)。依赖已由 depends_on + healthcheck 保证
+      DEPLOY_MODE: ${DEPLOY_MODE:-auto}
+      # 数据源模式(优先级高于 DEPLOY_MODE):auto(默认)/ sqlite / mysql
+      DB_TYPE: ${DB_TYPE:-auto}
+      # 数据源细粒度开关与地址:这些变量 compose 都会转发给容器,可用 .env 覆盖;
+      # 不设时用这里的默认值(DB_URL 的默认与镜像内默认一致,指向上面的 mysql 服务)
+      DB_URL: "${DB_URL:-jdbc:mysql://mysql:3306/game_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}"
+      DB_FALLBACK_SQLITE: ${DB_FALLBACK_SQLITE:-true}
+      SQLITE_FALLBACK_URL: ${SQLITE_FALLBACK_URL:-jdbc:sqlite:/data/db/game.db}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
       LOGIN_USERNAME: ${LOGIN_USERNAME:-admin}
       LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
       # 服务端口:默认 80,修改后同时生效于容器内监听端口与宿主机映射
@@ -228,11 +245,34 @@ COMPOSE_EOF
     cat > "$dir/.env" <<'ENV_EOF'
 # 由 install.sh 自动生成, 按需修改
 
+# 部署模式(推荐显式声明, 避免启动时探测外部依赖):
+#   auto        默认, MySQL/Redis 连不上时自动降级为 SQLite/单机
+#   standalone  单机:直接使用 SQLite + 进程内 SSE, 跳过 MySQL/Redis 探测与降级
+#   distributed 多实例:强制 MySQL + Redis, 连不上直接启动失败
+DEPLOY_MODE=auto
+
+# 数据库类型(细粒度开关, 优先级高于 DEPLOY_MODE):
+#   auto   默认;sqlite 直连本地文件库并跳过 MySQL 探测;mysql 强制 MySQL 并禁用 SQLite 回退
+DB_TYPE=auto
+
 # MySQL root 密码(默认 password)
 MYSQL_PASSWORD=password
 
+# MySQL 未配置/连接失败时自动回退到 SQLite 文件库(仅在 DEPLOY_MODE=auto 且 DB_TYPE=auto 时生效)
+DB_FALLBACK_SQLITE=true
+# 显式 SQLite / 自动回退时使用的 SQLite 连接。
+# 注意:这是**容器内**路径,必须落在挂载卷 /data 下,否则数据不持久化(容器重建就丢)
+SQLITE_FALLBACK_URL=jdbc:sqlite:/data/db/game.db
+
+#
+# 想连接编排外的数据库时,覆盖 DB_URL:
+# DB_URL=jdbc:mysql://外部地址:3306/game_db?useSSL=false&serverTimezone=Asia/Shanghai
+
 # Redis 密码(默认无密码,留空即可)
 REDIS_PASSWORD=
+
+# Redis 开关:false 表示显式单机(SSE 本地广播、无分布式锁, 跳过连接探测)
+REDIS_ENABLED=true
 
 # 系统登录账号
 LOGIN_USERNAME=admin
@@ -260,7 +300,13 @@ ENV_EOF
 # 本地构建镜像前确保有完整源码(git clone -> tarball)
 ensure_source() {
     local dir="$PROJECT_DIR"
-    if [ -f "$dir/Dockerfile" ] && [ -f "$dir/pom.xml" ]; then
+
+    # 仓库内运行:源码就是 docker/ 的上一级(Dockerfile 在仓库根)
+    if [ -f "$dir/../pom.xml" ] && [ -f "$dir/../Dockerfile" ]; then
+        return 0
+    fi
+    # 部署目录里已下载过源码(仓库布局:根 pom.xml + 根 Dockerfile)
+    if [ -f "$dir/pom.xml" ] && [ -f "$dir/Dockerfile" ]; then
         return 0
     fi
 
@@ -268,30 +314,34 @@ ensure_source() {
     if ! command -v git >/dev/null 2>&1 && ! have_curl && ! have_wget; then
         die "需要 git / curl / wget 下载源码, 请先安装"
     fi
-    rm -rf "$dir" 2>/dev/null || true
+
+    # 先下到临时目录再拷进来:部署目录里已有生成的 docker-compose.yml 与 .env,
+    # 不能像以前那样先把 $dir 整个删掉
+    local tmp
+    tmp="$(mktemp -d)" || die "无法创建临时目录"
 
     # 方式 A: git clone
     if command -v git >/dev/null 2>&1; then
         info "通过 git 下载项目: ${REPO_URL} (分支 ${REPO_BRANCH})"
-        if git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$dir" >/dev/null 2>&1; then
-            info "源码下载完成"
-            return 0
+        if git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$tmp/src" >/dev/null 2>&1; then
+            if cp -R "$tmp/src/." "$dir/" >/dev/null 2>&1; then
+                rm -rf "$tmp"
+                info "源码下载完成"
+                return 0
+            fi
+            warn "源码拷贝到 ${dir} 失败"
         fi
         warn "git clone 失败, 尝试 tarball 下载..."
-        rm -rf "$dir" 2>/dev/null || true
     fi
 
     # 方式 B: tarball 下载并解压
-    local path tgz parent tmp extracted="" e
+    local path tgz extracted="" e
     path="$(repo_path "$REPO_URL")"
     if printf '%s' "$REPO_URL" | grep -q "gitee"; then
         tgz="${REPO_TARBALL_URL:-https://gitee.com/${path}/repository/archive/${REPO_BRANCH}.tar.gz}"
     else
         tgz="${REPO_TARBALL_URL:-https://codeload.github.com/${path}/tar.gz/refs/heads/${REPO_BRANCH}}"
     fi
-    parent="$(dirname "$dir")"
-    mkdir -p "$parent"
-    tmp="$(mktemp -d)" || die "无法创建临时目录"
     info "通过 tarball 下载项目: ${tgz}"
     if (cd "$tmp" && http_get "$tgz" | tar -xz) >/dev/null 2>&1; then
         for e in "$tmp"/*/; do
@@ -301,10 +351,12 @@ ensure_source() {
         done
     fi
     if [ -n "$extracted" ]; then
-        mv "$extracted" "$dir" || die "解压项目失败"
-        rm -rf "$tmp"
-        info "源码下载完成"
-        return 0
+        if cp -R "$extracted/." "$dir/" >/dev/null 2>&1; then
+            rm -rf "$tmp"
+            info "源码下载完成"
+            return 0
+        fi
+        warn "源码拷贝到 ${dir} 失败"
     fi
     rm -rf "$tmp" 2>/dev/null || true
     die "源码下载失败, 请手动执行: git clone ${REPO_URL} ${dir}"

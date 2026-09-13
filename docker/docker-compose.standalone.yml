@@ -1,14 +1,18 @@
 # 单机模式编排:一个容器跑全部(前端 + 后端),无需 MySQL/Redis,
 # 数据用命名卷持久化(容器删除重建不丢)。
 #
-# 用法: docker compose -f docker-compose.standalone.yml up -d --build
+# 用法: docker compose -f docker/docker-compose.standalone.yml up -d --build
+name: dance-game
+
 services:
   app:
     build:
-      context: .
+      # 上下文是仓库根(Dockerfile 就在根目录)
+      context: ..
       dockerfile: Dockerfile
     image: ${APP_IMAGE:-dance-game-app:standalone}
-    container_name: dance-game-app
+    # 与多实例编排(docker-compose.yml)的容器名区分,避免两个编排同时运行时冲突
+    container_name: dance-game-app-standalone
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
@@ -17,13 +21,15 @@ services:
       DEPLOY_MODE: ${DEPLOY_MODE:-standalone}
       DB_TYPE: ${DB_TYPE:-auto}
       # 单机模式使用的 SQLite 文件库(在 /data 命名卷内持久化)
-      SQLITE_FALLBACK_URL: "jdbc:sqlite:/data/db/game.db"
+      SQLITE_FALLBACK_URL: ${SQLITE_FALLBACK_URL:-jdbc:sqlite:/data/db/game.db}
+      # 单机形态本就无 Redis:显式关闭,跳过连接探测
+      REDIS_ENABLED: ${REDIS_ENABLED:-false}
       LOGIN_USERNAME: ${LOGIN_USERNAME:-admin}
       LOGIN_PASSWORD: ${LOGIN_PASSWORD:-123456}
       SERVER_PORT: ${SERVER_PORT:-80}
       # JWT 密钥:默认写入 /data/jwt(与 SQLite 同卷,持久化到 app-data),重启复用
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
-      JWT_SECRET_FILE: /data/jwt/dance-game-jwt-secret.key
+      JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/data/jwt/dance-game-jwt-secret.key}
       # 上传文件路径(统一放在 /data/upload)
       FILE_UPLOAD_PATH: /data/upload
     volumes:

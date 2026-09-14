@@ -176,7 +176,7 @@
                   GUEST
                 </span>
                 <span
-                  v-if="isGuest(competitor) && !props.isInitialized"
+                  v-if="isGuest(competitor) && canArrange"
                   class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-neutral-600/10 text-neutral-400 border border-neutral-600/30"
                 >
                   待排位
@@ -283,8 +283,12 @@ const withdrawingId = ref<string | number | null>(null);
 // 擂台赛:支持参赛选手弃权(弃权后不再参与排队,进行中作废并由下一位补位)
 const isArena = computed(() => props.stageMode === 'ARENA');
 
-// GUEST 可加入/可排位窗口:赛段未初始化且处于规划/未开始态(DRAFT/PENDING)
-const canArrange = computed(() => !props.isInitialized && (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING'));
+// GUEST 可加入/可排位窗口:赛段处于规划/未开始态(DRAFT/PENDING),且名单尚未被锁定。
+// 注意 is_initialized 只在"已经物化出参赛行"时才代表名单真的锁定过——
+// 历史数据里被创建流程提前置 1 的空赛段仍应可编排,否则连外卡都加不进去。
+const canArrange = computed(() =>
+  (props.stageStatus === 'DRAFT' || props.stageStatus === 'PENDING')
+  && (!props.isInitialized || competitors.value.length === 0));
 
 /** 号码牌数值(空/非数字排最后) */
 const numOf = (c: CompetitorVO) => {

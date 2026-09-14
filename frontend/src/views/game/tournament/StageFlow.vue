@@ -306,7 +306,7 @@ interface Stage {
   prevStageId: string | null; // 上一赛段ID
   nextStageId: string | null; // 下一赛段ID
   remark?: string; // 备注
-  isInitialized?: boolean; // 是否已完成初始化配置
+  isInitialized?: boolean; // 名单是否已锁定(已初始化/已排种子);空赛段不代表锁定
   tournamentId?: string; // 赛事ID
   incoming?: RosterVO[]; // 名单摘要(roster)
 }
@@ -550,8 +550,8 @@ const defaultConfigs: Record<StageMode, any> = {
 };
 
 const stageTypes = [
-  { mode: StageMode.KNOCKOUT, label: '淘汰赛', description: '单败淘汰制', icon: Trophy },
   { mode: StageMode.AUDITION, label: '海选赛', description: '海选晋级·人数不限', icon: Mic },
+  { mode: StageMode.KNOCKOUT, label: '淘汰赛', description: '单败淘汰制', icon: Trophy },
   { mode: StageMode.ARENA, label: '擂台赛', description: 'SEVEN TO SMOKE', icon: Target },
   { mode: StageMode.RANK, label: '排名赛', description: '多维度打分排名', icon: ListOrdered },
   { mode: StageMode.FREE_MATCH, label: '自由对抗', description: '手动加场·手动晋级', icon: Swords }
@@ -840,7 +840,9 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       teamCountEnd: config.advanceCount || config.advanceQuota || 0,
       status: status,
       ruleConfig: ruleConfig || JSON.stringify(config),
-      isInitialized: ruleConfig ? 1 : 0
+      // 不传 isInitialized:该字段表示"名单已锁定/已排种子",由后端在开赛/落圈时写入,
+      // 不属于赛段配置。新建赛段留空即按库默认 0,避免"填了配置"被误当成"名单已锁"。
+      isInitialized: undefined
     };
 
     // 只在值存在时才添加指针字段，避免传递 null
@@ -906,8 +908,9 @@ const handleStageUpdate = async (updatedStage: StageData) => {
       teamCountStart: updatedStage.teamCountStart,
       teamCountEnd: updatedStage.teamCountEnd,
       status: updatedStage.status,
-      ruleConfig: updatedStage.ruleConfig,
-      isInitialized: updatedStage.isInitialized ? 1 : 0
+      ruleConfig: updatedStage.ruleConfig
+      // 不回传 isInitialized:它由后端维护,前端本地值可能已过期,
+      // 写回会把别处(开赛/落圈)刚置上的"名单已锁定"抹掉。
     };
 
     // 只在值存在时才添加指针字段，避免传递 null

@@ -116,7 +116,7 @@
             <p v-if="editable" class="text-[11px] text-neutral-600 mt-2">
               圈只能增加不能减少；新增圈为空场次，已签到选手与已有圈不受影响
             </p>
-            <p v-if="editable && Number(localStage.isInitialized) === 1" class="text-[11px] text-amber-500/80 mt-1">
+            <p v-if="editable && hasGeneratedMatches" class="text-[11px] text-amber-500/80 mt-1">
               赛段已生成对阵：修改圈配置后请重新点击「开始赛段/生成对阵」以按新配置重排
             </p>
           </div>
@@ -213,7 +213,7 @@
               </div>
 
               <div v-if="targetOptions.length === 0" class="text-[11px] text-neutral-600">
-                暂无可承接赛段（下游赛段需处于规划中且未初始化）
+                暂无可承接赛段（下游赛段需处于规划中，且名单尚未确认/跳过）
               </div>
               <div v-else class="space-y-2">
                 <div
@@ -328,6 +328,8 @@ const editable = computed(() =>
 const referees = ref<{ id: string | number; name: string }[]>([]);
 const actualCircleReferees = ref<string[]>([]);
 const actualCirclePlayers = ref<(number | null)[]>([]);
+/** 本赛段是否已生成过对阵(决定"改圈后需重排"的提示,不能用 isInitialized 代替) */
+const hasGeneratedMatches = ref(false);
 
 interface ExitEntry {
   targetStageId: string | number;
@@ -368,7 +370,16 @@ const circleRefereeText = (i: number) => {
 const stageNameOf = (id: string | number | null | undefined): string =>
   stageOptions.value.find((s) => String(s.id) === String(id))?.name || (id == null ? '未指定' : '赛段 #' + id);
 
-/** 可选去向:沿 next 链位于本赛段之后,且仍为规划中未初始化 */
+/**
+ * 名单是否已被物化锁定(已确认带入或已跳过)。
+ * 只有这种情况下游赛段才不能再承接新的出口来源;单看 is_initialized 会误杀
+ * 历史数据里被创建流程提前置 1 的空赛段(它们既无对阵也无参赛方)。
+ */
+const rosterLocked = (s: StageData): boolean =>
+  Array.isArray((s as any).incoming)
+  && (s as any).incoming.some((r: any) => r?.state === 'CONFIRMED' || r?.state === 'SKIPPED');
+
+/** 可选去向:沿 next 链位于本赛段之后,且仍为规划中、名单未锁定的赛段 */
 const targetOptions = computed(() => {
   const list = stageOptions.value;
   if (!list.length) return [] as StageData[];
@@ -380,7 +391,7 @@ const targetOptions = computed(() => {
     visited.add(String(cur.nextStageId));
     const next = byId.get(String(cur.nextStageId));
     if (!next) break;
-    if ((next.status === 'DRAFT' || next.status === 'PENDING') && Number(next.isInitialized) !== 1) {
+    if ((next.status === 'DRAFT' || next.status === 'PENDING') && !rosterLocked(next)) {
       out.push(next);
     }
     cur = next;
@@ -665,6 +676,7 @@ const removeExit = async (e: ExitEntry) => {
 const loadActualCircleReferees = async () => {
   actualCircleReferees.value = [];
   actualCirclePlayers.value = [];
+  hasGeneratedMatches.value = false;
   const sid = props.stage?.id;
   if (sid == null || !/^\d+$/.test(String(sid))) return;
   try {
@@ -676,6 +688,7 @@ const loadActualCircleReferees = async () => {
     const matches = (matchResp?.data?.data || matchResp?.data || [])
       .slice()
       .sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0) || String(a.id).localeCompare(String(b.id)));
+    hasGeneratedMatches.value = matches.length > 0;
     const counts: (number | null)[] = await Promise.all(matches.map(async (m: any) => {
       try {
         const pResp: any = await listMatchParticipant({ matchId: m.id } as any);

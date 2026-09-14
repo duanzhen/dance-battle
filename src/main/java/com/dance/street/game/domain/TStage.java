@@ -103,7 +103,9 @@ public class TStage extends TenantEntity {
     private Long teamCountEnd;
 
     /**
-     * 是否完成初始化配置：0-否 1-是
+     * 名单是否已锁定(已初始化并排定种子位)：0-否 1-是。
+     * <p>由 {@code initialize()} 在开赛或首次落圈时写入,不是"配置填完了"的意思;
+     * 空赛段(无参赛行)即使该值为 1 也不算真的锁定,门禁会按实际物化情况判断。</p>
      */
     private Long isInitialized;
 

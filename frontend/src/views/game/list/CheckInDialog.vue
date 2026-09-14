@@ -559,10 +559,11 @@ const activeCompetitorNumbers = () =>
     .filter((n) => !Number.isNaN(n) && n > 0)
     .sort((a, b) => a - b);
 
-// 按号分圈:圈位由号码本身决定(第N号 → 第 ((N-1) mod 圈数)+1 圈),与后端一致,
-// 不依赖已签到人数/签到顺序,保证"先空圈、边签到边抽号"时各圈均分
+// 按号分圈:圈位由号码本身决定(第N号 → 第 ((N-1) mod 圈数)+1 圈),
+// 不依赖已签到人数/签到顺序,保证"先空圈、边签到边抽号"时各圈均分。
+// 单圈(圈数=1)也是显式配置的一个圈:恒为第 1 圈,同样要把目标圈传给后端。
 const circleIndexOfNumber = (num: number, circleCount: number) => {
-  if (circleCount <= 1 || !Number.isFinite(num) || num <= 0) return -1;
+  if (circleCount < 1 || !Number.isFinite(num) || num <= 0) return -1;
   return (num - 1) % circleCount;
 };
 
@@ -615,7 +616,7 @@ const activeCircleIndex = computed(() => {
     return circleBar.value.findIndex((c) => c.matchId != null && String(c.matchId) === String(currentCircleMatchId.value));
   }
   const count = effectiveCircleCount.value;
-  return count > 1 ? circleIndexOfNumber(Number(selectedSlot.value.number), count) : -1;
+  return count >= 1 ? circleIndexOfNumber(Number(selectedSlot.value.number), count) : -1;
 });
 
 // 按号分圈:选中号码将进入的圈名
@@ -624,6 +625,30 @@ const targetCircleName = computed(() => {
   const idx = activeCircleIndex.value;
   return idx >= 0 && idx < circleBar.value.length ? circleBar.value[idx].name : '';
 });
+
+/**
+ * 落圈参数:后端不再自行推导圈位,由前端算好并显式传入。
+ * 已生成圈场次时传 matchId;尚未生成时传计划圈序号 zoneIndex。
+ */
+const targetCirclePayload = (): { matchId?: string | number; zoneIndex?: number } => {
+  // 单圈(含排名赛的单场):唯一圈即第 1 圈,无论按号还是手动模式都要显式传,
+  // 后端不再自行决定落圈;已拿到场次ID 就传 matchId,否则传圈序号。
+  if ((stageMode.value === 'AUDITION' || stageMode.value === 'RANK') && effectiveCircleCount.value <= 1) {
+    const only = circleBar.value[0];
+    return only?.matchId != null ? { matchId: only.matchId } : { zoneIndex: 1 };
+  }
+  if (!splitByNumber.value) {
+    // 手动选圈:用圈栏中选中的圈
+    if (selectedMatchId.value != null) return { matchId: selectedMatchId.value };
+    if (selectedZoneIndex.value != null) return { zoneIndex: selectedZoneIndex.value };
+    return {};
+  }
+  // 按号分圈:第 N 号 → 第 ((N-1) mod 圈数)+1 圈,与圈栏展示的高亮圈一致
+  const idx = activeCircleIndex.value;
+  if (idx < 0) return {};
+  const circle = circleBar.value[idx];
+  return circle?.matchId != null ? { matchId: circle.matchId } : { zoneIndex: idx + 1 };
+};
 
 // 已选择摘要:补充目标圈/手动圈信息
 const selectedCircleLabel = computed(() => {
@@ -708,16 +733,17 @@ const handleSubmit = async () => {
       // 号码/圈均未变化时不再传 matchId,避免无意义地把本人从原圈移除再挂回
       const ownNumber = competitors.value.find((c) => String(c.id) === String(currentPlayer.value?.competitorId))?.number;
       const numberChanged = ownNumber != null && String(selectedSlot.value.number) !== String(ownNumber);
+      const target = targetCirclePayload();
+      // 目标圈与本人当前所在圈一致时不传,避免无意义地把本人从原圈移除再挂回
       const circleUnchanged =
-        !splitByNumber.value &&
-        selectedMatchId.value != null &&
+        !numberChanged &&
+        target.matchId != null &&
         currentCircleMatchId.value != null &&
-        String(selectedMatchId.value) === String(currentCircleMatchId.value);
-      // 按号分圈时号码决定圈位,不传 matchId 由后端按号换圈
+        String(target.matchId) === String(currentCircleMatchId.value);
       await editCheckIn({
         playerId: currentPlayer.value.id,
         competitorNumber: String(selectedSlot.value.number),
-        matchId: splitByNumber.value ? undefined : !numberChanged && circleUnchanged ? undefined : (selectedMatchId.value ?? undefined),
+        matchId: circleUnchanged ? undefined : target.matchId,
         name: playerName.value.trim(),
         avatar: playerAvatar.value
       });
@@ -730,10 +756,8 @@ const handleSubmit = async () => {
         competitorId: selectedSlot.value.competitor?.id,
         name: playerName.value.trim(),
         avatar: playerAvatar.value,
-        // 按号分圈时号码决定圈位,不传 matchId 由后端按号落圈
-        matchId: splitByNumber.value ? undefined : (selectedMatchId.value ?? undefined),
-        // 尚未生成圈场次时,把抽号页选中的计划圈序号带给后端,由后端补建圈并落圈
-        zoneIndex: !splitByNumber.value && selectedMatchId.value === null ? (selectedZoneIndex.value ?? undefined) : undefined
+        // 落圈由前端决定并显式传给后端(后端不再自行推导圈位)
+        ...targetCirclePayload()
       });
       ElMessage.success('签到成功');
     }

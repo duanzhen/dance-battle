@@ -120,7 +120,7 @@ export interface StageData {
   teamCountStart: number;
   teamCountEnd: number;
   status: 'DRAFT' | 'PENDING' | 'GAMING' | 'SETTLED' | 'DISCARD';
-  isInitialized?: boolean; // 是否已完成初始化配置
+  isInitialized?: boolean; // 名单是否已锁定(已初始化/已排种子);空赛段不代表锁定
   tournamentId?: string | number; // 赛事ID
   prevStageId?: string | number | null;
   nextStageId?: string | number | null;

@@ -27,6 +27,12 @@ public interface ITStageLifecycleService {
     void startStage(Long stageId);
 
     /**
+     * 赛段进入进行中(DRAFT/PENDING→GAMING)并广播赛事事件;已是 GAMING 等状态时为空操作(幂等)。
+     * 「开始赛段」与「开始单个场次」共用本入口,避免两处各写一份状态推进逻辑。
+     */
+    void ensureStageGaming(Long stageId);
+
+    /**
      * 轮空场次自动结算:单边轮空(1 名真人)直接判胜并填下游/标晋级,双边轮空置为已结算。
      * 返回本次结算的场次数。
      */
@@ -40,26 +46,24 @@ public interface ITStageLifecycleService {
 
     /**
      * 海选/排名赛补签到:把新参赛方挂入圈场次(新增 participant + round),保证可被裁判打分并参与结算。
-     * 海选分圈为按号码顺序均分时,按新参赛方号码在其整体号码序列中的位置落圈;
-     * 随机分圈时,配置了每圈名额则按"剩余名额余量"择优落圈,否则挂入人数最少的圈。
+     * 落圈由调用方决定,后端不推导圈位;仅当只有一个圈场次时才允许不指定。
      * AUDITION/RANK + GAMING/PENDING 且已生成场次时生效,尚未生成场次时为空操作(后续生成会纳入)。
      */
     void appendStageCompetitor(Long stageId, Long competitorId);
 
     /**
-     * 同上,但显式指定目标圈场次(签到弹窗手动选圈)。目标圈须为未结算的正式圈。
+     * 同上,显式指定目标圈场次(签到弹窗决定落圈)。目标圈须为未结算的正式圈。
      */
     void appendStageCompetitor(Long stageId, Long competitorId, Long targetMatchId);
 
     /**
-     * 同上,并支持「目标圈序号」:海选分圈尚未生成圈场次时,
-     * 后端先按配置补建 ZONE-1..n 计划圈,再把新选手挂入 zoneIndex 对应的圈。
+     * 同上,并支持「目标圈序号」:尚未拿到圈场次ID 时改用 1 起的圈序号定位(按 ZONE-n)。
      */
     void appendStageCompetitor(Long stageId, Long competitorId, Long targetMatchId, Integer zoneIndex);
 
     /**
-     * 编辑签到结果后重排落位:已改号的参赛方先从原圈场次移除,
-     * 再按新号码挂入对应圈(按号分圈自动计算圈位;随机分圈可显式传 targetMatchId 换圈)。
+     * 编辑签到结果后重排落位:已改号的参赛方先从原圈场次移除,再挂入目标圈;
+     * 不传 targetMatchId 表示保持原圈,仅在圈内按新号码重排(后端不按号码推导圈位)。
      * 该参赛方已有打分记录时禁止移动。
      */
     void relocateCheckInCompetitor(Long stageId, Long competitorId, Long targetMatchId);

@@ -9,6 +9,7 @@ import org.dromara.common.core.utils.StringUtils;
 import org.dromara.common.sse.core.TournamentEventSseEmitterManager;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TRoundScore;
@@ -30,6 +31,7 @@ import com.dance.street.game.interceptor.RefereeAuthInterceptor;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
@@ -47,9 +49,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -74,6 +78,7 @@ public class RefereeMatchController {
     private final ITRefereeStageService refereeStageService;
     private final ITStageLifecycleService stageLifecycleService;
     private final TournamentEventSseEmitterManager tournamentEventSseEmitterManager;
+    private final TMatchRefereeMapper matchRefereeMapper;
 
     /**
      * 裁判端 SSE 长连接:赛段/场次/打分变化时实时推送刷新
@@ -138,12 +143,21 @@ public class RefereeMatchController {
         boolean perCompetitorStage = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode()) || isRankStage;
         // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分
         boolean rankResultHidden = isRankStage && !"AUTO".equalsIgnoreCase(publishMode);
+        // 分圈海选:裁判只应看到/判罚自己绑定的圈(t_match_referee 圈级绑定)。
+        // 只有该赛段确实做了圈级绑定时才启用过滤,单圈/未配置圈裁判的旧数据保持原行为。
+        Set<Long> allowedMatchIds = allowedMatchIds(stage.getId(), referee.getId());
         List<TMatch> matches = new ArrayList<>();
         if (!"DIRECTOR".equalsIgnoreCase(publishMode)) {
             matches = matchMapper.selectList(
                 Wrappers.<TMatch>lambdaQuery()
                     .eq(TMatch::getStageId, stage.getId())
                     .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
+            if (allowedMatchIds != null) {
+                // Stream.toList() 不可变,后面还要 sort,这里包一层可变列表
+                matches = new ArrayList<>(matches.stream()
+                    .filter(m -> allowedMatchIds.contains(m.getId()))
+                    .toList());
+            }
         }
         // 海选赛/排名赛兜底：若赛段已开始但无场次，自动生成
         if (matches.isEmpty() && perCompetitorStage) {
@@ -172,6 +186,12 @@ public class RefereeMatchController {
                 Wrappers.<TMatch>lambdaQuery()
                     .eq(TMatch::getStageId, stage.getId())
                     .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
+            // 兜底查询同样要守圈级权限,否则未绑圈的裁判会看到全部圈
+            if (allowedMatchIds != null) {
+                matches = new ArrayList<>(matches.stream()
+                    .filter(m -> allowedMatchIds.contains(m.getId()))
+                    .toList());
+            }
         }
         // 场次按 id 排序,保证选择稳定
         matches.sort(Comparator.comparing(TMatch::getId));
@@ -302,6 +322,12 @@ public class RefereeMatchController {
                 .orderByAsc(TMatch::getDisplayRow)
                 .orderByAsc(TMatch::getDisplayCol)
                 .orderByAsc(TMatch::getId));
+        // 分圈:只展示本裁判绑定的圈
+        if (allowedMatchIds != null) {
+            stageAllMatches = new ArrayList<>(stageAllMatches.stream()
+                .filter(m -> allowedMatchIds.contains(m.getId()))
+                .toList());
+        }
         List<RefereeMatchInfo> stageMatchInfos = new ArrayList<>();
         List<RefereeMatchVo.RefereeStageMatchInfo> stageOverview = new ArrayList<>();
         List<TMatchRound> allRounds = List.of();
@@ -429,7 +455,7 @@ public class RefereeMatchController {
         // 查询当前裁判对各参赛方的已有打分
         Map<Long, java.math.BigDecimal> refereeScores = new java.util.HashMap<>();
         List<TRoundScore> myScores;
-        if (perCompetitorStage) {
+        if (match != null && perCompetitorStage) {
             // 海选赛/排名赛逐选手打分分布在各自轮次,跨本场全部轮次聚合该裁判的打分
             List<Long> roundIds = matchRoundMapper.selectList(
                     Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
@@ -438,7 +464,7 @@ public class RefereeMatchController {
                 Wrappers.<TRoundScore>lambdaQuery()
                     .in(TRoundScore::getRoundId, roundIds)
                     .eq(TRoundScore::getRefereeId, referee.getId()));
-        } else if (currentRound != null) {
+        } else if (match != null && currentRound != null) {
             myScores = roundScoreMapper.selectList(
                 Wrappers.<TRoundScore>lambdaQuery()
                     .eq(TRoundScore::getRoundId, currentRound.getId())
@@ -495,6 +521,52 @@ public class RefereeMatchController {
     }
 
     /**
+     * 本赛段内该裁判可判罚的场次(圈)。
+     *
+     * <p>分圈海选会把裁判按圈绑定到 t_match_referee。只要本赛段存在圈级绑定,
+     * 裁判就只能看到并判罚自己绑定的圈;赛段未做圈级绑定时返回 null 表示不限制。</p>
+     *
+     * @return null = 不限制;否则返回允许的场次ID集合(可能为空集合 = 未分配到任何圈)
+     */
+    private Set<Long> allowedMatchIds(Long stageId, Long refereeId) {
+        List<TMatch> stageMatches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .select(TMatch::getId, TMatch::getDisplayZone));
+        if (stageMatches.isEmpty()) {
+            return null;
+        }
+        List<Long> stageMatchIds = stageMatches.stream().map(TMatch::getId).toList();
+        List<TMatchReferee> stageBindings = matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
+            .in(TMatchReferee::getMatchId, stageMatchIds)
+            .select(TMatchReferee::getMatchId, TMatchReferee::getRefereeId));
+        if (stageBindings.isEmpty()) {
+            // 没有圈级绑定(单圈海选/未配置圈裁判):不限制,保持原行为
+            return null;
+        }
+        Set<Long> mine = new LinkedHashSet<>();
+        for (TMatchReferee r : stageBindings) {
+            if (Objects.equals(r.getRefereeId(), refereeId)) {
+                mine.add(r.getMatchId());
+            }
+        }
+        // 绑定的场次所在圈整体可见:二海(同分加赛)场次是结算时新建的、按圈归属原圈,
+        // 只要裁判绑定了该圈的任一场次即可判罚该圈后续新增的加赛场次。
+        Set<String> myZones = stageMatches.stream()
+            .filter(m -> mine.contains(m.getId()) && org.apache.commons.lang3.StringUtils.isNotBlank(m.getDisplayZone()))
+            .map(TMatch::getDisplayZone)
+            .collect(Collectors.toSet());
+        Set<Long> allowed = new LinkedHashSet<>();
+        for (TMatch m : stageMatches) {
+            boolean sameZone = org.apache.commons.lang3.StringUtils.isNotBlank(m.getDisplayZone())
+                && myZones.contains(m.getDisplayZone());
+            if (mine.contains(m.getId()) || sameZone) {
+                allowed.add(m.getId());
+            }
+        }
+        return allowed;
+    }
+
+    /**
      * 裁判提交打分
      */
     @PostMapping("/{matchId}/submit-score")
@@ -519,6 +591,11 @@ public class RefereeMatchController {
         }
         if (!refereeStageService.getStageIdsByRefereeId(referee.getId()).contains(match.getStageId())) {
             return R.fail("未分配该赛段的判罚权限");
+        }
+        // 分圈海选:只能判罚自己绑定的圈
+        Set<Long> allowed = allowedMatchIds(match.getStageId(), referee.getId());
+        if (allowed != null && !allowed.contains(matchId)) {
+            return R.fail("未分配该圈(场次)的判罚权限");
         }
 
         MatchResultVo result = matchResultService.submitResult(bo);

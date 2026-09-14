@@ -324,6 +324,14 @@ class RosterSmokeTest {
                 .eq(TCompetitor::getStageId, revive.getId()));
         assertEquals(1, reviveRows.size());
         assertEquals(RosterConstants.ENTRY_REVIVE, reviveRows.get(0).getEntryTag());
+        // 海选落圈由客户端指定:单圈也是显式配置的一个圈,先把选手落进去再开赛
+        lifecycleService.ensureAuditionCircles(revive.getId());
+        List<TMatch> reviveCircle = matchMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, revive.getId()));
+        assertEquals(1, reviveCircle.size(), "单圈海选应按配置预建 1 个圈");
+        lifecycleService.appendStageCompetitor(revive.getId(), reviveRows.get(0).getId(),
+            reviveCircle.get(0).getId());
         lifecycleService.startStage(revive.getId());
         scoreAllAuditionParticipants(revive.getId());
         assertEquals(StageConstants.STAGE_SETTLED, lifecycleService.completeStage(revive.getId()));
@@ -1056,5 +1064,44 @@ class RosterSmokeTest {
         c.setFinalRank(finalRank);
         c.setOutcomeStatus(OutcomeStatusEnum.ADVANCE.getCode());
         competitorMapper.insert(c);
+    }
+
+    /**
+     * 回归:创建流程曾把 is_initialized 提前置 1(赛段实为空,既无对阵也无参赛行)。
+     * 这类赛段仍必须能装配晋级名单,否则整条晋级链会断在"赛段已初始化,名单已锁定"。
+     */
+    @Test
+    void emptyStageWithStaleInitializedFlagStillAcceptsRoster() {
+        TTournament tournament = new TTournament();
+        tournament.setName("旧标志空赛段");
+        tournamentMapper.insert(tournament);
+        Long tid = tournament.getId();
+
+        TStageVo source = createStage(tid, "海选", "AUDITION", 0L, 1L, null,
+            "{\"mode\":\"AUDITION\",\"advanceCount\":1,\"maxScore\":10,\"circles\":1}");
+        TStageVo target = createStage(tid, "下一赛段", "KNOCKOUT", 1L, 1L, source.getId(),
+            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":1,\"advanceCount\":1},"
+                + "\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+
+        // 源赛段产生 1 名晋级者并结算
+        insertCompetitor(tid, source.getId(), "选手A", "1", 1L);
+        TStage settled = new TStage();
+        settled.setId(source.getId());
+        settled.setStatus(StageConstants.STAGE_SETTLED);
+        stageMapper.updateById(settled);
+
+        // 模拟前端历史数据:空赛段被提前标记为已初始化(无对阵、无参赛行)
+        TStage stale = new TStage();
+        stale.setId(target.getId());
+        stale.setIsInitialized(1L);
+        stageMapper.updateById(stale);
+        assertEquals(1L, stageMapper.selectById(target.getId()).getIsInitialized());
+        assertEquals(0, competitorMapper.selectCount(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, target.getId())));
+
+        assertEquals(1, rosterService.applyRoster(target.getId(), null),
+            "空赛段(仅带历史误标)仍应能装配晋级名单");
+        assertEquals(1, countOutcome(target.getId(), OutcomeStatusEnum.PENDING.getCode()));
     }
 }

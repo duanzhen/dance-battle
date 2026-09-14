@@ -52,6 +52,17 @@ public interface ITStageRosterService {
     /** 名单就绪度(纯函数):全部内部来源组对应源赛段已结算 */
     boolean isRosterReady(Long stageId);
 
+    /**
+     * 开赛守卫:校验目标赛段的名单是否允许开赛,不通过时抛 ServiceException。
+     *
+     * <p>规则:无内部来源组(STREAM/人工覆盖)的名单不受限;含内部来源组时,
+     * 已装配(CONFIRMED)/已跳过(SKIPPED)直接放行,来源未结算完拦截,
+     * 来源已结算但仍有候选未确认拦截,确无候选则放行(本赛段不带人)。</p>
+     *
+     * <p>名单语义集中在名单服务内,赛段生命周期只负责在开赛前调用本方法。</p>
+     */
+    void assertStageStartable(Long targetStageId);
+
     /** 只读预排候选(AUTO 来源组,与 apply 同口径;MANUAL/STREAM 不参与) */
     List<TCompetitor> previewRoster(Long targetStageId);
 

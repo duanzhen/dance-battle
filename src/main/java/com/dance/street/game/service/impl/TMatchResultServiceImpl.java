@@ -74,6 +74,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private final com.dance.street.game.service.ITRefereeStageService refereeStageService;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
+    /** 赛段级结果(晋级/淘汰/名次)的唯一写入口 */
+    private final CompetitorOutcomeWriter outcomeWriter;
     private final ScoringEngine scoringEngine = new ScoringEngine();
     /** 待公布结果 JSON:内部配置读写统一走雪花 ID 安全 mapper */
     private static final tools.jackson.databind.ObjectMapper RESULT_MAPPER = SnowflakeJson.mapper();
@@ -402,15 +404,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .stream().filter(p -> p.getCompetitorId() != null).count();
         if (realCount <= 1) {
             // 赛段已生成场次且尚未开赛(DRAFT/PENDING):开始首个场次时一并进入进行中
-            if (StageConstants.STAGE_PENDING.equals(stage.getStatus())
-                || StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
-                TStage sUpd = new TStage();
-                sUpd.setId(stage.getId());
-                sUpd.setStatus(StageConstants.STAGE_GAMING);
-                stageMapper.updateById(sUpd);
-                refereeSseNotifier.notifyStage(stage.getId(), "stage");
-                tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
-            }
+            stageLifecycleService.ensureStageGaming(stage.getId());
             boolean settled = stageLifecycleService.settleByeMatch(matchId);
             if (!settled) {
                 // 0 参赛方的非首轮场次是等待上游胜者填入的占位,不能按轮空结算
@@ -446,15 +440,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
         }
         // 赛段若尚未开始,随本场一起进入 GAMING
-        if (StageConstants.STAGE_PENDING.equals(stage.getStatus())
-            || StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
-            TStage sUpd = new TStage();
-            sUpd.setId(stage.getId());
-            sUpd.setStatus(StageConstants.STAGE_GAMING);
-            stageMapper.updateById(sUpd);
-            refereeSseNotifier.notifyStage(stage.getId(), "stage");
-            tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
-        }
+        stageLifecycleService.ensureStageGaming(stage.getId());
         TMatch mUpd = new TMatch();
         mUpd.setId(match.getId());
         mUpd.setStatus(StageConstants.MATCH_GAMING);
@@ -687,10 +673,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     }
 
     private void markCompetitorOutcome(Long competitorId, String status) {
-        TCompetitor cupd = new TCompetitor();
-        cupd.setId(competitorId);
-        cupd.setOutcomeStatus(status);
-        competitorMapper.updateById(cupd);
+        outcomeWriter.writeOutcome(competitorId, status);
     }
 
     private void markCompetitorAdvance(Long competitorId, TMatch match) {
@@ -701,11 +684,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
             rank = cnt + 1;
         }
-        TCompetitor cupd = new TCompetitor();
-        cupd.setId(competitorId);
-        cupd.setFinalRank(rank);
-        cupd.setOutcomeStatus(OutcomeStatusEnum.ADVANCE.getCode());
-        competitorMapper.updateById(cupd);
+        outcomeWriter.writeResult(competitorId, OutcomeStatusEnum.ADVANCE.getCode(), rank);
     }
 
     private TMatchRound mustGetRound(TMatch match) {

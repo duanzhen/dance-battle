@@ -73,9 +73,9 @@ export const checkInPlayer = (data: {
   competitorId?: string | number;
   name?: string;
   avatar?: string;
-  /** 目标圈场次ID(海选/排名赛分圈、线下抽签指定圈时传;不传由系统自动择优) */
+  /** 目标圈场次ID:多圈海选/排名赛必传(后端不再自行决定圈位);仅单圈时可省略 */
   matchId?: string | number;
-  /** 目标圈序号(1 起):海选分圈尚未生成圈场次时,选中的计划圈,由后端补建圈后落圈 */
+  /** 目标圈序号(1 起):尚未拿到圈场次ID 时用它指定目标圈,与 matchId 二选一 */
   zoneIndex?: number;
 }) => {
   return request({
@@ -92,7 +92,7 @@ export const checkInPlayer = (data: {
 export const editCheckIn = (data: {
   playerId: string | number;
   competitorNumber?: string;
-  /** 目标圈场次ID(随机分圈手动换圈时传;按号分圈由号码自动决定圈位) */
+  /** 目标圈场次ID:需要换圈时传;不传则保持原圈(后端不再按号码推导圈位) */
   matchId?: string | number;
   name?: string;
   avatar?: string;

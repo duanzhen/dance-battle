@@ -20,6 +20,7 @@ import com.dance.street.game.domain.vo.TStageRosterOverrideVo;
 import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
@@ -73,6 +74,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     private final TStageRosterOverrideMapper overrideMapper;
     private final TPlayerMapper playerMapper;
     private final TournamentEventNotifier tournamentEventNotifier;
+    /** 赛段链遍历的唯一入口(以 next 链为事实源) */
+    private final StageChain stageChain;
 
     // ------------------------------------------------------------------
     // 名单 = stage 属性的读写
@@ -148,15 +151,16 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (fresh == null) {
             return;
         }
-        boolean entry = fresh.getPrevStageId() == null;
-        TStageRosterGroupBo defaultGroup = entry ? externalGroup() : defaultGroup(fresh.getPrevStageId());
+        // 入口判定与默认来源组都以前驱为准;前驱由 next 链推导(prev 列仅展示)
+        TStage prev = stageChain.prevOf(fresh);
+        TStageRosterGroupBo defaultGroup = prev == null ? externalGroup() : defaultGroup(prev.getId());
         List<TStageRosterGroupBo> groups = groupsOf(fresh);
         boolean exists = groups.stream().anyMatch(g -> sameGroup(g, defaultGroup));
         if (!exists) {
             groups.add(defaultGroup);
             saveGroups(fresh, groups);
             log.info("赛段[{}]名单已写入默认来源组[{}]", stage.getId(),
-                entry ? "签到(STREAM)" : "上一赛段·晋级·AUTO");
+                prev == null ? "签到(STREAM)" : "上一赛段·晋级·AUTO");
         }
     }
 
@@ -170,7 +174,9 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         List<TStageRosterGroupBo> kept = new ArrayList<>();
         boolean changed = false;
         boolean streamSeen = false;
-        Long prevId = stage.getPrevStageId();
+        // 前驱以 next 链推导:改链后本方法在事务内被调用,读到的已是新链
+        TStage prevStage = stageChain.prevOf(stage);
+        Long prevId = prevStage == null ? null : prevStage.getId();
         boolean entry = prevId == null;
         for (TStageRosterGroupBo g : groupsOf(stage)) {
             boolean stream = RosterConstants.FILL_STREAM.equals(g.getFillMode())
@@ -234,9 +240,29 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             if (StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
                 continue;
             }
-            if (stage.getRosterConfigJson() == null || stage.getRosterConfigJson().isBlank()) {
+            if (rosterGroupsMissing(stage)) {
                 ensureRosterForStage(stage);
             }
+        }
+    }
+
+    /**
+     * 名单来源组是否缺失:null/空白,或已被摘空的空数组({@code {"groups":[]}})。
+     *
+     * <p>删除上游赛段时 {@link #removeSourceRefs} 会摘掉引用它的来源组,摘完全部后
+     * JSON 变成空数组——那不是"空白",旧判空条件漏掉了这种情况,赛段会一直没有任何来源组。
+     * 配置损坏时按"无需补齐"处理并告警,避免把删赛段流程整个阻断。</p>
+     */
+    private boolean rosterGroupsMissing(TStage stage) {
+        String json = stage.getRosterConfigJson();
+        if (json == null || json.isBlank()) {
+            return true;
+        }
+        try {
+            return groupsOf(stage).isEmpty();
+        } catch (RuntimeException e) {
+            log.warn("赛段[{}]名单来源组配置损坏,跳过删除后补齐: {}", stage.getId(), e.getMessage());
+            return false;
         }
     }
 
@@ -249,7 +275,9 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         Set<Long> deleted = new HashSet<>(deletedStageIds);
         for (TStage stage : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
             .isNotNull(TStage::getRosterConfigJson))) {
-            if (deleted.contains(stage.getId())) {
+            // 已取消的赛段不再参与流转,与 reconcileAfterLinkChange 一致直接跳过
+            if (deleted.contains(stage.getId())
+                || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
                 continue;
             }
             List<TStageRosterGroupBo> groups = groupsOf(stage);
@@ -257,6 +285,14 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             groups.removeIf(g -> g.getSourceStageId() != null && deleted.contains(g.getSourceStageId()));
             if (groups.size() == before) {
                 continue;
+            }
+            // 与 reconcileAfterLinkChange 同一把锁:已装配/已跳过的名单不允许被静默改写。
+            // 否则会留下「来源组被摘空、rosterApplied 仍为 1」的假 CONFIRMED——
+            // 名单状态显示已带入,参赛行却还指向被删除的赛段,开赛守卫还会放行。
+            if (isLocked(stage)) {
+                throw new ServiceException(
+                    "赛段[{}]名单已装配/已跳过,删除上游赛段会破坏其名单来源;请先重置该赛段后再删除",
+                    stage.getName());
             }
             saveGroups(stage, groups);
             log.info("赛段删除:摘除赛段[{}]名单中引用已删赛段的来源组,剩余 {} 组",
@@ -313,7 +349,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
      * 入口赛段(无前驱)则保证存在签到来源组。
      */
     private void ensurePrevChainDefault(TStage stage, List<TStageRosterGroupBo> groups) {
-        Long prevId = stage.getPrevStageId();
+        TStage prevStage = stageChain.prevOf(stage);
+        Long prevId = prevStage == null ? null : prevStage.getId();
         if (prevId == null) {
             boolean hasStream = groups.stream().anyMatch(g ->
                 RosterConstants.FILL_STREAM.equals(g.getFillMode())
@@ -431,10 +468,17 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可编辑人工覆盖,当前: {}",
                 stage.getStatus());
         }
-        if (Long.valueOf(1L).equals(stage.getIsInitialized())) {
+        // 同上:只有已物化出参赛行时,"已初始化"才代表名单真的被锁定过
+        if (Long.valueOf(1L).equals(stage.getIsInitialized()) && hasMaterializedCompetitors(stageId)) {
             throw new ServiceException("赛段已初始化,名单已锁定,无法调整人工覆盖");
         }
         return stage;
+    }
+
+    /** 该赛段是否已物化出参赛行(名单真正被锁定过);空赛段不算 */
+    private boolean hasMaterializedCompetitors(Long stageId) {
+        return competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stageId)) > 0;
     }
 
     @Override
@@ -719,7 +763,10 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可新增来源,当前: {}",
                 target.getStatus());
         }
-        if (Long.valueOf(1L).equals(target.getIsInitialized())) {
+        // 只有已物化出参赛行时才代表名单真的被锁定过;空赛段(历史数据里被
+        // 创建流程提前置 1)仍应允许配置来源组/出口,否则出口配置直接写不进去。
+        if (Long.valueOf(1L).equals(target.getIsInitialized())
+            && hasMaterializedCompetitors(stageId)) {
             throw new ServiceException("赛段已初始化,名单来源已锁定");
         }
         if (bo == null) {
@@ -960,6 +1007,34 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     }
 
     @Override
+    public void assertStageStartable(Long targetStageId) {
+        TStage stage = stageMapper.selectById(targetStageId);
+        if (stage == null) {
+            return;
+        }
+        List<TStageRosterGroupBo> groups = groupsOf(stage);
+        boolean hasInternalSource = groups.stream().anyMatch(g -> g.getSourceStageId() != null);
+        if (!hasInternalSource) {
+            // 纯签到/人工名单:与本赛段的衔接无关,不设限
+            return;
+        }
+        String state = stateOf(stage);
+        if (RosterConstants.ROSTER_CONFIRMED.equals(state)
+            || RosterConstants.ROSTER_SKIPPED.equals(state)) {
+            log.info("赛段[{}]名单已装配/跳过,开赛放行", targetStageId);
+            return;
+        }
+        if (!readyByGroups(groups)) {
+            throw new ServiceException("赛段名单来源尚未全部结算,请等待来源赛段结束后再开始本赛段");
+        }
+        if (hasAnyCandidate(targetStageId)) {
+            throw new ServiceException("赛段名单尚未确认,请先在中间态「确认名单」后再开始本赛段");
+        }
+        // 确无任何来源候选:本赛段不带人,直接放行(不写任何状态)
+        log.info("赛段[{}]名单无来源候选,本赛段不带人,直接开赛", targetStageId);
+    }
+
+    @Override
     public List<TCompetitor> previewRoster(Long targetStageId) {
         TStage stage = stageMapper.selectById(targetStageId);
         if (stage == null || isLocked(stage)) {
@@ -983,9 +1058,6 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             && !StageConstants.STAGE_PENDING.equals(target.getStatus())) {
             throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可装配名单,当前: {}",
                 target.getStatus());
-        }
-        if (Long.valueOf(1L).equals(target.getIsInitialized())) {
-            throw new ServiceException("赛段已初始化,名单已锁定,无法装配");
         }
         if (isLocked(target)) {
             return 0;
@@ -1017,6 +1089,12 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         List<TCompetitor> existing = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
             .eq(TCompetitor::getStageId, targetStageId)
             .orderByAsc(TCompetitor::getId));
+        // 「已初始化」只在确实已经物化出参赛行时才代表"名单已锁定、不能再改";
+        // 空赛段(创建流程曾把 is_initialized 提前置 1 的历史数据)仍应允许装配,
+        // 否则这类赛段会永远接不到晋级名单。
+        if (Long.valueOf(1L).equals(target.getIsInitialized()) && !existing.isEmpty()) {
+            throw new ServiceException("赛段已初始化,名单已锁定,无法装配");
+        }
         int plan = target.getTeamCountStart() != null && target.getTeamCountStart() > 0
             ? target.getTeamCountStart().intValue() : 0;
         Set<String> existingPlayerKeys = memberPlayerKeys(existing);
@@ -1476,8 +1554,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         RuleConfigHolder rc = RuleConfigParser.parse(source.getRuleConfig());
         List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
         boolean explicitQuota = perCircleCfg != null && !perCircleCfg.isEmpty();
-        int advanceCount = readStageAdvanceCount(source);
-        int circles = (int) srcMatches.stream().map(m -> zoneOfMatch(m)).distinct().count();
+        int advanceCount = StageFlowSupport.readStageAdvanceCount(source);
+        int circles = (int) srcMatches.stream().map(StageFlowSupport::zoneOf).distinct().count();
         circles = Math.max(1, circles);
         int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
         int divideBy = circles > plannedCircles ? plannedCircles : circles;
@@ -1487,7 +1565,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         int ordinal = 0;
         int acc = 0;
         for (TMatch m : srcMatches) {
-            String zone = zoneOfMatch(m);
+            String zone = StageFlowSupport.zoneOf(m);
             if (!zoneOrdinal.containsKey(zone)) {
                 int quota = ordinal >= plannedCircles ? 0
                     : explicitQuota && ordinal < perCircleCfg.size()
@@ -1503,7 +1581,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (!srcMatchIds.isEmpty()) {
             Map<Long, String> matchZone = new HashMap<>();
             for (TMatch m : srcMatches) {
-                matchZone.put(m.getId(), zoneOfMatch(m));
+                matchZone.put(m.getId(), StageFlowSupport.zoneOf(m));
             }
             participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
                     .in(TMatchParticipant::getMatchId, srcMatchIds)
@@ -1533,27 +1611,6 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             }
             return Long.compare(a.getId(), b.getId());
         });
-    }
-
-    private String zoneOfMatch(TMatch m) {
-        return m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone();
-    }
-
-    private int readStageAdvanceCount(TStage stage) {
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        int advanceCount = 1;
-        if (rc != null && rc.getKnockout() != null && rc.getKnockout().getAdvanceCount() != null) {
-            advanceCount = rc.getKnockout().getAdvanceCount();
-        }
-        try {
-            Map<String, Object> raw = new tools.jackson.databind.ObjectMapper()
-                .readValue(stage.getRuleConfig(), Map.class);
-            if (raw != null && raw.containsKey("advanceCount")) {
-                advanceCount = ((Number) raw.get("advanceCount")).intValue();
-            }
-        } catch (Exception ignored) {
-        }
-        return advanceCount;
     }
 
     private String groupLabel(TStageRosterGroupBo g) {

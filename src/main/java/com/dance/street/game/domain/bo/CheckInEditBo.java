@@ -10,7 +10,7 @@ import java.io.Serializable;
  * 编辑签到结果请求业务对象
  *
  * <p>用于已签到选手改号/换圈:competitorNumber 为新的目标号码(为空表示不改号),
- * matchId 仅在随机分圈手动换圈时传入(按号分圈由号码自动决定圈位)。</p>
+ * matchId 为需要改入的目标圈;不传则保持原圈(圈位不由后端按号码推导)。</p>
  *
  * @author duane
  * @date 2026-09-03
@@ -28,7 +28,7 @@ public class CheckInEditBo implements Serializable {
     /** 新的参赛号码(可选:为空表示不改号,仅改名/头像/换圈) */
     private String competitorNumber;
 
-    /** 目标圈场次ID(可选:随机分圈模式手动换圈时传入) */
+    /** 目标圈场次ID(可选:需要换圈时传入;不传表示保持原圈) */
     private Long matchId;
 
     /** 选手名称(可选) */

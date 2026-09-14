@@ -15,7 +15,7 @@
       赛段已开始或已初始化，出口配置已锁定；如需调整请先重置该赛段。
     </div>
     <div v-else-if="targetOptions.length === 0" class="text-[11px] text-neutral-600">
-      暂无可承接的赛段（下游赛段需处于规划中且未初始化）
+      暂无可承接的赛段（下游赛段需处于规划中，且名单尚未确认/跳过）
     </div>
 
     <!-- 出口列表 -->
@@ -168,7 +168,16 @@ const editable = computed(() => {
 const stageNameOf = (id: string | number | null | undefined): string =>
   stageOptions.value.find((s) => String(s.id) === String(id))?.name || ('赛段 #' + id);
 
-/** 可选去向:沿 next 链位于本赛段之后,且仍为规划中未初始化 */
+/**
+ * 名单是否已被物化锁定(已确认带入或已跳过)。
+ * 只有这种情况下游赛段才不能再承接新的出口来源;单看 is_initialized 会误杀
+ * 历史数据里被创建流程提前置 1 的空赛段(它们既无对阵也无参赛方)。
+ */
+const rosterLocked = (s: StageData): boolean =>
+  Array.isArray((s as any).incoming)
+  && (s as any).incoming.some((r: any) => r?.state === 'CONFIRMED' || r?.state === 'SKIPPED');
+
+/** 可选去向:沿 next 链位于本赛段之后,且仍为规划中、名单未锁定的赛段 */
 const targetOptions = computed(() => {
   const list = stageOptions.value;
   if (!list.length) return [];
@@ -180,7 +189,7 @@ const targetOptions = computed(() => {
     visited.add(String(cur.nextStageId));
     const next = byId.get(String(cur.nextStageId));
     if (!next) break;
-    if ((next.status === 'DRAFT' || next.status === 'PENDING') && Number(next.isInitialized) !== 1) {
+    if ((next.status === 'DRAFT' || next.status === 'PENDING') && !rosterLocked(next)) {
       out.push(next);
     }
     cur = next;

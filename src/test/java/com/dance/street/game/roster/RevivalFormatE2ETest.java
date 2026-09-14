@@ -123,9 +123,12 @@ class RevivalFormatE2ETest {
         Long round32RosterId = rosterService.listByTarget(round32.getId()).get(0).getId();
         addCircleRankGroups(round32.getId(), audition.getId(), "ADVANCE", 1, 8);
 
-        // 海选签到 64 人(种子 1..64,按号顺序均分两圈,每圈 32)
+        // 海选:先预建两圈,再按号码取模落圈(64 人 → 每圈 32)
+        lifecycleService.ensureAuditionCircles(audition.getId());
+        List<TMatch> preCircles = auditionCircleMatches(audition.getId());
+        assertEquals(2, preCircles.size(), "应按配置预建 2 个空圈");
         for (int i = 1; i <= 64; i++) {
-            insertPending(tid, audition.getId(), "选手" + i, String.valueOf(i), i);
+            checkInByNumber(tid, audition.getId(), preCircles, "选手" + i, i, i);
         }
         lifecycleService.startStage(audition.getId());
         assertEquals(StageConstants.STAGE_GAMING, stageMapper.selectById(audition.getId()).getStatus());
@@ -230,8 +233,12 @@ class RevivalFormatE2ETest {
         rosterService.addGroups(revival.getId(), bo);
         rosterService.removeGroup(revivalRosterId, 0); // 去掉默认"海选晋级"组
 
+        // 海选:先按配置预建唯一圈,再逐个签到落圈(单圈同样是显式配置的一个圈)
+        lifecycleService.ensureAuditionCircles(audition.getId());
+        List<TMatch> preCircles = auditionCircleMatches(audition.getId());
+        assertEquals(1, preCircles.size(), "单圈海选应按配置预建 1 个圈");
         for (int i = 1; i <= 26; i++) {
-            insertPending(tid, audition.getId(), "选手" + i, String.valueOf(i), i);
+            checkInByNumber(tid, audition.getId(), preCircles, "选手" + i, i, i);
         }
         lifecycleService.startStage(audition.getId());
         List<TMatch> circles = auditionCircleMatches(audition.getId());
@@ -323,9 +330,12 @@ class RevivalFormatE2ETest {
                 + zone2Judge.getId() + "\"]]}");
         TStageVo round32 = createStage(tid, "32强", "KNOCKOUT", 32L, 16L, audition.getId(), knockoutRule(32L, 16L));
 
-        // 32 人按号码均分两圈(号码 1~16 → 圈1,17~32 → 圈2)
+        // 海选:先预建两圈,再按号码取模落圈(32 人 → 每圈 16)
+        lifecycleService.ensureAuditionCircles(audition.getId());
+        List<TMatch> preCircles = auditionCircleMatches(audition.getId());
+        assertEquals(2, preCircles.size(), "应按配置预建 2 个空圈");
         for (int i = 1; i <= 32; i++) {
-            insertPending(tid, audition.getId(), "选手" + i, String.valueOf(i), i);
+            checkInByNumber(tid, audition.getId(), preCircles, "选手" + i, i, i);
         }
         lifecycleService.startStage(audition.getId());
         List<TMatch> circles = auditionCircleMatches(audition.getId());
@@ -485,6 +495,25 @@ class RevivalFormatE2ETest {
         c.setSeedRank((long) seed);
         c.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
         competitorMapper.insert(c);
+    }
+
+    /**
+     * 签到并落圈:圈结构须已预建,按号码取模决定圈位
+     * (与前端 circleIndexOfNumber 的「第 N 号 → 第 ((N-1) mod 圈数)+1 圈」一致)。
+     */
+    private void checkInByNumber(Long tid, Long stageId, List<TMatch> circles,
+                                 String name, int number, int seed) {
+        TCompetitor c = new TCompetitor();
+        c.setTournamentId(tid);
+        c.setStageId(stageId);
+        c.setType(0L);
+        c.setName(name);
+        c.setNumber(String.valueOf(number));
+        c.setSeedRank((long) seed);
+        c.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
+        competitorMapper.insert(c);
+        int idx = Math.floorMod(number - 1, circles.size());
+        lifecycleService.appendStageCompetitor(stageId, c.getId(), circles.get(idx).getId());
     }
 
     private List<TMatch> auditionCircleMatches(Long stageId) {

@@ -24,6 +24,7 @@ import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITTournamentService;
+import com.dance.street.game.service.impl.StageChain;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,8 @@ public class DirectorController {
     private final ITMatchResultService matchResultService;
     private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
+    /** 赛段链遍历的唯一入口(以 next 链为事实源) */
+    private final StageChain stageChain;
 
     /**
      * 获取当前认证赛事信息(名称等)
@@ -99,12 +102,12 @@ public class DirectorController {
             throw new ServiceException("未开启「跳过中间态确认阶段」配置,请先在管理端中间态确认晋级");
         }
         // 确认晋级作用于「要开始赛段的上一赛段」(已 SETTLED 的源赛段),把晋级者写入本赛段
-        TStageVo stage = stageService.queryById(id);
-        Long prevId = stage == null ? null : stage.getPrevStageId();
-        if (prevId == null) {
+        // 上一赛段由 next 链推导(prev 列仅展示字段)
+        TStage prev = stageChain.prevOf(stageMapper.selectById(id));
+        if (prev == null) {
             throw new ServiceException("该赛段没有上一赛段,无需确认晋级");
         }
-        return R.ok(stageLifecycleService.calculateAdvancement(prevId));
+        return R.ok(stageLifecycleService.calculateAdvancement(prev.getId()));
     }
 
     /**
@@ -117,10 +120,11 @@ public class DirectorController {
             return;
         }
         for (TStageVo stage : stages) {
-            if (stage.getPrevStageId() == null) {
+            TStage current = stageMapper.selectById(stage.getId());
+            if (current == null) {
                 continue;
             }
-            TStage prev = stageMapper.selectById(stage.getPrevStageId());
+            TStage prev = stageChain.prevOf(current);
             if (prev == null || !StageConstants.STAGE_SETTLED.equals(prev.getStatus())) {
                 continue;
             }

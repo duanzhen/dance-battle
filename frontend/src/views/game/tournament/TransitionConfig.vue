@@ -718,10 +718,10 @@ const modeLabelMap: Record<string, string> = {
   FREE_MATCH: '自由对抗'
 };
 
-/** 目标赛段已开始(非 DRAFT/PENDING)时锁定整页中间态调整 */
+/** 目标赛段已开始(非 DRAFT)时锁定整页中间态调整 */
 const targetLocked = computed(() => {
   const status = targetStage.value?.status;
-  return status != null && status !== 'DRAFT' && status !== 'PENDING';
+  return status != null && status !== 'DRAFT';
 });
 
 /** 目标赛段名单摘要:优先用接口实时数据,接口失败时回退到 StageFlow 传入的摘要 */
@@ -1327,7 +1327,6 @@ const modeLabel = (mode?: string): string => (mode && modeLabelMap[mode]) || mod
 const statusLabel = (status?: string): string => {
   const map: Record<string, string> = {
     DRAFT: '规划中',
-    PENDING: '规划中',
     GAMING: '进行中',
     SETTLED: '已结束',
     DISCARD: '已取消'

@@ -14,6 +14,9 @@ import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
+import com.dance.street.game.mapper.TMatchRefereeMapper;
+import com.dance.street.game.domain.TMatchReferee;
+import com.dance.street.game.domain.TStage;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
@@ -83,6 +86,8 @@ class CheckInFlowTest {
     @Autowired
     private TCompetitorMapper competitorMapper;
     @Autowired
+    private TMatchRefereeMapper matchRefereeMapper;
+    @Autowired
     private ITStageService stageService;
     @Autowired
     private ITStageLifecycleService lifecycleService;
@@ -131,6 +136,21 @@ class CheckInFlowTest {
             .eq(TMatch::getStageId, stageId)
             .orderByAsc(TMatch::getDisplayRow)
             .orderByAsc(TMatch::getId));
+    }
+
+    /**
+     * 海选按圈判:开赛前每个圈都必须有裁判,否则裁判端看不到场次、赛段结束不了。
+     * 这里给赛段当前所有圈各绑一名裁判。
+     */
+    private void bindRefereeToCircles(Long stageId) {
+        TStage stage = stageMapper.selectById(stageId);
+        for (TMatch m : circleMatches(stageId)) {
+            TMatchReferee mr = new TMatchReferee();
+            mr.setMatchId(m.getId());
+            mr.setRefereeId(0L);
+            mr.setTournamentId(stage.getTournamentId());
+            matchRefereeMapper.insert(mr);
+        }
     }
 
     private List<TMatchParticipant> participantsOf(Long matchId) {
@@ -209,26 +229,34 @@ class CheckInFlowTest {
             assertEquals(2, matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
                 .eq(TMatchRound::getMatchId, c.getId())), "每名选手应有独立轮次");
         }
-        // 签到后赛段被初始化(名单锁定)
-        assertEquals(1L, stageMapper.selectById(stage.getId()).getIsInitialized());
+        // 签到只落圈,不提前锁名单:初始化留给生成对阵/开赛(留出加外卡/排位的窗口)
+        assertEquals(0L, stageMapper.selectById(stage.getId()).getIsInitialized(),
+            "落圈不应锁定名单");
     }
 
     /**
-     * 圈场次尚未建立时签到:后端只按配置预建空圈,再按客户端给的目标圈落位。
-     * 尚未拿到场次ID 时用 zoneIndex 指定(前端在圈栏还没落地时就是这么传的)。
+     * 圈必须先建好:尚未建立圈场次时签到被拒;预建空圈后即可按目标圈落位。
      */
     @Test
-    void checkInBeforeCirclesExistPreBuildsThenHonoursTargetZone() {
+    void checkInRequiresCirclesToExistFirst() {
         Long tid = newTournament("未建圈先签到");
         TStageVo stage = newAuditionStage(tid, "海选", 2, 2);
         assertEquals(0, circleMatches(stage.getId()).size(), "初始应无圈场次");
 
         Long first = insertPending(tid, stage.getId(), "选手1", "1");
+        ServiceException ex = assertThrows(ServiceException.class,
+            () -> lifecycleService.appendStageCompetitor(stage.getId(), first, null, 2),
+            "没有圈时不允许签到");
+        assertTrue(ex.getMessage().contains("尚未建立圈场次"),
+            "应提示先创建圈,实际: " + ex.getMessage());
+        assertEquals(0, circleMatches(stage.getId()).size(), "被拒时不应顺手建圈");
+
+        // 先建好空圈,再按目标圈落位
+        lifecycleService.ensureAuditionCircles(stage.getId());
         lifecycleService.appendStageCompetitor(stage.getId(), first, null, 2);
 
         List<TMatch> circles = circleMatches(stage.getId());
-        assertEquals(2, circles.size(), "签到时应按配置预建 2 个圈");
-        assertEquals(1, circleCountOf(stage.getId(), first), "选手应被挂入一个圈");
+        assertEquals(2, circles.size(), "应预建 2 个空圈");
         assertEquals(first, participantsOf(circles.get(1).getId()).get(0).getCompetitorId(),
             "应按 zoneIndex=2 落入第 2 圈");
         assertEquals(0, participantsOf(circles.get(0).getId()).size(),
@@ -387,15 +415,19 @@ class CheckInFlowTest {
         assertEquals(Long.valueOf(2L), competitorMapper.selectById(ids.get(0)).getSeedRank());
         assertEquals(Long.valueOf(3L), competitorMapper.selectById(ids.get(1)).getSeedRank());
 
-        // 签到落圈(单圈也要显式指定):首次落圈会初始化赛段,种子随即锁定
+        // 签到落圈(单圈也要显式指定):单圈落圈不提前锁名单(留出加外卡/排位窗口),
+        // 名单在开赛时初始化并锁定
         lifecycleService.ensureAuditionCircles(stage.getId());
         List<TMatch> circles = circleMatches(stage.getId());
         assertEquals(1, circles.size(), "单圈应按配置预建 1 个圈");
         for (Long cid : ids) {
             lifecycleService.appendStageCompetitor(stage.getId(), cid, circles.get(0).getId());
         }
-        assertEquals(1L, stageMapper.selectById(stage.getId()).getIsInitialized(), "落圈时应初始化");
+        assertEquals(0L, stageMapper.selectById(stage.getId()).getIsInitialized(),
+            "单圈落圈不应提前锁定名单");
+        bindRefereeToCircles(stage.getId());
         lifecycleService.startStage(stage.getId());
+        assertEquals(1L, stageMapper.selectById(stage.getId()).getIsInitialized(), "开赛时应初始化");
         assertThrows(ServiceException.class, () -> lifecycleService.setSeedOrder(bo),
             "已初始化的赛段不允许再调整种子顺序");
     }

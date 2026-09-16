@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.domain.R;
 import com.dance.street.game.domain.bo.StageRefereeBo;
+import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITRefereeStageService;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +30,7 @@ import java.util.List;
 public class RefereeStageController {
 
     private final ITRefereeStageService refereeStageService;
+    private final ITStageLifecycleService stageLifecycleService;
 
     /**
      * 查询某赛段已分配的裁判ID列表
@@ -45,6 +47,8 @@ public class RefereeStageController {
     @SaCheckPermission("game:refereeStage:edit")
     @PostMapping("/assign")
     public R<Void> assignReferees(@Validated @RequestBody StageRefereeBo bo) {
+        // 赛段开始后裁判锁定:中途加减裁判会让同场选手由不同数量的裁判打分,分数不可比
+        stageLifecycleService.assertRefereesEditable(bo.getStageId());
         refereeStageService.assignReferees(bo);
         return R.ok();
     }

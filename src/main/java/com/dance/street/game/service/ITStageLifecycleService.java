@@ -6,6 +6,7 @@ import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
+import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 
 import java.util.List;
@@ -23,11 +24,11 @@ public interface ITStageLifecycleService {
     /** 按赛制生成对阵(TMatch/Participant/Round + promotion_rule 连线) */
     void generateMatches(GenerateMatchesBo bo);
 
-    /** 赛段 PENDING→GAMING;淘汰赛只开第一场(逐场进行),其余赛制所有场次进入 GAMING */
+    /** 赛段 DRAFT→GAMING;淘汰赛只开第一场(逐场进行),其余赛制所有场次进入 GAMING */
     void startStage(Long stageId);
 
     /**
-     * 赛段进入进行中(DRAFT/PENDING→GAMING)并广播赛事事件;已是 GAMING 等状态时为空操作(幂等)。
+     * 赛段进入进行中(DRAFT→GAMING)并广播赛事事件;已是 GAMING 等状态时为空操作(幂等)。
      * 「开始赛段」与「开始单个场次」共用本入口,避免两处各写一份状态推进逻辑。
      */
     void ensureStageGaming(Long stageId);
@@ -47,7 +48,7 @@ public interface ITStageLifecycleService {
     /**
      * 海选/排名赛补签到:把新参赛方挂入圈场次(新增 participant + round),保证可被裁判打分并参与结算。
      * 落圈由调用方决定,后端不推导圈位;仅当只有一个圈场次时才允许不指定。
-     * AUDITION/RANK + GAMING/PENDING 且已生成场次时生效,尚未生成场次时为空操作(后续生成会纳入)。
+     * AUDITION/RANK 且处于 GAMING 或规划中(DRAFT)并已生成场次时生效,尚未生成场次时为空操作(后续生成会纳入)。
      */
     void appendStageCompetitor(Long stageId, Long competitorId);
 
@@ -85,6 +86,16 @@ public interface ITStageLifecycleService {
      * 抽号/签到页打开时调用,保证顶部圈栏始终对应真实场次;已有场次开始或圈已建齐时为空操作。
      */
     void ensureAuditionCircles(Long stageId);
+
+    /**
+     * 裁判配置锁定校验:赛段一旦开始(非 DRAFT)就不能再改裁判。
+     *
+     * <p>与"每圈必须有裁判才能开赛"配套:开始后加减裁判既无必要,也会让同场选手
+     * 由不同数量的裁判打分(海选按累加聚合),分数不可比。</p>
+     *
+     * @throws org.dromara.common.core.exception.ServiceException 赛段已开始/已结束
+     */
+    void assertRefereesEditable(Long stageId);
 
     /** 擂台赛:按轮转队列创建并开始下一场对决(胜者守擂、败者队尾、平局双方均排到队尾)。赛段须 GAMING 且无进行中对决 */
     void startNextArenaMatch(Long stageId);
@@ -126,14 +137,18 @@ public interface ITStageLifecycleService {
     /**
      * 完成赛段:GAMING→SETTLED(结算后需在中间态「确认晋级」)。
      *
-     * @return 结算后的赛段状态:SETTLED=已正常完成;GAMING=存在未完成场次(如海选二海/加赛),
+     * <p>结算由对应赛制的 {@code StageSettler} 策略执行。无论哪种赛制,
+     * 「还不能结束」都通过返回值的 {@code completed=false} + {@code message} 表达,
+     * 不再混用异常(见 {@link StageCompleteVo})。</p>
+     *
+     * @return SETTLED=已正常完成;GAMING=存在未完成场次(如海选二海/加赛)或仍有场次未结算,
      *         赛段保持进行中,需完成剩余判罚后再次调用。
      */
-    String completeStage(Long stageId);
+    StageCompleteVo completeStage(Long stageId);
 
     /**
      * 回退到草稿:清除赛段已生成的全部场次(级联轮次/参赛明细/打分),参赛方回退待定,
-     * isInitialized 归零、状态置 DRAFT,可重新排种子/生成对阵。仅 DRAFT/PENDING 状态可用。
+     * isInitialized 归零、状态置 DRAFT,可重新排种子/生成对阵。仅 DRAFT 状态可用。
      */
     void resetStageToDraft(Long stageId);
 

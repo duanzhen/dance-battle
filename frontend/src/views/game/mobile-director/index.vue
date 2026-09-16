@@ -74,7 +74,7 @@
               <span
                 class="text-[8px] font-bold px-1.5 py-0.5 rounded-full"
                 :class="{
-                  'bg-blue-600/20 text-blue-400': stage.status === 'DRAFT' || stage.status === 'PENDING',
+                  'bg-blue-600/20 text-blue-400': stage.status === 'DRAFT',
                   'bg-green-600/20 text-green-400': stage.status === 'GAMING',
                   'bg-amber-600/20 text-amber-400': stage.status === 'SETTLED',
                   'bg-red-600/20 text-red-400': stage.status === 'DISCARD'
@@ -104,7 +104,7 @@
             <span
               class="text-[10px] font-bold px-2 py-1 rounded"
               :class="{
-                'bg-blue-600/20 text-blue-400': currentStage.status === 'DRAFT' || currentStage.status === 'PENDING',
+                'bg-blue-600/20 text-blue-400': currentStage.status === 'DRAFT',
                 'bg-green-600/20 text-green-400': currentStage.status === 'GAMING',
                 'bg-amber-600/20 text-amber-400': currentStage.status === 'SETTLED',
                 'bg-red-600/20 text-red-400': currentStage.status === 'DISCARD'
@@ -171,7 +171,7 @@
             </div>
 
             <p
-              v-if="currentStage && !canStart && (currentStage.status === 'DRAFT' || currentStage.status === 'PENDING')"
+              v-if="currentStage && !canStart && currentStage.status === 'DRAFT'"
               class="mt-3 text-[10px] text-neutral-500 leading-relaxed"
             >
               <template v-if="currentStage.awaitingAdvancement">
@@ -181,7 +181,7 @@
             </p>
 
             <div
-              v-if="currentStage.status === 'DRAFT' || currentStage.status === 'PENDING'"
+              v-if="currentStage.status === 'DRAFT'"
               class="mt-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/10"
             >
               <p v-if="currentStage.stageMode === 'ARENA'" class="text-[10px] text-blue-400/70">
@@ -873,7 +873,7 @@ const prevStage = computed(() => {
 
 const canStart = computed(() => {
   if (!currentStage.value) return false;
-  if (currentStage.value.status !== 'DRAFT' && currentStage.value.status !== 'PENDING') return false;
+  if (currentStage.value.status !== 'DRAFT') return false;
   // 中间态未确认时:开启「跳过中间态确认」配置才允许点击(点击时弹窗确认后自动确认晋级再开始)
   if (currentStage.value.awaitingAdvancement && !currentStage.value.skipConfirm) return false;
   return !prevStage.value || prevStage.value.status === 'SETTLED';
@@ -902,7 +902,6 @@ const tempWithdrawTarget = ref<string | number | null>(null);
 const getStatusText = (status: string) => {
   const map: Record<string, string> = {
     'DRAFT': '规划中',
-    'PENDING': '规划中',
     'GAMING': '进行中',
     'SETTLED': '已结束',
     'DISCARD': '已取消'
@@ -1118,12 +1117,12 @@ const handleComplete = async () => {
 
     const stillGaming = stages.value.some((s) => s.status === 'GAMING');
     isLive.value = stillGaming;
-    const result = payloadOf<any>(res);
-    if (result?.status && result.status !== 'SETTLED') {
-      ElMessage.warning(
-        stage.stageMode === 'AUDITION' ? '海选产生二海(同分加赛),完成二海判罚后才能结束赛段' : '赛段仍有未完成场次,完成全部判罚后才能结束赛段'
-      );
-    }
+      const result = payloadOf<any>(res);
+      if (result?.status && result.status !== 'SETTLED') {
+        // 后端统一返回可直接展示的原因(如「海选存在二海未完成判罚: 选手32, 选手34」);
+        // 只有旧响应没有 message 时才回退到通用提示
+        ElMessage.warning(result.message || '赛段仍有未完成场次,完成全部判罚后才能结束赛段');
+      }
   } catch (e: any) {
     console.error('完成赛段失败:', e);
     ElMessage.error(e?.message || '完成赛段失败');

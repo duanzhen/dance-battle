@@ -53,7 +53,7 @@ export const withdrawArenaCompetitor = (stageId: string | number, competitorId: 
   });
 };
 
-/** 开始赛段:PENDING→GAMING */
+/** 开始赛段:DRAFT→GAMING */
 export const startStage = (id: string | number) => {
   return request({
     url: '/game/stage/' + id + '/start',
@@ -69,7 +69,7 @@ export const completeStage = (id: string | number) => {
   });
 };
 
-/** 重置赛段为草稿:清除已生成对阵,参赛方回退待定,可重新排种子/生成(仅 DRAFT/PENDING 可用) */
+/** 重置赛段为草稿:清除已生成对阵,参赛方回退待定,可重新排种子/生成(仅 DRAFT 可用) */
 export const resetStageToDraft = (id: string | number) => {
   return request({
     url: '/game/stage/' + id + '/reset-to-draft',

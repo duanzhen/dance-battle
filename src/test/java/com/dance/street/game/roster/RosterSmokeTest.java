@@ -3,6 +3,7 @@ package com.dance.street.game.roster;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
@@ -21,6 +22,7 @@ import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
@@ -95,6 +97,8 @@ class RosterSmokeTest {
     private TMatchMapper matchMapper;
     @Autowired
     private TMatchParticipantMapper participantMapper;
+    @Autowired
+    private TMatchRefereeMapper matchRefereeMapper;
 
     @Test
     void defaultRosterSynthesisAndApplyRoster() {
@@ -332,9 +336,10 @@ class RosterSmokeTest {
         assertEquals(1, reviveCircle.size(), "单圈海选应按配置预建 1 个圈");
         lifecycleService.appendStageCompetitor(revive.getId(), reviveRows.get(0).getId(),
             reviveCircle.get(0).getId());
+        bindRefereeToCircles(revive);
         lifecycleService.startStage(revive.getId());
         scoreAllAuditionParticipants(revive.getId());
-        assertEquals(StageConstants.STAGE_SETTLED, lifecycleService.completeStage(revive.getId()));
+        assertEquals(StageConstants.STAGE_SETTLED, lifecycleService.completeStage(revive.getId()).getStatus());
         assertEquals(1, countOutcome(revive.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
 
         // 决赛:默认名单(复活赛胜者) + 跨级直入来源(预选胜者)整单汇入
@@ -915,6 +920,23 @@ class RosterSmokeTest {
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, stageId)
                 .eq(TCompetitor::getOutcomeStatus, outcome));
+    }
+
+    /**
+     * 海选按圈判:开赛前每个圈都必须有裁判,否则圈上没人能打分、赛段结束不了。
+     * 开赛前赛段下的场次就是圈,这里给每个圈各绑一名裁判。
+     */
+    private void bindRefereeToCircles(TStageVo stage) {
+        List<TMatch> circles = matchMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, stage.getId()));
+        for (TMatch m : circles) {
+            TMatchReferee mr = new TMatchReferee();
+            mr.setMatchId(m.getId());
+            mr.setRefereeId(0L);
+            mr.setTournamentId(stage.getTournamentId());
+            matchRefereeMapper.insert(mr);
+        }
     }
 
     /** 淘汰赛单场(2 人)直接判定胜负并结算 */

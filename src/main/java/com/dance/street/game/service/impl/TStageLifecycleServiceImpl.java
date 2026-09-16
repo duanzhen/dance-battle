@@ -24,19 +24,15 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
-import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
-import com.dance.street.game.domain.vo.TCompetitorVo;
-import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.engine.common.DimensionConfig;
-import com.dance.street.game.engine.common.GroupConfig;
 import com.dance.street.game.engine.common.PromotionTarget;
-import com.dance.street.game.engine.common.TransitionConfig;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
@@ -50,10 +46,7 @@ import com.dance.street.game.engine.generator.BracketPlan;
 import com.dance.street.game.engine.generator.MatchPlan;
 import com.dance.street.game.engine.generator.SlotPlan;
 import com.dance.street.game.engine.generator.StageGeneratorFactory;
-import com.dance.street.game.engine.scoring.MatchScoreInput;
-import com.dance.street.game.engine.scoring.MatchScoreResult;
 import com.dance.street.game.engine.scoring.ScoreAggregator;
-import com.dance.street.game.engine.scoring.ScoringEngine;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TMatchMapper;
@@ -65,20 +58,23 @@ import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
-import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
-import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
+import com.dance.street.game.service.impl.settle.ArenaQueueSupport;
+import com.dance.street.game.service.impl.settle.AuditionStageSettler;
+import com.dance.street.game.service.impl.settle.SettlementSupport;
+import com.dance.street.game.service.impl.settle.StageSettleOutcome;
+import com.dance.street.game.service.impl.settle.StageSettlerRegistry;
+import static com.dance.street.game.service.impl.settle.SettlementSupport.parseCompetitorNumber;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -111,21 +107,27 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final TPlayerMapper playerMapper;
     private final TRefereeMapper refereeMapper;
     private final TTournamentMapper tournamentMapper;
-    private final ScoringEngine scoringEngine = new ScoringEngine();
     private final TRoundScoreMapper roundScoreMapper;
-    private final ITCompetitorService competitorService;
     private final ITStageService stageService;
     private final StageGeneratorFactory generatorFactory = new StageGeneratorFactory();
-    private final ITScoredMatchService scoredMatchService;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final ITRefereeStageService refereeStageService;
     private final ITStageRosterService rosterService;
     /** 赛段级结果(晋级/淘汰/名次)的唯一写入口 */
     private final CompetitorOutcomeWriter outcomeWriter;
-
-    /** 海选大屏「当前上场选手」标记(仅内存,现场标记,不落库):matchId -> competitorId */
-    private final Map<Long, Long> matchCurrentCompetitor = new ConcurrentHashMap<>();
+    /** 结算策略注册表:按赛制分派(见 settle 包) */
+    private final StageSettlerRegistry settlerRegistry;
+    /** 海选结算策略:加赛自动结算由它承担 */
+    private final AuditionStageSettler auditionStageSettler;
+    /** 擂台赛轮转队列/积分口径(查询与结算共用) */
+    private final ArenaQueueSupport arenaQueueSupport;
+    /** 结算共享内核(场次置结算、号码排序等) */
+    private final SettlementSupport settlementSupport;
+    /** 赛段链唯一入口:开赛守卫用它校正 prev 展示列 */
+    private final StageChain stageChain;
+    /** 当前上场选手标记的跨实例存储(Redis,单机降级为进程内) */
+    private final MatchCurrentCompetitorStore currentCompetitorStore;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -543,6 +545,16 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             // 只允许增加圈:在末尾追加空白 ZONE match,原圈及已落圈选手保持不变
             addMissingAuditionCircles(stage, planned);
             log.info("海选赛段[{}]按配置追加空圈至{}圈完成", stageId, planned);
+            return;
+        }
+        // 圈已建齐:本次保存可能只改了「每圈裁判」配置,按配置重新应用圈-裁判绑定。
+        // 仅在配置里显式写了每圈裁判(长度与圈数一致)时才重绑——否则会走兜底规则
+        // (全裁判绑每圈 / 1:1),把现场手动调好的绑定覆盖掉。
+        // 场次已开始的情况在上面已提前返回,不会改动进行中的绑定。
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        List<List<Long>> cfg = rc != null ? rc.getCircleRefereeIds() : null;
+        if (cfg != null && cfg.size() == zones.size()) {
+            autoAssignCircleReferees(stage);
         }
     }
 
@@ -582,7 +594,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (gaming > 0) {
             throw new ServiceException("已有进行中的对决,请先完成或重启当前对决");
         }
-        List<Long> queue = computeArenaQueue(stageId);
+        List<Long> queue = arenaQueueSupport.computeArenaQueue(stageId);
         if (queue.size() < 2) {
             throw new ServiceException("擂台赛至少需要 2 名参赛者,当前 {} 名", queue.size());
         }
@@ -657,7 +669,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 临时弃权 = 排到队尾:记录跳过标记(固定排在队列末尾,后续仍参与排队/对阵/排名)
         TCompetitor upd = new TCompetitor();
         upd.setId(competitorId);
-        upd.setRemark(appendArenaSkipMark(comp.getRemark()));
+        upd.setRemark(arenaQueueSupport.appendArenaSkipMark(comp.getRemark()));
         competitorMapper.updateById(upd);
         // 补位:同一场次内把临时弃权选手替换为队列下一位(不开新场)
         replaceArenaMatchParticipant(stageId, competitorId);
@@ -712,7 +724,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
         }
         // 队列下一位(排除弃权者与场上对手)
-        List<Long> queue = computeArenaQueue(stageId);
+        List<Long> queue = arenaQueueSupport.computeArenaQueue(stageId);
         Long otherFinal = otherId;
         Long replacement = queue.stream()
             .filter(id -> !id.equals(withdrawnId) && (otherFinal == null || !id.equals(otherFinal)))
@@ -841,7 +853,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .eq(TMatchParticipant::getCompetitorId, winner.getCompetitorId()));
             resolveKnockoutByeWinner(m, winner.getCompetitorId());
         }
-        markMatchSettled(m);
+        settlementSupport.markMatchSettled(m);
         return true;
     }
 
@@ -897,20 +909,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         outcomeWriter.writeResult(competitorId, OutcomeStatusEnum.ADVANCE.getCode(), rank);
     }
 
-    /** 场次与轮次置为已结算并通知裁判端/赛事事件 */
-    private void markMatchSettled(TMatch match) {
-        TMatch mUpd = new TMatch();
-        mUpd.setId(match.getId());
-        mUpd.setStatus(StageConstants.MATCH_SETTLED);
-        matchMapper.updateById(mUpd);
-        TMatchRound roundUpd = new TMatchRound();
-        roundUpd.setStatus(StageConstants.MATCH_SETTLED);
-        matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
-            .eq(TMatchRound::getMatchId, match.getId()));
-        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "match");
-        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
-    }
-
     @Override
     public ArenaOverviewVo getArenaOverview(Long stageId) {
         TStage stage = mustGetStage(stageId);
@@ -928,8 +926,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .orderByAsc(TCompetitor::getId));
         Map<Long, TCompetitor> compMap = comps.stream()
             .collect(Collectors.toMap(TCompetitor::getId, c -> c));
-        Map<Long, Integer> points = arenaPoints(stageId);
-        List<Long> queue = computeArenaQueue(stageId);
+        Map<Long, Integer> points = arenaQueueSupport.arenaPoints(stageId);
+        List<Long> queue = arenaQueueSupport.computeArenaQueue(stageId);
         Map<Long, String> avatars = loadAvatarMap(new ArrayList<>(compMap.keySet()));
 
         List<ArenaOverviewVo.CompetitorInfo> queueList = new ArrayList<>();
@@ -964,163 +962,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .eq(TMatch::getStatus, StageConstants.MATCH_SETTLED));
         vo.setBattleCount(settled);
         return vo;
-    }
-
-    /**
-     * 擂台赛轮转队列:初始 = 签到顺序(seedRank),回放已结算对决重排。
-     * 每场对决:胜者留在队首,败者排到队尾,其余保持相对顺序;
-     * 平局时擂主(slot1)与挑战者(slot2)均排到队尾(保持原相对顺序)。
-     */
-    private List<Long> computeArenaQueue(Long stageId) {
-        List<TCompetitor> comps = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, stageId)
-            // 弃权选手不参与排队/对阵/排名
-            .ne(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.WITHDRAWN.getCode())
-            .orderByAsc(TCompetitor::getSeedRank)
-            .orderByAsc(TCompetitor::getId));
-        // 临时弃权标记:有标记的选手固定排在队尾(按标记时间),避免被"胜者守擂"重放顶回队首
-        List<TCompetitor> normal = new ArrayList<>();
-        List<TCompetitor> skipped = new ArrayList<>();
-        for (TCompetitor c : comps) {
-            if (arenaSkipSeq(c) >= 0) {
-                skipped.add(c);
-            } else {
-                normal.add(c);
-            }
-        }
-        skipped.sort(Comparator.comparingLong(this::arenaSkipSeq).thenComparing(TCompetitor::getId));
-        List<Long> queue = normal.stream().map(TCompetitor::getId).collect(Collectors.toCollection(ArrayList::new));
-
-        List<TMatch> settled = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stageId)
-            .eq(TMatch::getStatus, StageConstants.MATCH_SETTLED)
-            .orderByAsc(TMatch::getId));
-        for (TMatch m : settled) {
-            List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                .eq(TMatchParticipant::getMatchId, m.getId())
-                .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
-            // 平局:擂主(slot1)与挑战者(slot2)均移到队尾,其余保持相对顺序
-            boolean isDraw = parts.stream().anyMatch(p -> p.getCompetitorId() != null
-                && MatchOutcomeEnum.DRAW.getCode().equals(p.getOutcomeStatus()));
-            if (isDraw) {
-                Long defender = null;
-                Long challenger = null;
-                for (TMatchParticipant p : parts) {
-                    if (p.getCompetitorId() == null) {
-                        continue;
-                    }
-                    if (p.getDisplaySlotIndex() != null && p.getDisplaySlotIndex() == 1L) {
-                        defender = p.getCompetitorId();
-                    } else if (p.getDisplaySlotIndex() != null && p.getDisplaySlotIndex() == 2L) {
-                        challenger = p.getCompetitorId();
-                    }
-                }
-                if (defender == null || challenger == null
-                    || !queue.contains(defender) || !queue.contains(challenger)) {
-                    // 异常数据(如中途改判/重启残留)跳过该场,保持当前队列
-                    continue;
-                }
-                List<Long> next = new ArrayList<>();
-                for (Long cid : queue) {
-                    if (!cid.equals(defender) && !cid.equals(challenger)) {
-                        next.add(cid);
-                    }
-                }
-                next.add(defender);
-                next.add(challenger);
-                queue = next;
-                continue;
-            }
-            Long winner = null;
-            Long loser = null;
-            for (TMatchParticipant p : parts) {
-                if (p.getCompetitorId() == null) {
-                    continue;
-                }
-                if (MatchOutcomeEnum.WIN.getCode().equals(p.getOutcomeStatus())) {
-                    winner = p.getCompetitorId();
-                } else if (MatchOutcomeEnum.LOSS.getCode().equals(p.getOutcomeStatus())) {
-                    loser = p.getCompetitorId();
-                }
-            }
-            if (winner == null || loser == null || !queue.contains(winner) || !queue.contains(loser)) {
-                // 异常数据(如中途改判/重启残留)跳过该场,保持当前队列
-                continue;
-            }
-            List<Long> next = new ArrayList<>();
-            next.add(winner);
-            for (Long cid : queue) {
-                if (!cid.equals(winner) && !cid.equals(loser)) {
-                    next.add(cid);
-                }
-            }
-            next.add(loser);
-            queue = next;
-        }
-        for (TCompetitor c : skipped) {
-            queue.add(c.getId());
-        }
-        return queue;
-    }
-
-    /** 临时弃权标记前缀(存于 remark,格式 ARENA_SKIP:<时间戳>;可多个,取最后一次) */
-    private static final String ARENA_SKIP_PREFIX = "ARENA_SKIP:";
-
-    /** 读取临时弃权时间戳;无标记返回 -1 */
-    private long arenaSkipSeq(TCompetitor c) {
-        String r = c.getRemark();
-        if (r == null || r.isBlank()) {
-            return -1L;
-        }
-        int idx = r.lastIndexOf(ARENA_SKIP_PREFIX);
-        if (idx < 0) {
-            return -1L;
-        }
-        try {
-            String rest = r.substring(idx + ARENA_SKIP_PREFIX.length());
-            return Long.parseLong(rest.split(";")[0].trim());
-        } catch (NumberFormatException e) {
-            return -1L;
-        }
-    }
-
-    private String appendArenaSkipMark(String remark) {
-        String mark = ARENA_SKIP_PREFIX + System.currentTimeMillis();
-        return (remark == null || remark.isBlank()) ? mark : remark + ";" + mark;
-    }
-
-    /** 擂台赛积分:统计本赛段全部场次中参赛者的胜场数(每胜一场 +1) */
-    private Map<Long, Integer> arenaPoints(Long stageId) {
-        Map<Long, Integer> wins = new HashMap<>();
-        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stageId));
-        if (matches.isEmpty()) {
-            return wins;
-        }
-        // 平局双方各加1分:由赛段配置 drawBothScore 控制(默认关闭,只按胜场记分)
-        TStage stage = stageMapper.selectById(stageId);
-        RuleConfigHolder rc = stage != null ? RuleConfigParser.parse(stage.getRuleConfig()) : null;
-        boolean drawBothScore = rc != null && Boolean.TRUE.equals(rc.getDrawBothScore());
-        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
-        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-            .in(TMatchParticipant::getMatchId, matchIds)
-            .eq(TMatchParticipant::getOutcomeStatus, MatchOutcomeEnum.WIN.getCode()));
-        for (TMatchParticipant p : parts) {
-            if (p.getCompetitorId() != null) {
-                wins.merge(p.getCompetitorId(), 1, Integer::sum);
-            }
-        }
-        if (drawBothScore) {
-            List<TMatchParticipant> draws = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchIds)
-                .eq(TMatchParticipant::getOutcomeStatus, MatchOutcomeEnum.DRAW.getCode()));
-            for (TMatchParticipant p : draws) {
-                if (p.getCompetitorId() != null) {
-                    wins.merge(p.getCompetitorId(), 1, Integer::sum);
-                }
-            }
-        }
-        return wins;
     }
 
     private ArenaOverviewVo.CompetitorInfo toArenaCompetitor(Long competitorId,
@@ -1198,8 +1039,23 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         // 轮空场次不在此自动结算:保持 PENDING,由导播台逐场点「开始」时再自动结束(见 settleByeMatch),
         // 保证淘汰赛的每一场(含轮空)都经过导播台确认
+        // 圈/对阵已预建(exist>0)时也要在开赛这一刻锁定名单:否则预建圈的赛段开赛后
+        // isInitialized 仍是 0,种子位还能被继续调整。空赛段没有名单可锁,保持未初始化。
+        if (exist > 0 && !Long.valueOf(1L).equals(stage.getIsInitialized())) {
+            long pendingComps = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stageId)
+                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
+            if (pendingComps > 0) {
+                InitializeStageBo initBo = new InitializeStageBo();
+                initBo.setStageId(stageId);
+                initialize(initBo);
+                stage = mustGetStage(stageId);
+            }
+        }
         // 海选落圈守卫:圈位由客户端在签到时指定,开赛前必须人人已落圈(见 assertAuditionAllAttached)
         assertAuditionAllAttached(stageId);
+        // 海选裁判守卫:每个圈都要有裁判,否则开赛后没人能判、赛段既结算不了也结束不了
+        assertAuditionCirclesHaveReferees(stageId);
         ensureStageGaming(stageId);
 
         // 擂台赛:开赛后自动创建并开始第一场对决(队首擂主 vs 队次挑战者)
@@ -1268,9 +1124,63 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .map(c -> c.getNumber() == null ? c.getName() : c.getName() + "(" + c.getNumber() + "号)")
             .toList();
         if (!missed.isEmpty()) {
-            throw new ServiceException("海选有 {} 名参赛者尚未落圈,无法开始:{};请先在签到页指定其圈子",
+            throw new ServiceException("海选有 {} 名参赛者尚未落圈,无法开始:{};请先为其指定圈子"
+                + "(签到页选圈,或调用「参赛方落圈」接口)",
                 missed.size(), String.join("、", missed));
         }
+    }
+
+    /**
+     * 海选开赛守卫:每个圈都必须至少有一名裁判。
+     *
+     * <p>海选是<b>按圈判</b>的——裁判端只显示自己绑到圈上的那场({@code t_match_referee})。
+     * 圈上没有裁判时谁也打不了分,赛段既结算不了也结束不了,现场只能删赛事重建;
+     * 而"赛段级裁判"({@code t_referee_stage})只表示谁参与本赛段,不会自动落到圈上。
+     * 所以开赛前拦住,并列出缺裁判的圈。</p>
+     */
+    private void assertAuditionCirclesHaveReferees(Long stageId) {
+        TStage stage = stageMapper.selectById(stageId);
+        if (stage == null || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            return;
+        }
+        List<TMatch> circles = auditionCircles(stage);
+        if (circles.isEmpty()) {
+            return;
+        }
+        List<String> missing = new ArrayList<>();
+        for (int i = 0; i < circles.size(); i++) {
+            TMatch circle = circles.get(i);
+            long refs = matchRefereeMapper.selectCount(Wrappers.<TMatchReferee>lambdaQuery()
+                .eq(TMatchReferee::getMatchId, circle.getId()));
+            if (refs == 0) {
+                missing.add(circle.getName() != null ? circle.getName() : ("第" + (i + 1) + "圈"));
+            }
+        }
+        if (!missing.isEmpty()) {
+            throw new ServiceException("海选有 {} 个圈还没有裁判,无法开始:{};"
+                + "请给每圈指定裁判(赛段流程→海选配置→每圈裁判)",
+                missing.size(), String.join("、", missing));
+        }
+    }
+
+    /**
+     * 裁判配置锁定校验:赛段一旦开始(非 DRAFT)就不能再改裁判。
+     *
+     * <p>配合开赛守卫(每圈必须有裁判),开始后加减裁判既无必要也会出问题:
+     * 海选按累加聚合,中途加减裁判会让同场选手由不同数量的裁判打分、分数不可比,
+     * 且减裁判不会撤销其已提交的分。</p>
+     */
+    @Override
+    public void assertRefereesEditable(Long stageId) {
+        if (stageId == null) {
+            return;
+        }
+        TStage stage = stageMapper.selectById(stageId);
+        if (stage == null || StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            return;
+        }
+        throw new ServiceException("赛段[{}]已开始,裁判配置已锁定:如需调整请先重置赛段",
+            stage.getName());
     }
 
     /**
@@ -1278,10 +1188,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
      * 任一不满足即抛 ServiceException;通过后调用方才有权生成对阵并置 GAMING。
      */
     private void assertCanStart(TStage stage) {
-        // DRAFT 也可一键开始:自动初始化后进入 PENDING,再生成对阵并开赛
-        if (!StageConstants.STAGE_PENDING.equals(stage.getStatus())
-            && !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
-            throw new ServiceException("仅 DRAFT/PENDING 状态的赛段可开始,当前: {}", stage.getStatus());
+        // 未开始只有 DRAFT 一个状态:一键开始会自动初始化、生成对阵,再置 GAMING
+        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("仅规划中(DRAFT)状态的赛段可开始,当前: {}", stage.getStatus());
         }
         // 海选圈默认为空:必须先配置至少一圈(人数/裁判/去向)才能开始
         if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
@@ -1289,15 +1198,11 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             throw new ServiceException("海选尚未配置圈,请先在赛段配置中新增至少一圈(人数/裁判/去向)");
         }
         // 流程规范:上一赛段必须已结束(SETTLED),否则不允许开始本赛段。
-        // 前驱由 next 链推导(见 StageChain)。prev 列在这里只用于识别异常数据:
-        // 列上记着前驱、但链上没有任何赛段的 next 指向本赛段,说明链已损坏;
-        // 此时宁可拦住也不当入口赛段放行——当入口会改用签到来源组,静默产出错误的名单。
+        // 前驱由 next 链推导(见 StageChain);prev 列只是展示字段,与链不一致时
+        // 按链修正(两个方向),不当作致命错误拦下开赛——拦截一件只影响展示的
+        // 不一致,代价是主办方开不了赛。
         TStage prev = stageService.resolvePrevStage(stage);
-        if (prev == null && stage.getPrevStageId() != null) {
-            throw new ServiceException(
-                "赛段[{}]的上一赛段指针与赛段链不一致(prev={} 但无赛段的 next 指向本赛段),请先修复赛段链",
-                stage.getId(), stage.getPrevStageId());
-        }
+        stageChain.reconcilePrevColumn(stage);
         if (prev == null) {
             // 链表头(入口赛段)没有上游,名单守卫由名单服务按"无内部来源组"自动放行
             return;
@@ -1313,8 +1218,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Transactional(rollbackFor = Exception.class)
     public void ensureStageGaming(Long stageId) {
         TStage stage = mustGetStage(stageId);
-        if (!StageConstants.STAGE_PENDING.equals(stage.getStatus())
-            && !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
             // 已是 GAMING/SETTLED:幂等空操作,不重复落库与广播
             return;
         }
@@ -1358,43 +1262,17 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             return;
         }
 
-        // 海选分圈:统一预建空圈(只建圈结构,不分配选手),落圈由客户端在签到时指定。
-        // 已有圈但少于配置时只增量补空圈,不重建、不动原有圈。
-        boolean auditionSplit = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
-            && plannedCircleCount(stage) >= 1;
-        if (auditionSplit) {
-            List<TMatch> zones = auditionCircles(stage);
-            if (zones.size() < plannedCircleCount(stage)) {
-                // 统一预建空圈:只建圈结构,不分配选手(落圈由客户端在签到时指定);
-                // 场次已开始(进行中)后禁止补建新圈,防止出现"进行中赛段里的未开始圈"
-                boolean anyStarted = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, stageId)
-                    .ne(TMatch::getStatus, StageConstants.MATCH_PENDING)) > 0;
-                if (!anyStarted) {
-                    addMissingAuditionCircles(stage, plannedCircleCount(stage));
-                }
-            }
-        }
-        // 抽号页 ensureAuditionCircles 可能已按配置预建空圈但尚未初始化(DRAFT):
-        // 第一位选手签到时补做初始化(锁定名单)以便挂入对应圈
-        if (auditionSplit && !Long.valueOf(1L).equals(stage.getIsInitialized())
-            && StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
-            long pending = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, stageId)
-                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
-            if (pending > 0) {
-                InitializeStageBo initBo = new InitializeStageBo();
-                initBo.setStageId(stageId);
-                initialize(initBo);
-                stage = mustGetStage(stageId);
-            }
+        // 海选圈必须先建好(ensure-circle-slots / generate-matches),签到只负责把人落进已有的圈。
+        // 这里不再按配置补建圈场次——「没有圈也能签到」会让选手静默不参与打分与结算。
+        boolean auditionSplit = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
+        if (auditionSplit && auditionCircles(stage).isEmpty()) {
+            throw new ServiceException("海选赛段尚未建立圈场次,请先创建圈后再签到");
         }
 
-        // 逐选手模式(AUDITION/RANK)补签到窗口:进行中/未开始均可挂入;
-        // 状态已收敛为 DRAFT 后,已生成对阵但尚未开赛同样允许挂入,否则迟到者会从打分中"消失"。
+        // 逐选手模式(AUDITION/RANK)补签到窗口:进行中或规划中均可挂入;
+        // 已生成对阵但尚未开赛(DRAFT)同样允许挂入,否则迟到者会从打分中"消失"。
         // 非逐选手赛制(淘汰/小组/擂台)仍保持原语义,不在生成后追加参赛方。
         boolean attachable = StageConstants.STAGE_GAMING.equals(stage.getStatus())
-            || StageConstants.STAGE_PENDING.equals(stage.getStatus())
             || (StageConstants.STAGE_DRAFT.equals(stage.getStatus())
                 && (auditionSplit || perCompetitor));
         if (!attachable) {
@@ -1421,6 +1299,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .filter(m -> !(StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛")))
             .toList();
         if (candidates.isEmpty()) {
+            if (auditionSplit) {
+                throw new ServiceException("海选没有可落圈的圈场次(圈已结算或正在进行加赛),无法签到");
+            }
             return;
         }
         TMatch target;
@@ -1722,18 +1603,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         autoAssignCircleReferees(stage);
     }
 
-    /** 参赛号码转数值用于排序:非数字号码排最后 */
-    private int parseCompetitorNumber(String number) {
-        if (number == null || number.isBlank()) {
-            return Integer.MAX_VALUE;
-        }
-        try {
-            return Integer.parseInt(number.trim());
-        } catch (NumberFormatException e) {
-            return Integer.MAX_VALUE;
-        }
-    }
-
     /** 加赛深度 -> sheet 名:1=二海,2=三海,3=四海,4=五海(加赛上限内最多四级) */
     private String tiebreakerSheetName(int depth) {
         return switch (depth) {
@@ -1942,60 +1811,19 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public String completeStage(Long stageId) {
+    public StageCompleteVo completeStage(Long stageId) {
         TStage stage = mustGetStage(stageId);
         if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
             throw new ServiceException("仅 GAMING 状态的赛段可完成,当前: {}", stage.getStatus());
         }
-        // 擂台赛:对决逐场独立结算,校验无进行中对决后落库冠军/名次(决出闭环)
-        if (StageModeEnum.ARENA.getCode().equals(stage.getStageMode())) {
-            long gaming = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stageId)
-                .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
-            if (gaming > 0) {
-                throw new ServiceException("仍有 {} 场对决进行中,请先完成或重启后再结束赛段", gaming);
-            }
-            settleArenaStage(stage);
-        } else if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
-            // 海选赛:最终结算,聚合所有裁判打分并排名晋级。之后场次变 SETTLED
-            // 二海(同分加赛)未判罚(仍有选手一条分都没打)时禁止结束赛段;
-            // 弃权选手打 0 分(0 分不参与晋级)后即可正常结算
-            assertTiebreakersJudged(stageId);
-            settleAuditionStage(stage);
-            // 检查是否还有加赛场次未完成
-            long tbUnfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stageId)
-                .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-            if (tbUnfinished > 0) {
-                // 海选出现二海(同分加赛):首次结算当场生成,赛段保持 GAMING,
-                // 必须等裁判完成二海判罚后再次调用 completeStage 才能结束赛段。
-                log.info("赛段[{}]存在{}场二海(同分加赛)未完成,赛段保持进行中,完成二海判罚后再结束",
-                    stageId, tbUnfinished);
-                return StageConstants.STAGE_GAMING;
-            }
-        } else if (StageModeEnum.RANK.getCode().equals(stage.getStageMode())) {
-            // 排名赛:最终结算,按多维度总分排名晋级。晋级线上同分并列者保持 PENDING,
-            // 由导播台在中间态(下一赛段开始前)手动决定谁晋级/是否全部晋级
-            settleRankStage(stage);
-            long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stageId)
-                .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-            if (unfinished > 0) {
-                log.info("赛段[{}]存在{}场未结算,等待全部结算后再次完成", stageId, unfinished);
-                return StageConstants.STAGE_GAMING;
-            }
-        } else {
-            // 多裁判累计打分场次(VOTING/RANKING):先统一结算,再校验是否全部完成
-            scoredMatchService.settleScoredMatches(stageId);
-            long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stageId).ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-            if (unfinished > 0) {
-                throw new ServiceException("赛段仍有 {} 场未结算,无法完成", unfinished);
-            }
-        }
-        // 小组赛:按组累计积分排名,前 advancePerGroup 名晋级
-        if (StageModeEnum.GROUP.getCode().equals(stage.getStageMode())) {
-            settleGroupStage(stage);
+        // 按赛制选结算策略(见 settle 包):每种赛制的结算规则独立成类,
+        // 这里只负责"选策略 → 置状态 → 广播"。
+        StageSettleOutcome outcome = settlerRegistry.of(stage.getStageMode()).settle(stage);
+        if (!outcome.closable()) {
+            // 结算产生了后续工作(二海加赛、仍有场次未结算…):赛段保持进行中。
+            // 「还不能结束」统一用返回值表达,不再与异常混用——导播台只需看 message。
+            log.info("赛段[{}]暂不能结束:{}", stageId, outcome.reason());
+            return StageCompleteVo.pending(outcome.reason());
         }
         stage.setStatus(StageConstants.STAGE_SETTLED);
         stageMapper.updateById(stage);
@@ -2005,7 +1833,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
         // 不再由后端自动确认晋级:完成赛段仅产出晋级预排;是否跳过中间态由 MC 导播台
         // 在开始下一赛段时弹窗确认后调用「确认晋级」接口决定(见 isAutoConfirmAdvancement)
-        return StageConstants.STAGE_SETTLED;
+        return StageCompleteVo.settled();
     }
 
     /**
@@ -2412,102 +2240,12 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         return item;
     }
 
-    /**
-     * 二海(同分加赛)守卫:加赛里还有选手未打分(未判罚)时,禁止结束赛段。
-     * 弃权按「打 0 分」处理(0 分不参与晋级),全部加赛选手有成绩记录后即可结算。
-     */
-    private void assertTiebreakersJudged(Long stageId) {
-        List<TMatch> tiebreakers = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stageId)
-            .likeRight(TMatch::getRemark, "同分加赛")
-            .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-        if (tiebreakers.isEmpty()) {
-            return;
-        }
-        List<Long> tbIds = tiebreakers.stream().map(TMatch::getId).toList();
-        List<TMatchParticipant> tbParts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, tbIds)
-                .isNotNull(TMatchParticipant::getCompetitorId));
-        if (tbParts.isEmpty()) {
-            return;
-        }
-        List<Long> compIds = tbParts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
-        Map<Long, TCompetitor> compMap = compIds.isEmpty() ? Map.of()
-            : competitorMapper.selectByIds(compIds).stream()
-                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
-        List<Long> tbRoundIds = matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery()
-                    .in(TMatchRound::getMatchId, tbIds)
-                    .select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        Set<Long> judged = tbRoundIds.isEmpty() ? Set.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, tbRoundIds)
-                    .select(TRoundScore::getCompetitorId))
-                .stream()
-                .map(TRoundScore::getCompetitorId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        List<String> unjudged = new ArrayList<>();
-        for (TMatchParticipant p : tbParts) {
-            if (p.getCompetitorId() == null || judged.contains(p.getCompetitorId())) {
-                continue;
-            }
-            TCompetitor c = compMap.get(p.getCompetitorId());
-            // 已标记退赛(WITHDRAWN)的选手不参与判罚,不算未判罚
-            if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
-                continue;
-            }
-            unjudged.add(c != null ? c.getName() : ("选手" + p.getCompetitorId()));
-        }
-        if (!unjudged.isEmpty()) {
-            throw new ServiceException("海选存在二海(同分加赛)未完成判罚: {},请完成二海判罚后再结束赛段(弃权选手打 0 分,0 分不参与晋级)",
-                String.join(", ", unjudged));
-        }
-    }
-
-    /**
-     * 擂台赛结算:把轮转队列首位落库为冠军(ADVANCE/finalRank=1),其余按胜场积分
-     * 排 2..n 并标记淘汰,使擂台赛结果可被查询、可接续下一赛段晋级。
-     * 至少完成一场对决才允许结束,避免空擂台直接"决出冠军"。
-     */
-    private void settleArenaStage(TStage stage) {
-        List<Long> queue = computeArenaQueue(stage.getId());
-        if (queue.isEmpty()) {
-            throw new ServiceException("擂台赛无参赛者,无法完成赛段");
-        }
-        long battles = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stage.getId())
-            .eq(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-        if (battles == 0) {
-            throw new ServiceException("擂台赛尚未进行任何对决,无法完成赛段(请先创建并完成至少一场对决)");
-        }
-        Map<Long, Integer> points = arenaPoints(stage.getId());
-        Long championId = queue.get(0);
-        List<Long> rest = new ArrayList<>(queue.subList(1, queue.size()));
-        // 亚军及以后按胜场积分降序;积分相同按参赛方 ID 稳定排序
-        rest.sort((a, b) -> {
-            int cmp = Integer.compare(points.getOrDefault(b, 0), points.getOrDefault(a, 0));
-            return cmp != 0 ? cmp : Long.compare(a, b);
-        });
-        outcomeWriter.writeResult(championId, OutcomeStatusEnum.ADVANCE.getCode(), 1L);
-        long rank = 2L;
-        for (Long cid : rest) {
-            outcomeWriter.writeResult(cid, OutcomeStatusEnum.ELIMINATED.getCode(), rank++);
-        }
-        log.info("擂台赛[{}]完成:冠军[{}]({}胜),共{}场对决,{}名参赛者落库排名", stage.getId(),
-            championId, points.getOrDefault(championId, 0), battles, queue.size());
-    }
-
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resetStageToDraft(Long stageId) {
         TStage stage = mustGetStage(stageId);
-        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())
-            && !StageConstants.STAGE_PENDING.equals(stage.getStatus())) {
-            throw new ServiceException("仅 DRAFT/PENDING 状态的赛段可重置为草稿,当前: {}", stage.getStatus());
+        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("仅规划中(DRAFT)状态的赛段可重置为草稿,当前: {}", stage.getStatus());
         }
         // 级联清除场次/轮次/参赛明细/打分
         List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
@@ -2572,275 +2310,43 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         return rosterService.applyRoster(nextStageId, null);
     }
 
-    private Long resolveNextStageId(TStage stage) {
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        if (rc != null && rc.getTransition() != null && rc.getTransition().getTargetStageId() != null) {
-            return rc.getTransition().getTargetStageId();
-        }
-        return stage.getNextStageId();
-    }
-
     /**
-     * 小组赛结算:按组(displayZone)累计参赛方胜负积分 → 组内排名 →
-     * 前 advancePerGroup 名 outcomeStatus=ADVANCE 并写 finalRank,其余 ELIMINATED。
-     */
-    private void settleGroupStage(TStage stage) {
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        GroupConfig gc = rc != null ? rc.getGroup() : null;
-        int winP = (gc != null && gc.getWinPoints() != null) ? gc.getWinPoints() : 3;
-        int drawP = (gc != null && gc.getDrawPoints() != null) ? gc.getDrawPoints() : 1;
-        int lossP = (gc != null && gc.getLossPoints() != null) ? gc.getLossPoints() : 0;
-        int advancePerGroup = (gc != null && gc.getAdvancePerGroup() != null) ? gc.getAdvancePerGroup() : 1;
-
-        List<TMatch> matches = matchMapper.selectList(
-            Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stage.getId()));
-        if (matches.isEmpty()) {
-            return;
-        }
-
-        // 按 displayZone(组)分组 matchId
-        Map<String, List<Long>> groupMatchIds = matches.stream()
-            .filter(m -> m.getDisplayZone() != null)
-            .collect(Collectors.groupingBy(TMatch::getDisplayZone,
-                Collectors.mapping(TMatch::getId, Collectors.toList())));
-
-        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds));
-        List<Long> compIds = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
-        Map<Long, TCompetitor> compMap = compIds.isEmpty() ? Map.of()
-            : competitorMapper.selectByIds(compIds).stream()
-                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
-
-        for (Map.Entry<String, List<Long>> entry : groupMatchIds.entrySet()) {
-            String zone = entry.getKey();
-            List<Long> gMatchIds = entry.getValue();
-            java.util.Set<Long> gSet = new java.util.HashSet<>(gMatchIds);
-            // 组内参赛方(退赛除外)
-            java.util.Set<Long> memberSet = new java.util.HashSet<>();
-            for (TMatchParticipant p : parts) {
-                if (p.getCompetitorId() != null && gSet.contains(p.getMatchId())) {
-                    TCompetitor c = compMap.get(p.getCompetitorId());
-                    if (c == null || !OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
-                        memberSet.add(p.getCompetitorId());
-                    }
-                }
-            }
-            List<Long> members = new ArrayList<>(memberSet);
-            // competitorId -> 累计积分
-            Map<Long, Integer> points = new HashMap<>();
-            for (TMatchParticipant p : parts) {
-                if (p.getCompetitorId() == null || !gSet.contains(p.getMatchId())
-                    || !members.contains(p.getCompetitorId())) {
-                    continue;
-                }
-                String o = p.getOutcomeStatus();
-                int pt;
-                if (MatchOutcomeEnum.WIN.getCode().equals(o)) {
-                    pt = winP;
-                } else if (MatchOutcomeEnum.DRAW.getCode().equals(o)) {
-                    pt = drawP;
-                } else if (MatchOutcomeEnum.LOSS.getCode().equals(o)) {
-                    pt = lossP;
-                } else {
-                    continue;
-                }
-                points.merge(p.getCompetitorId(), pt, Integer::sum);
-            }
-
-            // 组内按积分降序排名
-            List<Long> scored = members.stream()
-                .filter(points::containsKey)
-                .sorted((a, b) -> {
-                    int cmp = Integer.compare(points.get(b), points.get(a));
-                    return cmp != 0 ? cmp : Long.compare(a, b);
-                })
-                .collect(Collectors.toList());
-            int n = scored.size();
-            int rankCursor = 1;
-            // 晋级线同分并列:同分者保持 PENDING,由导播台在中间态用 adjustAdvancement 定夺
-            java.util.Set<Long> pendingSet = new java.util.HashSet<>();
-            if (advancePerGroup < n) {
-                int cutoff = points.get(scored.get(advancePerGroup - 1));
-                List<Long> tied = scored.stream()
-                    .filter(c -> points.get(c) == cutoff).collect(Collectors.toList());
-                int firstTied = scored.indexOf(tied.get(0));
-                int lastTied = scored.indexOf(tied.get(tied.size() - 1));
-                if (tied.size() > 1 && lastTied >= advancePerGroup) {
-                    for (int i = 0; i < firstTied; i++) {
-                        outcomeWriter.writeResult(scored.get(i), OutcomeStatusEnum.ADVANCE.getCode(), (long) (i + 1));
-                    }
-                    for (int i = lastTied + 1; i < n; i++) {
-                        outcomeWriter.writeResult(scored.get(i), OutcomeStatusEnum.ELIMINATED.getCode(), (long) (i + 1));
-                    }
-                    pendingSet.addAll(tied);
-                    rankCursor = n + 1;
-                    log.info("组[{}]晋级线出现{}名同分并列,保持待定等待导播台调整", zone, tied.size());
-                }
-            }
-            if (pendingSet.isEmpty()) {
-                for (int i = 0; i < n; i++) {
-                    boolean advance = i < advancePerGroup;
-                    outcomeWriter.writeResult(scored.get(i),
-                        advance ? OutcomeStatusEnum.ADVANCE.getCode() : OutcomeStatusEnum.ELIMINATED.getCode(),
-                        (long) (i + 1));
-                }
-                rankCursor = n + 1;
-            }
-            // 未出场/未获分者(退赛除外)标记淘汰,排名顺延
-            for (Long cid : members) {
-                if (!points.containsKey(cid)) {
-                    outcomeWriter.writeResult(cid, OutcomeStatusEnum.ELIMINATED.getCode(), (long) rankCursor++);
-                }
-            }
-        }
-    }
-
-    /**
-     * 海选赛结算:取赛场所有参赛方的当前总分(由多裁判累计提交后写在 participant.scoreValue),
-     * 按分数降序排名,前 advanceCount 名标 ADVANCE,其余标 ELIMINATED。
-     */
-    private void settleAuditionStage(TStage stage) {
-        List<TMatch> matches = matchMapper.selectList(
-            Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stage.getId())
-                .orderByAsc(TMatch::getDisplayRow)
-                .orderByAsc(TMatch::getId));
-        if (matches.isEmpty()) {
-            return;
-        }
-        // 圈名额/全局排名起点统一计算(与二海/三海单场自动结算共用,避免口径分叉)
-        Map<String, int[]> zoneCtx = buildAuditionZoneContext(stage, matches);
-        // 圈内已晋级数(含已结算正式圈与加赛,支持重复结算幂等)
-        Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(stage, matches);
-
-        for (TMatch match : matches) {
-            if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
-                continue;
-            }
-            String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-            int[] qb = zoneCtx.get(zone);
-            if (qb == null) {
-                continue;
-            }
-            settleAuditionMatch(match, qb[0], qb[1], zoneAdvanced);
-        }
-    }
-
-    /**
-     * 海选圈上下文统一计算:每圈晋级名额 + 全局排名起点(按场次 displayRow 顺序)。
-     * 整段结算与二海/三海单场自动结算共用,保证每圈名额与排名起点口径一致。
+     * 下一赛段(晋级者要写进哪一段):以 {@code next_stage_id} 链为唯一事实源。
      *
-     * @return zone(CENTER 归一) -> [每圈晋级名额, 全局排名起点]
+     * <p>{@code ruleConfig.transition.targetStageId} 是历史遗留的可选覆盖项,现已无写入方。
+     * 两者都可能存在,一旦指向不同赛段就会出现两个答案——开赛守卫看链、装配看配置,
+     * 正是这类分叉会导致晋级名单错配。所以不一致时直接报错让人修,不静默选一个。</p>
      */
-    private Map<String, int[]> buildAuditionZoneContext(TStage stage, List<TMatch> matches) {
-        int advanceCount = StageFlowSupport.readStageAdvanceCount(stage);
+    private Long resolveNextStageId(TStage stage) {
+        Long chainNext = stage.getNextStageId();
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
-        boolean explicitQuota = perCircleCfg != null && !perCircleCfg.isEmpty();
-        if (explicitQuota) {
-            for (Integer q : perCircleCfg) {
-                if (q == null || q < 0) {
-                    throw new ServiceException("每圈晋级人数配置非法(不能为负): {}", perCircleCfg);
-                }
+        Long configured = (rc != null && rc.getTransition() != null)
+            ? rc.getTransition().getTargetStageId() : null;
+        if (configured == null) {
+            return chainNext;
+        }
+        if (chainNext != null && !configured.equals(chainNext)) {
+            throw new ServiceException(
+                "赛段[{}]的下一赛段有两个答案:赛段链 next={},规则配置 transition.targetStageId={};请先修正配置",
+                stage.getId(), chainNext, configured);
+        }
+        // 链未连但配置指定了目标:以配置为准(兼容历史数据),并校验目标属于同一赛事
+        if (chainNext == null) {
+            TStage target = stageMapper.selectById(configured);
+            if (target == null || !Objects.equals(target.getTournamentId(), stage.getTournamentId())) {
+                throw new ServiceException("赛段[{}]配置的 transition.targetStageId={} 不存在或不属于本赛事",
+                    stage.getId(), configured);
             }
+            return configured;
         }
-        // 圈数以实际生成的场次为准:配置圈数可能被生成器按人数收缩(人数<圈数),
-        // 也可能在生成后被修改,按配置结算会导致名额均分错位或整除校验误报
-        int circles = Math.max(1, (int) matches.stream()
-            .map(m -> m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone())
-            .distinct().count());
-        int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
-        // 历史残留的"配置圈数之外"场次按 0 人晋级处理;正常名额按配置圈数均分
-        int divideBy = circles > plannedCircles ? plannedCircles : circles;
-        int perCircle = divideBy > 1 ? advanceCount / divideBy : advanceCount;
-        // 未显式配置每圈名额时才要求均分可整除
-        if (!explicitQuota && circles <= plannedCircles && advanceCount > 0 && advanceCount % circles != 0) {
-            throw new ServiceException("海选总晋级数[{}]无法按实际[{}]圈均分,请调整晋级名额或圈数", advanceCount, circles);
-        }
-
-        Map<String, int[]> ctx = new HashMap<>();
-        int ordinal = 0;
-        int acc = 0;
-        for (TMatch m : matches) {
-            String zone = m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone();
-            if (ctx.containsKey(zone)) {
-                continue;
-            }
-            int quota = ordinal >= plannedCircles ? 0
-                : explicitQuota && ordinal < perCircleCfg.size()
-                    ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
-            ctx.put(zone, new int[]{quota, acc});
-            acc += quota;
-            ordinal++;
-        }
-        return ctx;
+        return chainNext;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean tryAutoSettleTiebreaker(Long matchId) {
-        if (matchId == null) {
-            return false;
-        }
-        TMatch match = matchMapper.selectById(matchId);
-        if (match == null || !StageConstants.MATCH_GAMING.equals(match.getStatus())) {
-            return false;
-        }
-        boolean tiebreaker = StringUtils.isNotBlank(match.getRemark())
-            && match.getRemark().startsWith("同分加赛");
-        if (!tiebreaker) {
-            return false;
-        }
-        TStage stage = stageMapper.selectById(match.getStageId());
-        if (stage == null || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
-            return false;
-        }
-        // 全员已打分(任一裁判打过即可,与 assertTiebreakersJudged 同口径);退赛选手不计
-        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-            .eq(TMatchParticipant::getMatchId, matchId)
-            .isNotNull(TMatchParticipant::getCompetitorId));
-        if (parts.isEmpty()) {
-            return false;
-        }
-        List<Long> cids = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
-        Map<Long, TCompetitor> compById = cids.isEmpty() ? Map.of()
-            : competitorMapper.selectByIds(cids).stream()
-                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
-        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                .eq(TMatchRound::getMatchId, matchId).select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        Set<Long> judged = roundIds.isEmpty() ? Set.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds).select(TRoundScore::getCompetitorId))
-                .stream().map(TRoundScore::getCompetitorId).filter(Objects::nonNull).collect(Collectors.toSet());
-        for (TMatchParticipant p : parts) {
-            TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
-            if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
-                continue;
-            }
-            if (p.getCompetitorId() == null || !judged.contains(p.getCompetitorId())) {
-                return false;
-            }
-        }
-        // 单场结算:圈名额/全局排名起点与整段结算共用同一计算,幂等只处理未结算场次
-        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stage.getId())
-            .orderByAsc(TMatch::getDisplayRow)
-            .orderByAsc(TMatch::getId));
-        Map<String, int[]> zoneCtx = buildAuditionZoneContext(stage, matches);
-        Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(stage, matches);
-        String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-        int[] qb = zoneCtx.get(zone);
-        if (qb == null) {
-            return false;
-        }
-        settleAuditionMatch(match, qb[0], qb[1], zoneAdvanced);
-        log.info("海选加赛[{}]全员打分完成,已自动结算", match.getId());
-        refereeSseNotifier.notifyMatch(stage.getId(), match.getId(), "match");
-        tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), match.getId(), "stage");
-        return true;
+        // 加赛「全员打分后自动结算」的判定与落库都在海选结算策略里,本类只做事务边界与转发
+        return auditionStageSettler.tryAutoSettleTiebreaker(matchId);
     }
 
     @Override
@@ -2849,683 +2355,15 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (match == null) {
             throw new ServiceException("场次不存在");
         }
-        if (competitorId == null) {
-            matchCurrentCompetitor.remove(matchId);
-        } else {
-            matchCurrentCompetitor.put(matchId, competitorId);
-        }
+        // 现场标记走跨实例缓存(Redis,单机降级为进程内),不落库——见 MatchCurrentCompetitorStore
+        currentCompetitorStore.mark(matchId, competitorId);
         // 广播:大屏 widget 与导播台按事件刷新当前标记
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), matchId, "stage");
     }
 
     @Override
     public Long getMatchCurrentCompetitor(Long matchId) {
-        return matchCurrentCompetitor.get(matchId);
-    }
-
-    /**
-     * 统计海选各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额。
-     */
-    private Map<String, Integer> countAuditionAdvancedByZone(TStage stage, List<TMatch> matches) {
-        Map<Long, String> matchZone = new HashMap<>();
-        for (TMatch m : matches) {
-            matchZone.put(m.getId(), m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone());
-        }
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchZone.keySet())
-                .eq(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-        Map<String, Integer> result = new HashMap<>();
-        for (TMatchParticipant p : parts) {
-            result.merge(matchZone.getOrDefault(p.getMatchId(), "CENTER"), 1, Integer::sum);
-        }
-        return result;
-    }
-
-    private void settleAuditionMatch(TMatch match, int advanceQuota,
-                                     int zoneBase,
-                                     Map<String, Integer> zoneAdvanced) {
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, match.getId())
-                .isNotNull(TMatchParticipant::getCompetitorId));
-        if (parts.isEmpty()) {
-            TMatch mUpd = new TMatch();
-            mUpd.setId(match.getId());
-            mUpd.setStatus(StageConstants.MATCH_SETTLED);
-            matchMapper.updateById(mUpd);
-            return;
-        }
-        List<Long> partIds = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
-        Map<Long, TCompetitor> compMap = partIds.isEmpty() ? Map.of()
-            : competitorMapper.selectByIds(partIds).stream()
-                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
-        // 退赛选手不参与排名、不占用晋级名额(保持 WITHDRAWN)
-        List<TMatchParticipant> active = parts.stream()
-            .filter(p -> p.getCompetitorId() != null)
-            .filter(p -> {
-                TCompetitor c = compMap.get(p.getCompetitorId());
-                return c == null || !OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus());
-            })
-            .toList();
-        if (active.isEmpty()) {
-            // 圈内全员退赛:直接置为已结算,不产出晋级者
-            TMatch mUpd = new TMatch();
-            mUpd.setId(match.getId());
-            mUpd.setStatus(StageConstants.MATCH_SETTLED);
-            matchMapper.updateById(mUpd);
-            return;
-        }
-        // 剩余晋级名额:按圈独立计算,加赛场次只争本圈尚未确定的晋级位
-        String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-        int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
-        int remaining = Math.max(0, advanceQuota - alreadyAdvanced);
-
-        Map<Long, java.math.BigDecimal> scores = new HashMap<>();
-        for (TMatchParticipant p : active) {
-            if (p.getCompetitorId() != null) {
-                scores.put(p.getCompetitorId(), p.getScoreValue() != null ? p.getScoreValue() : java.math.BigDecimal.ZERO);
-            }
-        }
-        List<Long> sortedCids = new ArrayList<>(scores.keySet());
-        sortedCids.sort((a, b) -> {
-            java.math.BigDecimal sa = scores.getOrDefault(a, java.math.BigDecimal.ZERO);
-            java.math.BigDecimal sb = scores.getOrDefault(b, java.math.BigDecimal.ZERO);
-            int cmp = sb.compareTo(sa);
-            if (cmp != 0) {
-                return cmp;
-            }
-            // 非晋级线的同分:按签到时抽签的号码牌升序定先后(名次唯一,不并列)
-            TCompetitor ca = compMap.get(a);
-            TCompetitor cb = compMap.get(b);
-            int na = ca == null ? Integer.MAX_VALUE : parseCompetitorNumber(ca.getNumber());
-            int nb = cb == null ? Integer.MAX_VALUE : parseCompetitorNumber(cb.getNumber());
-            return Integer.compare(na, nb);
-        });
-        // 名次 = 上面的排序位次(分数降序、同分按号码牌);晋级线上的并列由二海决出后再回写名次
-        Map<Long, Integer> ranks = new HashMap<>();
-        for (int i = 0; i < sortedCids.size(); i++) {
-            ranks.put(sortedCids.get(i), i + 1);
-        }
-
-        // 0 分选手(弃权/缺席,含未打分)不参与晋级,也不参与同分加赛;
-        // 正分人数不足晋级名额时,剩余名额空缺(下一赛段对应位置轮空)
-        int positiveCount = 0;
-        for (Long cid : sortedCids) {
-            if (scores.get(cid).compareTo(java.math.BigDecimal.ZERO) > 0) {
-                positiveCount++;
-            }
-        }
-
-        // 名次段加赛(名次线上并列、双方结果早已确定):只决先后,不改晋级/淘汰结果
-        Map<Long, String> keepOutcome = new HashMap<>();
-        boolean rankTiebreak = StringUtils.isNotBlank(match.getRemark())
-            && match.getRemark().startsWith("同分加赛")
-            && match.getRemark().contains("名次段");
-        if (rankTiebreak) {
-            for (TCompetitor c : compMap.values()) {
-                if (c.getOutcomeStatus() != null
-                    && !OutcomeStatusEnum.PENDING.getCode().equals(c.getOutcomeStatus())) {
-                    keepOutcome.put(c.getId(), c.getOutcomeStatus());
-                }
-            }
-        }
-
-        // 剩余名额已满,本场(加赛)所有人淘汰
-        if (remaining <= 0) {
-            for (int i = 0; i < sortedCids.size(); i++) {
-                markAuditionResult(sortedCids.get(i),
-                    keepOutcome.getOrDefault(sortedCids.get(i), OutcomeStatusEnum.ELIMINATED.getCode()),
-                    (long) (zoneBase + i + 1 + alreadyAdvanced), ranks, match.getId());
-            }
-            TMatch mUpd = new TMatch();
-            mUpd.setId(match.getId());
-            mUpd.setStatus(StageConstants.MATCH_SETTLED);
-            matchMapper.updateById(mUpd);
-            log.info("海选赛场次[{}]结算:晋级名额已满,{}名同分选手淘汰", match.getId(), sortedCids.size());
-            return;
-        }
-
-        // 检测晋级线上的同分情况(仅正分选手参与;正分人数不足名额时直接晋级,不产生加赛)
-        if (remaining < positiveCount) {
-            java.math.BigDecimal cutoffScore = scores.get(sortedCids.get(remaining - 1));
-            // 统计与 cutoffScore 同分的所有选手
-            List<Long> tiedAtCutoff = new ArrayList<>();
-            for (Long cid : sortedCids) {
-                if (scores.get(cid).compareTo(cutoffScore) == 0) {
-                    tiedAtCutoff.add(cid);
-                }
-            }
-            // 同分导致晋级人数超限,需要加赛
-            if (tiedAtCutoff.size() > 1 && remaining <= sortedCids.indexOf(tiedAtCutoff.get(tiedAtCutoff.size() - 1))) {
-                // 明确晋级者:排在 tiedAtCutoff 中第一名之前的所有人
-                int firstTiedPos = sortedCids.indexOf(tiedAtCutoff.get(0));
-                for (int i = 0; i < firstTiedPos; i++) {
-                    Long cid = sortedCids.get(i);
-                    markAuditionResult(cid, OutcomeStatusEnum.ADVANCE.getCode(),
-                        (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match.getId());
-                }
-                // 明确淘汰者:排在 tiedAtCutoff 中最后一名之后的所有人
-                int lastTiedPos = sortedCids.indexOf(tiedAtCutoff.get(tiedAtCutoff.size() - 1));
-                for (int i = lastTiedPos + 1; i < sortedCids.size(); i++) {
-                    Long cid = sortedCids.get(i);
-                    markAuditionResult(cid, OutcomeStatusEnum.ELIMINATED.getCode(),
-                        (long) (zoneBase + i + 1 + alreadyAdvanced), ranks, match.getId());
-                }
-                zoneAdvanced.put(zone, alreadyAdvanced + firstTiedPos);
-                // 同分选手保持 PENDING,创建加赛场次
-                createTiebreakerMatch(match, tiedAtCutoff);
-                TMatch mUpd = new TMatch();
-                mUpd.setId(match.getId());
-                mUpd.setStatus(StageConstants.MATCH_SETTLED);
-                matchMapper.updateById(mUpd);
-                log.info("海选赛场次[{}]出现{}名同分选手,已创建加赛", match.getId(), tiedAtCutoff.size());
-                return;
-            }
-        }
-
-        // 正常结算:0 分选手永不晋级;正分选手按分数从高到低取前 min(remaining, positiveCount) 名,
-        // 名额不足时剩余名额空缺(下一赛段轮空)
-        int advanced = 0;
-        for (int i = 0; i < sortedCids.size(); i++) {
-            Long cid = sortedCids.get(i);
-            boolean eligible = scores.get(cid).compareTo(java.math.BigDecimal.ZERO) > 0;
-            boolean advance = eligible && advanced < remaining;
-            if (advance) {
-                advanced++;
-            }
-            String computed = advance ? OutcomeStatusEnum.ADVANCE.getCode() : OutcomeStatusEnum.ELIMINATED.getCode();
-            markAuditionResult(cid, keepOutcome.getOrDefault(cid, computed),
-                (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match.getId());
-        }
-        zoneAdvanced.put(zone, alreadyAdvanced + advanced);
-
-        TMatch mUpd = new TMatch();
-        mUpd.setId(match.getId());
-        mUpd.setStatus(StageConstants.MATCH_SETTLED);
-        matchMapper.updateById(mUpd);
-
-        log.info("海选赛场次[{}]已结算,共{}名选手,正分{}名,晋级{}名(0分选手不晋级)", match.getId(),
-            sortedCids.size(), positiveCount, advanced);
-    }
-
-    private void markAuditionResult(Long cid, String outcome, Long finalRank,
-                                     Map<Long, Integer> ranks, Long matchId) {
-        outcomeWriter.writeResult(cid, outcome, finalRank);
-
-        TMatchParticipant pUpd = new TMatchParticipant();
-        pUpd.setRankInMatch(ranks.get(cid) != null ? ranks.get(cid).longValue() : null);
-        pUpd.setOutcomeStatus(outcome);
-        participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-            .eq(TMatchParticipant::getMatchId, matchId)
-            .eq(TMatchParticipant::getCompetitorId, cid));
-
-        TMatch match = matchMapper.selectById(matchId);
-        // 二海(同分加赛)结算:把晋级/淘汰结果同步回该选手在所有场次(原始海选场、中间加赛场)的
-        // 参赛方行,避免原始场次参赛方状态停留在 PENDING 而一直显示"进行中";
-        // 普通海选场每个选手只有一行,无需跨场次同步
-        boolean tiebreaker = match != null && StringUtils.isNotBlank(match.getRemark())
-            && match.getRemark().startsWith("同分加赛");
-        if (tiebreaker) {
-            List<Long> stageMatchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, match.getStageId())
-                    .select(TMatch::getId))
-                .stream().map(TMatch::getId).toList();
-            if (!stageMatchIds.isEmpty()) {
-                TMatchParticipant sync = new TMatchParticipant();
-                sync.setOutcomeStatus(outcome);
-                participantMapper.update(sync, Wrappers.<TMatchParticipant>lambdaUpdate()
-                    .in(TMatchParticipant::getMatchId, stageMatchIds)
-                    .eq(TMatchParticipant::getCompetitorId, cid));
-            }
-            // 二海/三海结果回写原始海选场的本场排名(按最终排名顺序重排同分小组)
-            syncTiebreakerOriginalRank(match);
-        }
-    }
-
-    /**
-     * 二海/三海结算后,把同分小组在原始海选场(一海)的本场排名写回:
-     * 小组基准名次 = 原场竞争性排名(同分并列时的名次),按各成员最终排名(finalRank,
-     * 即加赛逐级决出的顺序)依次顺延;尚未出结果(PENDING)的成员保持不动。
-     */
-    private void syncTiebreakerOriginalRank(TMatch tbMatch) {
-        if (tbMatch == null || tbMatch.getStageId() == null) {
-            return;
-        }
-        // 找原始海选场:同赛段同圈、非加赛、displayRow 小于加赛场次的最近一场(加赛链逐级回退)
-        List<TMatch> candidates = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, tbMatch.getStageId())
-            .eq(tbMatch.getDisplayZone() != null, TMatch::getDisplayZone, tbMatch.getDisplayZone())
-            .isNull(tbMatch.getDisplayZone() == null, TMatch::getDisplayZone)
-            .orderByDesc(TMatch::getDisplayRow));
-        TMatch original = null;
-        for (TMatch m : candidates) {
-            boolean tiebreaker = StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛");
-            if (tiebreaker) {
-                continue;
-            }
-            if (m.getDisplayRow() != null && tbMatch.getDisplayRow() != null
-                && m.getDisplayRow() < tbMatch.getDisplayRow()) {
-                original = m;
-                break;
-            }
-        }
-        if (original == null) {
-            return;
-        }
-        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-            .eq(TMatchParticipant::getMatchId, original.getId())
-            .isNotNull(TMatchParticipant::getCompetitorId));
-        if (parts.isEmpty()) {
-            return;
-        }
-        // 原场竞争性排名(同分并列),用于确定同分小组的基准名次
-        Map<Long, BigDecimal> scores = new HashMap<>();
-        for (TMatchParticipant p : parts) {
-            scores.put(p.getCompetitorId(), p.getScoreValue() != null ? p.getScoreValue() : BigDecimal.ZERO);
-        }
-        Map<Long, Integer> compRanks = com.dance.street.game.engine.scoring.RankCalculator.rank(scores);
-        // 同分小组 = 本加赛场次的参与方
-        List<TMatchParticipant> tbParts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-            .eq(TMatchParticipant::getMatchId, tbMatch.getId())
-            .isNotNull(TMatchParticipant::getCompetitorId));
-        List<Long> groupIds = tbParts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
-        if (groupIds.isEmpty()) {
-            return;
-        }
-        Integer baseRank = groupIds.stream()
-            .map(compRanks::get).filter(Objects::nonNull).min(Integer::compareTo).orElse(null);
-        if (baseRank == null) {
-            return;
-        }
-        // 连环加赛未全部决出时先不回写(避免中间名次错误),等全组有最终排名后再统一写回
-        List<TCompetitor> comps = competitorMapper.selectByIds(groupIds);
-        Map<Long, TCompetitor> compById = comps.stream()
-            .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
-        boolean anyUnresolved = false;
-        for (Long gid : groupIds) {
-            TCompetitor c = compById.get(gid);
-            if (c == null || OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
-                continue;
-            }
-            if (c.getFinalRank() == null) {
-                anyUnresolved = true;
-                break;
-            }
-        }
-        if (anyUnresolved) {
-            return;
-        }
-        // 已出结果(有最终排名)的成员按 finalRank 升序,依次写回 base, base+1, …
-        List<TCompetitor> resolved = groupIds.stream()
-            .map(compById::get).filter(Objects::nonNull)
-            .filter(c -> !OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus()))
-            .filter(c -> c.getFinalRank() != null)
-            .sorted(Comparator.comparing(TCompetitor::getFinalRank))
-            .toList();
-        for (int i = 0; i < resolved.size(); i++) {
-            TCompetitor c = resolved.get(i);
-            TMatchParticipant upd = new TMatchParticipant();
-            upd.setRankInMatch(baseRank.longValue() + i);
-            participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .eq(TMatchParticipant::getMatchId, original.getId())
-                .eq(TMatchParticipant::getCompetitorId, c.getId()));
-        }
-    }
-
-    /**
-     * 创建加赛场次:只有同分选手参与,胜负决出后由 completeStage 再次结算。
-     */
-    private void createTiebreakerMatch(TMatch parentMatch, List<Long> tiedCompetitorIds) {
-        createTiebreakerMatch(parentMatch, tiedCompetitorIds, "晋级名额");
-    }
-
-    /**
-     * 把原场次(圈)的裁判绑定复制到加赛场次。
-     *
-     * <p>分圈海选时裁判只判自己绑定的圈(见 RefereeMatchController#allowedMatchIds),
-     * 加赛场次若不继承绑定,该圈的裁判就看不到二海,赛段会卡在"仍有场次未结算"。</p>
-     */
-    private void copyMatchReferees(TMatch source, TMatch target) {
-        List<TMatchReferee> bindings = matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
-            .eq(TMatchReferee::getMatchId, source.getId()));
-        if (bindings.isEmpty() && source.getDisplayZone() != null) {
-            // 原场次没有直接绑定(旧数据):退回用同圈其他场次的绑定
-            List<Long> zoneMatchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, source.getStageId())
-                    .eq(TMatch::getDisplayZone, source.getDisplayZone())
-                    .select(TMatch::getId))
-                .stream().map(TMatch::getId).toList();
-            if (!zoneMatchIds.isEmpty()) {
-                bindings = matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
-                    .in(TMatchReferee::getMatchId, zoneMatchIds));
-            }
-        }
-        Set<Long> refereeIds = new LinkedHashSet<>();
-        for (TMatchReferee r : bindings) {
-            if (r.getRefereeId() != null) {
-                refereeIds.add(r.getRefereeId());
-            }
-        }
-        for (Long refereeId : refereeIds) {
-            TMatchReferee row = new TMatchReferee();
-            row.setTournamentId(target.getTournamentId());
-            row.setMatchId(target.getId());
-            row.setRefereeId(refereeId);
-            matchRefereeMapper.insert(row);
-        }
-    }
-
-    /**
-     * 创建加赛场次(同 stage 内的新 match,由它决定原场中悬而未决的名次)。
-     *
-     * @param tag 这条边界的人话标签(如"晋级名额""名次段第24名"),写入 remark:
-     *            既用于导出分组,也用于「同一边界最多加赛几轮」的计数
-     */
-    private void createTiebreakerMatch(TMatch parentMatch, List<Long> tiedCompetitorIds, String tag) {
-        // 同一圈 + 同一边界最多加赛 4 轮(二海~五海):仍决不出就人工裁决/重置,
-        // 避免操作失误导致加赛场次无限堆积、赛段永远无法完成
-        long tiebreakerCount = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, parentMatch.getStageId())
-            .eq(parentMatch.getDisplayZone() != null, TMatch::getDisplayZone, parentMatch.getDisplayZone())
-            .likeRight(TMatch::getRemark, "同分加赛")
-            .like(TMatch::getRemark, tag));
-        if (tiebreakerCount >= 4) {
-            throw new ServiceException(
-                "海选「{}」已连续 {} 轮同分加赛仍未决出,请人工裁决(如调整打分或重置赛段后重排)",
-                tag, tiebreakerCount);
-        }
-        TMatch tb = new TMatch();
-        tb.setTournamentId(parentMatch.getTournamentId());
-        tb.setStageId(parentMatch.getStageId());
-        tb.setName(parentMatch.getName() + "-加赛");
-        tb.setStatus(StageConstants.MATCH_PENDING);
-        tb.setMatchMode(parentMatch.getMatchMode());
-        // 加赛归属原圈(同 zone),结算时只争本圈剩余名额
-        tb.setDisplayZone(parentMatch.getDisplayZone());
-        tb.setDisplayRow(parentMatch.getDisplayRow() != null ? parentMatch.getDisplayRow() + 1L : 1L);
-        tb.setDisplayCol(2L);
-        tb.setRemark("同分加赛," + tag + "," + tiedCompetitorIds.size() + "人");
-        matchMapper.insert(tb);
-
-        // 加赛场次沿用原圈的裁判绑定:分圈海选里裁判只判自己绑定的圈,
-        // 不复制绑定会导致二海的场次谁都看不到、判罚不了,赛段卡住无法结算。
-        copyMatchReferees(parentMatch, tb);
-
-        // 一个轮次
-        TMatchRound round = new TMatchRound();
-        round.setTournamentId(tb.getTournamentId());
-        round.setMatchId(tb.getId());
-        round.setRoundSequence(1L);
-        round.setStatus(StageConstants.MATCH_PENDING);
-        matchRoundMapper.insert(round);
-
-        // 每个同分选手一个参赛位
-        for (int i = 0; i < tiedCompetitorIds.size(); i++) {
-            TMatchParticipant p = new TMatchParticipant();
-            p.setTournamentId(tb.getTournamentId());
-            p.setMatchId(tb.getId());
-            p.setCompetitorId(tiedCompetitorIds.get(i));
-            p.setDisplaySlotIndex((long) (i + 1));
-            p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
-            participantMapper.insert(p);
-        }
-
-        // 自动开始加赛
-        tb.setStatus(StageConstants.MATCH_GAMING);
-        matchMapper.updateById(tb);
-        round.setStatus(StageConstants.MATCH_GAMING);
-        matchRoundMapper.updateById(round);
-        // 加赛创建后必须推送:裁判端需要看到新场次才能打分,导播端需要知道赛段尚未完成
-        refereeSseNotifier.notifyMatch(tb.getStageId(), tb.getId(), "match");
-        tournamentEventNotifier.notify(tb.getTournamentId(), tb.getStageId(), tb.getId(), "match");
-
-        log.info("加赛场次[{}]已创建并自动开始,{}名选手参与", tb.getId(), tiedCompetitorIds.size());
-    }
-
-    /**
-     * 排名赛结算:按圈聚合全部裁判×维度打分,计算每圈总分排名,
-     * 晋级线内正常晋级;晋级线上同分并列导致名额超限时,同分者保持 PENDING,
-     * 由导播台在中间态手动指定晋级者(adjustAdvancement)。
-     */
-    private void settleRankStage(TStage stage) {
-        List<TMatch> matches = matchMapper.selectList(
-            Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stage.getId())
-                .orderByAsc(TMatch::getDisplayRow)
-                .orderByAsc(TMatch::getId));
-        if (matches.isEmpty()) {
-            return;
-        }
-        int advanceCount = StageFlowSupport.readStageAdvanceCount(stage);
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
-        boolean explicitQuota = perCircleCfg != null && !perCircleCfg.isEmpty();
-        if (explicitQuota) {
-            for (Integer q : perCircleCfg) {
-                if (q == null || q < 0) {
-                    throw new ServiceException("每圈晋级人数配置非法(不能为负): {}", perCircleCfg);
-                }
-            }
-        }
-        // 圈数以实际生成的场次为准(配置圈数可能被生成器收缩,或生成后被修改)
-        int circles = (int) matches.stream()
-            .map(m -> m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone())
-            .distinct().count();
-        circles = Math.max(1, circles);
-        int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
-        // 历史残留的"配置圈数之外"场次按 0 人晋级处理;正常名额按配置圈数均分
-        int divideBy = circles > plannedCircles ? plannedCircles : circles;
-        int perCircle = divideBy > 1 ? advanceCount / divideBy : advanceCount;
-        if (!explicitQuota && circles <= plannedCircles && advanceCount > 0 && advanceCount % circles != 0) {
-            throw new ServiceException("排名赛总晋级数[{}]无法按实际[{}]圈均分,请调整晋级名额或圈数", advanceCount, circles);
-        }
-
-        // 圈序号 + 每圈晋级名额 + 全局排名起点(前序各圈名额累加)
-        List<String> orderedZones = new ArrayList<>();
-        Map<String, Integer> zoneOrdinal = new HashMap<>();
-        Map<String, Integer> zoneQuota = new HashMap<>();
-        Map<String, Integer> zoneBase = new HashMap<>();
-        int ordinal = 0;
-        int acc = 0;
-        for (TMatch m : matches) {
-            String zone = m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone();
-            if (zoneOrdinal.putIfAbsent(zone, ordinal) == null) {
-                int quota = ordinal >= plannedCircles ? 0
-                    : explicitQuota && ordinal < perCircleCfg.size()
-                        ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
-                zoneQuota.put(zone, quota);
-                zoneBase.put(zone, acc);
-                acc += quota;
-                orderedZones.add(zone);
-                ordinal++;
-            }
-        }
-        // 圈内已晋级数(支持重复结算幂等)
-        Map<String, Integer> zoneAdvanced = countRankAdvancedByZone(stage, matches);
-
-        for (TMatch match : matches) {
-            if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
-                continue;
-            }
-            String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-            settleRankMatch(match, rc, zoneQuota.getOrDefault(zone, perCircle),
-                zoneBase.getOrDefault(zone, 0), zoneAdvanced);
-        }
-    }
-
-    /** 统计排名赛各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额 */
-    private Map<String, Integer> countRankAdvancedByZone(TStage stage, List<TMatch> matches) {
-        Map<Long, String> matchZone = new HashMap<>();
-        for (TMatch m : matches) {
-            matchZone.put(m.getId(), m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone());
-        }
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchZone.keySet())
-                .eq(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-        Map<String, Integer> result = new HashMap<>();
-        for (TMatchParticipant p : parts) {
-            result.merge(matchZone.getOrDefault(p.getMatchId(), "CENTER"), 1, Integer::sum);
-        }
-        return result;
-    }
-
-    /**
-     * 结算单场排名赛:跨本场全部轮次(每个选手一个轮次)聚合多裁判×多维度分,
-     * 用 RANKING 策略算总分排名,按本圈剩余名额晋级;晋级线同分并列时保持 PENDING。
-     */
-    private void settleRankMatch(TMatch match, RuleConfigHolder rc, int advanceQuota,
-                                 int zoneBase, Map<String, Integer> zoneAdvanced) {
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, match.getId())
-                .isNotNull(TMatchParticipant::getCompetitorId));
-        if (parts.isEmpty()) {
-            markMatchSettled(match);
-            return;
-        }
-        List<Long> partIds = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
-        Map<Long, TCompetitor> compMap = partIds.isEmpty() ? Map.of()
-            : competitorMapper.selectByIds(partIds).stream()
-                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
-        // 退赛选手不参与排名、不占用晋级名额(保持 WITHDRAWN)
-        List<Long> competitorIds = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull)
-            .filter(cid -> {
-                TCompetitor c = compMap.get(cid);
-                return c == null || !OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus());
-            })
-            .toList();
-        if (competitorIds.isEmpty()) {
-            markMatchSettled(match);
-            return;
-        }
-        // 未打分守卫:从未被任何裁判打分的选手不允许随结算"0 分自动晋级"
-        List<Long> roundIds = matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        Map<Long, Long> scoreCountByCompetitor = roundIds.isEmpty() ? Map.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds)
-                    .select(TRoundScore::getCompetitorId))
-                .stream()
-                .filter(rs -> rs.getCompetitorId() != null)
-                .collect(Collectors.groupingBy(TRoundScore::getCompetitorId, Collectors.counting()));
-        List<String> unjudged = competitorIds.stream()
-            .map(compMap::get).filter(Objects::nonNull)
-            .filter(c -> !scoreCountByCompetitor.containsKey(c.getId()))
-            .map(TCompetitor::getName)
-            .toList();
-        if (!unjudged.isEmpty()) {
-            throw new ServiceException("圈内仍有 {} 名选手未打分(未标记退赛): {},请先完成打分或标记退赛后再结算",
-                unjudged.size(), unjudged);
-        }
-
-        // 分数分布在各自轮次,跨本场全部轮次汇总
-        List<TRoundScore> allScores = roundIds.isEmpty() ? List.of() : roundScoreMapper.selectList(
-            Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
-
-        MatchScoreInput input = MatchScoreInput.builder()
-            .matchMode(MatchModeEnum.RANKING)
-            .scoringConfig(rc != null ? rc.getScoring() : null)
-            .competitorIds(competitorIds)
-            .rawScores(allScores)
-            .build();
-        List<MatchScoreResult> results = scoringEngine.compute(input);
-
-        // 回写 participant 总分/排名(胜负状态统一在下面按晋级结果标)
-        for (MatchScoreResult r : results) {
-            TMatchParticipant pUpd = new TMatchParticipant();
-            pUpd.setScoreValue(r.getScoreValue());
-            pUpd.setRankInMatch(r.getRankInMatch() == null ? null : r.getRankInMatch().longValue());
-            participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .eq(TMatchParticipant::getMatchId, match.getId())
-                .eq(TMatchParticipant::getCompetitorId, r.getCompetitorId()));
-        }
-
-        String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-        int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
-        int remaining = Math.max(0, advanceQuota - alreadyAdvanced);
-
-        Map<Long, java.math.BigDecimal> scores = new HashMap<>();
-        for (MatchScoreResult r : results) {
-            if (r.getCompetitorId() != null) {
-                scores.put(r.getCompetitorId(), r.getScoreValue() != null ? r.getScoreValue() : java.math.BigDecimal.ZERO);
-            }
-        }
-        List<Long> sortedCids = new ArrayList<>(scores.keySet());
-        sortedCids.sort((a, b) -> scores.getOrDefault(b, java.math.BigDecimal.ZERO)
-            .compareTo(scores.getOrDefault(a, java.math.BigDecimal.ZERO)));
-        Map<Long, Integer> ranks = com.dance.street.game.engine.scoring.RankCalculator.rank(scores);
-
-        // 剩余名额已满:本场(重复结算/异常数据)所有人淘汰
-        if (remaining <= 0) {
-            for (int i = 0; i < sortedCids.size(); i++) {
-                markRankResult(sortedCids.get(i), OutcomeStatusEnum.ELIMINATED.getCode(),
-                    (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
-            }
-            markMatchSettled(match);
-            log.info("排名赛场次[{}]结算:晋级名额已满,{}名选手淘汰", match.getId(), sortedCids.size());
-            return;
-        }
-
-        // 检测晋级线上的同分并列:晋级名额被同分横跨时,同分者保持 PENDING 由导播台定夺
-        if (remaining < sortedCids.size()) {
-            java.math.BigDecimal cutoffScore = scores.get(sortedCids.get(remaining - 1));
-            List<Long> tiedAtCutoff = new ArrayList<>();
-            for (Long cid : sortedCids) {
-                if (scores.get(cid).compareTo(cutoffScore) == 0) {
-                    tiedAtCutoff.add(cid);
-                }
-            }
-            int lastTiedPos = sortedCids.indexOf(tiedAtCutoff.get(tiedAtCutoff.size() - 1));
-            if (tiedAtCutoff.size() > 1 && remaining <= lastTiedPos) {
-                int firstTiedPos = sortedCids.indexOf(tiedAtCutoff.get(0));
-                // 明确晋级者:同分群之前
-                for (int i = 0; i < firstTiedPos; i++) {
-                    Long cid = sortedCids.get(i);
-                    markRankResult(cid, OutcomeStatusEnum.ADVANCE.getCode(),
-                        (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
-                }
-                // 明确淘汰者:同分群之后
-                for (int i = lastTiedPos + 1; i < sortedCids.size(); i++) {
-                    Long cid = sortedCids.get(i);
-                    markRankResult(cid, OutcomeStatusEnum.ELIMINATED.getCode(),
-                        (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
-                }
-                zoneAdvanced.put(zone, alreadyAdvanced + firstTiedPos);
-                // 同分者保持 PENDING,由导播台在中间态调整中手动决定晋级
-                log.info("排名赛场次[{}]晋级线出现{}名同分并列,保持待定等待导播台调整", match.getId(), tiedAtCutoff.size());
-                markMatchSettled(match);
-                return;
-            }
-        }
-
-        // 无同分问题:正常结算
-        for (int i = 0; i < sortedCids.size(); i++) {
-            Long cid = sortedCids.get(i);
-            boolean advance = i < remaining;
-            markRankResult(cid, advance ? OutcomeStatusEnum.ADVANCE.getCode() : OutcomeStatusEnum.ELIMINATED.getCode(),
-                (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
-        }
-        zoneAdvanced.put(zone, alreadyAdvanced + Math.min(remaining, sortedCids.size()));
-        markMatchSettled(match);
-        log.info("排名赛场次[{}]已结算,共{}名选手,晋级{}名", match.getId(), sortedCids.size(),
-            Math.min(remaining, sortedCids.size()));
-    }
-
-    /** 回写排名赛参赛者结果:competitor 赛段级状态 + participant 场次级状态 */
-    private void markRankResult(Long cid, String outcome, Long finalRank,
-                                Map<Long, Integer> ranks, TMatch match) {
-        outcomeWriter.writeResult(cid, outcome, finalRank);
-
-        TMatchParticipant pUpd = new TMatchParticipant();
-        pUpd.setRankInMatch(ranks.get(cid) != null ? ranks.get(cid).longValue() : null);
-        pUpd.setOutcomeStatus(outcome);
-        participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-            .eq(TMatchParticipant::getMatchId, match.getId())
-            .eq(TMatchParticipant::getCompetitorId, cid));
+        return currentCompetitorStore.current(matchId);
     }
 
     // ==================== 自由对抗(手动加场 + 手动晋级) ====================

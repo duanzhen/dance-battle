@@ -316,10 +316,10 @@ public class TPlayerServiceImpl implements ITPlayerService {
             memberBo.setRole("MEMBER");
             competitorMemberService.insertByBo(memberBo);
 
-            // 海选/排名赛已开始(场次已生成):把新签到选手挂入当前人数最少的圈场次,可被裁判打分并参与结算
             if (StageModeEnum.AUDITION.getCode().equals(firstStage.getStageMode())
                 || StageModeEnum.RANK.getCode().equals(firstStage.getStageMode())) {
-                // 线下抽签指定圈(matchId)时挂入指定圈,否则系统按各圈剩余名额自动择优
+                // 海选/排名赛:落圈由前端指定(matchId 或尚未建圈时的 zoneIndex),
+                // 后端不再按号码/名额推导;多圈未指定会被 appendStageCompetitor 拒绝
                 stageLifecycleService.appendStageCompetitor(firstStage.getId(), competitorId, bo.getMatchId(), bo.getZoneIndex());
             }
 

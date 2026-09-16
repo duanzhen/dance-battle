@@ -9,6 +9,7 @@ import com.dance.street.game.domain.bo.TCompetitorBo;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.vo.MatchResultVo;
+import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -125,6 +126,9 @@ public class DirectorController {
                 continue;
             }
             TStage prev = stageChain.prevOf(current);
+            // prev 列只是展示字段:这里统一按 next 链推导覆盖,
+            // 避免列与链不同步时导播台把「上一赛段」显示成「未知」
+            stage.setPrevStageId(prev == null ? null : prev.getId());
             if (prev == null || !StageConstants.STAGE_SETTLED.equals(prev.getStatus())) {
                 continue;
             }
@@ -158,7 +162,7 @@ public class DirectorController {
     }
 
     /**
-     * 开始赛段:PENDING→GAMING
+     * 开始赛段:DRAFT→GAMING
      */
     @Log(title = "导播台开始赛段", businessType = BusinessType.UPDATE)
     @PutMapping("/stage/{id}/start")
@@ -169,15 +173,16 @@ public class DirectorController {
     }
 
     /**
-     * 完成赛段:GAMING→SETTLED
+     * 完成赛段:GAMING→SETTLED。
+     *
+     * <p>不能结束时返回 {@code completed=false} + {@code message}(如海选产生二海),
+     * 不算错误;导播台据此前置提示并保持赛段进行中。</p>
      */
     @Log(title = "导播台完成赛段", businessType = BusinessType.UPDATE)
     @PutMapping("/stage/{id}/complete")
-    public R<java.util.Map<String, String>> completeStage(@PathVariable("id") Long id, HttpServletRequest request) {
+    public R<StageCompleteVo> completeStage(@PathVariable("id") Long id, HttpServletRequest request) {
         assertStageInTournament(currentTournament(request), id);
-        String status = stageLifecycleService.completeStage(id);
-        // 返回结算后赛段真实状态:SETTLED=已完成;GAMING=海选产生二海等,赛段保持进行中
-        return R.ok(java.util.Map.of("status", status));
+        return R.ok(stageLifecycleService.completeStage(id));
     }
 
     /**

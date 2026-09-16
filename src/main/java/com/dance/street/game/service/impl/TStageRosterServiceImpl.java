@@ -463,10 +463,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (isLocked(stage)) {
             throw new ServiceException("名单已装配完成或已跳过,请先重置目标赛段再调整人工覆盖");
         }
-        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())
-            && !StageConstants.STAGE_PENDING.equals(stage.getStatus())) {
-            throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可编辑人工覆盖,当前: {}",
-                stage.getStatus());
+        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("仅规划中(DRAFT)的赛段可编辑人工覆盖,当前: {}", stage.getStatus());
         }
         // 同上:只有已物化出参赛行时,"已初始化"才代表名单真的被锁定过
         if (Long.valueOf(1L).equals(stage.getIsInitialized()) && hasMaterializedCompetitors(stageId)) {
@@ -758,10 +756,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (target == null) {
             throw new ServiceException("目标赛段不存在");
         }
-        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())
-            && !StageConstants.STAGE_PENDING.equals(target.getStatus())) {
-            throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可新增来源,当前: {}",
-                target.getStatus());
+        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
+            throw new ServiceException("仅规划中(DRAFT)的赛段可新增来源,当前: {}", target.getStatus());
         }
         // 只有已物化出参赛行时才代表名单真的被锁定过;空赛段(历史数据里被
         // 创建流程提前置 1)仍应允许配置来源组/出口,否则出口配置直接写不进去。
@@ -843,10 +839,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     @Transactional(rollbackFor = Exception.class)
     public void removeGroup(Long stageId, int groupIndex) {
         TStage target = mustRosterStage(stageId, true);
-        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())
-            && !StageConstants.STAGE_PENDING.equals(target.getStatus())) {
-            throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可删除来源组,当前: {}",
-                target.getStatus());
+        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
+            throw new ServiceException("仅规划中(DRAFT)的赛段可删除来源组,当前: {}", target.getStatus());
         }
         List<TStageRosterGroupBo> groups = groupsOf(target);
         if (groupIndex < 0 || groupIndex >= groups.size()) {
@@ -867,10 +861,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     @Transactional(rollbackFor = Exception.class)
     public void updateGroup(Long stageId, int groupIndex, TStageRosterGroupBo group) {
         TStage target = mustRosterStage(stageId, true);
-        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())
-            && !StageConstants.STAGE_PENDING.equals(target.getStatus())) {
-            throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可编辑来源组,当前: {}",
-                target.getStatus());
+        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
+            throw new ServiceException("仅规划中(DRAFT)的赛段可编辑来源组,当前: {}", target.getStatus());
         }
         if (group == null) {
             throw new ServiceException("请提供来源组规则");
@@ -1054,10 +1046,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (target == null) {
             throw new ServiceException("赛段不存在");
         }
-        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())
-            && !StageConstants.STAGE_PENDING.equals(target.getStatus())) {
-            throw new ServiceException("仅规划中(DRAFT/PENDING)的赛段可装配名单,当前: {}",
-                target.getStatus());
+        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
+            throw new ServiceException("仅规划中(DRAFT)的赛段可装配名单,当前: {}", target.getStatus());
         }
         if (isLocked(target)) {
             return 0;

@@ -319,10 +319,10 @@ const config = ref<any>({
   circleRefereeIds: []
 });
 
-/** 赛段未开始(DRAFT/PENDING)前,圈配置可反复调整;开始/结束后锁定 */
+/** 赛段未开始(DRAFT)前,圈配置可反复调整;开始/结束后锁定 */
 const editable = computed(() =>
   currentMode.value !== ConfigMode.STARTED
-  && (localStage.value.status === 'DRAFT' || localStage.value.status === 'PENDING')
+  && localStage.value.status === 'DRAFT'
 );
 
 const referees = ref<{ id: string | number; name: string }[]>([]);
@@ -391,7 +391,7 @@ const targetOptions = computed(() => {
     visited.add(String(cur.nextStageId));
     const next = byId.get(String(cur.nextStageId));
     if (!next) break;
-    if ((next.status === 'DRAFT' || next.status === 'PENDING') && !rosterLocked(next)) {
+    if (next.status === 'DRAFT' && !rosterLocked(next)) {
       out.push(next);
     }
     cur = next;

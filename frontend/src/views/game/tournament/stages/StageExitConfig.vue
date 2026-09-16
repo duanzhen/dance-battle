@@ -189,7 +189,7 @@ const targetOptions = computed(() => {
     visited.add(String(cur.nextStageId));
     const next = byId.get(String(cur.nextStageId));
     if (!next) break;
-    if ((next.status === 'DRAFT' || next.status === 'PENDING') && !rosterLocked(next)) {
+    if (next.status === 'DRAFT' && !rosterLocked(next)) {
       out.push(next);
     }
     cur = next;

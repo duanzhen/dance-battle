@@ -16,7 +16,7 @@
               <div
                 class="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 text-[10px] font-bold rounded-full shadow-lg z-20 flex items-center gap-1"
                 :class="{
-                  'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-blue-500/30': stage.status === 'DRAFT' || stage.status === 'PENDING',
+                  'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-blue-500/30': stage.status === 'DRAFT',
                   'bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-amber-500/30': stage.status === 'GAMING',
                   'bg-gradient-to-r from-green-600 to-green-500 text-white shadow-green-500/30': stage.status === 'SETTLED',
                   'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-red-500/30': stage.status === 'DISCARD'
@@ -301,7 +301,7 @@ interface Stage {
   format: string;
   teamCountStart: number;
   teamCountEnd: number;
-  status: 'DRAFT' | 'PENDING' | 'GAMING' | 'SETTLED' | 'DISCARD';
+  status: 'DRAFT' | 'GAMING' | 'SETTLED' | 'DISCARD';
   ruleConfig: string;
   prevStageId: string | null; // 上一赛段ID
   nextStageId: string | null; // 下一赛段ID
@@ -659,7 +659,6 @@ const currentConfigMode = computed<ConfigMode>(() => {
 const getStatusText = (status: Stage['status']) => {
   const statusMap = {
     'DRAFT': '规划中',
-    'PENDING': '规划中',
     'GAMING': '进行中',
     'SETTLED': '已结束',
     'DISCARD': '已取消'

@@ -46,6 +46,18 @@
       </div>
       <div class="flex flex-wrap items-center gap-1.5 toolbar-buttons">
         <el-button type="warning" size="small" :icon="Plus" @click="handleAdd" class="amber-button">添加选手</el-button>
+        <!-- 测试工具:一键把所有未签到选手签到(仅开发/测试构建可见,见 VITE_ENABLE_DEV_TOOLS) -->
+        <el-button
+          v-if="devToolsEnabled"
+          size="small"
+          :icon="UserRoundCheck"
+          :loading="bulkCheckingIn"
+          :disabled="playerStats.total === playerStats.checkedIn"
+          title="测试用:把所有未签到选手一键签到(海选按圈轮转分配)"
+          @click="handleBulkCheckIn"
+        >
+          一键全签到
+        </el-button>
         <el-button size="small" @click="showImportDialog = true" class="import-button">批量导入</el-button>
         <el-segmented v-model="displayMode" :options="displayModeOptions" size="small" class="amber-segmented" @change="handleModeChange" />
         <el-button size="small" circle :icon="RefreshCw" class="import-button" title="刷新" @click="refreshAll" />
@@ -304,7 +316,7 @@
 import { ref, watch, computed, nextTick } from 'vue';
 import { Users, Plus, User, Check, Clock, UserRoundCheck, File, RefreshCw } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers } from '@/api/game/player';
+import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers, checkInPlayer } from '@/api/game/player';
 import { download } from '@/utils/request';
 import { PlayerVO, PlayerForm as PlayerFormType } from '@/api/game/player/types';
 import { listCompetitor } from '@/api/game/competitor';
@@ -368,6 +380,16 @@ const playerStats = computed(() => {
 const showImportDialog = ref(false);
 const importFile = ref<File | null>(null);
 const importing = ref(false);
+
+/**
+ * 测试工具开关:一键全签到只在开发/测试构建里出现。
+ * 生产打包(.env.production)默认关闭,避免现场误点把所有选手一次性签到。
+ * 本地要用测试构建:`VITE_ENABLE_DEV_TOOLS=true npm run build:prod`。
+ */
+const devToolsEnabled = computed(() =>
+  import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_TOOLS === 'true'
+);
+const bulkCheckingIn = ref(false);
 const importResult = ref<{ success: boolean; msg: string } | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const dragOver = ref(false);
@@ -614,6 +636,108 @@ const handleEditCheckIn = (player: PlayerVO) => {
   }
   currentCheckInPlayer.value = player;
   checkInDialogRef.value?.open(player);
+};
+
+/**
+ * 测试用:把所有未签到选手一次性签到。
+ *
+ * <p>与逐个签到走同一套接口,差别只在批量与自动选圈:海选/排名赛必须指定目标圈,
+ * 这里按圈轮转分配(均衡落圈),号码接在现有最大号之后避免重号。</p>
+ */
+const handleBulkCheckIn = async () => {
+  if (!props.tournamentId || !firstStageId.value) {
+    ElMessage.warning('无法签到：缺少赛事或赛段信息');
+    return;
+  }
+  const status = firstStageInfo.value?.status;
+  if (status === 'SETTLED' || status === 'DISCARD') {
+    ElMessage.warning('首个赛段已结束，无法签到');
+    return;
+  }
+  const targets = players.value.filter((p) => !p.competitorId);
+  if (targets.length === 0) {
+    ElMessage.info('没有待签到的选手');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将把 ${targets.length} 名未签到选手一次性签到（海选/排名赛会按圈轮转分配）。该功能仅用于测试，请勿在正式赛事中使用。`,
+      '一键全签到',
+      { type: 'warning', confirmButtonText: '确定签到', cancelButtonText: '取消' }
+    );
+  } catch {
+    return;
+  }
+
+  bulkCheckingIn.value = true;
+  try {
+    const stage = ((await getStage(firstStageId.value)).data ?? {}) as any;
+    const needCircle = stage.stageMode === 'AUDITION' || stage.stageMode === 'RANK';
+    let circles: any[] = [];
+    if (needCircle) {
+      // 圈必须先存在:没有圈时后端会拒绝落圈(圈只由配置侧产生),这里先按配置补齐
+      await ensureAuditionCircles(firstStageId.value);
+      const matches = ((await listMatch({ stageId: firstStageId.value } as any)).data ?? []) as any[];
+      circles = matches
+        .filter((m) => m.status !== 'SETTLED' && !String(m.remark || '').startsWith('同分加赛'))
+        .sort(
+          (a, b) =>
+            Number(a.displayRow ?? 0) - Number(b.displayRow ?? 0) || String(a.id).localeCompare(String(b.id))
+        );
+      if (circles.length === 0) {
+        ElMessage.warning('该赛段没有可落圈的圈场次，无法签到');
+        return;
+      }
+    }
+
+    // 号码接在现有最大数字之后:重号会让海选结算的并列名次失去区分度
+    let nextNumber = maxCompetitorNumber() + 1;
+    let ok = 0;
+    const failures: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const player = targets[i];
+      const body: any = {
+        playerId: player.id,
+        checkInType: 'CREATE',
+        competitorNumber: String(nextNumber++)
+      };
+      if (needCircle) {
+        body.matchId = circles[i % circles.length].id;
+      }
+      try {
+        await checkInPlayer(body);
+        ok++;
+      } catch (e: any) {
+        failures.push(`${player.name || player.id}: ${e?.msg || e?.message || '失败'}`);
+      }
+    }
+
+    await refreshAll();
+    if (failures.length === 0) {
+      ElMessage.success(`已签到 ${ok} 名选手`);
+    } else {
+      const detail = failures.slice(0, 3).join('；');
+      ElMessage.warning(
+        `成功 ${ok} 名，失败 ${failures.length} 名：${detail}${failures.length > 3 ? ' …' : ''}`
+      );
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.msg || e?.message || '一键全签到失败');
+  } finally {
+    bulkCheckingIn.value = false;
+  }
+};
+
+/** 现有参赛号码中的最大数字,用于批量签到续号 */
+const maxCompetitorNumber = () => {
+  let max = 0;
+  for (const p of players.value) {
+    const n = parseInt(String(p.competitorVo?.number ?? ''), 10);
+    if (!Number.isNaN(n) && n > max) {
+      max = n;
+    }
+  }
+  return max;
 };
 
 // 加载首个赛段信息(海选进行中提示用)

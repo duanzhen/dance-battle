@@ -403,7 +403,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 .eq(TMatchParticipant::getMatchId, matchId))
             .stream().filter(p -> p.getCompetitorId() != null).count();
         if (realCount <= 1) {
-            // 赛段已生成场次且尚未开赛(DRAFT/PENDING):开始首个场次时一并进入进行中
+            // 赛段已生成场次且尚未开赛(DRAFT):开始首个场次时一并进入进行中
             stageLifecycleService.ensureStageGaming(stage.getId());
             boolean settled = stageLifecycleService.settleByeMatch(matchId);
             if (!settled) {
@@ -513,8 +513,9 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 if (downstream != null && !StageConstants.MATCH_PENDING.equals(downstream.getStatus())) {
                     throw new ServiceException("下游场次已开赛,无法 reset");
                 }
-                participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
-                    .set(TMatchParticipant::getCompetitorId, null)
+                // 占位行直接删除:competitor_id 是 NOT NULL,置 null 会触发数据库约束错误。
+                // 生成对阵时空槽本就不落行,winner 再次路由时 fillDownstreamSlot 会补插。
+                participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
                     .eq(TMatchParticipant::getMatchId, wt.getTargetMatchId())
                     .eq(TMatchParticipant::getDisplaySlotIndex, wt.getTargetSlot().longValue()));
             }
@@ -526,8 +527,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 if (downstream != null && !StageConstants.MATCH_PENDING.equals(downstream.getStatus())) {
                     throw new ServiceException("季军赛场次已开赛,无法 reset");
                 }
-                participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
-                    .set(TMatchParticipant::getCompetitorId, null)
+                participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
                     .eq(TMatchParticipant::getMatchId, lt.getTargetMatchId())
                     .eq(TMatchParticipant::getDisplaySlotIndex, lt.getTargetSlot().longValue()));
             }
@@ -575,6 +575,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         RedisUtils.deleteKeys(GlobalConstants.REPEAT_SUBMIT_KEY + "/game/match/" + matchId + "/submit-result*");
         // 清擂台重投计数,重新开始后重新计
         RedisUtils.deleteObject("arena:revote:" + matchId);
+        // 清待公布结果:updateById 跳过 null,必须显式 set,否则重启后会残留旧结果,
+        // 导播台一点「公布」就会把上一轮的判定重新生效
+        matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
+            .eq(TMatch::getId, matchId)
+            .set(TMatch::getResultJson, null));
         // 场次与轮次回目标状态
         TMatch mUpd = new TMatch();
         mUpd.setId(matchId);
@@ -827,10 +832,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 公布结果只结束场次,不自动完成赛段(由导播台手动"完成赛段")
         MatchResultVo vo = submitResult(bo);
         // 公布后清空暂存结果
-        TMatch upd = new TMatch();
-        upd.setId(matchId);
-        upd.setResultJson(null);
-        matchMapper.updateById(upd);
+        // 注意:updateById 会跳过 null 字段,必须用 lambdaUpdate 显式 set 才能真正清空
+        matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
+            .eq(TMatch::getId, matchId)
+            .set(TMatch::getResultJson, null));
         log.info("场次[{}]结果已由导播台公布", matchId);
         return vo;
     }

@@ -23,7 +23,9 @@ import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
+import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.AssignCircleBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
@@ -86,7 +88,9 @@ public class TStageController extends BaseController {
     @RepeatSubmit()
     @PostMapping()
     public R<TStageVo> add(@Validated(AddGroup.class) @RequestBody TStageBo bo) {
-        return R.ok(tStageService.insertByBo(bo));
+        TStageVo created = tStageService.insertByBo(bo);
+        syncAuditionCircles(created);
+        return R.ok(created);
     }
 
     /**
@@ -97,7 +101,22 @@ public class TStageController extends BaseController {
     @RepeatSubmit()
     @PutMapping()
     public R<TStageVo> edit(@Validated(EditGroup.class) @RequestBody TStageBo bo) {
-        return R.ok(tStageService.updateByBo(bo));
+        TStageVo updated = tStageService.updateByBo(bo);
+        syncAuditionCircles(updated);
+        return R.ok(updated);
+    }
+
+    /**
+     * 圈结构跟随赛段配置:在赛段流程中保存/新建海选赛段的圈配置后,按配置建齐空圈。
+     *
+     * <p>圈只在这个入口产生——签到不再补建圈,也不允许"没有圈就签到"。
+     * 非海选赛段或已有场次开赛时为空操作(见 ensureAuditionCircles)。</p>
+     */
+    private void syncAuditionCircles(TStageVo stage) {
+        if (stage == null || stage.getId() == null) {
+            return;
+        }
+        tStageLifecycleService.ensureAuditionCircles(stage.getId());
     }
 
     /**
@@ -146,7 +165,7 @@ public class TStageController extends BaseController {
     // ==================== 赛段生命周期(赛事流程引擎)====================
 
     /**
-     * 初始化赛段:锁定参赛方名单并排种子顺位,DRAFT→PENDING
+     * 初始化赛段:锁定参赛方名单并排种子顺位(状态保持 DRAFT,开赛时才进 GAMING)
      */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "赛段初始化", businessType = BusinessType.UPDATE)
@@ -195,7 +214,26 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 开始赛段:PENDING→GAMING
+     * 把参赛方放入指定圈(海选/排名赛补签到的管理端入口)。
+     *
+     * <p>与 {@code /withdraw} 互为反向操作:落圈一律由调用方指定,
+     * 多圈海选未传 matchId / zoneIndex 会被拒绝(后端不再自行推导圈位)。</p>
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "参赛方落圈", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{id}/competitor/{competitorId}/circle")
+    public R<Void> assignCompetitorCircle(@NotNull(message = "赛段ID不能为空") @PathVariable Long id,
+                                          @NotNull(message = "参赛选手ID不能为空") @PathVariable Long competitorId,
+                                          @RequestBody(required = false) AssignCircleBo bo) {
+        tStageLifecycleService.appendStageCompetitor(id, competitorId,
+            bo == null ? null : bo.getMatchId(),
+            bo == null ? null : bo.getZoneIndex());
+        return R.ok();
+    }
+
+    /**
+     * 开始赛段:DRAFT→GAMING
      */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "开始赛段", businessType = BusinessType.UPDATE)
@@ -207,21 +245,22 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 完成赛段:GAMING→SETTLED(需所有场次已结算)
+     * 完成赛段:GAMING→SETTLED(需所有场次已结算)。
+     *
+     * <p>返回 {@code completed}/{@code message}:不能结束时不是错误,
+     * 而是 {@code completed=false} + 可直接展示的原因(如海选产生二海)。</p>
      */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "完成赛段", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
     @PutMapping("/{id}/complete")
-    public R<java.util.Map<String, String>> complete(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
-        String status = tStageLifecycleService.completeStage(id);
-        // 返回结算后赛段真实状态:SETTLED=已完成;GAMING=海选产生二海等,赛段保持进行中
-        return R.ok(java.util.Map.of("status", status));
+    public R<StageCompleteVo> complete(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        return R.ok(tStageLifecycleService.completeStage(id));
     }
 
     /**
      * 重置赛段为草稿:清除已生成对阵(级联轮次/参赛明细/打分),参赛方回退待定,
-     * isInitialized 归零,可重新排种子/生成对阵。仅 DRAFT/PENDING 状态可用。
+     * isInitialized 归零,可重新排种子/生成对阵。仅 DRAFT 状态可用。
      */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "重置赛段草稿", businessType = BusinessType.UPDATE)

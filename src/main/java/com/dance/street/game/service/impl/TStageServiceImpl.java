@@ -124,13 +124,31 @@ public class TStageServiceImpl implements ITStageService {
         return list;
     }
 
-    /** 补入名单摘要:名单是赛段属性,直接按赛段读取 */
+    /**
+     * 补入名单摘要,并把 prev 展示字段按赛段链覆盖。
+     *
+     * <p>prev 只是展示字段,事实源只有 next 链。管理端流程图用它找头节点并排序整条链,
+     * 一旦库里那一列过期(历史脏数据、指针写失败)整张图就会排错;
+     * 这里统一按链推导覆盖,列只作为兜底写回,不再参与读取。</p>
+     */
     private void enrichIncoming(List<TStageVo> stages) {
         if (stages == null || stages.isEmpty()) {
             return;
         }
+        Set<Long> tournamentIds = stages.stream()
+            .map(TStageVo::getTournamentId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        Map<Long, Long> prevByStageId = new HashMap<>();
+        for (Long tid : tournamentIds) {
+            prevByStageId.putAll(stageChain.prevIdsFromChain(tid));
+        }
         for (TStageVo stage : stages) {
             if (stage.getId() != null) {
+                if (stage.getTournamentId() != null && tournamentIds.contains(stage.getTournamentId())) {
+                    // 链上没有前驱即入口赛段:显式置 null,避免透出列里的脏值
+                    stage.setPrevStageId(prevByStageId.get(stage.getId()));
+                }
                 List<TStageRosterVo> rosters = rosterService.listByTarget(stage.getId());
                 stage.setIncoming(rosters.isEmpty() ? null : rosters);
             }
@@ -772,7 +790,7 @@ public class TStageServiceImpl implements ITStageService {
      * 根据比赛ID获取第一个赛段
      *
      * @param tournamentId 比赛ID
-     * @return 第一个赛段，不关心赛段状态（DRAFT/PENDING/GAMING/SETTLED 均返回）
+     * @return 第一个赛段，不关心赛段状态（DRAFT/GAMING/SETTLED 均返回）
      */
     @Override
     public TStageVo getFirstStageByTournamentId(Long tournamentId) {

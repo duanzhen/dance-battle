@@ -33,6 +33,8 @@ import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.TVisScene;
 import com.dance.street.game.domain.TVisWidget;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
+import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
@@ -82,6 +84,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
     private final ITRefereeStageService refereeStageService;
     private final TStageMapper stageMapper;
     private final ITStageRosterService rosterService;
+    private final ITStageLifecycleService stageLifecycleService;
 
     /** 赛事模版:模版编码 → 赛段定义(海选 + 淘汰赛链) */
     private static final Map<String, List<StageDef>> TEMPLATES = buildTemplates();
@@ -414,6 +417,12 @@ public class TTournamentServiceImpl implements ITTournamentService {
         //     同时把下一赛段的默认"海选·晋级"来源组替换为按圈的晋级出口
         autoConfigureAuditionCircles(stages, refereeIds);
 
+        // 6.6 圈结构落库:圈配置(6.5)写完之后,按配置把海选圈场次建出来。
+        //     圈只由配置侧产生——签到只负责人落进已有的圈,不再补建圈。
+        stages.stream()
+            .filter(s -> StageModeEnum.AUDITION.getCode().equals(s.getStageMode()))
+            .forEach(s -> stageLifecycleService.ensureAuditionCircles(s.getId()));
+
         log.info("按模版[{}]创建赛事[{}]完成:{} 个赛段,{} 个对战树 widget,1 个当前场次 widget,2 个背景图片 widget",
             bo.getTemplateCode(), tid, stages.size(), idx);
         if (refereeIds != null && !refereeIds.isEmpty()) {
@@ -552,16 +561,13 @@ public class TTournamentServiceImpl implements ITTournamentService {
         for (int i = 0; i < circles; i++) {
             quotas.add(base + (i < rem ? 1 : 0));
         }
-        // 用字符串写 ID:雪花 ID 超出 JS 安全整数范围,写成 JSON 数字会在前端 JSON.parse 时被四舍五入,
-        // 导致圈配置里的裁判 ID 匹配不上裁判列表(页面显示成 ID 而不是裁判名)。后端按 Long 解析不受影响。
+        // 圈的裁判暂不在模板建赛时分配:每圈先留空列表,由主办方后面在赛段流程里编辑。
+        // (留空列表而非不写该字段:autoAssignCircleReferees 见到与圈数等长的配置就按配置绑定,
+        //  不会退化成"把赛段全部裁判绑到每个圈"。)
+        // 用字符串写 ID:雪花 ID 超出 JS 安全整数范围,写成 JSON 数字会在前端 JSON.parse 时被四舍五入。
         List<List<String>> circleRefs = new ArrayList<>();
         for (int i = 0; i < circles; i++) {
             circleRefs.add(new ArrayList<>());
-        }
-        if (refereeIds != null) {
-            for (int i = 0; i < refereeIds.size(); i++) {
-                circleRefs.get(i % circles).add(String.valueOf(refereeIds.get(i)));
-            }
         }
         try {
             ObjectMapper mapper = SnowflakeJson.mapper();

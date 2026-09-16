@@ -57,7 +57,7 @@
       <div class="pt-4 border-t border-neutral-800 space-y-2">
         <div class="text-xs text-neutral-500 mb-1">流程操作</div>
         <button
-          v-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'"
+          v-if="localStage.status === 'DRAFT'"
           @click="doStart"
           :disabled="lifecycleLoading || !canStartStage"
           :title="!canStartStage ? '上一赛段结束后方可开始本赛段' : '将自动初始化并生成对阵'"
@@ -66,12 +66,12 @@
           开始赛段
         </button>
         <p
-          v-if="(localStage.status === 'DRAFT' || localStage.status === 'PENDING') && !canStartStage"
+          v-if="localStage.status === 'DRAFT' && !canStartStage"
           class="text-[10px] text-neutral-500 leading-relaxed"
         >
           上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
         </p>
-        <p v-else-if="localStage.status === 'DRAFT' || localStage.status === 'PENDING'" class="text-[10px] text-neutral-500 leading-relaxed">
+        <p v-else-if="localStage.status === 'DRAFT'" class="text-[10px] text-neutral-500 leading-relaxed">
           点击「开始赛段」将自动初始化并生成对阵。
         </p>
         <button
@@ -95,19 +95,25 @@
           <label
             v-for="ref in refereeList"
             :key="ref.id"
-            class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-neutral-800/50 transition-colors"
+            class="flex items-center gap-2 px-2 py-1.5 rounded transition-colors"
+            :class="refereesLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-neutral-800/50'"
           >
             <input
               type="checkbox"
               :checked="selectedRefereeIds.includes(String(ref.id))"
+              :disabled="refereesLocked"
               @change="toggleReferee(String(ref.id))"
               class="w-3.5 h-3.5 rounded border-neutral-600 bg-neutral-800 text-amber-500 focus:ring-0 focus:ring-offset-0"
             />
             <span class="text-xs text-neutral-300 truncate">{{ ref.name }}</span>
           </label>
         </div>
+        <!-- 赛段已开始:裁判锁定(开赛前必须每圈配好裁判,开赛后增减会让分数不可比) -->
+        <p v-if="refereesLocked" class="text-[10px] text-amber-500/80 leading-relaxed pt-1">
+          本赛段已开始,裁判配置已锁定。中途增减裁判会导致同场选手由不同数量的裁判打分,分数不可比。
+        </p>
         <button
-          v-if="refereeDirty"
+          v-if="refereeDirty && !refereesLocked"
           @click="saveRefereeAssignment"
           :disabled="savingReferees"
           class="w-full py-1.5 text-xs font-medium rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
@@ -190,7 +196,6 @@ const stageModeLabels: Record<string, string> = {
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
     DRAFT: '规划中',
-    PENDING: '规划中',
     GAMING: '进行中',
     SETTLED: '已结束',
     DISCARD: '已取消'
@@ -200,7 +205,6 @@ const statusLabel = computed(() => {
 const statusTextClass = computed(() => {
   const map: Record<string, string> = {
     DRAFT: 'text-neutral-400',
-    PENDING: 'text-neutral-400',
     GAMING: 'text-green-400',
     SETTLED: 'text-neutral-300',
     DISCARD: 'text-red-400'
@@ -282,17 +286,14 @@ const doComplete = async () => {
   lifecycleLoading.value = true;
   try {
     const res: any = await completeStage(localStage.value.id);
-    const status = res?.data?.status;
-    if (status === 'SETTLED') {
+    const result = res?.data;
+    if (result?.completed || result?.status === 'SETTLED') {
       localStage.value.status = 'SETTLED';
       ElMessage.success('赛段已完成');
     } else {
-      // 海选产生二海(同分加赛):后端保持赛段 GAMING,不允许结束,需完成二海判罚后再次结算
-      ElMessage.warning(
-        localStage.value.stageMode === 'AUDITION'
-          ? '海选产生二海(同分加赛),完成二海判罚后才能结束赛段'
-          : '赛段仍有未完成场次,完成全部判罚后才能结束赛段'
-      );
+      // 结算未完成不是错误:后端统一返回 completed=false + 可直接展示的原因
+      // (如「海选产生二海(同分加赛),完成二海判罚后才能结束赛段」)
+      ElMessage.warning(result?.message || '赛段仍有未完成场次,完成全部判罚后才能结束赛段');
     }
     emit('update', localStage.value);
     emit('refresh');
@@ -312,6 +313,11 @@ const refereeDirty = computed(() => {
   return sorted.join(',') !== orig.join(',');
 });
 const savingReferees = ref(false);
+/**
+ * 裁判锁定:赛段一旦开始(非 DRAFT)就不能再改裁判。
+ * 与后端一致——开赛前必须每圈配好裁判,开赛后增减会让同场选手由不同数量的裁判打分,分数不可比。
+ */
+const refereesLocked = computed(() => localStage.value.status !== 'DRAFT');
 
 const loadRefereeList = async (tournamentId: string | number) => {
   try {

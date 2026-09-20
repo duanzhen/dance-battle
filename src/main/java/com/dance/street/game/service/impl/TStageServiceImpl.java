@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageConfigBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
@@ -33,10 +34,8 @@ import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.SnowflakeJson;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
-import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.engine.common.PairingModeResolver;
-import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.generator.KnockoutGenerator;
 import com.dance.street.game.mapper.TCompetitorMapper;
@@ -143,13 +142,16 @@ public class TStageServiceImpl implements ITStageService {
         for (Long tid : tournamentIds) {
             prevByStageId.putAll(stageChain.prevIdsFromChain(tid));
         }
+        // 名单一次批量取回:此前逐赛段 listByTarget,且每个来源组还要回查一次来源赛段
+        Map<Long, List<TStageRosterVo>> rostersByStage = rosterService.listByTargets(
+            stages.stream().map(TStageVo::getId).filter(Objects::nonNull).toList());
         for (TStageVo stage : stages) {
             if (stage.getId() != null) {
                 if (stage.getTournamentId() != null && tournamentIds.contains(stage.getTournamentId())) {
                     // 链上没有前驱即入口赛段:显式置 null,避免透出列里的脏值
                     stage.setPrevStageId(prevByStageId.get(stage.getId()));
                 }
-                List<TStageRosterVo> rosters = rosterService.listByTarget(stage.getId());
+                List<TStageRosterVo> rosters = rostersByStage.getOrDefault(stage.getId(), List.of());
                 stage.setIncoming(rosters.isEmpty() ? null : rosters);
             }
         }
@@ -174,6 +176,10 @@ public class TStageServiceImpl implements ITStageService {
     /**
      * 新增赛段流程
      *
+     * <p>插入位置只认意图:{@code afterStageId}(兼容旧字段 {@code prevStageId})表示
+     * "插到该赛段之后",为空则插到链头。前后指针由 {@link StageChain} 按链顺序写入,
+     * 客户端传的 {@code nextStageId} 不参与。</p>
+     *
      * @param bo 赛段流程
      * @return 新增后的赛段流程
      */
@@ -183,26 +189,25 @@ public class TStageServiceImpl implements ITStageService {
         TStage add = MapstructUtils.convert(bo, TStage.class);
 
         // 归一化 ruleConfig:补齐与 teamCountStart/teamCountEnd 对应的配置字段
-        normalizeRuleConfig(add);
+        normalizeRuleConfig(add, null);
 
-        // 校验数据
-        validateLinkIds(add);
+        // 插入意图:afterStageId 优先;旧调用方用 prevStageId 表达同一件事
+        Long afterStageId = bo.getAfterStageId() != null ? bo.getAfterStageId() : bo.getPrevStageId();
 
-        // 维护链表
-        maintainChainOnInsert(add);
-
+        // 指针列一律由 StageChain 写:先落一行不带指针的记录,再按链顺序接入
+        add.setPrevStageId(null);
+        add.setNextStageId(null);
         baseMapper.insert(add);
         bo.setId(add.getId());
+        stageChain.insertAfter(add, afterStageId);
 
-        // 更新链表中的相邻节点
-        updateNeighborLinks(add);
         // 名单:新赛段有直接前驱时同步写入默认来源组(source=prev, ADVANCE, AUTO);
         // 先写名单再联动名额,使 syncAdvanceCountFromNext 能识别"目标是否多来源"
         rosterService.ensureRosterForStage(add);
         // 插入赛段后联动调整源赛段晋级名额:
         // 前驱赛段的 teamCountEnd 对齐到新赛段的 teamCountStart,
         // 保证「前段选多少人 = 后段收多少人」;具体人选仍由中间态(预排/顶替/GUEST)对接
-        syncAdvanceCountFromNext(add.getPrevStageId(), add.getId());
+        syncAdvanceCountFromNext(afterStageId, add.getId());
         // 中间插入(A→Z→B):B 的 prev 已改为 Z,名单默认来源同步从 A 迁到 Z
         if (add.getNextStageId() != null) {
             rosterService.reconcileAfterLinkChange(add.getNextStageId());
@@ -214,6 +219,13 @@ public class TStageServiceImpl implements ITStageService {
     /**
      * 修改赛段流程
      *
+     * <p><b>只改配置,不动赛段链。</b>客户端提交的 {@code prevStageId}/{@code nextStageId}
+     * 一律忽略:那是它本地的展示副本,过期后写回会把链(以及下游名单来源)改歪——
+     * 此前"改一个场次配置却重写整条链"正是这么来的。需要调整链顺序请调用
+     * {@link #moveStageAfter(Long, Long)}。</p>
+     *
+     * <p>配置写入见 {@link #updateConfig(TStageConfigBo)}。</p>
+     *
      * @param bo 赛段流程
      * @return 修改后的赛段流程
      */
@@ -221,18 +233,78 @@ public class TStageServiceImpl implements ITStageService {
     @Transactional(rollbackFor = Exception.class)
     public TStageVo updateByBo(TStageBo bo) {
         TStage update = MapstructUtils.convert(bo, TStage.class);
+        warnIfClientSendsChainPointers(update);
+        return applyConfigUpdate(update);
+    }
+
+    /**
+     * 修改赛段配置(不含链表指针)。
+     *
+     * <p>配置面板的唯一入口。BO 里没有 prev/next,因此这条路径在任何情况下都不会改链,
+     * 也不会触发下游名单对账——纯配置保存不产生链写入。</p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TStageVo updateConfig(TStageConfigBo bo) {
+        TStage patch = new TStage();
+        patch.setId(bo.getId());
+        patch.setName(bo.getName());
+        patch.setStageMode(bo.getStageMode());
+        patch.setMembers(bo.getMembers());
+        patch.setVisualColIndex(bo.getVisualColIndex());
+        patch.setRuleConfig(bo.getRuleConfig());
+        patch.setStatus(bo.getStatus());
+        patch.setTeamCountStart(bo.getTeamCountStart());
+        patch.setTeamCountEnd(bo.getTeamCountEnd());
+        patch.setVisualConfig(bo.getVisualConfig());
+        patch.setRemark(bo.getRemark());
+        return applyConfigUpdate(patch);
+    }
+
+    /**
+     * 调整赛段链顺序:把 {@code stageId} 移到 {@code afterStageId} 之后(空 = 移到链头)。
+     *
+     * <p>改链从「回传前后指针」改成「声明意图」:顺序由 {@link StageChain} 按现有链推导后
+     * 统一写入,不读客户端手里的指针副本,也就不存在过期副本把链写歪的窗口。</p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void moveStageAfter(Long stageId, Long afterStageId) {
+        List<Long> changed = stageChain.moveAfter(stageId, afterStageId);
+        // prev 变了的赛段:入口↔非入口会切换,默认名单来源(签到流/上游晋级)要跟着迁
+        for (Long changedStageId : changed) {
+            rosterService.reconcileAfterLinkChange(changedStageId);
+        }
+    }
+
+    /**
+     * 配置写入的公共实现:只写 patch 上显式提供的配置列。
+     *
+     * <p>patch 由调用方按入口裁剪({@link #updateByBo} 会清掉指针列),因此
+     * {@code updateById} 生成的 UPDATE 里不会出现 prev/next——链的写入只发生在
+     * {@link StageChain} 里。</p>
+     */
+    private TStageVo applyConfigUpdate(TStage patch) {
+        if (patch.getId() == null) {
+            throw new ServiceException("赛段ID不能为空");
+        }
+        TStage oldStage = baseMapper.selectById(patch.getId());
+        if (oldStage == null) {
+            throw new ServiceException("赛段不存在: {}", patch.getId());
+        }
+        // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
+        // 避免后续有人往 patch 里塞指针又把链写歪
+        patch.setPrevStageId(null);
+        patch.setNextStageId(null);
 
         // 归一化 ruleConfig:补齐与 teamCountStart/teamCountEnd 对应的配置字段
-        normalizeRuleConfig(update);
-
-        // 校验数据
-        validateLinkIds(update);
+        normalizeRuleConfig(patch, oldStage);
 
         // 防悬挂状态:直接把赛段置为已结束时,要求所有场次必须已结算(与 completeStage 口径一致),
         // 避免出现「赛段 SETTLED + 二海/场次 GAMING」的前端误写状态
-        if (update.getStatus() != null && StageConstants.STAGE_SETTLED.equals(update.getStatus())) {
+        if (patch.getStatus() != null && StageConstants.STAGE_SETTLED.equals(patch.getStatus())) {
             long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, update.getId())
+                .eq(TMatch::getStageId, patch.getId())
                 .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
             if (unfinished > 0) {
                 throw new ServiceException("赛段仍有 {} 场未结算(如海选二海),不能直接标记为已结束,请通过「完成赛段」结算",
@@ -240,35 +312,36 @@ public class TStageServiceImpl implements ITStageService {
             }
         }
 
-        // 获取旧数据，用于清理原链表连接
-        TStage oldStage = baseMapper.selectById(update.getId());
         // 分圈保护:海选圈数只增不减、开始后锁定(前端已改为按钮加圈)
-        validateAuditionCircleChange(update, oldStage);
+        validateAuditionCircleChange(patch, oldStage);
 
-        // 防呆:客户端提交的链表指针可能已过期(如删除中间赛段后本地未刷新),
-        // 指向的赛段必须存在且属于同一赛事,否则回退旧链接,避免把悬空指针写回
-        sanitizeLinkIds(update, oldStage);
+        baseMapper.updateById(patch);
 
-        // 先清理旧的链表连接
-        if (oldStage != null) {
-            clearOldLinks(oldStage);
+        // 返回库中整行:prev/next 是展示列,链由 StageChain 维护,回读才是最新口径
+        return MapstructUtils.convert(baseMapper.selectById(patch.getId()), TStageVo.class);
+    }
+
+    /**
+     * 客户端通过普通更新接口回传了与本赛段现状不同的 prev/next:
+     * 说明它手里那份指针副本已经过期(或想改链),两者都不该按它的值写库。
+     */
+    private void warnIfClientSendsChainPointers(TStage incoming) {
+        if (incoming.getId() == null
+            || (incoming.getPrevStageId() == null && incoming.getNextStageId() == null)) {
+            return;
         }
-
-        // 维护新链表
-        maintainChainOnInsert(update);
-
-        baseMapper.updateById(update);
-
-        // 更新链表中的相邻节点
-        updateNeighborLinks(update);
-        // 若本赛段因改链成为新的入口(无直接前驱),由后端补建签到外部来源组
-        if (update.getPrevStageId() == null) {
-            rosterService.ensureRosterForStage(update);
+        TStage current = baseMapper.selectById(incoming.getId());
+        if (current == null) {
+            return;
         }
-        // 改链后对账本赛段名单:清旧前驱默认组/入口签到组,按新 prev 补齐默认组
-        rosterService.reconcileAfterLinkChange(update.getId());
-
-        return MapstructUtils.convert(update, TStageVo.class);
+        boolean differs = !Objects.equals(incoming.getPrevStageId(), current.getPrevStageId())
+            || !Objects.equals(incoming.getNextStageId(), current.getNextStageId());
+        if (differs) {
+            log.warn("赛段[{}]通过配置更新入口提交了前后指针(提交 prev={} next={},库中 prev={} next={}),已忽略;"
+                    + "改链请调用 PUT /game/stage/{}/link",
+                incoming.getId(), incoming.getPrevStageId(), incoming.getNextStageId(),
+                current.getPrevStageId(), current.getNextStageId(), incoming.getId());
+        }
     }
 
     /**
@@ -314,35 +387,6 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /**
-     * 修正过期的链表指针:prev/next 指向的赛段不存在或跨赛事时,
-     * 回退为旧赛段的链接(或置空),防止删除中间赛段后本地未刷新导致悬空引用写回。
-     */
-    private void sanitizeLinkIds(TStage update, TStage oldStage) {
-        if (update.getPrevStageId() != null && !isValidLinkTarget(update.getPrevStageId(), update.getTournamentId())) {
-            log.warn("赛段[{}] prevStageId={} 已失效(不存在或跨赛事),回退为旧链接 {}",
-                update.getId(), update.getPrevStageId(),
-                oldStage == null ? null : oldStage.getPrevStageId());
-            update.setPrevStageId(oldStage == null ? null : oldStage.getPrevStageId());
-        }
-        if (update.getNextStageId() != null && !isValidLinkTarget(update.getNextStageId(), update.getTournamentId())) {
-            log.warn("赛段[{}] nextStageId={} 已失效(不存在或跨赛事),回退为旧链接 {}",
-                update.getId(), update.getNextStageId(),
-                oldStage == null ? null : oldStage.getNextStageId());
-            update.setNextStageId(oldStage == null ? null : oldStage.getNextStageId());
-        }
-    }
-
-    /** 链表指针有效性:目标赛段存在,且(指定赛事时)属于同一赛事 */
-    private boolean isValidLinkTarget(Long stageId, Long tournamentId) {
-        if (stageId == null) {
-            return true;
-        }
-        TStage target = baseMapper.selectById(stageId);
-        return target != null
-            && (tournamentId == null || Objects.equals(target.getTournamentId(), tournamentId));
-    }
-
-    /**
      * 归一化赛段 rule_config,保证与赛段权威字段(teamCountStart/teamCountEnd)一致。
      *
      * <p>rule_config 是前后端共用的配置契约(前端按 {@code knockout.advanceCount} 判定决赛等),
@@ -355,12 +399,23 @@ public class TStageServiceImpl implements ITStageService {
      *   <li>AUDITION:补齐顶层 {@code advanceCount}(取赛段字段)</li>
      *   <li>通用:补齐顶层 {@code mode}</li>
      * </ul>
+     *
+     * @param stage 本次要写入的字段(patch,可能只带了部分配置)
+     * @param old   库中现值:patch 没带的赛段字段按它补,避免归一化把已有值冲掉
      */
-    private void normalizeRuleConfig(TStage stage) {
-        String mode = stage.getStageMode();
+    private void normalizeRuleConfig(TStage stage, TStage old) {
+        String mode = StringUtils.isNotBlank(stage.getStageMode())
+            ? stage.getStageMode()
+            : (old == null ? null : old.getStageMode());
         if (StringUtils.isBlank(mode) || StringUtils.isBlank(stage.getRuleConfig())) {
             return;
         }
+        Long teamCountStart = stage.getTeamCountStart() != null
+            ? stage.getTeamCountStart()
+            : (old == null ? null : old.getTeamCountStart());
+        Long teamCountEnd = stage.getTeamCountEnd() != null
+            ? stage.getTeamCountEnd()
+            : (old == null ? null : old.getTeamCountEnd());
         try {
             ObjectMapper mapper = SnowflakeJson.mapper();
             @SuppressWarnings("unchecked")
@@ -376,18 +431,18 @@ public class TStageServiceImpl implements ITStageService {
                     ko = new HashMap<>();
                     rc.put("knockout", ko);
                 }
-                if (stage.getTeamCountStart() != null && ko.get("teamsCount") == null) {
-                    ko.put("teamsCount", stage.getTeamCountStart());
+                if (teamCountStart != null && ko.get("teamsCount") == null) {
+                    ko.put("teamsCount", teamCountStart);
                     changed = true;
                 }
-                if (stage.getTeamCountEnd() != null && ko.get("advanceCount") == null) {
-                    ko.put("advanceCount", stage.getTeamCountEnd());
+                if (teamCountEnd != null && ko.get("advanceCount") == null) {
+                    ko.put("advanceCount", teamCountEnd);
                     changed = true;
                 }
             } else if (StageModeEnum.AUDITION.getCode().equals(mode)
                 || StageModeEnum.RANK.getCode().equals(mode)) {
-                if (stage.getTeamCountEnd() != null && rc.get("advanceCount") == null) {
-                    rc.put("advanceCount", stage.getTeamCountEnd());
+                if (teamCountEnd != null && rc.get("advanceCount") == null) {
+                    rc.put("advanceCount", teamCountEnd);
                     changed = true;
                 }
             }
@@ -404,97 +459,6 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /**
-     * 校验链表ID字段的类型
-     */
-    private void validateLinkIds(TStage entity) {
-        try {
-            if (entity.getPrevStageId() != null) {
-                // 确保是 Long 类型
-                Long prevId = Long.valueOf(entity.getPrevStageId().toString());
-                entity.setPrevStageId(prevId);
-            }
-            if (entity.getNextStageId() != null) {
-                Long nextId = Long.valueOf(entity.getNextStageId().toString());
-                entity.setNextStageId(nextId);
-            }
-            if (entity.getParentStageId() != null) {
-                Long parentId = Long.valueOf(entity.getParentStageId().toString());
-                entity.setParentStageId(parentId);
-            }
-        } catch (Exception e) {
-            log.error("赛段链表ID类型错误: prevStageId={}, nextStageId={}, parentStageId={}",
-                entity.getPrevStageId(), entity.getNextStageId(), entity.getParentStageId(), e);
-            throw new RuntimeException("赛段链表ID必须是数值类型");
-        }
-    }
-
-    /**
-     * 插入节点时的链表维护
-     */
-    private void maintainChainOnInsert(TStage stage) {
-        if (stage.getTournamentId() == null) {
-            throw new RuntimeException("tournamentId不能为空");
-        }
-
-        Long prevId = stage.getPrevStageId();
-        Long nextId = stage.getNextStageId();
-
-        // 如果同时指定了 prev 和 next，检查它们是否原本相连
-        if (prevId != null && nextId != null) {
-            TStage prevStage = baseMapper.selectById(prevId);
-            if (prevStage != null && !Objects.equals(prevStage.getNextStageId(), nextId)) {
-                throw new RuntimeException(
-                    String.format("指定的前驱节点[%d]和后继节点[%d]不相邻", prevId, nextId)
-                );
-            }
-        }
-
-        // 如果只指定了 prevId，自动查找 next
-        if (prevId != null && nextId == null) {
-            TStage prevStage = baseMapper.selectById(prevId);
-            if (prevStage != null) {
-                nextId = prevStage.getNextStageId();
-                stage.setNextStageId(nextId);
-            }
-        }
-        // 如果只指定了 nextId，自动查找 prev
-        else if (nextId != null && prevId == null) {
-            TStage nextStage = baseMapper.selectById(nextId);
-            if (nextStage != null) {
-                prevId = nextStage.getPrevStageId();
-                stage.setPrevStageId(prevId);
-            }
-        }
-    }
-
-    /**
-     * 更新相邻节点的指针
-     */
-    private void updateNeighborLinks(TStage stage) {
-        Long newId = stage.getId();
-        Long prevId = stage.getPrevStageId();
-        Long nextId = stage.getNextStageId();
-
-        // 更新前驱节点的 nextStageId
-        if (prevId != null) {
-            TStage prevStage = baseMapper.selectById(prevId);
-            if (prevStage != null) {
-                prevStage.setNextStageId(newId);
-                baseMapper.updateById(prevStage);
-            }
-        }
-
-        // 更新后继节点的 prevStageId
-        if (nextId != null) {
-            TStage nextStage = baseMapper.selectById(nextId);
-            if (nextStage != null) {
-                nextStage.setPrevStageId(newId);
-                baseMapper.updateById(nextStage);
-            }
-        }
-    }
-
-    /**
      * 晋级名额联动(旧链表模型遗留):名单化后**显式停用**。
      *
      * <p>每个赛段的晋级名额/容量与名单来源组是独立配置:
@@ -505,61 +469,6 @@ public class TStageServiceImpl implements ITStageService {
      */
     private void syncAdvanceCountFromNext(Long prevId, Long nextId) {
         // no-op:名单流转由来源组与赛段配置决定
-    }
-
-    /** 名单行的全部内部来源组是否都已结算(STREAM/外部组视为就绪) */
-    private boolean allGroupsResolved(List<TStageRosterGroupBo> groups) {
-        for (TStageRosterGroupBo g : groups) {
-            if (g.getSourceStageId() == null) {
-                continue;
-            }
-            TStage src = baseMapper.selectById(g.getSourceStageId());
-            if (src == null || !StageConstants.STAGE_SETTLED.equals(src.getStatus())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * 清理旧的链表连接
-     */
-    private void clearOldLinks(TStage oldStage) {
-        Long oldId = oldStage.getId();
-        Long oldPrevId = oldStage.getPrevStageId();
-        Long oldNextId = oldStage.getNextStageId();
-
-        // 如果有前驱节点，将它的 nextStageId 指向我们的后继
-        if (oldPrevId != null) {
-            TStage prevStage = baseMapper.selectById(oldPrevId);
-            if (prevStage != null && Objects.equals(prevStage.getNextStageId(), oldId)) {
-                if (oldNextId == null) {
-                    // updateById 会跳过 null 字段,清空链接需用显式 set
-                    baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-                        .eq(TStage::getId, oldPrevId)
-                        .set(TStage::getNextStageId, null));
-                } else {
-                    prevStage.setNextStageId(oldNextId);
-                    baseMapper.updateById(prevStage);
-                }
-            }
-        }
-
-        // 如果有后继节点，将它的 prevStageId 指向我们的前驱
-        if (oldNextId != null) {
-            TStage nextStage = baseMapper.selectById(oldNextId);
-            if (nextStage != null && Objects.equals(nextStage.getPrevStageId(), oldId)) {
-                if (oldPrevId == null) {
-                    // updateById 会跳过 null 字段,清空链接需用显式 set
-                    baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-                        .eq(TStage::getId, oldNextId)
-                        .set(TStage::getPrevStageId, null));
-                } else {
-                    nextStage.setPrevStageId(oldPrevId);
-                    baseMapper.updateById(nextStage);
-                }
-            }
-        }
     }
 
     /**
@@ -577,7 +486,6 @@ public class TStageServiceImpl implements ITStageService {
         }
         List<TStage> deletingStages = baseMapper.selectList(
             Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids));
-        List<TStage> toDeleteStages = List.of();
         if(isValid){
             // 状态守卫:进行中/已结束的赛段不允许删除,与前端「删除此赛段」的禁用口径一致。
             // 这两类赛段已承载现场数据(场次/判罚/打分),删除会级联抹掉,且不可恢复。
@@ -591,16 +499,9 @@ public class TStageServiceImpl implements ITStageService {
                     throw new ServiceException("赛段[{}]已结束,不可删除(已承载赛果数据)", st.getName());
                 }
             }
-            // 在删除前重新连接链表
-            reconnectChainBeforeDelete(ids);
-            // 删除赛段后联动调整源赛段晋级名额:
-            // 前驱赛段的 teamCountEnd 对齐到存活后继赛段的 teamCountStart(即被删赛段的 next),
-            // 例如删除 32→16 的 32强 后,海选晋级名额自动回到下一赛段容量
-            toDeleteStages = baseMapper.selectList(
-                Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids));
-            for (TStage st : toDeleteStages) {
-                syncAdvanceCountFromNext(st.getPrevStageId(), st.getNextStageId());
-            }
+            // 链表不在这里拼:删除落库后由 StageChain.realignPointers 按 next 链统一收口
+            // (旧实现在删除前后各写一遍邻居指针,是同一件事做两遍)
+            // 名额联动(syncAdvanceCountFromNext)已改为名单驱动,不再依赖被删节点的前后指针
         }
         // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
         List<Long> stageIds = ids.stream().map(Long::valueOf).toList();
@@ -643,22 +544,15 @@ public class TStageServiceImpl implements ITStageService {
         refereeStageMapper.delete(Wrappers.<TRefereeStage>lambdaQuery()
             .in(TRefereeStage::getStageId, stageIds));
         boolean deleted = baseMapper.deleteByIds(ids) > 0;
-        // 删除后清扫:同赛事仍有 prev/next 指向已删赛段的,按被删节点的前后链接重连,
-        // 兜底修复异常数据留下的悬空指针(正常链表下此处无命中)
-        for (TStage st : toDeleteStages) {
-            baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-                .eq(TStage::getTournamentId, st.getTournamentId())
-                .eq(TStage::getPrevStageId, st.getId())
-                .set(TStage::getPrevStageId, st.getPrevStageId()));
-            baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-                .eq(TStage::getTournamentId, st.getTournamentId())
-                .eq(TStage::getNextStageId, st.getId())
-                .set(TStage::getNextStageId, st.getNextStageId()));
-        }
-        Set<Long> affectedTournamentIds = toDeleteStages.stream()
+        Set<Long> affectedTournamentIds = deletingStages.stream()
             .map(TStage::getTournamentId)
             .filter(Objects::nonNull)
             .collect(Collectors.toSet());
+        // 删除后收口:按当前 next 链重算顺序并修正指针(被删节点自动被前后邻居跨过)。
+        // 指针只在 StageChain 里写,删除流程不再自己拼「前驱.next = 被删的.next」。
+        for (Long tid : affectedTournamentIds) {
+            stageChain.realignPointers(tid);
+        }
         // 删除后为存活赛段补齐名单行:被删赛段的后续赛段若原名单整行失效,
         // 按新 prev 补默认组;新入口(无前驱)补签到 STREAM 组
         rosterService.ensureRosterForSurvivors(affectedTournamentIds);
@@ -728,60 +622,6 @@ public class TStageServiceImpl implements ITStageService {
                 }
             } catch (Exception e) {
                 log.warn("赛段删除联动:组件[{}] dataConfig 解析失败,跳过: {}", w.getId(), e.getMessage());
-            }
-        }
-    }
-
-    /**
-     * 删除前重新连接链表
-     *
-     * @param ids 待删除的ID集合
-     */
-    private void reconnectChainBeforeDelete(Collection<Long> ids) {
-        // 查询要删除的赛段
-        List<TStage> toDeleteStages = baseMapper.selectList(
-            Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids)
-        );
-
-        if (toDeleteStages.isEmpty()) {
-            return;
-        }
-
-        // 对每个要删除的节点，重新连接其前后节点
-        for (TStage stage : toDeleteStages) {
-            Long prevId = stage.getPrevStageId();
-            Long nextId = stage.getNextStageId();
-
-            // 将前驱节点的 next 指向后继节点
-            if (prevId != null) {
-                TStage prevStage = baseMapper.selectById(prevId);
-                if (prevStage != null && Objects.equals(prevStage.getNextStageId(), stage.getId())) {
-                    if (nextId == null) {
-                        // updateById 会跳过 null 字段,清空链接需用显式 set
-                        baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-                            .eq(TStage::getId, prevId)
-                            .set(TStage::getNextStageId, null));
-                    } else {
-                        prevStage.setNextStageId(nextId);
-                        baseMapper.updateById(prevStage);
-                    }
-                }
-            }
-
-            // 将后继节点的 prev 指向前驱节点
-            if (nextId != null) {
-                TStage nextStage = baseMapper.selectById(nextId);
-                if (nextStage != null && Objects.equals(nextStage.getPrevStageId(), stage.getId())) {
-                    if (prevId == null) {
-                        // updateById 会跳过 null 字段,清空链接需用显式 set
-                        baseMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-                            .eq(TStage::getId, nextId)
-                            .set(TStage::getPrevStageId, null));
-                    } else {
-                        nextStage.setPrevStageId(prevId);
-                        baseMapper.updateById(nextStage);
-                    }
-                }
             }
         }
     }

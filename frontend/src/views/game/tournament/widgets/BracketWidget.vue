@@ -176,7 +176,7 @@ import StageSelector from '../stages/StageSelector.vue';
 import ColorInput from './common/ColorInput.vue';
 import TextInput from './common/TextInput.vue';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
 import { getStage, getStagePreBracket } from '@/api/game/stage';
 import { getTournament } from '@/api/game/tournament';
@@ -262,6 +262,22 @@ const compById = computed(() => {
   return m;
 });
 
+/**
+ * 一次取回某赛段的全部参赛方,再按场次分组(共用 api 层包装)。
+ *
+ * 对战树此前按场次逐个请求(N 场 = N 个 HTTP,决赛来源解析那段还是 for + await 串行),
+ * 浏览器并发上限下要排好几轮,表现就是"加载名单很慢"。这里只是本组件取自己赛段的数据,
+ * 不涉及其它 widget 的加载方式。
+ */
+const loadParticipantsByStage = async (stageId: any): Promise<Record<string, any[]>> => {
+  try {
+    return await listParticipantsByStage(stageId);
+  } catch (e) {
+    console.warn('参赛方批量加载失败,按空名单渲染:', e);
+    return {};
+  }
+};
+
 const loadData = async () => {
   if (!props.stageId) {
     competitors.value = [];
@@ -326,17 +342,9 @@ const loadData = async () => {
     // 拉场次(已生成时含比分/排名/结果)
     const res: any = await listMatch({ stageId: props.stageId, pageNum: 1, pageSize: 999 } as any);
     matches.value = res?.data?.data || res?.data || [];
-    participantsByMatch.value = {};
-    await Promise.all(
-      matches.value.map(async (m: any) => {
-        try {
-          const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 99 } as any);
-          participantsByMatch.value[m.id] = pr?.data?.data || pr?.data || [];
-        } catch {
-          participantsByMatch.value[m.id] = [];
-        }
-      })
-    );
+    // 参赛方按赛段一次取回再按场次分组:此前每场一个请求(16 强 = 16 个 HTTP),
+    // 浏览器并发上限下要排好几轮,对战树就"卡在加载名单"。
+    participantsByMatch.value = await loadParticipantsByStage(props.stageId);
     // 本赛段未生成(无参赛方也无场次)时:拉取上一赛段胜者的预排对阵
     if (matches.value.length === 0 && competitors.value.length === 0) {
       try {
@@ -377,18 +385,14 @@ const loadData = async () => {
         if (prevStageId.value) {
           const pm: any = await listMatch({ stageId: prevStageId.value, pageNum: 1, pageSize: 999 } as any);
           const prevMatches = pm?.data?.data || pm?.data || [];
+          // 同上:上一赛段也一次取回(此前是 for + await 串行逐场请求)
+          const prevPartsByMatch = await loadParticipantsByStage(prevStageId.value);
           for (const m of prevMatches) {
-            try {
-              const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 99 } as any);
-              const parts = pr?.data?.data || pr?.data || [];
-              parts.forEach((p: any) => {
-                if (p.competitorId != null) {
-                  prevZoneMap.value[p.competitorId] = m.displayZone || 'LEFT';
-                }
-              });
-            } catch (e) {
-              // 忽略单个场次来源解析失败
-            }
+            (prevPartsByMatch[m.id] || []).forEach((p: any) => {
+              if (p.competitorId != null) {
+                prevZoneMap.value[p.competitorId] = m.displayZone || 'LEFT';
+              }
+            });
           }
         }
       } catch (e) {

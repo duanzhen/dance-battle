@@ -37,6 +37,10 @@ import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.DownstreamRouter;
+import com.dance.street.game.service.impl.flow.MatchStateWriter;
+import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
@@ -76,6 +80,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private final TournamentEventNotifier tournamentEventNotifier;
     /** 赛段级结果(晋级/淘汰/名次)的唯一写入口 */
     private final CompetitorOutcomeWriter outcomeWriter;
+    /** 场次状态推进的唯一入口(场次 + 轮次成套写) */
+    private final MatchStateWriter matchStateWriter;
+    /** 淘汰链下游路由的唯一入口(胜者/败者去向) */
+    private final DownstreamRouter downstreamRouter;
+    /** 参赛方成绩批量写入口(整场一条 SQL) */
+    private final ParticipantScoreWriter scoreWriter;
     private final ScoringEngine scoringEngine = new ScoringEngine();
     /** 待公布结果 JSON:内部配置读写统一走雪花 ID 安全 mapper */
     private static final tools.jackson.databind.ObjectMapper RESULT_MAPPER = SnowflakeJson.mapper();
@@ -188,7 +198,9 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 }
             }
             if (isAudition) {
-                accumulateAuditionScores(match, competitorIds);
+                // 只回写本次真正提交了的选手:此前对整圈参赛方逐个 UPDATE,
+                // 36 人的圈子点一次提交就要写 36 行(纯属放大写锁与往返)
+                accumulateAuditionScores(match, touchedCompetitorIds(bo, competitorIds));
             } else {
                 accumulateRankScores(match, stage, competitorIds);
             }
@@ -334,34 +346,25 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
 
         // 回写 participant
-        for (MatchScoreResult r : results) {
-            TMatchParticipant upd = new TMatchParticipant();
-            upd.setScoreValue(r.getScoreValue());
-            upd.setRankInMatch(r.getRankInMatch() == null ? null : r.getRankInMatch().longValue());
-            upd.setOutcomeStatus(r.getOutcomeStatus());
-            participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .eq(TMatchParticipant::getMatchId, match.getId())
-                .eq(TMatchParticipant::getCompetitorId, r.getCompetitorId()));
-        }
+        // 整场一条 SQL(此前逐参赛方 update,64 人 = 64 条)
+        scoreWriter.writeBatch(match.getId(), results.stream()
+            .filter(r -> r.getCompetitorId() != null)
+            .map(r -> new ParticipantScoreWriter.ScorePatch(
+                r.getCompetitorId(),
+                r.getScoreValue(),
+                r.getRankInMatch() == null ? null : r.getRankInMatch().longValue(),
+                r.getOutcomeStatus()))
+            .toList());
 
         // 淘汰特有:填下游占位 / 标决赛胜者晋级下一赛段
         if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
             resolveKnockoutDownstream(match, results);
         }
 
-        // 场次 SETTLED
-        TMatch mUpd = new TMatch();
-        mUpd.setId(match.getId());
-        mUpd.setStatus(StageConstants.MATCH_SETTLED);
-        matchMapper.updateById(mUpd);
+        // 场次与全部轮次(含平局加赛轮)一并结算
+        matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_SETTLED);
         // 场次已出结果,清理擂台重投计数,避免影响后续对决
         RedisUtils.deleteObject("arena:revote:" + match.getId());
-
-        // 全部轮次(含平局加赛轮)一并结算
-        TMatchRound roundUpd = new TMatchRound();
-        roundUpd.setStatus(StageConstants.MATCH_SETTLED);
-        matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
-            .eq(TMatchRound::getMatchId, match.getId()));
 
         // 默认不自动 complete 赛段:最后一个场次结束后由导播台手动"完成赛段"(仅显式传 true 时自动)
         boolean auto = Boolean.TRUE.equals(bo.getFinalizeStageIfComplete());
@@ -441,14 +444,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
         // 赛段若尚未开始,随本场一起进入 GAMING
         stageLifecycleService.ensureStageGaming(stage.getId());
-        TMatch mUpd = new TMatch();
-        mUpd.setId(match.getId());
-        mUpd.setStatus(StageConstants.MATCH_GAMING);
-        matchMapper.updateById(mUpd);
-        TMatchRound roundUpd = new TMatchRound();
-        roundUpd.setStatus(StageConstants.MATCH_GAMING);
-        matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
-            .eq(TMatchRound::getMatchId, match.getId()));
+        matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_GAMING);
         refereeSseNotifier.notifyMatch(stage.getId(), match.getId(), "match");
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), match.getId(), "match");
         log.info("场次[{}]已单独开始", matchId);
@@ -580,15 +576,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
             .eq(TMatch::getId, matchId)
             .set(TMatch::getResultJson, null));
-        // 场次与轮次回目标状态
-        TMatch mUpd = new TMatch();
-        mUpd.setId(matchId);
-        mUpd.setStatus(targetStatus);
-        matchMapper.updateById(mUpd);
-        TMatchRound roundUpd = new TMatchRound();
-        roundUpd.setStatus(targetStatus);
-        matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
-            .eq(TMatchRound::getMatchId, matchId));
+        // 场次与轮次回目标状态(成套写,避免「场次已结算、轮次还在进行中」)
+        matchStateWriter.setStatus(matchId, targetStatus);
     }
 
     private void resolveKnockoutDownstream(TMatch match, List<MatchScoreResult> results) {
@@ -598,98 +587,26 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 continue;
             }
             if (r.getRankInMatch() == null || r.getRankInMatch() > 1) {
-                markCompetitorOutcome(r.getCompetitorId(), OutcomeStatusEnum.ELIMINATED.getCode());
+                downstreamRouter.markEliminated(r.getCompetitorId());
             }
         }
 
-        // 胜者(本场第 1 名)去向
-        Map<String, PromotionTarget> rule = RuleConfigParser.parsePromotionRule(match.getPromotionRule());
-        PromotionTarget winnerTarget = rule.get("1");
-        if (winnerTarget == null) {
-            return;
-        }
+        // 胜者(本场第 1 名)去向:决赛标晋级,其余填下游占位(占位缺失时由路由补插)
         MatchScoreResult winner = results.stream()
             .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 1)
             .findFirst().orElse(null);
         if (winner == null || winner.getCompetitorId() == null) {
             return;
         }
-        if (StageConstants.ACTION_FINAL_ADVANCE.equals(winnerTarget.getAction())) {
-            // 决赛胜者:标记晋级下一赛段,并按场次顺序记录 finalRank(预排种子依据)
-            markCompetitorAdvance(winner.getCompetitorId(), match);
-        } else if (StageConstants.ACTION_ADVANCE.equals(winnerTarget.getAction())
-            && winnerTarget.getTargetMatchId() != null && winnerTarget.getTargetSlot() != null) {
-            // 填入下游场次占位:占位行缺失时补插(生成对阵时空槽不落 participant 行)
-            TMatchParticipant pUpd = new TMatchParticipant();
-            pUpd.setCompetitorId(winner.getCompetitorId());
-            int affected = participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .eq(TMatchParticipant::getMatchId, winnerTarget.getTargetMatchId())
-                .eq(TMatchParticipant::getDisplaySlotIndex, winnerTarget.getTargetSlot().longValue()));
-            if (affected == 0) {
-                TMatchParticipant np = new TMatchParticipant();
-                np.setTenantId(match.getTenantId());
-                np.setTournamentId(match.getTournamentId());
-                np.setMatchId(winnerTarget.getTargetMatchId());
-                np.setCompetitorId(winner.getCompetitorId());
-                np.setDisplaySlotIndex(winnerTarget.getTargetSlot().longValue());
-                np.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
-                participantMapper.insert(np);
-                log.info("场次[{}]胜者[{}]补插到下游场次[{}]占位(slot={})",
-                    match.getId(), winner.getCompetitorId(), winnerTarget.getTargetMatchId(),
-                    winnerTarget.getTargetSlot().longValue());
-            }
-        }
+        downstreamRouter.routeWinner(match, winner.getCompetitorId());
 
         // 季军赛:本场第 2 名(败者)路由到败者组场次(半决赛败者互争季军)
-        PromotionTarget loserTarget = rule.get("2");
-        if (loserTarget != null && StageConstants.ACTION_ADVANCE.equals(loserTarget.getAction())
-            && loserTarget.getTargetMatchId() != null && loserTarget.getTargetSlot() != null) {
-            MatchScoreResult loser = results.stream()
-                .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
-                .findFirst().orElse(null);
-            if (loser != null && loser.getCompetitorId() != null) {
-                fillDownstreamSlot(match, loserTarget.getTargetMatchId(),
-                    loserTarget.getTargetSlot().longValue(), loser.getCompetitorId());
-                log.info("场次[{}]败者[{}]补插到季军赛场次[{}]占位(slot={})",
-                    match.getId(), loser.getCompetitorId(), loserTarget.getTargetMatchId(),
-                    loserTarget.getTargetSlot().longValue());
-            }
+        MatchScoreResult loser = results.stream()
+            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
+            .findFirst().orElse(null);
+        if (loser != null && loser.getCompetitorId() != null) {
+            downstreamRouter.routeLoser(match, loser.getCompetitorId());
         }
-    }
-
-    /** 结果填入下游场次占位:占位行已存在则更新,不存在则补插(与胜者路由共用) */
-    private void fillDownstreamSlot(TMatch sourceMatch, Long targetMatchId, Long targetSlot, Long competitorId) {
-        TMatchParticipant pUpd = new TMatchParticipant();
-        pUpd.setCompetitorId(competitorId);
-        int affected = participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-            .eq(TMatchParticipant::getMatchId, targetMatchId)
-            .eq(TMatchParticipant::getDisplaySlotIndex, targetSlot));
-        if (affected > 0) {
-            return;
-        }
-        TMatchParticipant np = new TMatchParticipant();
-        np.setTenantId(sourceMatch.getTenantId());
-        np.setTournamentId(sourceMatch.getTournamentId());
-        np.setMatchId(targetMatchId);
-        np.setCompetitorId(competitorId);
-        np.setDisplaySlotIndex(targetSlot);
-        np.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
-        participantMapper.insert(np);
-    }
-
-    private void markCompetitorOutcome(Long competitorId, String status) {
-        outcomeWriter.writeOutcome(competitorId, status);
-    }
-
-    private void markCompetitorAdvance(Long competitorId, TMatch match) {
-        Long rank = match.getDisplayRow() != null ? match.getDisplayRow() + 1 : null;
-        if (rank == null) {
-            long cnt = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, match.getStageId())
-                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-            rank = cnt + 1;
-        }
-        outcomeWriter.writeResult(competitorId, OutcomeStatusEnum.ADVANCE.getCode(), rank);
     }
 
     private TMatchRound mustGetRound(TMatch match) {
@@ -891,7 +808,25 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
      * 海选赛累计打分:从已写入的 TRoundScore 重新汇总每个参赛方的总分并回写 participant。
      * 比赛场次保持 GAMING,不结算。管理员最终通过 completeStage 结算排名。
      */
+    /** 本次提交涉及的参赛方(去重);无有效明细时返回空列表(表示不需回写) */
+    private List<Long> touchedCompetitorIds(SubmitResultBo bo, List<Long> allCompetitorIds) {
+        if (bo.getScores() == null || bo.getScores().isEmpty()) {
+            return List.of();
+        }
+        java.util.LinkedHashSet<Long> touched = new java.util.LinkedHashSet<>();
+        for (ScoreEntryBo se : bo.getScores()) {
+            if (se.getCompetitorId() != null && se.getScore() != null
+                && allCompetitorIds.contains(se.getCompetitorId())) {
+                touched.add(se.getCompetitorId());
+            }
+        }
+        return new ArrayList<>(touched);
+    }
+
     private void accumulateAuditionScores(TMatch match, List<Long> competitorIds) {
+        if (competitorIds == null || competitorIds.isEmpty()) {
+            return;
+        }
         // 逐选手打分后分数分布在各自轮次,需跨本场全部轮次汇总
         List<Long> roundIds = matchRoundMapper.selectList(
                 Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
@@ -940,16 +875,44 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .rawScores(allScores)
             .build();
         List<MatchScoreResult> results = scoringEngine.compute(input);
+        // 只有真正变化的行才写:排名赛一次提交同样会重算全场,但 36 人的圈里
+        // 绝大多数人的分/名次不变,全量回写等于每次点击都写 36 行
+        Map<Long, TMatchParticipant> current = participantMapper.selectList(
+                Wrappers.<TMatchParticipant>lambdaQuery()
+                    .eq(TMatchParticipant::getMatchId, match.getId())
+                    .isNotNull(TMatchParticipant::getCompetitorId))
+            .stream()
+            .collect(java.util.stream.Collectors.toMap(TMatchParticipant::getCompetitorId, p -> p, (a, b) -> a));
+        // 按(名次,分数)分组批量写:未打分的选手同分同名次(如首次提交时 35 人并列),
+        // 分组后一次 UPDATE 覆盖一组,36 人的排名赛从 36 条写降到 1~2 条
+        Map<String, List<Long>> changedGroups = new java.util.LinkedHashMap<>();
+        Map<String, java.math.BigDecimal> groupScore = new HashMap<>();
+        Map<String, Long> groupRank = new HashMap<>();
         for (MatchScoreResult r : results) {
             if (r.getCompetitorId() == null) {
                 continue;
             }
+            TMatchParticipant before = current.get(r.getCompetitorId());
+            long newRank = r.getRankInMatch() == null ? 0L : r.getRankInMatch().longValue();
+            long oldRank = before == null || before.getRankInMatch() == null ? 0L : before.getRankInMatch();
+            java.math.BigDecimal newScore = r.getScoreValue() == null ? java.math.BigDecimal.ZERO : r.getScoreValue();
+            java.math.BigDecimal oldScore = before == null || before.getScoreValue() == null
+                ? java.math.BigDecimal.ZERO : before.getScoreValue();
+            if (newRank == oldRank && newScore.compareTo(oldScore) == 0) {
+                continue;
+            }
+            String key = newRank + "|" + newScore.stripTrailingZeros().toPlainString();
+            changedGroups.computeIfAbsent(key, k -> new ArrayList<>()).add(r.getCompetitorId());
+            groupScore.putIfAbsent(key, r.getScoreValue());
+            groupRank.putIfAbsent(key, r.getRankInMatch() == null ? null : r.getRankInMatch().longValue());
+        }
+        for (Map.Entry<String, List<Long>> entry : changedGroups.entrySet()) {
+            Long rank = groupRank.get(entry.getKey());
             participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .set(TMatchParticipant::getScoreValue, r.getScoreValue())
-                .set(TMatchParticipant::getRankInMatch,
-                    r.getRankInMatch() == null ? null : r.getRankInMatch().longValue())
+                .set(TMatchParticipant::getScoreValue, groupScore.get(entry.getKey()))
+                .set(TMatchParticipant::getRankInMatch, rank)
                 .eq(TMatchParticipant::getMatchId, match.getId())
-                .eq(TMatchParticipant::getCompetitorId, r.getCompetitorId()));
+                .in(TMatchParticipant::getCompetitorId, entry.getValue()));
         }
     }
 

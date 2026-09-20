@@ -70,7 +70,7 @@ import CheckboxGroup from './common/CheckboxGroup.vue';
 import TextInput from './common/TextInput.vue';
 import { getStage, getAuditionResult } from '@/api/game/stage';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
 import { getStageRefereeIds } from '@/api/game/refereeStage';
 import { listReferee } from '@/api/game/referee';
@@ -210,17 +210,19 @@ const loadData = async () => {
       .slice()
       .sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0) || String(a.id).localeCompare(String(b.id)));
 
-    const withParts = await Promise.all(
-      matches.map(async (m: any) => {
-        try {
-          const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 99 } as any);
-          const parts = (pr?.data?.data || pr?.data || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
-          return { ...m, participants: parts };
-        } catch {
-          return { ...m, participants: [] };
-        }
-      })
-    );
+    // 参赛方按赛段一次取回再分组:此前逐场请求,大屏每次 SSE 刷新都要跑 N 个 HTTP
+    let partsByMatch: Record<string, any[]> = {};
+    try {
+      partsByMatch = await listParticipantsByStage(props.stageId);
+    } catch {
+      partsByMatch = {};
+    }
+    const withParts = matches.map((m: any) => ({
+      ...m,
+      participants: (partsByMatch[String(m.id)] || [])
+        .slice()
+        .sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0))
+    }));
 
     // 按圈(displayZone)分组,多圈多列
     const order: string[] = [];

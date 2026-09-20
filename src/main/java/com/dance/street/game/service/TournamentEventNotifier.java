@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.sse.core.TournamentEventSseEmitterManager;
 import org.dromara.common.sse.dto.TournamentEventSseMessageDto;
+import org.dromara.common.core.utils.AfterCommitUtils;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,6 +21,11 @@ public class TournamentEventNotifier {
     private final TournamentEventSseEmitterManager tournamentEventSseEmitterManager;
 
     public void notify(Long tournamentId, Long stageId, Long matchId, String type) {
+        // 事务内推送会把写锁一直攥到网络写完(大屏卡住即阻塞),改为提交后再推送;无事务时立即推送
+        AfterCommitUtils.runAfterCommit(() -> doNotify(tournamentId, stageId, matchId, type));
+    }
+
+    private void doNotify(Long tournamentId, Long stageId, Long matchId, String type) {
         try {
             if (tournamentId == null) {
                 return;

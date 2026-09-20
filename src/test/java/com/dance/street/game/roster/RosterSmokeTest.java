@@ -1016,12 +1016,17 @@ class RosterSmokeTest {
         sameLink.setStatus(StageConstants.STAGE_GAMING);
         assertDoesNotThrow(() -> stageService.updateByBo(sameLink));
 
-        // 真的改链(换一个直接前驱)时才要求先重置该赛段
+        // 配置入口回传指针不再改链:名单已装配也不会因为"保存赛段"被拦
         TStageVo anotherAudition = stageService.insertByBo(
             baseStage(tournament.getId(), "另一入口", "AUDITION", 0L, 2L, null));
-        TStageBo relink = baseStage(tournament.getId(), "决赛", "KNOCKOUT", 2L, 1L, anotherAudition.getId());
-        relink.setId(fin.getId());
-        assertThrows(ServiceException.class, () -> stageService.updateByBo(relink));
+        TStageBo stalePointers = baseStage(tournament.getId(), "决赛", "KNOCKOUT", 2L, 1L, anotherAudition.getId());
+        stalePointers.setId(fin.getId());
+        assertDoesNotThrow(() -> stageService.updateByBo(stalePointers));
+        assertEquals(audition.getId(), stageMapper.selectById(fin.getId()).getPrevStageId(),
+            "配置入口不得按客户端指针改链");
+
+        // 真的改链走意图接口(移到另一个入口之后):名单已装配时才要求先重置该赛段
+        assertThrows(ServiceException.class, () -> stageService.moveStageAfter(fin.getId(), anotherAudition.getId()));
         // 拦截必须整单回滚:链路保持原样,不能出现「报错了但链已改」的中间状态
         assertEquals(audition.getId(), stageMapper.selectById(fin.getId()).getPrevStageId());
     }

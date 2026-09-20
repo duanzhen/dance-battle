@@ -6,6 +6,7 @@ import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.mapper.TStageMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.dromara.common.core.exception.ServiceException;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -26,6 +27,12 @@ import java.util.Set;
  * <p>反向链之所以不再是事实源,是因为它可由 next 完全推导,却额外引入
  * 「A.next=B 但 B.prev≠A」这类不同步状态;此前系统为此散落了三处兜底补丁
  * (resolvePrevStage 悬空反查、删除后的指针清扫、过期指针回退)。</p>
+ *
+ * <p><b>指针列只在本类里写。</b>业务代码不再自己拼 prev/next:接入新赛段用
+ * {@link #insertAfter}、移动已有赛段用 {@link #moveAfter},两者都按「期望的链顺序」
+ * 重排后一次性修正指针,既不产生「先断链再接线」的中间态,也不读客户端传来的指针。
+ * 客户端手里那份 prev/next 只是它某一时刻的副本,一旦过期写回就会把链写歪——
+ * 这正是「改个场次配置却动了赛段链」的成因。</p>
  *
  * @author duane
  */
@@ -149,6 +156,115 @@ public class StageChain {
             .set(TStage::getPrevStageId, expected));
         stage.setPrevStageId(expected);
         return true;
+    }
+
+    /**
+     * 把新建赛段接入链:插到 {@code afterStageId} 之后,{@code afterStageId} 为 null 表示插到链头。
+     *
+     * <p>调用前被插入行必须已落库(本方法按赛事重新推导整条链,再修正指针列)。</p>
+     *
+     * @return 本次指针列被实际改写的赛段ID(链尾追加时可能没有下游)
+     * @throws ServiceException 赛段缺少 id/tournamentId,或 {@code afterStageId} 不在本赛事的链上
+     */
+    public List<Long> insertAfter(TStage created, Long afterStageId) {
+        if (created == null || created.getId() == null || created.getTournamentId() == null) {
+            throw new ServiceException("新建赛段缺少 id 或 tournamentId,无法接入赛段链");
+        }
+        List<TStage> chain = new ArrayList<>(orderedChain(created.getTournamentId()));
+        // 新建行此时已在库里,会出现在 orderedChain 结果里;先摘掉再按意图插入
+        chain.removeIf(s -> Objects.equals(s.getId(), created.getId()));
+        chain.add(insertPosition(chain, afterStageId), created);
+        return applyPointers(chain);
+    }
+
+    /**
+     * 把已有赛段移动到 {@code afterStageId} 之后,{@code afterStageId} 为 null 表示移到链头。
+     *
+     * <p>与 {@link #insertAfter} 同源:先算出期望顺序,再只写与当前列不同的指针。
+     * 因为顺序是从现有链推导出来的线性表,把赛段挪到它自己的下游后面也只会得到
+     * 一个新的线性顺序,不存在成环的可能。</p>
+     *
+     * @return 本次指针列被实际改写的赛段ID
+     * @throws ServiceException 赛段不存在,或移动到它自己后面/目标不在本赛事链上
+     */
+    public List<Long> moveAfter(Long stageId, Long afterStageId) {
+        TStage stage = stageId == null ? null : stageMapper.selectById(stageId);
+        if (stage == null) {
+            throw new ServiceException("赛段[{}]不存在,无法调整链顺序", stageId);
+        }
+        if (Objects.equals(stageId, afterStageId)) {
+            throw new ServiceException("不能把赛段[{}]移动到它自己后面", stage.getName());
+        }
+        List<TStage> chain = new ArrayList<>(orderedChain(stage.getTournamentId()));
+        boolean removed = chain.removeIf(s -> Objects.equals(s.getId(), stageId));
+        if (!removed) {
+            // 被丢弃(DISCARD)的赛段不在链上,不参与重排
+            throw new ServiceException("赛段[{}]已不在赛段链上(可能已作废),无法调整顺序", stage.getName());
+        }
+        chain.add(insertPosition(chain, afterStageId), stage);
+        List<Long> changed = applyPointers(chain);
+        log.info("赛段[{}]移动到[{}]之后完成,指针改写 {} 个赛段", stageId, afterStageId, changed.size());
+        return changed;
+    }
+
+    /** 插入下标:afterStageId 为 null 取链头,否则取目标之后;目标不在链上直接拒绝 */
+    private int insertPosition(List<TStage> chain, Long afterStageId) {
+        if (afterStageId == null) {
+            return 0;
+        }
+        for (int i = 0; i < chain.size(); i++) {
+            if (Objects.equals(chain.get(i).getId(), afterStageId)) {
+                return i + 1;
+            }
+        }
+        throw new ServiceException("指定的前驱赛段[{}]不在本赛事的赛段链上", afterStageId);
+    }
+
+    /**
+     * 删除赛段后的链收口:按当前 next 链重算顺序并修正指针列。
+     *
+     * <p>被删节点已不在库里,重算出来的顺序天然是被前后邻居跨过的样子
+     * (A→B→C 删 B 得 A→C),因此删除流程不需要自己拼「prev.next 指向被删的 next」——
+     * 那种手写拼接在删除多个相邻赛段、或指针本身已歪时会把链拼错。</p>
+     *
+     * @param tournamentId 赛事ID
+     * @return 指针被实际改写的赛段ID
+     */
+    public List<Long> realignPointers(Long tournamentId) {
+        if (tournamentId == null) {
+            return List.of();
+        }
+        return applyPointers(new ArrayList<>(orderedChain(tournamentId)));
+    }
+
+    /**
+     * 按给定顺序修正 prev/next 列,只写与库中现值不同的节点。
+     *
+     * <p>这是全项目唯一写指针列的地方:任何一次改链都让「期望顺序」和「库中链」在
+     * 同一个事务里重合,不依赖调用方传来的指针,也就没有过期副本写歪链的窗口。</p>
+     *
+     * @param chain 期望的链顺序(已按 next 链推导,含首尾)
+     * @return 指针被实际改写的赛段ID
+     */
+    private List<Long> applyPointers(List<TStage> chain) {
+        List<Long> changed = new ArrayList<>();
+        for (int i = 0; i < chain.size(); i++) {
+            TStage node = chain.get(i);
+            Long expectedPrev = i == 0 ? null : chain.get(i - 1).getId();
+            Long expectedNext = i == chain.size() - 1 ? null : chain.get(i + 1).getId();
+            if (Objects.equals(node.getPrevStageId(), expectedPrev)
+                && Objects.equals(node.getNextStageId(), expectedNext)) {
+                continue;
+            }
+            stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+                .eq(TStage::getId, node.getId())
+                .set(TStage::getPrevStageId, expectedPrev)
+                .set(TStage::getNextStageId, expectedNext));
+            node.setPrevStageId(expectedPrev);
+            node.setNextStageId(expectedNext);
+            changed.add(node.getId());
+        }
+        return changed;
     }
 
     /** 链头判定与 prevOf 同口径:被任一存活赛段的 next 指向即不是链头 */

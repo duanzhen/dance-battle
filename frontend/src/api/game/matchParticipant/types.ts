@@ -62,6 +62,11 @@ export interface MatchParticipantForm extends BaseEntity {
   matchId?: string | number;
 
   /**
+   * 按赛段批量取参赛方(对战树/大屏一次拿全段,避免按场次逐个请求)
+   */
+  stageId?: string | number;
+
+  /**
    *
    */
   competitorId?: string | number;

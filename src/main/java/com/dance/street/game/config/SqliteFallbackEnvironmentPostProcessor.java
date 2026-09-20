@@ -32,8 +32,20 @@ import java.util.Map;
  * 自动按 SQLite 走,无需改任何业务代码。</p>
  *
  * <p>自动回退可通过环境变量关闭:{@code DB_FALLBACK_SQLITE=false}。
- * SQLite 连接会统一带上 {@code date_class=text} 参数,与建表脚本中的 TEXT 日期列一致,
- * 避免日期字段按整数写入后无法解析。</p>
+ * SQLite 连接会统一补齐两组参数(已显式设置的不覆盖):</p>
+ *
+ * <ul>
+ *   <li><b>日期</b>{@code date_class=text&date_string_format=...}:与建表脚本的 TEXT 日期列一致,
+ *       避免日期字段按整数写入后无法解析;</li>
+ *   <li><b>并发护栏</b>{@code journal_mode=WAL&busy_timeout=10000&transaction_mode=IMMEDIATE
+ *       &synchronous=NORMAL}:SQLite 是单写者库,而应用是多连接(Hikari)且大量事务
+ *       「先读后写」。默认配置(delete journal + 3s 忙等 + 延迟事务)下,一个事务读完再想写时,
+ *       若别的连接正持锁,SQLite 的死锁检测会<b>立即</b>抛 SQLITE_BUSY(忙等参数根本不生效);
+ *       WAL 让读者不挡写者,IMMEDIATE 让事务一开始就取写锁从而走忙等重试,而不是失败。</li>
+ * </ul>
+ *
+ * <p>这两组参数对 {@code DB_URL}、{@code SQLITE_FALLBACK_URL}、Docker/native 里写死的
+ * SQLite 连接一视同仁——只要最终数据源是 SQLite 就会被补齐,不需要各部署形态各配一遍。</p>
  */
 public class SqliteFallbackEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
@@ -52,6 +64,18 @@ public class SqliteFallbackEnvironmentPostProcessor implements EnvironmentPostPr
     private static final String DB_TYPE_MYSQL = "mysql";
     /** 与 sql/game_db.sqlite.sql 中 TEXT 日期列匹配的 sqlite-jdbc 日期参数 */
     private static final String SQLITE_DATE_PARAMS = "date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS";
+    /**
+     * SQLite 单机并发护栏参数:
+     * <ul>
+     *   <li>{@code journal_mode=WAL}:读者不阻塞写者(默认的 delete 模式下,一个长读事务就能把写者卡住);</li>
+     *   <li>{@code busy_timeout=10000}:拿不到锁时忙等 10s 再报错,而不是立刻失败;</li>
+     *   <li>{@code transaction_mode=IMMEDIATE}:Spring 开事务(setAutoCommit(false))时直接
+     *       {@code BEGIN IMMEDIATE} 取写锁——延迟事务「先读后写」的锁升级不走忙等,会立刻 SQLITE_BUSY;</li>
+     *   <li>{@code synchronous=NORMAL}:WAL 下的常规持久性设置,避免每次提交都 fsync。</li>
+     * </ul>
+     */
+    private static final String SQLITE_CONCURRENCY_PARAMS =
+        "journal_mode=WAL&busy_timeout=10000&transaction_mode=IMMEDIATE&synchronous=NORMAL";
     private static final int PROBE_TIMEOUT_MS = 3000;
 
     @Override
@@ -82,7 +106,7 @@ public class SqliteFallbackEnvironmentPostProcessor implements EnvironmentPostPr
             if (distributed) {
                 log.warn("DB_URL 为 SQLite 与 DEPLOY_MODE=distributed 冲突,按 DB_URL 使用本地 SQLite");
             }
-            String normalized = withSqliteDateParams(url);
+            String normalized = withSqliteDefaults(url);
             if (!normalized.equals(url)) {
                 Map<String, Object> props = new LinkedHashMap<>();
                 props.put(URL_KEY, normalized);
@@ -123,7 +147,7 @@ public class SqliteFallbackEnvironmentPostProcessor implements EnvironmentPostPr
         if (reason == null) {
             return;
         }
-        String sqliteUrl = withSqliteDateParams(
+        String sqliteUrl = withSqliteDefaults(
             environment.getProperty(FALLBACK_URL_KEY, DEFAULT_SQLITE_URL));
         log.warn("MySQL 连接失败/未配置({}),自动回退到 SQLite: {}"
                 + " (设 DEPLOY_MODE=standalone 显式使用本地库可跳过该探测,DB_FALLBACK_SQLITE=false 可关闭回退)",
@@ -159,7 +183,7 @@ public class SqliteFallbackEnvironmentPostProcessor implements EnvironmentPostPr
         String target = alreadySqlite
             ? currentUrl.trim()
             : environment.getProperty(FALLBACK_URL_KEY, DEFAULT_SQLITE_URL);
-        String sqliteUrl = withSqliteDateParams(target);
+        String sqliteUrl = withSqliteDefaults(target);
         Map<String, Object> props = new LinkedHashMap<>();
         props.put(URL_KEY, sqliteUrl);
         props.put(USERNAME_KEY, "");
@@ -168,12 +192,36 @@ public class SqliteFallbackEnvironmentPostProcessor implements EnvironmentPostPr
         log.info("数据库:显式 SQLite 模式({}),使用 {} (已跳过 MySQL 探测)", source, sqliteUrl);
     }
 
-    /** 给 SQLite 连接补齐日期参数;用户已显式设置 date_class 时保持不变 */
-    static String withSqliteDateParams(String url) {
-        if (url == null || url.matches("(?i).*[?&](date_class|dateClass)=.*")) {
+    /**
+     * 给 SQLite 连接补齐日期参数与并发护栏参数,已显式设置的项保持不变。
+     *
+     * <p>逐项判断而不是「见到 date_class 就整体跳过」:{@code application.yml} 里的默认
+     * SQLite 地址本身就带 date_class,整体跳过会让并发护栏永远补不上。</p>
+     */
+    static String withSqliteDefaults(String url) {
+        if (url == null || url.isBlank()) {
             return url;
         }
-        return url.contains("?") ? url + "&" + SQLITE_DATE_PARAMS : url + "?" + SQLITE_DATE_PARAMS;
+        String result = url;
+        if (!hasParam(result, "date_class") && !hasParam(result, "dateClass")) {
+            result = appendParams(result, SQLITE_DATE_PARAMS);
+        }
+        for (String param : SQLITE_CONCURRENCY_PARAMS.split("&")) {
+            String key = param.substring(0, param.indexOf('='));
+            if (!hasParam(result, key)) {
+                result = appendParams(result, param);
+            }
+        }
+        return result;
+    }
+
+    /** URL 上是否已带该参数 */
+    private static boolean hasParam(String url, String key) {
+        return url.matches("(?i).*[?&]" + key + "=.*");
+    }
+
+    private static String appendParams(String url, String params) {
+        return url.contains("?") ? url + "&" + params : url + "?" + params;
     }
 
     /**

@@ -26,6 +26,8 @@ import com.dance.street.game.service.ITMatchParticipantService;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import java.util.Collection;
 import java.util.HashMap;
 
@@ -94,27 +96,35 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
         if (list == null || list.isEmpty()) {
             return;
         }
+        // 场次/赛段一次批量取回:此前每个 distinct matchId 各查一次场次与赛段,
+        // 对战树/大屏一次加载就是几十条 SQL(与"按场次逐个请求"叠在一起更明显)
+        List<Long> matchIds = list.stream()
+            .map(TMatchParticipantVo::getMatchId).filter(Objects::nonNull).distinct().toList();
+        if (matchIds.isEmpty()) {
+            return;
+        }
+        Map<Long, TMatch> matchById = matchMapper.selectByIds(matchIds).stream()
+            .collect(Collectors.toMap(TMatch::getId, m -> m, (a, b) -> a));
+        List<Long> stageIds = matchById.values().stream()
+            .map(TMatch::getStageId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, TStage> stageById = stageIds.isEmpty() ? Map.of()
+            : stageMapper.selectByIds(stageIds).stream()
+                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
         Map<Long, Boolean> hiddenByMatch = new HashMap<>();
-        for (TMatchParticipantVo vo : list) {
-            if (vo.getMatchId() == null) {
-                continue;
-            }
-            Boolean hidden = hiddenByMatch.computeIfAbsent(vo.getMatchId(), matchId -> {
-                TMatch m = matchMapper.selectById(matchId);
-                if (m == null) {
-                    return false;
-                }
-                TStage s = stageMapper.selectById(m.getStageId());
-                if (s == null || !StageModeEnum.RANK.getCode().equals(s.getStageMode())) {
-                    return false;
-                }
-                if (StageConstants.STAGE_SETTLED.equals(s.getStatus())) {
-                    return false; // 已结算即已公布
-                }
+        for (Map.Entry<Long, TMatch> entry : matchById.entrySet()) {
+            TMatch m = entry.getValue();
+            TStage s = m.getStageId() == null ? null : stageById.get(m.getStageId());
+            boolean hidden = false;
+            if (s != null && StageModeEnum.RANK.getCode().equals(s.getStageMode())
+                && !StageConstants.STAGE_SETTLED.equals(s.getStatus())) {
                 RuleConfigHolder rc = RuleConfigParser.parse(s.getRuleConfig());
-                return rc != null && rc.getPublishMode() != null && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
-            });
-            if (Boolean.TRUE.equals(hidden)) {
+                hidden = rc != null && rc.getPublishMode() != null
+                    && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
+            }
+            hiddenByMatch.put(entry.getKey(), hidden);
+        }
+        for (TMatchParticipantVo vo : list) {
+            if (vo.getMatchId() != null && Boolean.TRUE.equals(hiddenByMatch.get(vo.getMatchId()))) {
                 vo.setScoreValue(null);
                 vo.setRankInMatch(null);
             }
@@ -127,6 +137,18 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
         lqw.orderByAsc(TMatchParticipant::getId);
         lqw.eq(bo.getTournamentId() != null, TMatchParticipant::getTournamentId, bo.getTournamentId());
         lqw.eq(bo.getMatchId() != null, TMatchParticipant::getMatchId, bo.getMatchId());
+        // 按赛段批量取参赛方(对战树/大屏):一次拿到该赛段全部场次的行,前端不必逐场请求
+        if (bo.getStageId() != null) {
+            List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                    .eq(TMatch::getStageId, bo.getStageId())
+                    .select(TMatch::getId))
+                .stream().map(TMatch::getId).toList();
+            if (matchIds.isEmpty()) {
+                lqw.eq(TMatchParticipant::getMatchId, -1L); // 该赛段还没有场次:返回空而不是全表
+            } else {
+                lqw.in(TMatchParticipant::getMatchId, matchIds);
+            }
+        }
         lqw.eq(bo.getCompetitorId() != null, TMatchParticipant::getCompetitorId, bo.getCompetitorId());
         lqw.eq(bo.getDisplaySlotIndex() != null, TMatchParticipant::getDisplaySlotIndex, bo.getDisplaySlotIndex());
         lqw.eq(bo.getScoreValue() != null, TMatchParticipant::getScoreValue, bo.getScoreValue());

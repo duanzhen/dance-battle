@@ -5,20 +5,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.utils.StringUtils;
 import org.dromara.common.core.exception.ServiceException;
-import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.SubmitResultBo;
-import com.dance.street.game.engine.common.PromotionTarget;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
-import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.scoring.MatchScoreInput;
 import com.dance.street.game.engine.scoring.MatchScoreResult;
@@ -32,12 +29,13 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
+import com.dance.street.game.service.impl.flow.DownstreamRouter;
+import com.dance.street.game.service.impl.flow.MatchStateWriter;
+import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -59,6 +57,12 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final ScoringEngine scoringEngine = new ScoringEngine();
+    /** 场次状态推进唯一入口(场次 + 轮次成套写) */
+    private final MatchStateWriter matchStateWriter;
+    /** 淘汰链下游路由唯一入口 */
+    private final DownstreamRouter downstreamRouter;
+    /** 参赛方成绩批量写入口(整场一条 SQL) */
+    private final ParticipantScoreWriter scoreWriter;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -128,10 +132,8 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
                 writeGroupOutcomes(match, results);
             }
             writeParticipantScores(match, results, null);
-            TMatch mUpd = new TMatch();
-            mUpd.setId(match.getId());
-            mUpd.setStatus(StageConstants.MATCH_SETTLED);
-            matchMapper.updateById(mUpd);
+            // 场次与轮次成套结算(此前只置场次,轮次会残留 GAMING)
+            matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_SETTLED);
             refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "match");
             tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
             log.info("多裁判场次[{}]已结算:{}人参与,模式={}", match.getId(), results.size(), mode.getCode());
@@ -160,17 +162,15 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
 
     /** 回写 participant 的 score_value / rank_in_match / outcomeStatus(null 表示不改) */
     private void writeParticipantScores(TMatch match, List<MatchScoreResult> results, String outcomeStatus) {
-        for (MatchScoreResult r : results) {
-            TMatchParticipant upd = new TMatchParticipant();
-            upd.setScoreValue(r.getScoreValue());
-            upd.setRankInMatch(r.getRankInMatch() == null ? null : r.getRankInMatch().longValue());
-            if (outcomeStatus != null) {
-                upd.setOutcomeStatus(outcomeStatus);
-            }
-            participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .eq(TMatchParticipant::getMatchId, match.getId())
-                .eq(TMatchParticipant::getCompetitorId, r.getCompetitorId()));
-        }
+        List<ParticipantScoreWriter.ScorePatch> patches = results.stream()
+            .filter(r -> r.getCompetitorId() != null)
+            .map(r -> new ParticipantScoreWriter.ScorePatch(
+                r.getCompetitorId(),
+                r.getScoreValue(),
+                r.getRankInMatch() == null ? null : r.getRankInMatch().longValue(),
+                outcomeStatus))
+            .toList();
+        scoreWriter.writeBatch(match.getId(), patches);
     }
 
     /** 淘汰赛:败者标淘汰,胜者填下游占位或标晋级下一赛段 */
@@ -180,13 +180,8 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
                 continue;
             }
             if (r.getRankInMatch() == null || r.getRankInMatch() > 1) {
-                markCompetitorOutcome(r.getCompetitorId(), OutcomeStatusEnum.ELIMINATED.getCode());
+                downstreamRouter.markEliminated(r.getCompetitorId());
             }
-        }
-        Map<String, PromotionTarget> rule = RuleConfigParser.parsePromotionRule(match.getPromotionRule());
-        PromotionTarget winnerTarget = rule.get("1");
-        if (winnerTarget == null) {
-            return;
         }
         MatchScoreResult winner = results.stream()
             .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 1)
@@ -194,17 +189,8 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
         if (winner == null || winner.getCompetitorId() == null) {
             return;
         }
-        if (StageConstants.ACTION_FINAL_ADVANCE.equals(winnerTarget.getAction())) {
-            // 决赛胜者:标记晋级下一赛段,并按场次顺序记录 finalRank(预排种子依据)
-            markCompetitorAdvance(winner.getCompetitorId(), match);
-        } else if (StageConstants.ACTION_ADVANCE.equals(winnerTarget.getAction())
-            && winnerTarget.getTargetMatchId() != null && winnerTarget.getTargetSlot() != null) {
-            TMatchParticipant pUpd = new TMatchParticipant();
-            pUpd.setCompetitorId(winner.getCompetitorId());
-            participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-                .eq(TMatchParticipant::getMatchId, winnerTarget.getTargetMatchId())
-                .eq(TMatchParticipant::getDisplaySlotIndex, winnerTarget.getTargetSlot().longValue()));
-        }
+        // 胜者去向:决赛标晋级,其余填下游占位(占位缺失时由路由补插——此前这条路径只 update,会静默丢人)
+        downstreamRouter.routeWinner(match, winner.getCompetitorId());
     }
 
     /** 小组赛:按本场排名写胜负(同分并列第一记平),供小组积分结算使用 */
@@ -230,28 +216,6 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
         participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
             .eq(TMatchParticipant::getMatchId, matchId)
             .eq(TMatchParticipant::getCompetitorId, competitorId));
-    }
-
-    private void markCompetitorOutcome(Long competitorId, String status) {
-        TCompetitor cupd = new TCompetitor();
-        cupd.setId(competitorId);
-        cupd.setOutcomeStatus(status);
-        competitorMapper.updateById(cupd);
-    }
-
-    private void markCompetitorAdvance(Long competitorId, TMatch match) {
-        Long rank = match.getDisplayRow() != null ? match.getDisplayRow() + 1 : null;
-        if (rank == null) {
-            long cnt = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, match.getStageId())
-                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-            rank = cnt + 1;
-        }
-        TCompetitor cupd = new TCompetitor();
-        cupd.setId(competitorId);
-        cupd.setFinalRank(rank);
-        cupd.setOutcomeStatus(OutcomeStatusEnum.ADVANCE.getCode());
-        competitorMapper.updateById(cupd);
     }
 
     private TMatchRound mustGetRound(TMatch match) {

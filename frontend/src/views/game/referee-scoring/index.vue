@@ -331,6 +331,8 @@
                       </button>
                       <input
                         type="number"
+                        min="0"
+                        :max="dim.maxScore || undefined"
                         :value="keypadTarget?.competitorId != null ? getDimScore(keypadTarget.competitorId, dim.key) : 0"
                         @input="keypadTarget?.competitorId != null && onDimInput(keypadTarget.competitorId, dim.key, $event)"
                         class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
@@ -515,6 +517,8 @@
                       </button>
                       <input
                         type="number"
+                        min="0"
+                        :max="dim.maxScore || undefined"
                         :value="getDimScore(p.competitorId!, dim.key)"
                         @input="onDimInput(p.competitorId!, dim.key, $event)"
                         class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
@@ -815,9 +819,12 @@ const clearKeypad = () => {
 };
 
 /**
- * 海选键盘直接输入:仅允许数字与一个小数点,小数位按满分切换。
- * 不做满分截断:敲超限数字不再被改写成满分(否则想打 15 会被吃成 10),
- * 超出 0-满分 由提交时校验提示,分数原样保留给裁判自己改。
+ * 海选键盘直接输入:仅允许数字与一个小数点,小数位按满分切换,
+ * 并且**超过满分的那一次输入整条不接受**(回退到上一次有效值)。
+ *
+ * <p>与软键盘 {@link pressKey} 口径一致(超限不追加),不再把超限值留在框里等提交时才拦;
+ * 选择"整条不接受"而不是"截断成满分",是为了保留裁判的输入意图——
+ * 在 10 分制里敲 15 时框里仍是 1,接着敲 .5 就是 1.5,不会被吃成 10。</p>
  */
 const onKeypadInput = (e: Event) => {
   const el = e.target as HTMLInputElement;
@@ -830,6 +837,12 @@ const onKeypadInput = (e: Event) => {
   // 去掉多余前导零(保留单个 0 与空串)
   const intText = intRaw.replace(/^0+(?=\d)/, '');
   v = decPart !== undefined ? intText + '.' + decPart.slice(0, keypadDecimals.value) : intText;
+  // 最高分限制:超限直接回退,输入框与已存值保持同步
+  if (v !== '' && Number(v) > keypadMax.value) {
+    el.value = keypadValue.value;
+    tipOverLimit(`本赛段满分 ${keypadMax.value} 分`);
+    return;
+  }
   keypadValue.value = v;
   el.value = v;
 };
@@ -880,10 +893,11 @@ const confirmKeypad = async () => {
     await submitRefereeScore(matchId.value, {
       scores: [{ competitorId: target.competitorId, dimension: 'MAIN', action: 'SCORE', score }]
     });
-    // 提交成功后刷新,回显最新分数
-    const prev = keypadTarget.value;
-    // 静默刷新,刷新后由 loadData 统一选中下一位未评选手,避免二次滚动闪烁
-    await loadData(stageId.value ?? undefined, matchId.value ?? undefined, prev, true);
+    // 提交成功后本地回显并跳下一位,不再 await 整页刷新:
+    // 后端已回写权威分数,SSE 的 scores 事件也会异步触发 refresh 校正,
+    // 让按钮转圈只等于一次提交往返(此前还要再等一次 my-match 全量刷新)。
+    applyLocalScore(target.competitorId, 'MAIN', score);
+    autoSelectNext(target);
   } catch (e: any) {
     console.error('提交打分失败:', e);
     ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
@@ -918,8 +932,9 @@ const confirmRankTarget = async () => {
   keypadSubmitting.value = true;
   try {
     await submitRefereeScore(matchId.value, { scores });
-    const prev = keypadTarget.value;
-    await loadData(stageId.value ?? undefined, matchId.value ?? undefined, prev, true);
+    // 本地回显并跳下一位,不再 await 整页刷新(SSE 的 scores 事件会后台校正)
+    scores.forEach((s: any) => applyLocalScore(s.competitorId, s.dimension, s.score));
+    autoSelectNext(target);
   } catch (e: any) {
     console.error('提交维度打分失败:', e);
     ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
@@ -964,6 +979,27 @@ const getDimScore = (competitorId: number, dim: string): number => {
   return edits.value[competitorId]?.[dim] ?? 0;
 };
 
+/** 维度满分:未配置或非正数表示不限 */
+const dimMaxScore = (dim: string): number | null => {
+  const max = Number(dimensions.value.find((d) => d.key === dim)?.maxScore);
+  return Number.isFinite(max) && max > 0 ? max : null;
+};
+
+/** 维度展示名(提示语里用) */
+const dimLabel = (dim: string): string => {
+  const cfg = dimensions.value.find((d) => d.key === dim);
+  return cfg?.name || dim;
+};
+
+/** 超限提示限流:连续敲键时不要刷屏 */
+let lastLimitTipAt = 0;
+const tipOverLimit = (text: string) => {
+  const now = Date.now();
+  if (now - lastLimitTipAt < 1500) return;
+  lastLimitTipAt = now;
+  ElMessage.warning(text);
+};
+
 const setDimScore = (competitorId: number, dim: string, raw: string) => {
   const v = Math.max(0, Number(raw) || 0);
   if (!edits.value[competitorId]) edits.value[competitorId] = {};
@@ -972,13 +1008,30 @@ const setDimScore = (competitorId: number, dim: string, raw: string) => {
   submitted.value = false;
 };
 
+/**
+ * 排名赛维度分键盘输入:超满分的输入整条不接受,回退到上一次有效值。
+ * 按钮(adjustDim)与键盘走同一上限,避免只限了按钮、"手输能超"的情况。
+ */
 const onDimInput = (competitorId: number, dim: string, event: Event) => {
-  setDimScore(competitorId, dim, (event.target as HTMLInputElement).value);
+  const el = event.target as HTMLInputElement;
+  const parsed = Number(el.value);
+  const max = dimMaxScore(dim);
+  if (max != null && Number.isFinite(parsed) && parsed > max) {
+    const fallback = getDimScore(competitorId, dim);
+    el.value = fallback > 0 ? String(fallback) : '';
+    tipOverLimit(`「${dimLabel(dim)}」满分 ${max} 分`);
+    return;
+  }
+  setDimScore(competitorId, dim, el.value);
 };
 
 const adjustDim = (competitorId: number, dim: string, delta: number) => {
   const current = getDimScore(competitorId, dim);
-  const next = Math.max(0, current + delta);
+  const max = dimMaxScore(dim);
+  let next = Math.max(0, current + delta);
+  if (max != null) {
+    next = Math.min(next, max);
+  }
   if (next === current) return;
   if (!edits.value[competitorId]) edits.value[competitorId] = {};
   edits.value[competitorId][dim] = next;
@@ -994,6 +1047,18 @@ const selectOutcome = (competitorId: number, outcome: string) => {
 
 const myTotal = (competitorId: number): number => {
   return myScores.value.filter((s) => s.competitorId === competitorId).reduce((sum, s) => sum + (s.score || 0), 0);
+};
+
+/**
+ * 本地回显"我的分":提交成功后立即更新,不必等整页 my-match 刷新回来。
+ * SSE 的 scores 事件随后会触发一次后台 refresh,用服务端值校正。
+ */
+const applyLocalScore = (competitorId: number, dimension: string, score: number) => {
+  const dim = dimension || 'MAIN';
+  myScores.value = [
+    ...myScores.value.filter((s) => !(s.competitorId === competitorId && (s.dimension || 'MAIN') === dim)),
+    { competitorId, dimension: dim, score } as MyScore
+  ];
 };
 
 /** 海选逐选手打分:本场所有选手是否已被当前裁判评完(二海/加赛同样适用) */
@@ -1037,8 +1102,8 @@ const handleSubmit = async () => {
     await submitRefereeScore(matchId.value, payload);
     submitted.value = true;
     touched.value.clear();
-    // 提交成功后刷新一次,回显自己刚提交的分
-    await loadData(stageId.value ?? undefined, matchId.value ?? undefined);
+    // 本地回显自己刚提交的分,不再 await 整页刷新(SSE 的 scores 事件会后台校正)
+    (payload.scores || []).forEach((s: any) => applyLocalScore(s.competitorId, s.dimension, s.score));
   } catch (e: any) {
     console.error('提交打分失败:', e);
     ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
@@ -1291,15 +1356,21 @@ const loadData = async (stageIdParam?: number, matchIdParam?: number, selectAfte
 
 let unsubSse: (() => void) | null = null;
 
-/** 裁判 SSE 长连接:复用赛事事件通道,按 authKey 身份订阅,只收命中自己的定向事件 */
-const connectRefereeSse = (authKey: string, tid: number | string) => {
+/**
+ * 裁判 SSE 长连接:复用赛事事件通道,按 authKey 身份订阅,只收命中自己的定向事件。
+ *
+ * 只带 authKey(不带 tournamentId):赛事由后端按裁判身份解析。这样**页面一打开就连上**,
+ * 不必等 my-match 成功——开赛前访问时 my-match 会返回"当前没有进行中的赛段",
+ * 拿不到 tournamentId 就跳过连接的话,主办开赛后页面不会有任何推送,只能手动刷新。
+ */
+const connectRefereeSse = (authKey: string) => {
   unsubSse?.();
   const baseUrl = (import.meta.env.VITE_APP_BASE_API as string) || '';
   const clientId = (import.meta.env.VITE_APP_CLIENT_ID as string) || '';
   unsubSse = subscribeChannel({
-    key: `referee:${tid}:${authKey}`,
+    key: `referee:${authKey}`,
     buildUrl: () =>
-      `${baseUrl}/tournament/event/sse?tournamentId=${encodeURIComponent(String(tid))}&authKey=${encodeURIComponent(authKey)}&clientid=${clientId}`,
+      `${baseUrl}/tournament/event/sse?authKey=${encodeURIComponent(authKey)}&clientid=${clientId}`,
     onMessage: () => {
       // 所有广播都触发 refresh:refresh 内部按上下文变化决定整页应用或仅合并累计分,
       // 保证下一赛段场次开始/赛段切换等跨赛段事件也能被裁判端感知
@@ -1319,13 +1390,10 @@ onMounted(async () => {
   }
   window.addEventListener('keydown', onKeydown);
   setRefereeAuthKey(authKey as string);
+  // 先连 SSE:此时可能还没有进行中的赛段,但连接本身必须建立,否则开赛事件收不到
+  connectRefereeSse(authKey as string);
   await loadData();
-  // SSE 实时推送 + 断线重连补偿,无需轮询
-  if (tournamentId.value) {
-    connectRefereeSse(authKey as string, tournamentId.value);
-  } else {
-    console.warn('未获取到赛事ID,跳过SSE连接,仅依赖手动刷新');
-  }
+  // 数据为空(赛段未开始)时订阅仍在,靠推送触发 refresh;断线由 subscribeChannel 自动重连并全量刷新
 });
 
 onUnmounted(() => {

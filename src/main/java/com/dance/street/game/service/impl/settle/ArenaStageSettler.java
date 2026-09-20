@@ -7,7 +7,7 @@ import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TMatchMapper;
-import com.dance.street.game.service.impl.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

@@ -337,6 +337,9 @@ public class TMatchServiceImpl implements ITMatchService {
                 publishModeByStage.put(s.getId(), readPublishMode(s));
             }
         }
+        // 裁判分配一次批量取回:此前每个需要显示投票进度的场次都回查一次赛段裁判
+        Map<Long, List<Long>> refereesByStage = stageIds.isEmpty() ? Map.of()
+            : refereeStageService.getRefereeIdsByStageIds(stageIds);
         // 需要统计投票的场次:STANDARD、进行中、公布模式非 DIRECTOR
         List<TMatchVo> votingMatches = matches.stream()
             .filter(m -> "STANDARD".equals(m.getMatchMode())
@@ -374,7 +377,7 @@ public class TMatchServiceImpl implements ITMatchService {
             if (!votingMatchIds.contains(vo.getId())) {
                 continue;
             }
-            List<Long> assignedIds = refereeStageService.getRefereeIdsByStageId(vo.getStageId());
+            List<Long> assignedIds = refereesByStage.getOrDefault(vo.getStageId(), List.of());
             vo.setTotalReferees(assignedIds.size());
             if (assignedIds.isEmpty()) {
                 continue;

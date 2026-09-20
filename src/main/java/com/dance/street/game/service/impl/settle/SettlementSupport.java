@@ -1,15 +1,12 @@
 package com.dance.street.game.service.impl.settle;
 
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
-import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.mapper.TCompetitorMapper;
-import com.dance.street.game.mapper.TMatchMapper;
-import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
+import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.utils.StringUtils;
 import org.springframework.stereotype.Component;
@@ -36,30 +33,36 @@ public class SettlementSupport {
     /** 加赛场次标记前缀(存于 t_match.remark),用于识别二海/三海… */
     public static final String TIEBREAKER_PREFIX = "同分加赛";
 
-    private final TMatchMapper matchMapper;
-    private final TMatchRoundMapper matchRoundMapper;
     private final TCompetitorMapper competitorMapper;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
+    /** 场次状态推进(场次 + 轮次成套写) */
+    private final MatchStateWriter matchStateWriter;
 
     /** 场次与轮次置为已结算并通知裁判端/赛事事件 */
     public void markMatchSettled(TMatch match) {
-        TMatch mUpd = new TMatch();
-        mUpd.setId(match.getId());
-        mUpd.setStatus(StageConstants.MATCH_SETTLED);
-        matchMapper.updateById(mUpd);
-        TMatchRound roundUpd = new TMatchRound();
-        roundUpd.setStatus(StageConstants.MATCH_SETTLED);
-        matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
-            .eq(TMatchRound::getMatchId, match.getId()));
+        matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_SETTLED);
         refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "match");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
     }
 
-    /** 场次是否为同分加赛(二海/三海…):remark 以「同分加赛」开头 */
+    /**
+     * 场次是否为同分加赛(二海/三海…)。
+     *
+     * <p>口径:优先看 {@code t_match.match_type}(显式字段);历史数据该列为 null,
+     * 退回 remark 前缀「同分加赛」识别——老库不需要迁移即可继续工作。</p>
+     */
     public static boolean isTiebreaker(TMatch match) {
-        return match != null && StringUtils.isNotBlank(match.getRemark())
-            && match.getRemark().startsWith(TIEBREAKER_PREFIX);
+        if (match == null) {
+            return false;
+        }
+        if (StageConstants.MATCH_TYPE_TIEBREAKER.equals(match.getMatchType())) {
+            return true;
+        }
+        if (match.getMatchType() != null) {
+            return false;
+        }
+        return StringUtils.isNotBlank(match.getRemark()) && match.getRemark().startsWith(TIEBREAKER_PREFIX);
     }
 
     /** 参赛号码转数值用于排序:非数字号码排最后 */

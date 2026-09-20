@@ -68,6 +68,19 @@ public class TMatch extends TenantEntity {
     private String matchMode;
 
     /**
+     * 场次性质:NORMAL=正常场次(圈/对阵/擂台/自由对抗),TIEBREAKER=同分加赛(二海/三海…)。
+     *
+     * <p>历史数据该列为 null,按 remark 前缀「同分加赛」兜底识别(见 SettlementSupport.isTiebreaker);
+     * 新产生的加赛场次一律显式写入,判断不再依赖备注文本。</p>
+     */
+    private String matchType;
+
+    /**
+     * 加赛场次的来源场次(哪一场的同分边界需要它):仅 TIEBREAKER 有值。
+     */
+    private Long parentMatchId;
+
+    /**
      * 
      */
     private String promotionRule;

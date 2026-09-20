@@ -485,6 +485,12 @@ public class RefereeMatchController {
             }
         }
         vo.setMyScores(myScoreInfos);
+        // 参赛方姓名/号码批量取:此前循环内逐个 selectById,36 人的海选圈一次刷新就是 36 条 SQL
+        List<Long> partCompetitorIds = participants.stream()
+            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, TCompetitor> partCompetitors = partCompetitorIds.isEmpty() ? Map.of()
+            : competitorMapper.selectByIds(partCompetitorIds).stream()
+                .collect(java.util.stream.Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
         for (TMatchParticipant p : participants) {
             RefereeParticipantInfo pi = new RefereeParticipantInfo();
             pi.setCompetitorId(p.getCompetitorId());
@@ -496,7 +502,7 @@ public class RefereeMatchController {
                 pi.setMyScore(refereeScores.get(p.getCompetitorId()));
             }
             if (p.getCompetitorId() != null) {
-                var comp = competitorMapper.selectById(p.getCompetitorId());
+                TCompetitor comp = partCompetitors.get(p.getCompetitorId());
                 pi.setCompetitorName(comp != null ? comp.getName() : ("选手 " + p.getCompetitorId()));
                 pi.setNumber(comp != null ? comp.getNumber() : null);
             } else {

@@ -56,6 +56,39 @@ class SqliteSchemaInitializerTest {
     }
 
     @Test
+    void oldDatabaseGetsNewMatchColumnsWithoutLosingData() throws Exception {
+        DataSource dataSource = newSqliteDataSource();
+        DatabaseSchemaInitializer initializer = new DatabaseSchemaInitializer(
+            dataSource, "jdbc:sqlite::memory:", null, null, true);
+        initializer.afterSingletonsInstantiated();
+
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        // 模拟旧版本建的库:先把本次新增的两列删掉(老库没有 match_type / parent_match_id)
+        jdbc.execute("ALTER TABLE t_match DROP COLUMN match_type");
+        jdbc.execute("ALTER TABLE t_match DROP COLUMN parent_match_id");
+        jdbc.update("INSERT INTO t_match (id, tenant_id, tournament_id, stage_id, name, status)"
+            + " VALUES (?, ?, ?, ?, ?, ?)", 910001L, 1L, 910001L, 910001L, "历史场次", "GAMING");
+
+        // 再跑一次自检:缺失列被自动补上,已有数据不动
+        initializer.afterSingletonsInstantiated();
+
+        List<String> columns = new ArrayList<>();
+        try (Connection cx = dataSource.getConnection();
+             Statement st = cx.createStatement();
+             ResultSet rs = st.executeQuery("PRAGMA table_info(t_match)")) {
+            while (rs.next()) {
+                columns.add(rs.getString("name").toLowerCase());
+            }
+        }
+        assertTrue(columns.contains("match_type"), "老库应自动补出 match_type 列,实际: " + columns);
+        assertTrue(columns.contains("parent_match_id"), "老库应自动补出 parent_match_id 列,实际: " + columns);
+        assertEquals("历史场次", jdbc.queryForObject(
+            "SELECT name FROM t_match WHERE id = 910001", String.class));
+        assertEquals("GAMING", jdbc.queryForObject(
+            "SELECT status FROM t_match WHERE id = 910001", String.class));
+    }
+
+    @Test
     void schemaInitializerCreatesAllTablesAndIndexesOnSqlite() throws Exception {
         DataSource dataSource = newSqliteDataSource();
         DatabaseSchemaInitializer initializer = new DatabaseSchemaInitializer(

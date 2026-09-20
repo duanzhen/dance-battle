@@ -23,7 +23,7 @@ import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
-import com.dance.street.game.service.impl.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -148,48 +148,16 @@ public class RankStageSettler implements StageSettler {
         if (matches.isEmpty()) {
             return;
         }
-        int advanceCount = StageFlowSupport.readStageAdvanceCount(stage);
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
-        boolean explicitQuota = perCircleCfg != null && !perCircleCfg.isEmpty();
-        if (explicitQuota) {
-            for (Integer q : perCircleCfg) {
-                if (q == null || q < 0) {
-                    throw new ServiceException("每圈晋级人数配置非法(不能为负): {}", perCircleCfg);
-                }
-            }
-        }
-        // 圈数以实际生成的场次为准(配置圈数可能被生成器收缩,或生成后被修改)
-        int circles = (int) matches.stream()
-            .map(m -> m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone())
-            .distinct().count();
-        circles = Math.max(1, circles);
-        int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
-        // 历史残留的"配置圈数之外"场次按 0 人晋级处理;正常名额按配置圈数均分
-        int divideBy = circles > plannedCircles ? plannedCircles : circles;
-        int perCircle = divideBy > 1 ? advanceCount / divideBy : advanceCount;
-        if (!explicitQuota && circles <= plannedCircles && advanceCount > 0 && advanceCount % circles != 0) {
-            throw new ServiceException("排名赛总晋级数[{}]无法按实际[{}]圈均分,请调整晋级名额或圈数", advanceCount, circles);
-        }
-
-        // 圈序号 + 每圈晋级名额 + 全局排名起点(前序各圈名额累加)
-        Map<String, Integer> zoneOrdinal = new HashMap<>();
+        // 圈序号 / 每圈晋升名额 / 全局排名起点:与海选结算、名单取人共用同一口径
+        Map<String, StageFlowSupport.CircleQuota> quotaCtx =
+            StageFlowSupport.circleQuotaContext(stage, matches, "排名赛");
         Map<String, Integer> zoneQuota = new HashMap<>();
         Map<String, Integer> zoneBase = new HashMap<>();
-        int ordinal = 0;
-        int acc = 0;
-        for (TMatch m : matches) {
-            String zone = m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone();
-            if (zoneOrdinal.putIfAbsent(zone, ordinal) == null) {
-                int quota = ordinal >= plannedCircles ? 0
-                    : explicitQuota && ordinal < perCircleCfg.size()
-                        ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
-                zoneQuota.put(zone, quota);
-                zoneBase.put(zone, acc);
-                acc += quota;
-                ordinal++;
-            }
-        }
+        quotaCtx.forEach((zone, quota) -> {
+            zoneQuota.put(zone, quota.quota());
+            zoneBase.put(zone, quota.base());
+        });
         // 圈内已晋级数(支持重复结算幂等)
         Map<String, Integer> zoneAdvanced = countRankAdvancedByZone(matches);
 
@@ -198,7 +166,7 @@ public class RankStageSettler implements StageSettler {
                 continue;
             }
             String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-            settleRankMatch(match, rc, zoneQuota.getOrDefault(zone, perCircle),
+            settleRankMatch(match, rc, zoneQuota.getOrDefault(zone, 0),
                 zoneBase.getOrDefault(zone, 0), zoneAdvanced);
         }
     }

@@ -1,6 +1,6 @@
 import request from '@/utils/request';
 import { AxiosPromise } from 'axios';
-import { StageVO, StageForm, StageQuery } from '@/api/game/stage/types';
+import { StageVO, StageForm, StageConfigForm, StageQuery } from '@/api/game/stage/types';
 
 /**
  * 查询赛段流程列表
@@ -40,7 +40,10 @@ export const addStage = (data: StageForm) => {
 };
 
 /**
- * 修改赛段流程
+ * 修改赛段流程(兼容入口)
+ *
+ * 后端已把它收敛成「只改配置」:请求里带的 prevStageId / nextStageId 一律被忽略,
+ * 不会再改赛段链。新代码请用 updateStageConfig(配置) / moveStageAfter(改链)。
  * @param data
  */
 export const updateStage = (data: StageForm) => {
@@ -48,6 +51,32 @@ export const updateStage = (data: StageForm) => {
     url: '/game/stage',
     method: 'put',
     data: data
+  });
+};
+
+/**
+ * 修改赛段配置(配置面板唯一入口)
+ * @param id 赛段ID
+ * @param data 配置字段(不含 prevStageId / nextStageId)
+ */
+export const updateStageConfig = (id: string | number, data: StageConfigForm) => {
+  return request({
+    url: '/game/stage/' + id + '/config',
+    method: 'put',
+    data
+  });
+};
+
+/**
+ * 调整赛段链顺序:把该赛段移动到 afterStageId 之后(不传 = 移到链头)
+ *
+ * 传意图而不是前后指针:顺序由后端按现有链推导后统一写入。
+ */
+export const moveStageAfter = (id: string | number, afterStageId: string | number | null) => {
+  return request({
+    url: '/game/stage/' + id + '/link',
+    method: 'put',
+    data: { afterStageId }
   });
 };
 

@@ -101,7 +101,7 @@ import { useRoute } from 'vue-router';
 import StageSelector from '../stages/StageSelector.vue';
 import { getStage, getStageRankDetail } from '@/api/game/stage';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listCompetitor } from '@/api/game/competitor';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
@@ -238,19 +238,17 @@ const loadData = async () => {
       .slice()
       .sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0) || String(a.id).localeCompare(String(b.id)));
 
-    const withParts = await Promise.all(
-      matches.map(async (m: any) => {
-        try {
-          const pr: any = await listMatchParticipant({ matchId: m.id, pageNum: 1, pageSize: 999 } as any);
-          const parts = (pr?.data?.data || pr?.data || [])
-            .filter((p: any) => p.competitorId != null)
-            .slice();
-          return { ...m, participants: parts };
-        } catch {
-          return { ...m, participants: [] };
-        }
-      })
-    );
+    // 参赛方按赛段一次取回再分组:此前逐场请求(N 场 = N 个 HTTP),大屏每次 SSE 刷新都跑一轮
+    let partsByMatch: Record<string, any[]> = {};
+    try {
+      partsByMatch = await listParticipantsByStage(props.stageId);
+    } catch {
+      partsByMatch = {};
+    }
+    const withParts = matches.map((m: any) => ({
+      ...m,
+      participants: (partsByMatch[String(m.id)] || []).filter((p: any) => p.competitorId != null)
+    }));
 
     // 按圈(displayZone)分组,每圈一列,组内按排名排序(无排名按分数降序、再按号码)
     const order: string[] = [];

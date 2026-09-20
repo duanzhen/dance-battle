@@ -119,6 +119,8 @@ CREATE TABLE `t_match` (
   `display_col` int DEFAULT NULL,
   `status` enum('PENDING','GAMING','SETTLED') NOT NULL DEFAULT 'PENDING',
   `match_mode` varchar(20) DEFAULT 'STANDARD' COMMENT 'STANDARD, VOTING, RANKING',
+  `match_type` varchar(20) DEFAULT 'NORMAL' COMMENT 'NORMAL=正常场次, TIEBREAKER=同分加赛(二海/三海)',
+  `parent_match_id` bigint DEFAULT NULL COMMENT '加赛场次的来源场次(仅 TIEBREAKER 有值)',
   `promotion_rule` json DEFAULT NULL,
   `result_json` varchar(1000) DEFAULT NULL COMMENT '手动公布模式待公布结果(competitorId->WIN/LOSS/DRAW)',
   `create_by` bigint DEFAULT NULL COMMENT '创建者',

@@ -16,7 +16,7 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.service.ITScoredMatchService;
-import com.dance.street.game.service.impl.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

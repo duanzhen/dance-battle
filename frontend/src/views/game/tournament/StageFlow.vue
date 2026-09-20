@@ -277,8 +277,8 @@
 import { ref, computed, markRaw, onMounted, onUnmounted } from 'vue';
 import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered, GitFork, Swords } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
-import { listStage, addStage as addStageApi, updateStage as updateStageApi, delStage as delStageApi } from '@/api/game/stage';
-import { StageVO, StageForm } from '@/api/game/stage/types';
+import { listStage, addStage as addStageApi, updateStageConfig as updateStageConfigApi, delStage as delStageApi } from '@/api/game/stage';
+import { StageVO, StageForm, StageConfigForm } from '@/api/game/stage/types';
 import { RosterVO } from '@/api/game/stage/rosterTypes';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import StageSidebar from './stages/StageSidebar.vue';
@@ -809,22 +809,18 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
     config = defaultConfigs[stageMode] || {};
   }
 
-  // 插入模式:在指定赛段后插入(与正常新增一致,只是带上前后指针)
-  let prevStageId: string | null = null;
-  let nextStageId: string | null = null;
-
+  // 插入位置只传意图(afterStageId = 插在这个赛段之后),不传 prev/next:
+  // 前端的 nextStageId 是它本地的副本,回传后由后端写回就可能把链写歪,
+  // 顺序一律由后端按现有链推导。
+  let afterStageId: string | null = null;
   if (insertAfterStageId.value) {
     const insertAfterStage = stages.value.find((s) => String(s.id) === insertAfterStageId.value);
     if (insertAfterStage) {
-      prevStageId = safeId(insertAfterStage.id);
-      nextStageId = safeId(insertAfterStage.nextStageId);
+      afterStageId = safeId(insertAfterStage.id);
     }
-  } else {
-    // 追加模式：添加到末尾
-    if (stages.value.length > 0) {
-      const lastStage = stages.value[stages.value.length - 1];
-      prevStageId = safeId(lastStage.id);
-    }
+  } else if (stages.value.length > 0) {
+    // 追加模式:插到当前链尾之后
+    afterStageId = safeId(stages.value[stages.value.length - 1].id);
   }
 
   try {
@@ -844,12 +840,9 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       isInitialized: undefined
     };
 
-    // 只在值存在时才添加指针字段，避免传递 null
-    if (prevStageId) {
-      formData.prevStageId = prevStageId;
-    }
-    if (nextStageId) {
-      formData.nextStageId = nextStageId;
+    // 插入意图:不传指针,由后端把新赛段接到 afterStageId 之后
+    if (afterStageId) {
+      formData.afterStageId = afterStageId;
     }
 
     const { data } = await addStageApi(formData);
@@ -895,15 +888,13 @@ const handleStageUpdate = async (updatedStage: StageData) => {
   const index = stages.value.findIndex((s) => String(s.id) === String(updatedStage.id));
   if (index === -1) return;
 
-  const existingStage = stages.value[index];
-
   try {
-    const formData: StageForm = {
-      id: updatedStage.id,
-      tournamentId: tournamentId.value,
+    // 配置保存只走配置接口:不带 prevStageId / nextStageId。
+    // 前端手里那份指针只是某一时刻的副本,回传后由后端写回就会把链(以及下游名单来源)
+    // 改歪——改链请用 PUT /game/stage/{id}/link(意图:移到哪个赛段之后)。
+    const formData: StageConfigForm = {
       name: updatedStage.name,
       stageMode: updatedStage.stageMode,
-      format: existingStage.format,
       teamCountStart: updatedStage.teamCountStart,
       teamCountEnd: updatedStage.teamCountEnd,
       status: updatedStage.status,
@@ -912,17 +903,7 @@ const handleStageUpdate = async (updatedStage: StageData) => {
       // 写回会把别处(开赛/落圈)刚置上的"名单已锁定"抹掉。
     };
 
-    // 只在值存在时才添加指针字段，避免传递 null
-    const prevId = safeId(existingStage.prevStageId);
-    const nextId = safeId(existingStage.nextStageId);
-    if (prevId) {
-      formData.prevStageId = prevId;
-    }
-    if (nextId) {
-      formData.nextStageId = nextId;
-    }
-
-    await updateStageApi(formData);
+    await updateStageConfigApi(updatedStage.id, formData);
     stages.value[index] = { ...stages.value[index], ...updatedStage } as Stage;
   } catch (error) {
     console.error('❌ 更新赛段失败:', error);

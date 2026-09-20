@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS `t_match` (
   `display_col` INTEGER,
   `status` TEXT NOT NULL DEFAULT 'PENDING',
   `match_mode` TEXT DEFAULT 'STANDARD',
+  `match_type` TEXT DEFAULT 'NORMAL',
+  `parent_match_id` INTEGER,
   `promotion_rule` TEXT,
   `result_json` TEXT,
   `create_by` INTEGER,

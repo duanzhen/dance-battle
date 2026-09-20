@@ -1,4 +1,4 @@
-package com.dance.street.game.service.impl;
+package com.dance.street.game.service.impl.flow;
 
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.mapper.TCompetitorMapper;

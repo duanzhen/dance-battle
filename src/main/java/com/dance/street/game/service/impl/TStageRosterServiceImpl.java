@@ -131,13 +131,18 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     /** 名单展示状态:CONFIRMED/SKIPPED/READY/WAIT_SOURCE(推导,不再持久化) */
     private String stateOf(TStage stage) {
+        return stateOf(stage, groupsOf(stage), null);
+    }
+
+    /** 同上,来源赛段状态可预取(批量路径不再逐组回查) */
+    private String stateOf(TStage stage, List<TStageRosterGroupBo> groups, Map<Long, TStage> sourceStages) {
         if (isApplied(stage)) {
             return RosterConstants.ROSTER_CONFIRMED;
         }
         if (isSkipped(stage)) {
             return RosterConstants.ROSTER_SKIPPED;
         }
-        return readyByGroups(groupsOf(stage)) ? RosterConstants.ROSTER_READY : RosterConstants.ROSTER_WAIT_SOURCE;
+        return readyByGroups(groups, sourceStages) ? RosterConstants.ROSTER_READY : RosterConstants.ROSTER_WAIT_SOURCE;
     }
 
     @Override
@@ -372,6 +377,11 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     /** 名单就绪度(纯函数):全部内部来源组已结算 */
     private boolean readyByGroups(List<TStageRosterGroupBo> groups) {
+        return readyByGroups(groups, null);
+    }
+
+    /** 同上,来源赛段可预取(批量路径一次取回,避免逐组 selectById) */
+    private boolean readyByGroups(List<TStageRosterGroupBo> groups, Map<Long, TStage> sourceStages) {
         if (groups.isEmpty()) {
             return false;
         }
@@ -379,7 +389,9 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             if (RosterConstants.FILL_STREAM.equals(g.getFillMode()) || g.getSourceStageId() == null) {
                 continue;
             }
-            TStage src = stageMapper.selectById(g.getSourceStageId());
+            TStage src = sourceStages != null
+                ? sourceStages.get(g.getSourceStageId())
+                : stageMapper.selectById(g.getSourceStageId());
             if (src == null || !StageConstants.STAGE_SETTLED.equals(src.getStatus())) {
                 return false;
             }
@@ -393,7 +405,51 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (stage == null) {
             return List.of();
         }
-        return List.of(toVo(stage));
+        return List.of(toVo(stage, groupsOf(stage), overridesOf(stage.getId()), null));
+    }
+
+    /**
+     * 批量取名单(赛段列表/导播台列表用):整页 3 条 SQL。
+     *
+     * <p>逐个 listByTarget 时,"每赛段一次名单查询 + 每来源组一次来源赛段查询"会随赛段数放大;
+     * 这里一次性取回赛段、覆盖项与全部被引用的来源赛段状态,在内存组装。</p>
+     */
+    @Override
+    public Map<Long, List<TStageRosterVo>> listByTargets(Collection<Long> targetStageIds) {
+        if (targetStageIds == null || targetStageIds.isEmpty()) {
+            return Map.of();
+        }
+        List<TStage> stages = stageMapper.selectByIds(targetStageIds.stream().distinct().toList());
+        if (stages.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> stageIds = stages.stream().map(TStage::getId).toList();
+        Map<Long, List<TStageRosterOverride>> overridesByStage = overrideMapper
+            .selectList(Wrappers.<TStageRosterOverride>lambdaQuery()
+                .in(TStageRosterOverride::getTargetStageId, stageIds)
+                .orderByAsc(TStageRosterOverride::getId))
+            .stream()
+            .collect(Collectors.groupingBy(TStageRosterOverride::getTargetStageId));
+        // 全部来源组引用的来源赛段:一次取回,供就绪度判定复用
+        Set<Long> sourceStageIds = new HashSet<>();
+        for (TStage stage : stages) {
+            for (TStageRosterGroupBo g : groupsOf(stage)) {
+                if (g.getSourceStageId() != null && !stageIds.contains(g.getSourceStageId())) {
+                    sourceStageIds.add(g.getSourceStageId());
+                }
+            }
+        }
+        Map<Long, TStage> sourceStages = new HashMap<>();
+        stages.forEach(s -> sourceStages.put(s.getId(), s));
+        if (!sourceStageIds.isEmpty()) {
+            stageMapper.selectByIds(sourceStageIds).forEach(s -> sourceStages.put(s.getId(), s));
+        }
+        Map<Long, List<TStageRosterVo>> result = new HashMap<>();
+        for (TStage stage : stages) {
+            result.put(stage.getId(), List.of(toVo(stage, groupsOf(stage),
+                overridesByStage.getOrDefault(stage.getId(), List.of()), sourceStages)));
+        }
+        return result;
     }
 
     @Override
@@ -404,20 +460,25 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             .orderByAsc(TStage::getId))) {
             if (groupsOf(stage).stream().anyMatch(g ->
                 Objects.equals(g.getSourceStageId(), sourceStageId))) {
-                out.add(toVo(stage));
+                out.add(toVo(stage, groupsOf(stage), overridesOf(stage.getId()), null));
             }
         }
         return out;
     }
 
-    private TStageRosterVo toVo(TStage stage) {
+    /**
+     * 组装名单 VO。
+     *
+     * @param sourceStages 预取的来源赛段(id-&gt;赛段);为 null 时回退逐组查询(单个赛段接口的老路径)
+     */
+    private TStageRosterVo toVo(TStage stage, List<TStageRosterGroupBo> groups,
+                                List<TStageRosterOverride> overrides, Map<Long, TStage> sourceStages) {
         TStageRosterVo vo = new TStageRosterVo();
         vo.setId(stage.getId());
         vo.setTournamentId(stage.getTournamentId());
         vo.setTargetStageId(stage.getId());
-        List<TStageRosterGroupBo> groups = groupsOf(stage);
         vo.setGroups(groups);
-        vo.setState(stateOf(stage));
+        vo.setState(stateOf(stage, groups, sourceStages));
         if (!groups.isEmpty()) {
             TStageRosterGroupBo first = groups.get(0);
             vo.setSourceStageId(first.getSourceStageId());
@@ -432,7 +493,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             vo.setScoreMin(first.getScoreMin());
             vo.setScoreMax(first.getScoreMax());
         }
-        vo.setOverrides(overridesOf(stage.getId()).stream()
+        vo.setOverrides(overrides.stream()
             .map(o -> MapstructUtils.convert(o, TStageRosterOverrideVo.class))
             .toList());
         return vo;
@@ -607,6 +668,18 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             }
         }
         long nextFree = 0L;
+        // 覆盖项一次性取回(此前每个拖拽项 selectById + upsert 里再 selectOne,
+        // 36 人名单保存 = 72 条 SQL),变动统一走一条批量 CASE 更新
+        List<TStageRosterOverride> overrides = overridesOf(stageId);
+        Map<Long, TStageRosterOverride> overrideById = overrides.stream()
+            .filter(o -> o.getId() != null)
+            .collect(Collectors.toMap(TStageRosterOverride::getId, o -> o, (a, b) -> a));
+        Map<Long, TStageRosterOverride> seedBySource = overrides.stream()
+            .filter(o -> RosterConstants.OVERRIDE_SEED.equals(o.getOp())
+                && o.getSourceCompetitorId() != null)
+            .collect(Collectors.toMap(TStageRosterOverride::getSourceCompetitorId, o -> o, (a, b) -> a));
+        List<Map<String, Object>> seedPatches = new ArrayList<>();
+        Map<Long, Long> newSeedAssignments = new LinkedHashMap<>();
         for (TStageRosterOrderBo.Item item : items) {
             if (item == null) {
                 continue;
@@ -623,15 +696,12 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             }
             Long sourceCompetitorId = item.getSourceCompetitorId();
             if (item.getOverrideId() != null) {
-                TStageRosterOverride o = overrideMapper.selectById(item.getOverrideId());
+                TStageRosterOverride o = overrideById.get(item.getOverrideId());
                 if (o == null || !Objects.equals(o.getTargetStageId(), stageId)) {
                     continue;
                 }
                 if (RosterConstants.OVERRIDE_ADD_GUEST.equals(o.getOp())) {
-                    TStageRosterOverride upd = new TStageRosterOverride();
-                    upd.setId(o.getId());
-                    upd.setSeedRank(seed);
-                    overrideMapper.updateById(upd);
+                    seedPatches.add(patch(o.getId(), seed));
                     continue;
                 }
                 if (o.getSourceCompetitorId() != null) {
@@ -641,39 +711,49 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             if (sourceCompetitorId == null) {
                 continue;
             }
-            upsertSeedOverride(target, sourceCompetitorId, seed);
+            validateSeedWithinPlan(target, seed);
+            TStageRosterOverride existing = seedBySource.get(sourceCompetitorId);
+            if (existing != null) {
+                if (!Objects.equals(existing.getSeedRank(), seed)) {
+                    seedPatches.add(patch(existing.getId(), seed));
+                    existing.setSeedRank(seed);
+                }
+            } else if (!newSeedAssignments.containsKey(sourceCompetitorId)) {
+                newSeedAssignments.put(sourceCompetitorId, seed);
+                seedBySource.put(sourceCompetitorId, new TStageRosterOverride());
+            }
+        }
+        if (!seedPatches.isEmpty()) {
+            overrideMapper.batchUpdateSeedRank(seedPatches);
+        }
+        if (!newSeedAssignments.isEmpty()) {
+            // 首次为这些选手落种子位:姓名一次批量取回
+            List<Long> newSeedSources = new ArrayList<>(newSeedAssignments.keySet());
+            Map<Long, String> nameById = competitorMapper.selectByIds(newSeedSources).stream()
+                .collect(Collectors.toMap(TCompetitor::getId, TCompetitor::getName, (a, b) -> a));
+            for (Map.Entry<Long, Long> entry : newSeedAssignments.entrySet()) {
+                TStageRosterOverride o = new TStageRosterOverride();
+                o.setTenantId(target.getTenantId());
+                o.setTournamentId(target.getTournamentId());
+                o.setTargetStageId(target.getId());
+                o.setOp(RosterConstants.OVERRIDE_SEED);
+                o.setSourceCompetitorId(entry.getKey());
+                o.setSeedRank(entry.getValue());
+                o.setRemark(nameById.get(entry.getKey()));
+                overrideMapper.insert(o);
+            }
         }
         notifyTarget(stageId);
     }
 
-    /** 顺序 = 位置 i 记第 i 位:已有 SEED 覆盖则改,没有则建 */
-    private void upsertSeedOverride(TStage target, Long sourceCompetitorId, long seedRank) {
-        validateSeedWithinPlan(target, seedRank);
-        TStageRosterOverride existing = overrideMapper.selectOne(Wrappers.<TStageRosterOverride>lambdaQuery()
-            .eq(TStageRosterOverride::getTargetStageId, target.getId())
-            .eq(TStageRosterOverride::getOp, RosterConstants.OVERRIDE_SEED)
-            .eq(TStageRosterOverride::getSourceCompetitorId, sourceCompetitorId)
-            .last("limit 1"));
-        if (existing != null) {
-            if (!Objects.equals(existing.getSeedRank(), seedRank)) {
-                TStageRosterOverride upd = new TStageRosterOverride();
-                upd.setId(existing.getId());
-                upd.setSeedRank(seedRank);
-                overrideMapper.updateById(upd);
-            }
-            return;
-        }
-        TCompetitor c = competitorMapper.selectById(sourceCompetitorId);
-        TStageRosterOverride o = new TStageRosterOverride();
-        o.setTenantId(target.getTenantId());
-        o.setTournamentId(target.getTournamentId());
-        o.setTargetStageId(target.getId());
-        o.setOp(RosterConstants.OVERRIDE_SEED);
-        o.setSourceCompetitorId(sourceCompetitorId);
-        o.setSeedRank(seedRank);
-        o.setRemark(c == null ? null : c.getName());
-        overrideMapper.insert(o);
+    /** 批量种子位更新项 */
+    private Map<String, Object> patch(Long id, long seedRank) {
+        Map<String, Object> item = new HashMap<>();
+        item.put("id", id);
+        item.put("seedRank", seedRank);
+        return item;
     }
+
 
     private void validateOverrideSource(Long stageId, String op, TStageRosterOverrideBo bo) {
         if (RosterConstants.OVERRIDE_ADD_GUEST.equals(op)) {
@@ -832,7 +912,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             saveGroups(target, merged);
         }
         notifyTarget(stageId);
-        return toVo(stageMapper.selectById(stageId));
+        TStage fresh = stageMapper.selectById(stageId);
+        return toVo(fresh, groupsOf(fresh), overridesOf(stageId), null);
     }
 
     @Override
@@ -1423,7 +1504,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             return false;
         }
         if (g.getZone() != null && part != null
-            && !Objects.equals(normalizeZone(g.getZone()), part.zone())) {
+            && !Objects.equals(resolveZone(g.getZone(), zoneOrder), part.zone())) {
             return false;
         }
         if (g.getRound() != null && part != null && !Objects.equals(g.getRound(), part.row())) {
@@ -1463,6 +1544,37 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     private String normalizeZone(String zone) {
         return zone == null ? null : (zone.startsWith("ZONE-") ? zone : zone.toUpperCase());
+    }
+
+    /**
+     * 把出口规则里的圈过滤解析成源赛段的<b>实际</b>圈名。
+     *
+     * <p>「ZONE-k」表达的是"第 k 个圈",不是字面上的场次分区名:海选单圈时场次的
+     * {@code display_zone} 是 {@code CENTER},多圈才是 {@code ZONE-1..n}。
+     * 此前直接拿字符串比对,导致单圈海选里选了「第1圈」的出口一个候选人都取不到——
+     * 表现为"海选结束了,选手没进下一个赛段"(赛段名单永远是空的)。</p>
+     *
+     * @param zone      出口规则里的圈(ZONE-1 / CENTER / null)
+     * @param zoneOrder 源赛段实际圈名 -> 圈序号(见 {@link #zoneByIdOrder})
+     * @return 源赛段实际圈名;无法解析时原样返回(保持"匹配不上就是没候选"的老行为)
+     */
+    private String resolveZone(String zone, Map<String, Integer> zoneOrder) {
+        String normalized = normalizeZone(zone);
+        if (normalized == null || !normalized.startsWith("ZONE-") || zoneOrder.containsKey(normalized)) {
+            // 空/非 ZONE-n,或源赛段的圈本来就叫这个名字:无需换算
+            return normalized;
+        }
+        try {
+            int target = Integer.parseInt(normalized.substring("ZONE-".length())) - 1;
+            for (Map.Entry<String, Integer> entry : zoneOrder.entrySet()) {
+                if (entry.getValue() != null && entry.getValue() == target) {
+                    return entry.getKey();
+                }
+            }
+        } catch (NumberFormatException ignored) {
+            // ZONE-abc 这类非序号写法:按原样比对
+        }
+        return normalized;
     }
 
     private Comparator<TCompetitor> groupComparator(TStageRosterGroupBo g,
@@ -1542,30 +1654,15 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             return;
         }
         RuleConfigHolder rc = RuleConfigParser.parse(source.getRuleConfig());
-        List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
-        boolean explicitQuota = perCircleCfg != null && !perCircleCfg.isEmpty();
-        int advanceCount = StageFlowSupport.readStageAdvanceCount(source);
-        int circles = (int) srcMatches.stream().map(StageFlowSupport::zoneOf).distinct().count();
-        circles = Math.max(1, circles);
-        int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
-        int divideBy = circles > plannedCircles ? plannedCircles : circles;
-        int perCircle = divideBy > 1 ? advanceCount / divideBy : advanceCount;
+        // 圈序号/名额/全局起点:与海选·排名赛结算共用同一口径(名单取人顺序必须与结算名次一致)
+        Map<String, StageFlowSupport.CircleQuota> quotaCtx =
+            StageFlowSupport.circleQuotaContext(source, srcMatches, "海选");
         Map<String, Integer> zoneOrdinal = new HashMap<>();
         Map<String, Integer> zoneBase = new HashMap<>();
-        int ordinal = 0;
-        int acc = 0;
-        for (TMatch m : srcMatches) {
-            String zone = StageFlowSupport.zoneOf(m);
-            if (!zoneOrdinal.containsKey(zone)) {
-                int quota = ordinal >= plannedCircles ? 0
-                    : explicitQuota && ordinal < perCircleCfg.size()
-                        ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
-                zoneOrdinal.put(zone, ordinal);
-                zoneBase.put(zone, acc);
-                acc += quota;
-                ordinal++;
-            }
-        }
+        quotaCtx.forEach((zone, quota) -> {
+            zoneOrdinal.put(zone, quota.ordinal());
+            zoneBase.put(zone, quota.base());
+        });
         List<Long> srcMatchIds = srcMatches.stream().map(TMatch::getId).toList();
         Map<Long, String> zoneByCompetitor = new HashMap<>();
         if (!srcMatchIds.isEmpty()) {
@@ -1615,7 +1712,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (g.getZone() != null) {
             Map<String, Integer> order = g.getSourceStageId() == null ? Map.of()
                 : zoneOrderOf(g.getSourceStageId());
-            return "第" + (order.getOrDefault(normalizeZone(g.getZone()), -1) + 1) + "圈·" + result + rank;
+            // 圈名同样按实际圈序号解析:单圈海选的场次叫 CENTER,「ZONE-1」也代表第 1 圈
+            return "第" + (order.getOrDefault(resolveZone(g.getZone(), order), -1) + 1) + "圈·" + result + rank;
         }
         return (Boolean.TRUE.equals(g.getRankByZone()) ? "每圈" : "全场") + result + rank;
     }

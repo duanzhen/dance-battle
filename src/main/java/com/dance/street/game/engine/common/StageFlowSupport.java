@@ -2,8 +2,11 @@ package com.dance.street.game.engine.common;
 
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TStage;
+import org.dromara.common.core.exception.ServiceException;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -46,5 +49,72 @@ public final class StageFlowSupport {
     /** 场次所属圈:displayZone 为空时视为 CENTER(未分圈时的唯一圈) */
     public static String zoneOf(TMatch match) {
         return match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+    }
+
+    /**
+     * 一个圈的结算上下文。
+     *
+     * @param ordinal 圈序号(0 基,按场次 displayRow 顺序)
+     * @param quota   本圈晋级名额
+     * @param base    本圈在全局名次里的起点(前序各圈名额累加)
+     */
+    public record CircleQuota(int ordinal, int quota, int base) {
+    }
+
+    /**
+     * 圈名额上下文(唯一口径):{@code zone -> (圈序号, 本圈名额, 全局排名起点)}。
+     *
+     * <p>「每圈分几个晋级名额」「本圈名次从全局第几名开始」这两件事此前在三处各写了一遍
+     * (海选结算、排名赛结算、名单按圈取人),任何一处单独改动都会让"结算名次"与
+     * "名单取人顺序"分叉。这里作为同源实现,参数 {@code modeLabel} 只用于错误提示。</p>
+     *
+     * <p>规则:显式配置 {@code circleAdvanceCounts} 优先(逐圈可不同,长度不足回退均分值);
+     * 未配置时按"实际圈数"均分并要求整除;配置圈数之外的残留场次按 0 名额处理。</p>
+     *
+     * @param stage     赛段(读 rule_config 与晋级名额)
+     * @param matches   本赛段场次(按 displayRow、id 升序;加赛场次与正式圈同 zone,会被合并)
+     * @param modeLabel 赛制名(如"海选""排名赛"),仅用于错误信息
+     */
+    public static Map<String, CircleQuota> circleQuotaContext(TStage stage, List<TMatch> matches, String modeLabel) {
+        Map<String, CircleQuota> ctx = new LinkedHashMap<>();
+        if (stage == null || matches == null || matches.isEmpty()) {
+            return ctx;
+        }
+        int advanceCount = readStageAdvanceCount(stage);
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
+        boolean explicitQuota = perCircleCfg != null && !perCircleCfg.isEmpty();
+        if (explicitQuota) {
+            for (Integer q : perCircleCfg) {
+                if (q == null || q < 0) {
+                    throw new ServiceException("{}每圈晋级人数配置非法(不能为负): {}", modeLabel, perCircleCfg);
+                }
+            }
+        }
+        // 圈数以实际场次为准:配置圈数可能被生成器按人数收缩,也可能在生成后被修改
+        int circles = Math.max(1, (int) matches.stream().map(StageFlowSupport::zoneOf).distinct().count());
+        int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
+        // 历史残留的"配置圈数之外"场次按 0 人晋级处理;正常名额按配置圈数均分
+        int divideBy = Math.min(circles, plannedCircles);
+        int perCircle = divideBy > 1 ? advanceCount / divideBy : advanceCount;
+        if (!explicitQuota && circles <= plannedCircles && advanceCount > 0 && advanceCount % circles != 0) {
+            throw new ServiceException("{}总晋级数[{}]无法按实际[{}]圈均分,请调整晋级名额或圈数",
+                modeLabel, advanceCount, circles);
+        }
+        int ordinal = 0;
+        int acc = 0;
+        for (TMatch m : matches) {
+            String zone = zoneOf(m);
+            if (ctx.containsKey(zone)) {
+                continue;
+            }
+            int quota = ordinal >= plannedCircles ? 0
+                : explicitQuota && ordinal < perCircleCfg.size()
+                    ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
+            ctx.put(zone, new CircleQuota(ordinal, quota, acc));
+            acc += quota;
+            ordinal++;
+        }
+        return ctx;
     }
 }

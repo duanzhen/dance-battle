@@ -32,6 +32,11 @@ public final class StageConstants {
     public static final String SCORE_ACTION_SCORE = "SCORE";
     public static final String SCORE_ACTION_VOTE = "VOTE";
 
+    /** t_match.match_type 取值 */
+    public static final String MATCH_TYPE_NORMAL = "NORMAL";
+    /** 同分加赛(二海/三海…):由结算时按晋级线同分自动创建 */
+    public static final String MATCH_TYPE_TIEBREAKER = "TIEBREAKER";
+
     /** 默认打分维度 */
     public static final String DIMENSION_MAIN = "MAIN";
 

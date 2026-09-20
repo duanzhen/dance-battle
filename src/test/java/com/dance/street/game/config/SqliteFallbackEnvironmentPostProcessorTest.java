@@ -9,10 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 验证 MySQL 不可达时数据源自动回退 SQLite,以及关闭开关/已是 SQLite 时不改动。
- * SQLite 连接会统一补齐 date_class=text 时间参数(与 README/建表脚本 TEXT 日期列一致)。
+ * SQLite 连接会统一补齐日期参数(与 README/建表脚本 TEXT 日期列一致)与并发护栏参数
+ * (WAL + busy_timeout + 事务 IMMEDIATE),详见 {@link SqliteFallbackEnvironmentPostProcessor}。
  * 探测地址用 127.0.0.1:1(连接必失败),避免依赖外部 MySQL。
  */
 class SqliteFallbackEnvironmentPostProcessorTest {
+
+    /** 日期参数之后的并发护栏参数(URL 上缺哪项补哪项) */
+    private static final String CONCURRENCY =
+        "&journal_mode=WAL&busy_timeout=10000&transaction_mode=IMMEDIATE&synchronous=NORMAL";
+    private static final String DATE = "date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS";
 
     private final SqliteFallbackEnvironmentPostProcessor processor =
         new SqliteFallbackEnvironmentPostProcessor();
@@ -25,8 +31,41 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         processor.postProcessEnvironment(env, null);
 
         assertEquals(
-            "jdbc:sqlite:/tmp/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            "jdbc:sqlite:/tmp/game.db?" + DATE + CONCURRENCY,
             env.getProperty("spring.datasource.url"));
+    }
+
+    /**
+     * 时间参数已存在时不能整体跳过:application.yml 的默认 SQLite 地址本身带 date_class,
+     * 旧实现「见到 date_class 就 return」会让并发护栏永远补不上。
+     */
+    @Test
+    void appendsConcurrencyParamsWhenDateParamsAlreadyPresent() {
+        MockEnvironment env = new MockEnvironment()
+            .withProperty("spring.datasource.url",
+                "jdbc:sqlite:./data/game.db?" + DATE);
+
+        processor.postProcessEnvironment(env, null);
+
+        assertEquals("jdbc:sqlite:./data/game.db?" + DATE + CONCURRENCY,
+            env.getProperty("spring.datasource.url"));
+    }
+
+    /** 用户显式写了的项不覆盖(例如自己设了 journal_mode / busy_timeout) */
+    @Test
+    void keepsExplicitlyConfiguredSqliteParams() {
+        MockEnvironment env = new MockEnvironment()
+            .withProperty("spring.datasource.url",
+                "jdbc:sqlite:./data/game.db?journal_mode=DELETE&busy_timeout=1000");
+
+        processor.postProcessEnvironment(env, null);
+
+        String url = env.getProperty("spring.datasource.url");
+        assertTrue(url.contains("journal_mode=DELETE"), url);
+        assertTrue(url.contains("busy_timeout=1000"), url);
+        assertTrue(url.contains("transaction_mode=IMMEDIATE"), url);
+        assertTrue(url.contains("synchronous=NORMAL"), url);
+        assertTrue(url.contains("date_class=text"), url);
     }
 
     @Test
@@ -53,7 +92,7 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         processor.postProcessEnvironment(env, null);
 
         assertEquals(
-            "jdbc:sqlite:/tmp/fallback.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            "jdbc:sqlite:/tmp/fallback.db?" + DATE + CONCURRENCY,
             env.getProperty("spring.datasource.url"));
     }
 
@@ -65,7 +104,7 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         processor.postProcessEnvironment(env, null);
 
         assertEquals(
-            "jdbc:sqlite:./data/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            "jdbc:sqlite:./data/game.db?" + DATE + CONCURRENCY,
             env.getProperty("spring.datasource.url"));
     }
 
@@ -81,7 +120,7 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         processor.postProcessEnvironment(env, null);
 
         assertEquals(
-            "jdbc:sqlite:/tmp/explicit.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            "jdbc:sqlite:/tmp/explicit.db?" + DATE + CONCURRENCY,
             env.getProperty("spring.datasource.url"));
         assertEquals("", env.getProperty("spring.datasource.username"));
         assertEquals("", env.getProperty("spring.datasource.password"));
@@ -96,7 +135,7 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         processor.postProcessEnvironment(env, null);
 
         assertEquals(
-            "jdbc:sqlite:./data/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            "jdbc:sqlite:./data/game.db?" + DATE + CONCURRENCY,
             env.getProperty("spring.datasource.url"));
     }
 
@@ -109,7 +148,7 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         processor.postProcessEnvironment(env, null);
 
         assertEquals(
-            "jdbc:sqlite:/data/db/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            "jdbc:sqlite:/data/db/game.db?" + DATE + CONCURRENCY,
             env.getProperty("spring.datasource.url"));
     }
 
@@ -137,7 +176,7 @@ class SqliteFallbackEnvironmentPostProcessorTest {
         processor.postProcessEnvironment(env, null);
 
         assertEquals(
-            "jdbc:sqlite:./data/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+            "jdbc:sqlite:./data/game.db?" + DATE + CONCURRENCY,
             env.getProperty("spring.datasource.url"));
     }
 
@@ -153,7 +192,7 @@ class SqliteFallbackEnvironmentPostProcessorTest {
             processor.postProcessEnvironment(env, null);
 
             assertEquals(
-                "jdbc:sqlite:/tmp/native.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS",
+                "jdbc:sqlite:/tmp/native.db?" + DATE + CONCURRENCY,
                 env.getProperty("spring.datasource.url"));
         });
     }

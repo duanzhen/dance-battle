@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,6 +74,8 @@ class GroupRankSettlementTest {
     private TMatchMapper matchMapper;
     @Autowired
     private TMatchParticipantMapper participantMapper;
+    @Autowired
+    private com.dance.street.game.mapper.TMatchRoundMapper matchRoundMapper;
     @Autowired
     private TCompetitorMapper competitorMapper;
     @Autowired
@@ -249,6 +252,17 @@ class GroupRankSettlementTest {
         assertEquals(2, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
             "每组晋级 1 人,共 2 人");
         assertEquals(2, countOutcome(stage.getId(), OutcomeStatusEnum.ELIMINATED.getCode()));
+
+        // 轮次必须跟着场次一起结算:此前"多裁判累计结算"这条路径只置场次,
+        // 轮次会残留 GAMING(裁判端看起来这场还在进行中)
+        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
+        List<com.dance.street.game.domain.TMatchRound> rounds = matchRoundMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<com.dance.street.game.domain.TMatchRound>lambdaQuery()
+                .in(com.dance.street.game.domain.TMatchRound::getMatchId, matchIds));
+        assertFalse(rounds.isEmpty(), "小组赛场次应各有轮次");
+        assertTrue(rounds.stream().allMatch(r -> StageConstants.MATCH_SETTLED.equals(r.getStatus())),
+            "场次结算后轮次也应为 SETTLED,实际: "
+                + rounds.stream().map(com.dance.street.game.domain.TMatchRound::getStatus).toList());
     }
 
     /**

@@ -296,7 +296,7 @@ import { listStage } from '@/api/game/stage';
 import { listRostersBySource, addRosterGroups, removeRosterGroup, updateRosterGroup, getStageRoster } from '@/api/game/stage/roster';
 import { listMatchReferee } from '@/api/game/matchReferee';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 
 const props = defineProps<{
   stage: StageData;
@@ -689,15 +689,17 @@ const loadActualCircleReferees = async () => {
       .slice()
       .sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0) || String(a.id).localeCompare(String(b.id)));
     hasGeneratedMatches.value = matches.length > 0;
-    const counts: (number | null)[] = await Promise.all(matches.map(async (m: any) => {
-      try {
-        const pResp: any = await listMatchParticipant({ matchId: m.id } as any);
-        const parts = pResp?.data ?? [];
-        return Array.isArray(parts) ? parts.length : null;
-      } catch {
-        return null;
-      }
-    }));
+    // 每圈人数按赛段一次取回再分组(此前逐圈一次请求)
+    let partsByMatch: Record<string, any[]> = {};
+    try {
+      partsByMatch = await listParticipantsByStage(sid);
+    } catch {
+      partsByMatch = {};
+    }
+    const counts: (number | null)[] = matches.map((m: any) => {
+      const parts = partsByMatch[String(m.id)];
+      return Array.isArray(parts) ? parts.length : null;
+    });
     actualCirclePlayers.value = counts;
     const byMatch: Record<string, string> = {};
     rows.forEach((r: any) => {

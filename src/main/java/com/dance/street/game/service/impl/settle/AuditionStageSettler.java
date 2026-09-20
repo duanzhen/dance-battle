@@ -8,8 +8,6 @@ import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
-import com.dance.street.game.engine.common.RuleConfigHolder;
-import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
@@ -25,7 +23,7 @@ import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
-import com.dance.street.game.service.impl.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -77,12 +75,10 @@ public class AuditionStageSettler implements StageSettler {
 
     @Override
     public StageSettleOutcome settle(TStage stage) {
-        // 二海(同分加赛)未判罚时禁止结束赛段;弃权选手打 0 分后即可正常结算
-        List<String> unjudged = findUnjudgedTiebreakerNames(stage.getId());
-        if (!unjudged.isEmpty()) {
-            return StageSettleOutcome.pending("海选存在二海(同分加赛)未完成判罚: "
-                + String.join(", ", unjudged)
-                + ",请完成二海判罚后再结束赛段(弃权选手打 0 分,0 分不参与晋级)");
+        // 前置守卫:还有选手一条分都没打就不许结束(正式圈与二海/加赛一视同仁)
+        String blocked = blockedReason(stage);
+        if (blocked != null) {
+            return StageSettleOutcome.pending(blocked);
         }
         settleAuditionStage(stage);
         long tbUnfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
@@ -97,45 +93,65 @@ public class AuditionStageSettler implements StageSettler {
     }
 
     /**
-     * 找出未完成判罚的二海(同分加赛)选手姓名。
+     * 还没打完分时的拦截原因:返回 null 表示所有人都已判完,可以结算。
      *
-     * <p>口径:加赛场次未结算,且场内有选手一条裁判分都没拿到(退赛选手除外)。
-     * 返回空表示所有加赛都已判完,可以结算赛段。</p>
+     * <p>此前只在二海(同分加赛)上拦,正式圈整圈没判也能直接结束,等于把没打分的人
+     * 当 0 分淘汰掉;现在正式圈与加赛一视同仁。</p>
      */
-    private List<String> findUnjudgedTiebreakerNames(Long stageId) {
-        List<TMatch> tiebreakers = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+    private String blockedReason(TStage stage) {
+        if (stage == null || stage.getId() == null) {
+            return null;
+        }
+        List<String> unjudged = findUnjudgedNames(stage.getId());
+        if (unjudged.isEmpty()) {
+            return null;
+        }
+        int shown = Math.min(unjudged.size(), 8);
+        String names = String.join("、", unjudged.subList(0, shown)) + (unjudged.size() > shown ? " 等" : "");
+        return "海选还有 " + unjudged.size() + " 位选手未打分(" + names + "),判完才能结束赛段;"
+            + "确实不上场的选手请标记退赛,或由裁判打 0 分(0 分不参与晋级)";
+    }
+
+    /**
+     * 找出尚未打分(一条裁判分都没有)的选手姓名。
+     *
+     * <p>口径:只看尚未结算的场次——正式圈与二海/加赛都算。0 分与「没打分」是两件事:
+     * 裁判打了 0 分会在 {@code t_round_score} 留下记录,算已判;已标记退赛(WITHDRAWN)
+     * 的选手不参与判罚,不算未判。返回空表示所有人都已判完。</p>
+     */
+    private List<String> findUnjudgedNames(Long stageId) {
+        List<TMatch> pending = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId)
-            .likeRight(TMatch::getRemark, SettlementSupport.TIEBREAKER_PREFIX)
             .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-        if (tiebreakers.isEmpty()) {
+        if (pending.isEmpty()) {
             return List.of();
         }
-        List<Long> tbIds = tiebreakers.stream().map(TMatch::getId).toList();
-        List<TMatchParticipant> tbParts = participantMapper.selectList(
+        List<Long> pendingIds = pending.stream().map(TMatch::getId).toList();
+        List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, tbIds)
+                .in(TMatchParticipant::getMatchId, pendingIds)
                 .isNotNull(TMatchParticipant::getCompetitorId));
-        if (tbParts.isEmpty()) {
+        if (parts.isEmpty()) {
             return List.of();
         }
-        List<Long> compIds = tbParts.stream()
+        List<Long> compIds = parts.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
         Map<Long, TCompetitor> compMap = settlementSupport.competitorMap(compIds);
-        List<Long> tbRoundIds = matchRoundMapper.selectList(
+        List<Long> roundIds = matchRoundMapper.selectList(
                 Wrappers.<TMatchRound>lambdaQuery()
-                    .in(TMatchRound::getMatchId, tbIds)
+                    .in(TMatchRound::getMatchId, pendingIds)
                     .select(TMatchRound::getId))
             .stream().map(TMatchRound::getId).toList();
-        Set<Long> judged = tbRoundIds.isEmpty() ? Set.of()
+        Set<Long> judged = roundIds.isEmpty() ? Set.of()
             : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, tbRoundIds)
+                    .in(TRoundScore::getRoundId, roundIds)
                     .select(TRoundScore::getCompetitorId))
                 .stream()
                 .map(TRoundScore::getCompetitorId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         List<String> unjudged = new ArrayList<>();
-        for (TMatchParticipant p : tbParts) {
+        for (TMatchParticipant p : parts) {
             if (p.getCompetitorId() == null || judged.contains(p.getCompetitorId())) {
                 continue;
             }
@@ -144,7 +160,10 @@ public class AuditionStageSettler implements StageSettler {
             if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
                 continue;
             }
-            unjudged.add(c != null ? c.getName() : ("选手" + p.getCompetitorId()));
+            String name = c != null && c.getName() != null ? c.getName() : ("选手" + p.getCompetitorId());
+            if (!unjudged.contains(name)) {
+                unjudged.add(name);
+            }
         }
         return unjudged;
     }
@@ -159,7 +178,8 @@ public class AuditionStageSettler implements StageSettler {
             return;
         }
         // 圈名额/全局排名起点统一计算(与二海/三海单场自动结算共用,避免口径分叉)
-        Map<String, int[]> zoneCtx = buildAuditionZoneContext(stage, matches);
+        Map<String, StageFlowSupport.CircleQuota> zoneCtx =
+            StageFlowSupport.circleQuotaContext(stage, matches, "海选");
         // 圈内已晋级数(含已结算正式圈与加赛,支持重复结算幂等)
         Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(matches);
 
@@ -168,62 +188,12 @@ public class AuditionStageSettler implements StageSettler {
                 continue;
             }
             String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-            int[] qb = zoneCtx.get(zone);
+            StageFlowSupport.CircleQuota qb = zoneCtx.get(zone);
             if (qb == null) {
                 continue;
             }
-            settleAuditionMatch(match, qb[0], qb[1], zoneAdvanced);
+            settleAuditionMatch(match, qb.quota(), qb.base(), zoneAdvanced);
         }
-    }
-
-    /**
-     * 海选圈上下文统一计算:每圈晋级名额 + 全局排名起点(按场次 displayRow 顺序)。
-     * 整段结算与二海/三海单场自动结算共用,保证每圈名额与排名起点口径一致。
-     *
-     * @return zone(CENTER 归一) -> [每圈晋级名额, 全局排名起点]
-     */
-    private Map<String, int[]> buildAuditionZoneContext(TStage stage, List<TMatch> matches) {
-        int advanceCount = StageFlowSupport.readStageAdvanceCount(stage);
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        List<Integer> perCircleCfg = rc != null ? rc.getCircleAdvanceCounts() : null;
-        boolean explicitQuota = perCircleCfg != null && !perCircleCfg.isEmpty();
-        if (explicitQuota) {
-            for (Integer q : perCircleCfg) {
-                if (q == null || q < 0) {
-                    throw new ServiceException("每圈晋级人数配置非法(不能为负): {}", perCircleCfg);
-                }
-            }
-        }
-        // 圈数以实际生成的场次为准:配置圈数可能被生成器按人数收缩(人数<圈数),
-        // 也可能在生成后被修改,按配置结算会导致名额均分错位或整除校验误报
-        int circles = Math.max(1, (int) matches.stream()
-            .map(m -> m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone())
-            .distinct().count());
-        int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
-        // 历史残留的"配置圈数之外"场次按 0 人晋级处理;正常名额按配置圈数均分
-        int divideBy = circles > plannedCircles ? plannedCircles : circles;
-        int perCircle = divideBy > 1 ? advanceCount / divideBy : advanceCount;
-        // 未显式配置每圈名额时才要求均分可整除
-        if (!explicitQuota && circles <= plannedCircles && advanceCount > 0 && advanceCount % circles != 0) {
-            throw new ServiceException("海选总晋级数[{}]无法按实际[{}]圈均分,请调整晋级名额或圈数", advanceCount, circles);
-        }
-
-        Map<String, int[]> ctx = new HashMap<>();
-        int ordinal = 0;
-        int acc = 0;
-        for (TMatch m : matches) {
-            String zone = m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone();
-            if (ctx.containsKey(zone)) {
-                continue;
-            }
-            int quota = ordinal >= plannedCircles ? 0
-                : explicitQuota && ordinal < perCircleCfg.size()
-                    ? Math.max(0, perCircleCfg.get(ordinal)) : perCircle;
-            ctx.put(zone, new int[]{quota, acc});
-            acc += quota;
-            ordinal++;
-        }
-        return ctx;
     }
 
     /** 统计海选各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额 */
@@ -577,6 +547,9 @@ public class AuditionStageSettler implements StageSettler {
         tb.setName(parentMatch.getName() + "-加赛");
         tb.setStatus(StageConstants.MATCH_PENDING);
         tb.setMatchMode(parentMatch.getMatchMode());
+        // 显式标记加赛(不再只靠 remark 文本识别);来源场次一并落库便于回溯
+        tb.setMatchType(StageConstants.MATCH_TYPE_TIEBREAKER);
+        tb.setParentMatchId(parentMatch.getId());
         // 加赛归属原圈(同 zone),结算时只争本圈剩余名额
         tb.setDisplayZone(parentMatch.getDisplayZone());
         tb.setDisplayRow(parentMatch.getDisplayRow() != null ? parentMatch.getDisplayRow() + 1L : 1L);
@@ -669,14 +642,15 @@ public class AuditionStageSettler implements StageSettler {
             .eq(TMatch::getStageId, stage.getId())
             .orderByAsc(TMatch::getDisplayRow)
             .orderByAsc(TMatch::getId));
-        Map<String, int[]> zoneCtx = buildAuditionZoneContext(stage, matches);
+        Map<String, StageFlowSupport.CircleQuota> zoneCtx =
+            StageFlowSupport.circleQuotaContext(stage, matches, "海选");
         Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(matches);
         String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
-        int[] qb = zoneCtx.get(zone);
+        StageFlowSupport.CircleQuota qb = zoneCtx.get(zone);
         if (qb == null) {
             return false;
         }
-        settleAuditionMatch(match, qb[0], qb[1], zoneAdvanced);
+        settleAuditionMatch(match, qb.quota(), qb.base(), zoneAdvanced);
         log.info("海选加赛[{}]全员打分完成,已自动结算", match.getId());
         // 裁判端通知已由 settleAuditionMatch → markMatchSettled 发出,这里不再重复;
         // 下面这条 tournament 事件必须保留且用 "stage" 类型——导播台按 type 区分,

@@ -225,7 +225,7 @@ import { setStageSeedOrder } from '@/api/game/stage';
 import { exportAuditionResult, getAuditionResult } from '@/api/game/stage';
 import { withdrawArenaCompetitor } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listMatchReferee } from '@/api/game/matchReferee';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
@@ -571,30 +571,29 @@ const loadCircleLabels = async () => {
     const zoneMap: Record<string, string> = {};
     const rankMap: Record<string, number> = {};
     const options: { key: string; label: string }[] = [];
-    await Promise.all(
-      zones.map(async (m: any) => {
-        const zoneKey = String(m.displayZone);
-        const refNames = namesByMatch[String(m.id)];
-        const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneKey.replace('ZONE-', '')}圈`;
-        options.push({ key: zoneKey, label });
-        try {
-          const pRes: any = await listMatchParticipant({ matchId: m.id } as any);
-          const parts: any[] = Array.isArray(pRes?.data) ? pRes.data : pRes?.data?.data || [];
-          parts.forEach((p: any) => {
-            if (p.competitorId != null) {
-              const cid = String(p.competitorId);
-              map[cid] = label;
-              zoneMap[cid] = zoneKey;
-              if (p.rankInMatch != null) {
-                rankMap[cid] = Number(p.rankInMatch);
-              }
-            }
-          });
-        } catch {
-          // 单圈加载失败不阻塞整体
+    // 参赛方按赛段一次取回(此前逐圈一次请求)
+    let partsByMatch: Record<string, any[]> = {};
+    try {
+      partsByMatch = await listParticipantsByStage(props.stageId);
+    } catch {
+      partsByMatch = {};
+    }
+    zones.forEach((m: any) => {
+      const zoneKey = String(m.displayZone);
+      const refNames = namesByMatch[String(m.id)];
+      const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneKey.replace('ZONE-', '')}圈`;
+      options.push({ key: zoneKey, label });
+      (partsByMatch[String(m.id)] || []).forEach((p: any) => {
+        if (p.competitorId != null) {
+          const cid = String(p.competitorId);
+          map[cid] = label;
+          zoneMap[cid] = zoneKey;
+          if (p.rankInMatch != null) {
+            rankMap[cid] = Number(p.rankInMatch);
+          }
         }
-      })
-    );
+      });
+    });
     options.sort((a, b) =>
       Number(String(a.key).replace('ZONE-', '')) - Number(String(b.key).replace('ZONE-', '')));
     circleLabels.value = map;

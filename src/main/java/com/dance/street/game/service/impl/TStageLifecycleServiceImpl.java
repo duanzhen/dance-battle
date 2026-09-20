@@ -58,6 +58,9 @@ import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
+import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.DownstreamRouter;
+import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageRosterService;
@@ -128,6 +131,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final StageChain stageChain;
     /** 当前上场选手标记的跨实例存储(Redis,单机降级为进程内) */
     private final MatchCurrentCompetitorStore currentCompetitorStore;
+    /** 场次状态推进唯一入口(场次 + 轮次成套写) */
+    private final MatchStateWriter matchStateWriter;
+    /** 淘汰链下游路由唯一入口(轮空胜者与正常胜者共用同一套去向逻辑) */
+    private final DownstreamRouter downstreamRouter;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -164,10 +171,18 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         } else {
             comps.sort(Comparator.comparing(c -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank()));
         }
+        // 种子顺位批量写:此前逐个 updateById(100 人 = 100 条 SQL)
+        List<Map<String, Object>> seedItems = new ArrayList<>(comps.size());
         for (int i = 0; i < comps.size(); i++) {
             TCompetitor c = comps.get(i);
             c.setSeedRank((long) (i + 1));
-            competitorMapper.updateById(c);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", c.getId());
+            item.put("seedRank", c.getSeedRank());
+            seedItems.add(item);
+        }
+        if (!seedItems.isEmpty()) {
+            competitorMapper.batchUpdateSeedRank(seedItems);
         }
 
         stage.setIsInitialized(1L);
@@ -378,6 +393,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             m.setDisplayZone(mp.getDisplayZone());
             m.setStatus(StageConstants.MATCH_PENDING);
             m.setMatchMode(matchMode);
+            m.setMatchType(StageConstants.MATCH_TYPE_NORMAL);
             matchMapper.insert(m);
             matchKeyToId.put(matchKey(mp.getRound(), mp.getMatchIndex()), m.getId());
 
@@ -610,6 +626,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         m.setDisplayCol(1L);
         m.setStatus(StageConstants.MATCH_GAMING);
         m.setMatchMode(MatchModeEnum.STANDARD.getCode());
+        m.setMatchType(StageConstants.MATCH_TYPE_NORMAL);
         matchMapper.insert(m);
 
         TMatchRound round = new TMatchRound();
@@ -859,54 +876,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     /** 轮空胜者去向:填下游场次占位;finalMatch 则标记晋级下一赛段 */
     private void resolveKnockoutByeWinner(TMatch match, Long winnerCompetitorId) {
-        Map<String, PromotionTarget> rule = RuleConfigParser.parsePromotionRule(match.getPromotionRule());
-        PromotionTarget winnerTarget = rule.get("1");
-        if (winnerTarget == null) {
-            return;
-        }
-        if (StageConstants.ACTION_FINAL_ADVANCE.equals(winnerTarget.getAction())) {
-            markCompetitorAdvance(winnerCompetitorId, match);
-        } else if (StageConstants.ACTION_ADVANCE.equals(winnerTarget.getAction())
-            && winnerTarget.getTargetMatchId() != null && winnerTarget.getTargetSlot() != null) {
-            fillDownstreamSlot(match, winnerTarget.getTargetMatchId(),
-                winnerTarget.getTargetSlot().longValue(), winnerCompetitorId);
-        }
-    }
-
-    /**
-     * 胜者填入下游场次占位:占位行已存在(旧版预建)则更新;
-     * 不存在(当前生成对阵时空槽不落 participant 行)则补插。
-     */
-    private void fillDownstreamSlot(TMatch sourceMatch, Long targetMatchId, Long targetSlot, Long winnerCompetitorId) {
-        TMatchParticipant pUpd = new TMatchParticipant();
-        pUpd.setCompetitorId(winnerCompetitorId);
-        int affected = participantMapper.update(pUpd, Wrappers.<TMatchParticipant>lambdaUpdate()
-            .eq(TMatchParticipant::getMatchId, targetMatchId)
-            .eq(TMatchParticipant::getDisplaySlotIndex, targetSlot));
-        if (affected > 0) {
-            return;
-        }
-        TMatchParticipant np = new TMatchParticipant();
-        np.setTenantId(sourceMatch.getTenantId());
-        np.setTournamentId(sourceMatch.getTournamentId());
-        np.setMatchId(targetMatchId);
-        np.setCompetitorId(winnerCompetitorId);
-        np.setDisplaySlotIndex(targetSlot);
-        np.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
-        participantMapper.insert(np);
-        log.info("胜者[{}]补插到下游场次[{}]占位(slot={})", winnerCompetitorId, targetMatchId, targetSlot);
-    }
-
-    /** 轮空胜者晋级标记:finalRank=场次位置(与正常结算一致),outcomeStatus=ADVANCE */
-    private void markCompetitorAdvance(Long competitorId, TMatch match) {
-        Long rank = match.getDisplayRow() != null ? match.getDisplayRow() + 1 : null;
-        if (rank == null) {
-            long cnt = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, match.getStageId())
-                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-            rank = cnt + 1;
-        }
-        outcomeWriter.writeResult(competitorId, OutcomeStatusEnum.ADVANCE.getCode(), rank);
+        // 与正常结算共用同一套去向逻辑(决赛标晋级 / 填下游占位并补插缺失占位行)
+        downstreamRouter.routeWinner(match, winnerCompetitorId);
     }
 
     @Override
@@ -1080,14 +1051,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             String targetStatus = singleActive
                 ? StageConstants.MATCH_PENDING
                 : StageConstants.MATCH_GAMING;
-            TMatch upd = new TMatch();
-            upd.setId(matches.get(i).getId());
-            upd.setStatus(targetStatus);
-            matchMapper.updateById(upd);
-            TMatchRound roundUpd = new TMatchRound();
-            roundUpd.setStatus(targetStatus);
-            matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
-                .eq(TMatchRound::getMatchId, matches.get(i).getId()));
+            // 场次与轮次成套推进
+            matchStateWriter.setStatus(matches.get(i).getId(), targetStatus);
         }
     }
 
@@ -1296,7 +1261,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 仅可挂入未结算的正式圈场次(加赛只允许同分选手参与,不追加新人)
         List<TMatch> candidates = matches.stream()
             .filter(m -> !StageConstants.MATCH_SETTLED.equals(m.getStatus()))
-            .filter(m -> !(StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛")))
+            .filter(m -> !settlementSupport.isTiebreaker(m))
             .toList();
         if (candidates.isEmpty()) {
             if (auditionSplit) {
@@ -1387,7 +1352,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 throw new ServiceException("目标圈场次不存在");
             }
             if (StageConstants.MATCH_SETTLED.equals(target.getStatus())
-                || (StringUtils.isNotBlank(target.getRemark()) && target.getRemark().startsWith("同分加赛"))) {
+                || settlementSupport.isTiebreaker(target)) {
                 throw new ServiceException("目标圈场次已结算或为加赛场次,无法改入");
             }
         } else {
@@ -1494,16 +1459,24 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
         for (int i = 0; i < parts.size(); i++) {
             TMatchParticipant p = parts.get(i);
-            TMatchParticipant slotUpd = new TMatchParticipant();
-            slotUpd.setId(p.getId());
-            slotUpd.setDisplaySlotIndex((long) (i + 1));
-            participantMapper.updateById(slotUpd);
+            long targetSlot = i + 1L;
+            // 只写真的变了的那几行:补签到常见的是"插到末尾",此时前面几十号人
+            // 的槽位一字未动,不该跟着写一遍(36 人圈 = 36 条无谓 UPDATE)
+            if (p.getDisplaySlotIndex() == null || p.getDisplaySlotIndex() != targetSlot) {
+                TMatchParticipant slotUpd = new TMatchParticipant();
+                slotUpd.setId(p.getId());
+                slotUpd.setDisplaySlotIndex(targetSlot);
+                participantMapper.updateById(slotUpd);
+            }
             List<TMatchRound> own = roundsByComp.getOrDefault(p.getCompetitorId(), List.of());
             if (!own.isEmpty()) {
-                TMatchRound rUpd = new TMatchRound();
-                rUpd.setId(own.get(0).getId());
-                rUpd.setRoundSequence((long) (i + 1));
-                matchRoundMapper.updateById(rUpd);
+                TMatchRound round = own.get(0);
+                if (round.getRoundSequence() == null || round.getRoundSequence() != targetSlot) {
+                    TMatchRound rUpd = new TMatchRound();
+                    rUpd.setId(round.getId());
+                    rUpd.setRoundSequence(targetSlot);
+                    matchRoundMapper.updateById(rUpd);
+                }
             }
         }
     }
@@ -1545,7 +1518,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .orderByAsc(TMatch::getId))
             .stream()
             // 同分加赛复用原圈 displayZone,不计入"圈场次"
-            .filter(m -> !(StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛")))
+            .filter(m -> !settlementSupport.isTiebreaker(m))
             .toList();
         if (plannedCircleCount(stage) <= 1) {
             return all;
@@ -1596,6 +1569,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             m.setDisplayCol(1L);
             m.setStatus(StageConstants.MATCH_PENDING);
             m.setMatchMode(matchMode);
+            m.setMatchType(StageConstants.MATCH_TYPE_NORMAL);
             matchMapper.insert(m);
             log.info("海选赛段[{}]追加空白第{}圈(matchId={})", stage.getId(), c, m.getId());
         }
@@ -1664,11 +1638,16 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 throw new ServiceException("参赛方[{}]不属于当前赛段", cid);
             }
         }
+        // 同上:抽签结果批量落库
+        List<Map<String, Object>> seedItems = new ArrayList<>(order.size());
         for (int i = 0; i < order.size(); i++) {
-            TCompetitor upd = new TCompetitor();
-            upd.setId(order.get(i));
-            upd.setSeedRank((long) (i + 1));
-            competitorMapper.updateById(upd);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", order.get(i));
+            item.put("seedRank", (long) (i + 1));
+            seedItems.add(item);
+        }
+        if (!seedItems.isEmpty()) {
+            competitorMapper.batchUpdateSeedRank(seedItems);
         }
         log.info("赛段[{}]按外部抽签结果设定{}个参赛方种子顺序", stage.getId(), order.size());
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), null, "stage");
@@ -2090,7 +2069,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         List<TMatch> mainMatches = new ArrayList<>();
         List<TMatch> tbMatches = new ArrayList<>();
         for (TMatch m : matches) {
-            if (StringUtils.isNotBlank(m.getRemark()) && m.getRemark().startsWith("同分加赛")) {
+            if (settlementSupport.isTiebreaker(m)) {
                 tbMatches.add(m);
             } else {
                 mainMatches.add(m);
@@ -2396,6 +2375,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         m.setDisplayZone("CENTER");
         m.setStatus(StageConstants.MATCH_PENDING);
         m.setMatchMode(MatchModeEnum.STANDARD.getCode());
+        m.setMatchType(StageConstants.MATCH_TYPE_NORMAL);
         matchMapper.insert(m);
 
         TMatchRound round = new TMatchRound();

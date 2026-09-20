@@ -280,8 +280,9 @@ public class TTournamentServiceImpl implements ITTournamentService {
             sb.setStatus("DRAFT");
             sb.setVisualColIndex((long) i);
             sb.setRuleConfig(buildRuleConfig(d, knockoutPairingMode(defs, i)));
+            // 插入意图:本赛段挂在上一个赛段之后(不传前后指针)
             if (prevId != null) {
-                sb.setPrevStageId(prevId);
+                sb.setAfterStageId(prevId);
             }
             TStageVo created = stageService.insertByBo(sb);
             stages.add(created);

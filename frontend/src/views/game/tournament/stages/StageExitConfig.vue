@@ -157,7 +157,16 @@ const circleCount = computed(() => {
     return 1;
   }
 });
-const zoneOptions = computed(() => Array.from({ length: circleCount.value }, (_, i) => 'ZONE-' + (i + 1)));
+/**
+ * 圈选项:单圈海选不列「第N圈」。
+ *
+ * 单圈时圈场次的分区名是固定的 CENTER(多圈才是 ZONE-1..n),选「第1圈」会写成
+ * ZONE-1 这种对不上的圈过滤,导致这条出口一个候选人都取不到(表现为选手进不了下一个赛段)。
+ * 单圈本来也只有一个圈,直接走「全部 1 圈」即可。
+ */
+const zoneOptions = computed(() =>
+  circleCount.value > 1 ? Array.from({ length: circleCount.value }, (_, i) => 'ZONE-' + (i + 1)) : []
+);
 
 /** 出口写在"目标赛段"上:来源侧始终可配置,目标侧限制在 targetOptions(规划中未初始化) */
 const editable = computed(() => {

@@ -40,6 +40,12 @@ public class TMatchParticipantBo extends BaseEntity {
     private Long matchId;
 
     /**
+     * 按赛段批量查询(仅查询条件使用,新增/修改时忽略):
+     * 返回该赛段全部场次的参赛方,供对战树/大屏一次取回,避免前端按场次逐个请求。
+     */
+    private Long stageId;
+
+    /**
      * 
      */
     @NotNull(message = "不能为空", groups = { AddGroup.class, EditGroup.class })

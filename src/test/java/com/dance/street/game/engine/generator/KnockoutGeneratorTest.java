@@ -19,11 +19,18 @@ class KnockoutGeneratorTest {
     private final KnockoutGenerator generator = new KnockoutGenerator();
 
     @Test
-    void seedPositions_standard8() {
-        // n=8 → [1,8,4,5,2,7,3,6]
-        assertArrayEquals(new int[]{1, 8, 4, 5, 2, 7, 3, 6}, KnockoutGenerator.seedPositions(8));
-        assertArrayEquals(new int[]{1, 4, 2, 3}, KnockoutGenerator.seedPositions(4));
-        assertArrayEquals(new int[]{1, 2}, KnockoutGenerator.seedPositions(2));
+    void seedLayout_smallAndNonPowerSizes() {
+        // 小规模:1/2 人直接给表;3 人按 4 人规模摆位(种子 4 缺失 → 调用方按轮空处理)
+        assertArrayEquals(new int[]{1}, KnockoutGenerator.seedLayout(1));
+        assertArrayEquals(new int[]{1, 2}, KnockoutGenerator.seedLayout(2));
+        assertArrayEquals(new int[]{1, 4, 3, 2}, KnockoutGenerator.seedLayout(3));
+        assertArrayEquals(new int[]{1, 4, 3, 2}, KnockoutGenerator.seedLayout(4));
+        // 非 2 的幂:统一按向上取整的规模摆位(不再退回另一套"递归种子位"口径)
+        assertArrayEquals(new int[]{1, 8, 5, 4, 3, 6, 7, 2}, KnockoutGenerator.seedLayout(6));
+        assertArrayEquals(
+            new int[]{1, 16, 8, 9, 12, 5, 13, 4, 3, 14, 6, 11, 10, 7, 15, 2},
+            KnockoutGenerator.seedLayout(12));
+        assertArrayEquals(new int[0], KnockoutGenerator.seedLayout(0));
     }
 
     @Test

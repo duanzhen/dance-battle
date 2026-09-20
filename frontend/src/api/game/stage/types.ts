@@ -109,6 +109,12 @@ export interface StageForm extends BaseEntity {
   nextStageId?: string | number;
 
   /**
+   * 新增赛段的插入位置:插在该赛段之后,不传 = 插到链头。
+   * 链顺序由后端按意图维护,不需要前端自己算前后指针。
+   */
+  afterStageId?: string | number;
+
+  /**
    * 父ID (用于同分加赛)
    */
   parentStageId?: string | number;
@@ -244,4 +250,23 @@ export interface StageQuery extends PageQuery {
    * 日期范围参数
    */
   params?: any;
+}
+
+/**
+ * 赛段配置表单(只含配置字段)
+ *
+ * 刻意没有 prevStageId / nextStageId:配置保存走 `/game/stage/{id}/config`,
+ * 后端不会、也无法从这条入口改赛段链。改链用 `moveStageAfter`(意图:移到哪个赛段之后)。
+ */
+export interface StageConfigForm {
+  name?: string;
+  stageMode?: string;
+  members?: number;
+  visualColIndex?: number;
+  ruleConfig?: string;
+  status?: string;
+  teamCountStart?: number;
+  teamCountEnd?: number;
+  visualConfig?: string;
+  remark?: string;
 }

@@ -276,7 +276,7 @@ import { checkInPlayer, editCheckIn, cancelCheckIn, listPlayer } from '@/api/gam
 import { getStage } from '@/api/game/stage';
 import { ensureAuditionCircles } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listMatchReferee } from '@/api/game/matchReferee';
 import PortraitMatting from './PortraitMatting.vue';
 import GameDialog from '@/components/GameDialog/index.vue';
@@ -391,6 +391,13 @@ const loadCircleInfo = async () => {
     const list: typeof circleList.value = [];
     const compMatchMap: Record<string, string | number> = {};
     let zoneCursor = 0;
+    // 参赛方按赛段一次取回:此前是 for + await 逐圈串行请求
+    let partsByMatch: Record<string, any[]> = {};
+    try {
+      partsByMatch = await listParticipantsByStage(props.stageId);
+    } catch {
+      partsByMatch = {};
+    }
     for (let i = 0; i < ordered.length; i++) {
       const m = ordered[i];
       // 只展示海选分圈场次(单场 CENTER 非分圈)
@@ -399,8 +406,7 @@ const loadCircleInfo = async () => {
       }
       const zoneNo = String(m.displayZone).replace('ZONE-', '');
       const refNames = refereeNamesByMatch[String(m.id)];
-      const parts = await listMatchParticipant({ matchId: m.id } as any);
-      const participants = (parts.data || (parts as any).data || []) as any[];
+      const participants = partsByMatch[String(m.id)] || [];
       participants.forEach((p: any) => {
         if (p.competitorId != null) {
           compMatchMap[String(p.competitorId)] = m.id;

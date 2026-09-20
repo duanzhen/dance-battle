@@ -29,17 +29,26 @@ public class TournamentEventController {
     private final ITRefereeService refereeService;
 
     @GetMapping(value = "/tournament/event/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter event(@RequestParam("tournamentId") Long tournamentId,
+    public SseEmitter event(@RequestParam(value = "tournamentId", required = false) Long tournamentId,
                             @RequestParam(value = "authKey", required = false) String authKey) {
         if (StringUtils.isNotBlank(authKey)) {
             TRefereeVo referee = refereeService.findByAuthKey(authKey);
             if (referee == null) {
                 throw new ServiceException("裁判认证失败:authKey 无效");
             }
-            if (referee.getTournamentId() != null && !referee.getTournamentId().equals(tournamentId)) {
+            // 赛事ID优先取裁判自身绑定:裁判页在"赛段还没开始"时就建立连接,
+            // 那时前端还拿不到 tournamentId(要等 my-match 成功),不能因此跳过连接。
+            Long tid = referee.getTournamentId() != null ? referee.getTournamentId() : tournamentId;
+            if (tid != null && tournamentId != null && !tid.equals(tournamentId)) {
                 throw new ServiceException("裁判不属于该赛事");
             }
-            return tournamentEventSseEmitterManager.connectReferee(tournamentId, referee.getId());
+            if (tid == null) {
+                throw new ServiceException("无法确定赛事:裁判未绑定赛事且未提供 tournamentId");
+            }
+            return tournamentEventSseEmitterManager.connectReferee(tid, referee.getId());
+        }
+        if (tournamentId == null) {
+            throw new ServiceException("请提供 tournamentId,或携带裁判 authKey");
         }
         return tournamentEventSseEmitterManager.connect(tournamentId);
     }

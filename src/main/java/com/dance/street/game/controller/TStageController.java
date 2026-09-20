@@ -25,6 +25,8 @@ import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageConfigBo;
+import com.dance.street.game.domain.bo.StageLinkBo;
 import com.dance.street.game.domain.bo.AssignCircleBo;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
@@ -95,6 +97,10 @@ public class TStageController extends BaseController {
 
     /**
      * 修改赛段流程
+     *
+     * <p>兼容入口:只改配置,不动赛段链(客户端回传的 prev/next 会被忽略)。
+     * 配置保存请优先用 {@code PUT /game/stage/{id}/config};调整链顺序用
+     * {@code PUT /game/stage/{id}/link}。</p>
      */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "赛段流程", businessType = BusinessType.UPDATE)
@@ -104,6 +110,39 @@ public class TStageController extends BaseController {
         TStageVo updated = tStageService.updateByBo(bo);
         syncAuditionCircles(updated);
         return R.ok(updated);
+    }
+
+    /**
+     * 修改赛段配置(配置面板入口):只写配置列,不动赛段链、不触发下游名单对账。
+     *
+     * <p>请求体里没有 prev/next 字段——「改配置」和「改链」从入口就分开。</p>
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "赛段配置", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PutMapping("/{id}/config")
+    public R<TStageVo> editConfig(@NotNull(message = "主键不能为空") @PathVariable Long id,
+                                  @RequestBody TStageConfigBo bo) {
+        bo.setId(id);
+        TStageVo updated = tStageService.updateConfig(bo);
+        syncAuditionCircles(updated);
+        return R.ok(updated);
+    }
+
+    /**
+     * 调整赛段链顺序:把该赛段移动到 {@code afterStageId} 之后(不传 = 移到链头)。
+     *
+     * <p>传的是意图而不是前后指针:客户端手里的 prev/next 只是展示副本,
+     * 由后端按现有链推导后统一写入,避免过期副本把链写歪。</p>
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "调整赛段链顺序", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PutMapping("/{id}/link")
+    public R<Void> link(@NotNull(message = "主键不能为空") @PathVariable Long id,
+                        @RequestBody StageLinkBo bo) {
+        tStageService.moveStageAfter(id, bo.getAfterStageId());
+        return R.ok();
     }
 
     /**

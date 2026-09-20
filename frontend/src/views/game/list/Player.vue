@@ -324,7 +324,7 @@ import { CompetitorVO } from '@/api/game/competitor/types';
 import { getFirstStage, getStage } from '@/api/game/stage';
 import { ensureAuditionCircles } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant } from '@/api/game/matchParticipant';
+import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listMatchReferee } from '@/api/game/matchReferee';
 import PlayerForm from './PlayerForm.vue';
 import CheckInDialog from './CheckInDialog.vue';
@@ -506,24 +506,23 @@ const loadCircleLabels = async () => {
       }
     });
     const map: Record<string, string> = {};
-    await Promise.all(
-      zones.map(async (m) => {
-        const zoneNo = String(m.displayZone).replace('ZONE-', '');
-        const refNames = namesByMatch[String(m.id)];
-        const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneNo}圈`;
-        try {
-          const pRes: any = await listMatchParticipant({ matchId: m.id } as any);
-          const parts: any[] = Array.isArray(pRes?.data) ? pRes.data : pRes?.data?.data || [];
-          parts.forEach((p) => {
-            if (p.competitorId != null) {
-              map[String(p.competitorId)] = label;
-            }
-          });
-        } catch {
-          // 单圈加载失败不阻塞整体
+    // 参赛方按赛段一次取回再分组(此前逐圈一次请求)
+    let partsByMatch: Record<string, any[]> = {};
+    try {
+      partsByMatch = await listParticipantsByStage(firstStageId.value);
+    } catch {
+      partsByMatch = {};
+    }
+    zones.forEach((m) => {
+      const zoneNo = String(m.displayZone).replace('ZONE-', '');
+      const refNames = namesByMatch[String(m.id)];
+      const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneNo}圈`;
+      (partsByMatch[String(m.id)] || []).forEach((p) => {
+        if (p.competitorId != null) {
+          map[String(p.competitorId)] = label;
         }
-      })
-    );
+      });
+    });
     circleLabels.value = map;
   } catch (error) {
     console.warn('加载圈标签失败:', error);

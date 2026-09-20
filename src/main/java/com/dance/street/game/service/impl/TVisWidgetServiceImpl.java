@@ -209,21 +209,28 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
             return;
         }
         withSceneLock(sceneId, () -> {
-            boolean hasLocked = widgetIds.stream()
-                .map(baseMapper::selectById)
-                .filter(Objects::nonNull)
-                .anyMatch(this::isLocked);
+            // 一次批量取回(此前先逐个 selectById 判锁定,再逐个 selectById + updateById 改 zIndex)
+            Map<Long, TVisWidget> byId = baseMapper.selectByIds(widgetIds.stream().distinct().toList())
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(TVisWidget::getId, w -> w, (a, b) -> a));
+            boolean hasLocked = byId.values().stream().anyMatch(this::isLocked);
             if (hasLocked) {
                 throw new ServiceException("存在已锁定的控件,请先解锁后再调整图层顺序");
             }
             int n = widgetIds.size();
+            List<Map<String, Object>> items = new java.util.ArrayList<>();
             for (int i = 0; i < n; i++) {
                 Long id = widgetIds.get(i);
-                TVisWidget w = baseMapper.selectById(id);
+                TVisWidget w = byId.get(id);
                 if (w != null && Objects.equals(w.getSceneId(), sceneId)) {
-                    w.setZIndex((long) (n - i)); // 前 = z 大 = 上层
-                    baseMapper.updateById(w);
+                    Map<String, Object> item = new java.util.HashMap<>();
+                    item.put("id", id);
+                    item.put("zIndex", (long) (n - i)); // 前 = z 大 = 上层
+                    items.add(item);
                 }
+            }
+            if (!items.isEmpty()) {
+                baseMapper.batchUpdateZIndex(items);
             }
         });
     }

@@ -38,6 +38,11 @@ import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 手机导播台接口：全部走赛事 auth_key 鉴权(DirectorAuthInterceptor),与管理员接口隔离。
@@ -117,34 +122,69 @@ public class DirectorController {
      * 导播端据此前置提示并在管理端确认前禁用「开始赛段」。
      */
     private void enrichAwaitingAdvancement(List<TStageVo> stages) {
-        if (stages == null) {
+        if (stages == null || stages.isEmpty()) {
             return;
         }
-        for (TStageVo stage : stages) {
-            TStage current = stageMapper.selectById(stage.getId());
-            if (current == null) {
-                continue;
+        // 批量口径:此前每个赛段 5 条 SQL(查赛段 + 查前驱 + 3 次 count),
+        // 导播台首页每次刷新都跑一遍,16 段赛事就是 80 条。现在整页共 3 条。
+        Set<Long> tournamentIds = stages.stream()
+            .map(TStageVo::getTournamentId).filter(Objects::nonNull).collect(Collectors.toSet());
+        if (tournamentIds.isEmpty()) {
+            return;
+        }
+        List<TStage> allStages = stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
+            .in(TStage::getTournamentId, tournamentIds));
+        Map<Long, TStage> stageById = allStages.stream()
+            .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
+        // 前驱按 next 链一次性推导(不再逐段 prevOf)
+        Map<Long, Long> prevByStage = new HashMap<>();
+        for (Long tid : tournamentIds) {
+            prevByStage.putAll(stageChain.prevIdsFromChain(tid));
+        }
+        // 参赛方统计:一次取回相关赛段的行,在内存里数
+        Set<Long> involved = new HashSet<>();
+        for (TStageVo s : stages) {
+            if (s.getId() != null) {
+                involved.add(s.getId());
             }
-            TStage prev = stageChain.prevOf(current);
+            Long prevId = prevByStage.get(s.getId());
+            if (prevId != null) {
+                involved.add(prevId);
+            }
+        }
+        // stageId -> [已接收晋级者数, 晋级数, 待定数]
+        Map<Long, long[]> stats = new HashMap<>();
+        if (!involved.isEmpty()) {
+            List<TCompetitor> rows = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .in(TCompetitor::getStageId, involved)
+                .select(TCompetitor::getStageId, TCompetitor::getOutcomeStatus,
+                    TCompetitor::getSourceCompetitorId));
+            for (TCompetitor c : rows) {
+                long[] st = stats.computeIfAbsent(c.getStageId(), k -> new long[3]);
+                if (c.getSourceCompetitorId() != null) {
+                    st[0]++;
+                }
+                if (OutcomeStatusEnum.ADVANCE.getCode().equals(c.getOutcomeStatus())) {
+                    st[1]++;
+                } else if (OutcomeStatusEnum.PENDING.getCode().equals(c.getOutcomeStatus())) {
+                    st[2]++;
+                }
+            }
+        }
+        for (TStageVo stage : stages) {
+            Long prevId = prevByStage.get(stage.getId());
             // prev 列只是展示字段:这里统一按 next 链推导覆盖,
             // 避免列与链不同步时导播台把「上一赛段」显示成「未知」
-            stage.setPrevStageId(prev == null ? null : prev.getId());
+            stage.setPrevStageId(prevId);
+            TStage prev = prevId == null ? null : stageById.get(prevId);
             if (prev == null || !StageConstants.STAGE_SETTLED.equals(prev.getStatus())) {
                 continue;
             }
-            long confirmed = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, stage.getId())
-                .isNotNull(TCompetitor::getSourceCompetitorId));
-            if (confirmed > 0) {
+            if (stats.getOrDefault(stage.getId(), new long[3])[0] > 0) {
                 continue;
             }
-            long srcAdvance = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, prev.getId())
-                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-            long srcPending = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, prev.getId())
-                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
-            stage.setAwaitingAdvancement(srcAdvance > 0 || srcPending > 0);
+            long[] src = stats.getOrDefault(prevId, new long[3]);
+            stage.setAwaitingAdvancement(src[1] > 0 || src[2] > 0);
         }
     }
 

@@ -118,17 +118,28 @@ public class KnockoutGenerator implements StageGenerator {
     static final int[] BASE_4 = {1, 4, 3, 2};
 
     /**
-     * SEED 模式标准摆位(通用生成器,强种子分散、汇聚对称):
-     * 以 4 人基数逐层翻倍,每对 (x,y)(x+y=n+1) 扩展为 {x,2n+1-x}、{y,2n+1-y}(x 的子对阵在前);
-     * 新列内前半段的子对阵按 x/y 原样朝上,后半段按补数朝上;整表前一半=左列、后一半=右列。
-     * 返回按 1..n 种子号排列的数组,相邻两两即首轮对阵。
+     * SEED 模式标准摆位(全项目唯一口径,生成对阵/中间态预排/大屏三处共用)。
+     *
+     * <p>以 4 人基数逐层翻倍,每对 (x,y)(x+y=n+1) 扩展为 {x,2n+1-x}、{y,2n+1-y}
+     * (x 的子对阵在前);新列内前半段的子对阵按 x/y 原样朝上,后半段按补数朝上;
+     * 整表前一半=左列、后一半=右列。返回按 1..n 种子号排列的数组,相邻两两即首轮对阵。</p>
+     *
+     * <p><b>非 2 的幂</b>按向上取整的规模摆位(如 6 人 → 8 人摆位表),缺号由调用方
+     * 按轮空处理——此前这里另有一套"递归种子位"口径,同一个 n 会得到两种摆位,
+     * 已删除。</p>
      */
     public static int[] seedLayout(int n) {
-        if (n <= 4) {
-            return n == 4 ? BASE_4.clone() : seedPositions(n);
+        if (n <= 1) {
+            return n == 1 ? new int[]{1} : new int[0];
+        }
+        if (n == 2) {
+            return new int[]{1, 2};
+        }
+        if (n == 4) {
+            return BASE_4.clone();
         }
         if ((n & (n - 1)) != 0) {
-            return seedPositions(n); // 非 2 的幂:回退递归种子位
+            return seedLayout(nextPowerOfTwo(n));
         }
         int[] prev = seedLayout(n / 2);
         int[] out = new int[n];
@@ -160,23 +171,6 @@ public class KnockoutGenerator implements StageGenerator {
             }
         }
         return out;
-    }
-
-    /**
-     * 标准种子位序列(n 为 2 的幂)。n=8 → [1,8,4,5,2,7,3,6],
-     * 相邻两两配对即首轮对阵:(1,8),(4,5),(2,7),(3,6)。
-     */
-    static int[] seedPositions(int n) {
-        if (n == 1) {
-            return new int[]{1};
-        }
-        int[] prev = seedPositions(n / 2);
-        int[] res = new int[n];
-        for (int i = 0; i < prev.length; i++) {
-            res[2 * i] = prev[i];
-            res[2 * i + 1] = n + 1 - prev[i];
-        }
-        return res;
     }
 
     static int nextPowerOfTwo(int v) {

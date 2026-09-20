@@ -31,6 +31,16 @@ public interface ITStageRosterService {
     /** 目标赛段名单详情(唯一:一赛段一份名单) */
     List<TStageRosterVo> listByTarget(Long targetStageId);
 
+    /**
+     * 批量取多个目标赛段的名单(赛段列表/导播台列表用)。
+     *
+     * <p>逐个 {@link #listByTarget} 会让"每赛段一次名单查询 + 每来源组一次来源赛段查询"
+     * 随赛段数放大成 O(赛段×组);批量口径下整页只需 3 条 SQL。</p>
+     *
+     * @return targetStageId -&gt; 该赛段的名单(与 listByTarget 同结构,通常只有一个元素)
+     */
+    Map<Long, List<TStageRosterVo>> listByTargets(Collection<Long> targetStageIds);
+
     /** 出口视角:全赛段扫描,返回引用某来源赛段的名单 */
     List<TStageRosterVo> listBySource(Long sourceStageId);
 

@@ -73,10 +73,20 @@ public class ArenaQueueSupport {
             .eq(TMatch::getStageId, stageId)
             .eq(TMatch::getStatus, StageConstants.MATCH_SETTLED)
             .orderByAsc(TMatch::getId));
+        // 一次性取回全部已结算对决的参赛方:此前每场查一次,
+        // 50 场擂台就是每次总览 50 条 SQL(总览/结算/弃权补位都在调本方法)
+        Map<Long, List<TMatchParticipant>> partsByMatch = new HashMap<>();
+        if (!settled.isEmpty()) {
+            List<Long> settledIds = settled.stream().map(TMatch::getId).toList();
+            participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .in(TMatchParticipant::getMatchId, settledIds)
+                    .orderByAsc(TMatchParticipant::getDisplaySlotIndex))
+                .forEach(p -> partsByMatch
+                    .computeIfAbsent(p.getMatchId(), k -> new ArrayList<>())
+                    .add(p));
+        }
         for (TMatch m : settled) {
-            List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                .eq(TMatchParticipant::getMatchId, m.getId())
-                .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+            List<TMatchParticipant> parts = partsByMatch.getOrDefault(m.getId(), List.of());
             // 平局:擂主(slot1)与挑战者(slot2)均移到队尾,其余保持相对顺序
             boolean isDraw = parts.stream().anyMatch(p -> p.getCompetitorId() != null
                 && MatchOutcomeEnum.DRAW.getCode().equals(p.getOutcomeStatus()));

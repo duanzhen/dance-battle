@@ -140,6 +140,7 @@ DB_URL=jdbc:sqlite:./data/game.db java -jar target/game-0.0.1-SNAPSHOT.jar
 - SQLite 模式无需 `MYSQL_*` / `DB_USERNAME` / `DB_PASSWORD`；Redis 默认仍会尝试连接，不需要时可加 `REDIS_ENABLED=false`（或直接用 `DEPLOY_MODE=standalone`）。
 - 也可以什么都不配置（`DEPLOY_MODE=auto`）：MySQL 未配置或连接失败时，应用会探测并自动回退到 SQLite（默认 `jdbc:sqlite:./data/game.db`，可用 `SQLITE_FALLBACK_URL` 修改；`DB_FALLBACK_SQLITE=false` 关闭回退）。
 - SQLite 连接会自动追加 `date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS`（与建表脚本中的 TEXT 日期列一致），避免时间字段出现 `Error parsing time stamp`；手动设置 `date_class` 时以你设置的值优先。
+- SQLite 连接还会自动追加并发护栏参数 `journal_mode=WAL&busy_timeout=10000&transaction_mode=IMMEDIATE&synchronous=NORMAL`：SQLite 是单写者库，而应用是多连接（Hikari）且大量事务「先读后写」——默认配置（delete journal + 3s 忙等 + 延迟事务）下，一个事务读完再想写时若别的连接正持锁，SQLite 会**立即**抛 `SQLITE_BUSY: database is locked`（忙等参数不生效）；WAL 让读者不挡写者，`IMMEDIATE` 让事务一开始就取写锁，从而转为忙等重试。其中某项你显式设置了就以你的为准（例如嫌等待太长可自行调大 `busy_timeout`）。
 
 > 如果你在旧版本下已经生成过 `data/game.db`（时间列被写成了毫秒数字串），修复参数只影响新写入。最简单的处理是删除 `data/game.db` 后重启让应用重建（演示数据会丢失），或按
 > `UPDATE 表名 SET create_time = datetime(create_time / 1000, 'unixepoch', 'localtime') WHERE create_time GLOB '[0-9]*';`
@@ -197,11 +198,11 @@ docker compose -f docker/docker-compose.standalone.yml up -d --build
 | --- | --- | --- |
 | `DEPLOY_MODE` | Jar `auto` / native `standalone` | 部署模式：`auto` 探测失败自动降级；`standalone` 强制 SQLite + 本地 SSE（跳过所有探测）；`distributed` 强制 MySQL + Redis，连不上直接启动失败 |
 | `DB_TYPE` | `auto` | 数据源模式（优先级高于 `DEPLOY_MODE`）：`sqlite` 直连本地文件库并跳过 MySQL 探测；`mysql` 强制 MySQL 并禁用 SQLite 回退 |
-| `DB_URL` | 空（使用 MySQL 连接） | 数据源完整 JDBC URL；设为 `jdbc:sqlite:...` 即切换为 SQLite（自动补齐时间参数） |
+| `DB_URL` | 空（使用 MySQL 连接） | 数据源完整 JDBC URL；设为 `jdbc:sqlite:...` 即切换为 SQLite（自动补齐日期与并发护栏参数） |
 | `DB_USERNAME` | 空 | 数据库用户名（覆盖 `MYSQL_USER`） |
 | `DB_PASSWORD` | 空 | 数据库密码（覆盖 `MYSQL_PASSWORD`） |
 | `DB_FALLBACK_SQLITE` | `true` | `auto` 模式下 MySQL 未配置/连接失败时是否自动回退 SQLite（`false` 关闭；显式 `DB_TYPE=mysql` / `DEPLOY_MODE=distributed` 时本开关不再生效） |
-| `SQLITE_FALLBACK_URL` | `jdbc:sqlite:./data/game.db`（Docker 镜像内默认为 `jdbc:sqlite:/data/db/game.db`） | 显式 SQLite / 自动回退时使用的 SQLite 连接（自动补齐时间参数；`DB_URL` 本身是 SQLite 时以 `DB_URL` 为准） |
+| `SQLITE_FALLBACK_URL` | `jdbc:sqlite:./data/game.db`（Docker 镜像内默认为 `jdbc:sqlite:/data/db/game.db`） | 显式 SQLite / 自动回退时使用的 SQLite 连接（自动补齐日期与并发护栏参数，见「方式三」；`DB_URL` 本身是 SQLite 时以 `DB_URL` 为准） |
 | `MYSQL_HOST` | `mysql` | MySQL 地址 |
 | `MYSQL_PORT` | `3306` | MySQL 端口 |
 | `MYSQL_DATABASE` | `game_db` | 数据库名 |

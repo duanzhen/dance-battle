@@ -254,7 +254,7 @@ const loadData = async () => {
     const order: string[] = [];
     const grouped = new Map<string, any[]>();
     withParts.forEach((m: any) => {
-      const zone = m.displayZone || 'CENTER';
+      const zone = m.displayZone;
       if (!grouped.has(zone)) {
         grouped.set(zone, []);
         order.push(zone);

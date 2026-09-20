@@ -771,7 +771,7 @@ const semi = computed(() => {
   };
   if (matches.value.length >= 2) {
     const semis = matches.value
-      .filter((m: any) => m.name !== '季军赛' && String(m.displayZone) !== 'CENTER')
+      .filter((m: any) => m.name !== '季军赛')
       .slice()
       .sort((a: any, b: any) => (a.displayRow ?? 0) - (b.displayRow ?? 0));
     if (semis.length >= 2) {
@@ -779,7 +779,7 @@ const semi = computed(() => {
       out.right = build(semis[1]);
     }
     // 季军赛:底部中间框展示对阵与胜者
-    const third = matches.value.find((m: any) => m.name === '季军赛' || String(m.displayZone) === 'CENTER') || null;
+    const third = matches.value.find((m: any) => m.name === '季军赛') || null;
     if (third) {
       const ss = (participantsByMatch.value[third.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
       const winner = ss.find((p: any) => isWinner(p)) || null;
@@ -817,7 +817,7 @@ const thirdPlaceText = computed(() => {
 });
 
 const leftSlots = computed(() => bracketSlots.value.filter((s) => s.zone === 'LEFT').sort((a, b) => a.order - b.order));
-const rightSlots = computed(() => bracketSlots.value.filter((s) => s.zone === 'RIGHT' || s.zone === 'CENTER').sort((a, b) => a.order - b.order));
+const rightSlots = computed(() => bracketSlots.value.filter((s) => s.zone === 'RIGHT').sort((a, b) => a.order - b.order));
 
 onMounted(() => {
   loadData();

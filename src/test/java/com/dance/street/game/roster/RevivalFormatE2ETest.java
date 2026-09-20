@@ -9,11 +9,13 @@ import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageConfigBo;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.vo.RosterCandidatesVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
@@ -380,6 +382,126 @@ class RevivalFormatE2ETest {
         assertEquals(16, rosterService.candidates(round32RosterId).getGroups().stream()
             .filter(g -> audition.getId().equals(g.getSourceStageId()))
             .mapToLong(g -> g.getCompetitors().size()).sum());
+    }
+
+    /**
+     * 级联加赛必须守住本圈剩余名额:二海先决出 1 人、剩 2 人再进三海时,三海不能因为
+     * "二海晋级者被重复算进名额"而判成名额已满(否则本圈少一个晋级者,下游少一个人)。
+     *
+     * <p>回归:加赛结算会把结果同步回该选手的原始圈行,晋级人数统计若按"行"计数,
+     * 同一名晋级者会被数两次;这里按"人"去重后才与名额对得上。</p>
+     */
+    @Test
+    void cascadeTiebreakerKeepsRemainingQuota() {
+        TTournament tournament = new TTournament();
+        tournament.setName("级联加赛名额");
+        tournamentMapper.insert(tournament);
+        Long tid = tournament.getId();
+        TReferee judge = insertReferee(tid, "圈1裁判");
+
+        // 单圈 6 人取 3
+        TStageVo audition = createStage(tid, "海选", "AUDITION", 0L, 3L, null,
+            "{\"mode\":\"AUDITION\",\"circles\":1,\"advanceCount\":3,\"maxScore\":100,"
+                + "\"circleAdvanceCounts\":[3],\"circleRefereeIds\":[[" + judge.getId() + "]]}");
+        lifecycleService.ensureAuditionCircles(audition.getId());
+        List<TMatch> circles = auditionCircleMatches(audition.getId());
+        assertEquals(1, circles.size());
+        for (int i = 1; i <= 6; i++) {
+            checkInByNumber(tid, audition.getId(), circles, "选手" + i, i, i);
+        }
+        lifecycleService.startStage(audition.getId());
+
+        // 圈内:A=10、B/C/D=8 并列横跨晋级线、E/F=1 → A 晋级,三人进二海
+        BigDecimal[] circleScores = {new BigDecimal("10"), new BigDecimal("8"), new BigDecimal("8"),
+            new BigDecimal("8"), new BigDecimal("1"), new BigDecimal("1")};
+        scoreMatchByOrder(circles.get(0), judge.getId(), i -> circleScores[i]);
+        lifecycleService.completeStage(audition.getId());
+        List<TMatch> tiebreaks = tiebreakerMatches(audition.getId());
+        assertEquals(1, tiebreaks.size(), "晋级线并列应开二海");
+        assertEquals(1, countOutcome(audition.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
+            "明确晋级者先落库");
+
+        // 二海:B 第一直接晋级,C/D 再次并列 → 三海
+        BigDecimal[] tiebreakScores = {new BigDecimal("8"), new BigDecimal("7"), new BigDecimal("7")};
+        scoreMatchByOrder(tiebreaks.get(0), judge.getId(), i -> tiebreakScores[i]);
+        List<TMatch> chain = tiebreakerMatches(audition.getId());
+        assertEquals(2, chain.size(), "二海再次并列应开三海");
+
+        // 三海分出胜负:本圈第 3 个名额应落在三海胜者身上
+        scoreMatchByOrder(chain.get(1), judge.getId(), i -> BigDecimal.valueOf(9 - i));
+        lifecycleService.completeStage(audition.getId());
+
+        assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(audition.getId()).getStatus());
+        assertEquals(3, countOutcome(audition.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
+            "本圈 3 个名额必须落满(A + 二海胜者 + 三海胜者)");
+    }
+
+    /**
+     * 单圈加圈:单圈只是"只有一个圈",与多圈共用同一套圈编号与圈集合。
+     *
+     * <p>回归:单圈场次曾单独命名为 CENTER,而多圈口径的"圈集合"只认 ZONE-* 场次;
+     * 于是加第 2 圈时原圈掉出圈集合、补圈又从第 1 个补起,凭空多出一个空的 ZONE-1——
+     * 真正新加的 ZONE-2 拿到 0 个晋级名额(该圈全员淘汰),每圈裁判绑定还会被清空。</p>
+     */
+    @Test
+    void growingSingleCircleToTwoKeepsCirclesQuotaAndReferees() {
+        TTournament tournament = new TTournament();
+        tournament.setName("单圈加圈");
+        tournamentMapper.insert(tournament);
+        Long tid = tournament.getId();
+        TReferee zone1Judge = insertReferee(tid, "圈1裁判");
+        TReferee zone2Judge = insertReferee(tid, "圈2裁判");
+
+        // 1) 先按单圈配置建段(前端"新增第 1 圈":circles=1、该圈 2 个名额、1 名裁判)
+        TStageVo audition = createStage(tid, "海选", "AUDITION", 0L, 4L, null,
+            "{\"mode\":\"AUDITION\",\"circles\":1,\"advanceCount\":4,\"maxScore\":100,"
+                + "\"circleAdvanceCounts\":[2],\"circleRefereeIds\":[[\"" + zone1Judge.getId() + "\"]]}");
+        lifecycleService.ensureAuditionCircles(audition.getId());
+        assertEquals(List.of("ZONE-1"), circleZonesOf(audition.getId()),
+            "单圈就是第 1 圈,ZONE-1");
+
+        // 2) 再加第 2 圈(前端 confirmAddCircle:circles=2、每圈 2 个名额、每圈一名裁判)
+        TStageConfigBo cfg = new TStageConfigBo();
+        cfg.setId(audition.getId());
+        cfg.setRuleConfig("{\"mode\":\"AUDITION\",\"circles\":2,\"advanceCount\":4,\"maxScore\":100,"
+            + "\"circleAdvanceCounts\":[2,2],\"circleRefereeIds\":[[\"" + zone1Judge.getId() + "\"],[\""
+            + zone2Judge.getId() + "\"]]}");
+        stageService.updateConfig(cfg);
+        lifecycleService.ensureAuditionCircles(audition.getId());
+
+        assertEquals(List.of("ZONE-1", "ZONE-2"), circleZonesOf(audition.getId()),
+            "加圈后应恰好是两个圈,不能出现幻影圈");
+        List<TMatch> circles = circleOnlyMatches(audition.getId());
+        assertEquals(2, circles.size());
+        assertEquals(List.of(zone1Judge.getId()), circleRefereeIds(circles.get(0).getId()),
+            "第 1 圈裁判按配置绑定");
+        assertEquals(List.of(zone2Judge.getId()), circleRefereeIds(circles.get(1).getId()),
+            "第 2 圈裁判按配置绑定");
+
+        // 3) 每圈 4 人跑完整流转:两圈各取 2 人晋级
+        for (int i = 1; i <= 8; i++) {
+            checkInByNumber(tid, audition.getId(), circles, "选手" + i, i, i);
+        }
+        lifecycleService.startStage(audition.getId());
+        scoreMatchByOrder(circles.get(0), zone1Judge.getId(), i -> BigDecimal.valueOf(100 - i));
+        scoreMatchByOrder(circles.get(1), zone2Judge.getId(), i -> BigDecimal.valueOf(100 - i));
+        lifecycleService.completeStage(audition.getId());
+
+        assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(audition.getId()).getStatus());
+        assertEquals(4, countOutcome(audition.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
+            "两圈各 2 个名额必须落满");
+        for (TMatch circle : circles) {
+            long advancers = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .eq(TMatchParticipant::getMatchId, circle.getId())
+                    .eq(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()))
+                .stream().map(TMatchParticipant::getCompetitorId).distinct().count();
+            assertEquals(2, advancers, circle.getDisplayZone() + " 应有 2 人晋级");
+        }
+    }
+
+    /** 正式圈的分区名(按展示序) */
+    private List<String> circleZonesOf(Long stageId) {
+        return circleOnlyMatches(stageId).stream().map(TMatch::getDisplayZone).toList();
     }
 
     /** 按上场顺序逐裁判打分(scoreFn 决定每人分数) */

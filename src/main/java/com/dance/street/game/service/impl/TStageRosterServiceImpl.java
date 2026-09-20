@@ -1452,7 +1452,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         Map<Long, PartInfo> partByComp = new HashMap<>();
         if (!matchIds.isEmpty()) {
             Map<Long, String> zoneById = matches.stream().collect(Collectors.toMap(TMatch::getId,
-                m -> m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone(), (a, b) -> a));
+                m -> Objects.toString(m.getDisplayZone(), ""), (a, b) -> a));
             Map<Long, Integer> rowById = matches.stream().collect(Collectors.toMap(TMatch::getId,
                 m -> m.getDisplayRow() == null ? 0 : m.getDisplayRow().intValue(), (a, b) -> a));
             participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
@@ -1483,7 +1483,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         Map<String, Integer> order = new HashMap<>();
         int i = 0;
         for (TMatch m : matches) {
-            String z = m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone();
+            String z = Objects.toString(m.getDisplayZone(), "");
             order.putIfAbsent(z, i++);
         }
         return order;
@@ -1504,7 +1504,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             return false;
         }
         if (g.getZone() != null && part != null
-            && !Objects.equals(resolveZone(g.getZone(), zoneOrder), part.zone())) {
+            && !Objects.equals(normalizeZone(g.getZone()), part.zone())) {
             return false;
         }
         if (g.getRound() != null && part != null && !Objects.equals(g.getRound(), part.row())) {
@@ -1544,37 +1544,6 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     private String normalizeZone(String zone) {
         return zone == null ? null : (zone.startsWith("ZONE-") ? zone : zone.toUpperCase());
-    }
-
-    /**
-     * 把出口规则里的圈过滤解析成源赛段的<b>实际</b>圈名。
-     *
-     * <p>「ZONE-k」表达的是"第 k 个圈",不是字面上的场次分区名:海选单圈时场次的
-     * {@code display_zone} 是 {@code CENTER},多圈才是 {@code ZONE-1..n}。
-     * 此前直接拿字符串比对,导致单圈海选里选了「第1圈」的出口一个候选人都取不到——
-     * 表现为"海选结束了,选手没进下一个赛段"(赛段名单永远是空的)。</p>
-     *
-     * @param zone      出口规则里的圈(ZONE-1 / CENTER / null)
-     * @param zoneOrder 源赛段实际圈名 -> 圈序号(见 {@link #zoneByIdOrder})
-     * @return 源赛段实际圈名;无法解析时原样返回(保持"匹配不上就是没候选"的老行为)
-     */
-    private String resolveZone(String zone, Map<String, Integer> zoneOrder) {
-        String normalized = normalizeZone(zone);
-        if (normalized == null || !normalized.startsWith("ZONE-") || zoneOrder.containsKey(normalized)) {
-            // 空/非 ZONE-n,或源赛段的圈本来就叫这个名字:无需换算
-            return normalized;
-        }
-        try {
-            int target = Integer.parseInt(normalized.substring("ZONE-".length())) - 1;
-            for (Map.Entry<String, Integer> entry : zoneOrder.entrySet()) {
-                if (entry.getValue() != null && entry.getValue() == target) {
-                    return entry.getKey();
-                }
-            }
-        } catch (NumberFormatException ignored) {
-            // ZONE-abc 这类非序号写法:按原样比对
-        }
-        return normalized;
     }
 
     private Comparator<TCompetitor> groupComparator(TStageRosterGroupBo g,
@@ -1668,14 +1637,14 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (!srcMatchIds.isEmpty()) {
             Map<Long, String> matchZone = new HashMap<>();
             for (TMatch m : srcMatches) {
-                matchZone.put(m.getId(), StageFlowSupport.zoneOf(m));
+                matchZone.put(m.getId(), m.getDisplayZone());
             }
             participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
                     .in(TMatchParticipant::getMatchId, srcMatchIds)
                     .isNotNull(TMatchParticipant::getCompetitorId)
                     .select(TMatchParticipant::getCompetitorId, TMatchParticipant::getMatchId))
                 .forEach(p -> zoneByCompetitor.putIfAbsent(p.getCompetitorId(),
-                    matchZone.getOrDefault(p.getMatchId(), "CENTER")));
+                    matchZone.getOrDefault(p.getMatchId(), "")));
         }
         advancers.sort((a, b) -> {
             String za = zoneByCompetitor.get(a.getId());
@@ -1712,8 +1681,8 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (g.getZone() != null) {
             Map<String, Integer> order = g.getSourceStageId() == null ? Map.of()
                 : zoneOrderOf(g.getSourceStageId());
-            // 圈名同样按实际圈序号解析:单圈海选的场次叫 CENTER,「ZONE-1」也代表第 1 圈
-            return "第" + (order.getOrDefault(resolveZone(g.getZone(), order), -1) + 1) + "圈·" + result + rank;
+            // 圈名按圈序号解析:第 k 个圈的分区名就是 ZONE-k
+            return "第" + (order.getOrDefault(normalizeZone(g.getZone()), -1) + 1) + "圈·" + result + rank;
         }
         return (Boolean.TRUE.equals(g.getRankByZone()) ? "每圈" : "全场") + result + rank;
     }

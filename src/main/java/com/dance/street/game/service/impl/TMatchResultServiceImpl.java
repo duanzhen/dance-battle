@@ -39,6 +39,7 @@ import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import com.dance.street.game.service.impl.flow.DownstreamRouter;
+import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
 import com.dance.street.game.service.ITMatchResultService;
@@ -84,6 +85,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private final MatchStateWriter matchStateWriter;
     /** 淘汰链下游路由的唯一入口(胜者/败者去向) */
     private final DownstreamRouter downstreamRouter;
+    /** 当前生效轮的唯一口径(多轮场次取最新一轮) */
+    private final MatchRoundLocator matchRoundLocator;
     /** 参赛方成绩批量写入口(整场一条 SQL) */
     private final ParticipantScoreWriter scoreWriter;
     private final ScoringEngine scoringEngine = new ScoringEngine();
@@ -169,7 +172,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                     }
                     TMatchRound target = roundByCompetitor.get(se.getCompetitorId());
                     if (target == null) {
-                        target = mustGetRound(match);
+                        target = matchRoundLocator.current(match);
                     }
                     byRoundCompetitor
                         .computeIfAbsent(target.getId() + ":" + se.getCompetitorId(), k -> new ArrayList<>())
@@ -226,7 +229,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 写明细分 → TRoundScore(非海选)
         List<TRoundScore> rawScores = new ArrayList<>();
         if (bo.getScores() != null && !bo.getScores().isEmpty()) {
-            TMatchRound round = mustGetRound(match);
+            TMatchRound round = matchRoundLocator.current(match);
             for (ScoreEntryBo se : bo.getScores()) {
                 // 越界校验:只能给本场参赛方提交打分,避免向不相关选手写入脏数据
                 if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
@@ -266,7 +269,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             && !refereeStageService.getRefereeIdsByStageId(stage.getId()).isEmpty();
         if (refereeVote) {
             int assigned = refereeStageService.getRefereeIdsByStageId(stage.getId()).size();
-            TMatchRound voteRound = mustGetRound(match);
+            TMatchRound voteRound = matchRoundLocator.current(match);
             // 覆盖写本裁判本轮投票(WIN=1 / LOSS=0 / DRAW=0.5),不影响其他裁判
             roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
                 .eq(TRoundScore::getRoundId, voteRound.getId())
@@ -609,25 +612,6 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
     }
 
-    private TMatchRound mustGetRound(TMatch match) {
-        List<TMatchRound> rounds = matchRoundMapper.selectList(
-            Wrappers.<TMatchRound>lambdaQuery()
-                .eq(TMatchRound::getMatchId, match.getId())
-                .orderByAsc(TMatchRound::getRoundSequence));
-        if (!rounds.isEmpty()) {
-            // 多轮制/平局加赛时取最新一轮(当前生效轮),而非首轮
-            return rounds.get(rounds.size() - 1);
-        }
-        TMatchRound round = new TMatchRound();
-        round.setTournamentId(match.getTournamentId());
-        round.setMatchId(match.getId());
-        round.setTenantId(match.getTenantId());
-        round.setRoundSequence(1L);
-        round.setStatus(StageConstants.MATCH_GAMING);
-        matchRoundMapper.insert(round);
-        return round;
-    }
-
     /**
      * 汇总多裁判投票:全平 → 双 DRAW(触发加赛轮);左/右胜票多者胜;票数持平 → null(不结算,等待改判)。
      */
@@ -783,7 +767,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .set(TMatchParticipant::getOutcomeStatus, MatchOutcomeEnum.PENDING.getCode())
             .eq(TMatchParticipant::getMatchId, match.getId()));
 
-        TMatchRound drawnRound = mustGetRound(match);
+        TMatchRound drawnRound = matchRoundLocator.current(match);
         TMatchRound drawnUpd = new TMatchRound();
         drawnUpd.setId(drawnRound.getId());
         drawnUpd.setStatus(StageConstants.MATCH_SETTLED);

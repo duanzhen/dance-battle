@@ -165,25 +165,38 @@ public class RankStageSettler implements StageSettler {
             if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
                 continue;
             }
-            String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+            String zone = match.getDisplayZone();
             settleRankMatch(match, rc, zoneQuota.getOrDefault(zone, 0),
                 zoneBase.getOrDefault(zone, 0), zoneAdvanced);
         }
     }
 
-    /** 统计排名赛各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额 */
+    /**
+     * 统计排名赛各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额。
+     *
+     * <p>与海选同一口径:<b>按人去重</b>。晋级结果会同步到该选手在本赛段的全部参赛行
+     * (见 {@code markManualAdvanceResult}),按行计数会把同一名晋级者重复算进名额。</p>
+     */
     private Map<String, Integer> countRankAdvancedByZone(List<TMatch> matches) {
         Map<Long, String> matchZone = new HashMap<>();
         for (TMatch m : matches) {
-            matchZone.put(m.getId(), m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone());
+            matchZone.put(m.getId(), m.getDisplayZone());
         }
         List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery()
                 .in(TMatchParticipant::getMatchId, matchZone.keySet())
                 .eq(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-        Map<String, Integer> result = new HashMap<>();
+        Map<Long, String> advancerZone = new HashMap<>();
         for (TMatchParticipant p : parts) {
-            result.merge(matchZone.getOrDefault(p.getMatchId(), "CENTER"), 1, Integer::sum);
+            if (p.getCompetitorId() == null) {
+                continue;
+            }
+            advancerZone.putIfAbsent(p.getCompetitorId(),
+                matchZone.getOrDefault(p.getMatchId(), ""));
+        }
+        Map<String, Integer> result = new HashMap<>();
+        for (String zone : advancerZone.values()) {
+            result.merge(zone, 1, Integer::sum);
         }
         return result;
     }
@@ -260,7 +273,7 @@ public class RankStageSettler implements StageSettler {
                 .eq(TMatchParticipant::getCompetitorId, r.getCompetitorId()));
         }
 
-        String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+        String zone = match.getDisplayZone();
         int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
         int remaining = Math.max(0, advanceQuota - alreadyAdvanced);
 

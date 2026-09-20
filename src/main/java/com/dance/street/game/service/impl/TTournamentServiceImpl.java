@@ -59,6 +59,7 @@ import java.util.Objects;
 
 import tools.jackson.databind.ObjectMapper;
 import com.dance.street.game.engine.common.SnowflakeJson;
+import com.dance.street.game.engine.common.StageFlowSupport;
 
 /**
  * 赛事主Service业务层处理
@@ -414,8 +415,9 @@ public class TTournamentServiceImpl implements ITTournamentService {
             refereeIds = createRefereesIfNeeded(tid, bo.getRefereeCount(), stageIds);
         }
 
-        // 6.5 海选圈自动配置(模板赛事免手工):按裁判数分 1~2 圈,均分晋级名额并绑定裁判,
-        //     同时把下一赛段的默认"海选·晋级"来源组替换为按圈的晋级出口
+        // 6.5 海选圈自动配置(模板赛事免手工):只建 1 个圈、晋级名额全给它、
+        //     模板创建的裁判默认都绑到这个圈上,同时把下一赛段的默认"海选·晋级"
+        //     来源组替换为按第 1 圈的晋级出口
         autoConfigureAuditionCircles(stages, refereeIds);
 
         // 6.6 圈结构落库:圈配置(6.5)写完之后,按配置把海选圈场次建出来。
@@ -538,8 +540,11 @@ public class TTournamentServiceImpl implements ITTournamentService {
     }
 
     /**
-     * 模板赛事自动配置海选圈:圈数按裁判数(≥2 → 2 圈),均分晋级名额与裁判,
-     * 并把下一赛段默认的"海选·晋级"来源组替换为按圈的晋级出口。
+     * 模板赛事自动配置海选圈:模板只建 <b>1 个圈</b>(单圈就是"只有一个圈",需要分圈时
+     * 由主办方在赛段配置里再加),把赛段晋级名额全部给这个圈,并把模板创建的全部裁判
+     * 默认都绑到它上面——开赛前不必再手工配圈、配裁判。
+     *
+     * <p>同时把下一赛段默认的"海选·晋级"来源组替换为按圈(第 1 圈)的晋级出口。</p>
      */
     private void autoConfigureAuditionCircles(List<TStageVo> stages, List<Long> refereeIds) {
         TStageVo audition = stages.stream()
@@ -550,26 +555,24 @@ public class TTournamentServiceImpl implements ITTournamentService {
         }
         int idx = stages.indexOf(audition);
         TStageVo next = idx >= 0 && idx + 1 < stages.size() ? stages.get(idx + 1) : null;
-        int refCount = refereeIds == null ? 0 : refereeIds.size();
-        int circles = refCount >= 2 ? 2 : 1;
         int advance = audition.getTeamCountEnd() == null ? 0 : audition.getTeamCountEnd().intValue();
         if (advance <= 0) {
             return;
         }
-        List<Integer> quotas = new ArrayList<>();
-        int base = advance / circles;
-        int rem = advance % circles;
-        for (int i = 0; i < circles; i++) {
-            quotas.add(base + (i < rem ? 1 : 0));
-        }
-        // 圈的裁判暂不在模板建赛时分配:每圈先留空列表,由主办方后面在赛段流程里编辑。
-        // (留空列表而非不写该字段:autoAssignCircleReferees 见到与圈数等长的配置就按配置绑定,
-        //  不会退化成"把赛段全部裁判绑到每个圈"。)
-        // 用字符串写 ID:雪花 ID 超出 JS 安全整数范围,写成 JSON 数字会在前端 JSON.parse 时被四舍五入。
+        int circles = 1;
+        List<Integer> quotas = List.of(advance);
+        // 裁判默认全绑到这一个圈;用字符串写 ID:雪花 ID 超出 JS 安全整数范围,
+        // 写成 JSON 数字会在前端 JSON.parse 时被四舍五入。
         List<List<String>> circleRefs = new ArrayList<>();
-        for (int i = 0; i < circles; i++) {
-            circleRefs.add(new ArrayList<>());
+        List<String> singleCircleRefs = new ArrayList<>();
+        if (refereeIds != null) {
+            for (Long refereeId : refereeIds) {
+                if (refereeId != null) {
+                    singleCircleRefs.add(String.valueOf(refereeId));
+                }
+            }
         }
+        circleRefs.add(singleCircleRefs);
         try {
             ObjectMapper mapper = SnowflakeJson.mapper();
             @SuppressWarnings("unchecked")
@@ -597,20 +600,18 @@ public class TTournamentServiceImpl implements ITTournamentService {
             bo.setFillMode("AUTO");
             bo.setQuota(0);
             List<TStageRosterGroupBo> groups = new ArrayList<>();
-            for (int i = 0; i < circles; i++) {
-                TStageRosterGroupBo g = new TStageRosterGroupBo();
-                g.setSourceStageId(audition.getId());
-                g.setResultFilter("ADVANCE");
-                if (circles > 1) {
-                    g.setZone("ZONE-" + (i + 1));
-                }
-                g.setRankByZone(circles > 1);
-                g.setRankStart(1);
-                g.setRankEnd(quotas.get(i));
-                g.setFillMode("AUTO");
-                g.setQuota(0);
-                groups.add(g);
-            }
+            TStageRosterGroupBo group = new TStageRosterGroupBo();
+            group.setSourceStageId(audition.getId());
+            group.setResultFilter("ADVANCE");
+            // 圈编号与单/多圈无关:第 k 圈恒为 ZONE-k,单圈也按"第 1 圈名次"取人。
+            // (写成"全场名次"来源组的话,赛段后来加圈时这条出口会横跨多圈取错人。)
+            group.setZone(StageFlowSupport.circleZone(1));
+            group.setRankByZone(true);
+            group.setRankStart(1);
+            group.setRankEnd(advance);
+            group.setFillMode("AUTO");
+            group.setQuota(0);
+            groups.add(group);
             bo.setGroups(groups);
             rosterService.addGroups(next.getId(), bo);
             // 追加成功后移除旧的"全场名次"默认组,避免与按圈出口重复取人
@@ -626,8 +627,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
                     }
                 }
             }
-            log.info("模板海选自动配置完成:{} 圈,每圈晋级 {},出口已写入赛段[{}]",
-                circles, quotas, next.getName());
+            log.info("模板海选自动配置完成:{} 圈(第 1 圈晋级 {}),已把 {} 名裁判绑到该圈,出口已写入赛段[{}]",
+                circles, advance, singleCircleRefs.size(), next.getName());
         } catch (Exception e) {
             log.warn("模板海选出口自动配置失败: {}", e.getMessage());
         }

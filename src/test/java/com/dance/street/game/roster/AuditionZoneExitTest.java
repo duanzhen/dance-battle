@@ -46,11 +46,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 单圈海选 + 「第1圈名次」出口:选手必须能进下一个赛段。
  *
- * <p>回归的事故:海选是单圈时,圈场次的 {@code display_zone} 是 {@code CENTER}(多圈才是 ZONE-1..n),
- * 而出口规则里的圈过滤写的是 {@code ZONE-1}。名单候选此前按字符串直接比对,于是这条出口
- * 一个候选人都取不到——现场表现就是「海选结束了,选手没进 32 强」,而且不报任何错。</p>
+ * <p>回归的事故(历史):单圈场次的 {@code display_zone} 曾是 {@code CENTER}(多圈才是 ZONE-1..n),
+ * 而出口规则里的圈过滤写的是 {@code ZONE-1},名单候选按字符串直接比对一个都取不到——
+ * 现场表现就是「海选结束了,选手没进 32 强」,而且不报任何错。</p>
  *
- * <p>口径:ZONE-k 表示"第 k 个圈",按源赛段实际场次顺序解析,两种命名都能对上。</p>
+ * <p>现在圈编号统一:{@code ZONE-k} 恒为"第 k 个圈",单圈即 {@code ZONE-1};老库里的
+ * CENTER 行仍按"第 1 个圈"解析,保证未重排的历史赛段继续能取到人。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -98,15 +99,20 @@ class AuditionZoneExitTest {
     private ITMatchResultService matchResultService;
 
     @Test
-    void zone1ExitTakesCandidatesFromSingleCenterCircle() {
+    void zone1ExitTakesCandidatesFromSingleCircle() {
+        assertEquals(2, runSingleCircleExit());
+    }
+
+    /** 单圈海选走一遍「出口按第 1 圈名次取人」,返回实际带入下一赛段的人数 */
+    private int runSingleCircleExit() {
         Long tid = newTournament("单圈海选出口");
         TStageVo audition = newAuditionStage(tid, "海选", 2);
         TStageVo next = newKnockoutStage(tid, "4强", 2, audition.getId());
 
-        // 先把圈建出来:单圈海选的场次分区是 CENTER(多圈才是 ZONE-1..n)
+        // 先把圈建出来:单圈即第 1 圈,与多圈同一套 ZONE-k 命名
         lifecycleService.ensureAuditionCircles(audition.getId());
-        assertEquals("CENTER", circlesOf(audition.getId()).get(0).getDisplayZone(),
-            "前置条件:单圈海选的场次分区应为 CENTER");
+        assertEquals("ZONE-1", circlesOf(audition.getId()).get(0).getDisplayZone(),
+            "前置条件:单圈海选的场次分区应为 ZONE-1");
         // 出口规则写 ZONE-1 —— 线上就是这么配的
         addExitGroup(next.getId(), audition.getId(), "ZONE-1", 2);
         // 出口生效后移除自动生成的「上一赛段·晋级」默认组(与模板/出口 UI 的处理一致),
@@ -137,6 +143,7 @@ class AuditionZoneExitTest {
         assertEquals(2, rows.size());
         assertTrue(rows.stream().allMatch(c -> c.getSourceCompetitorId() != null),
             "带入的选手应记录来源参赛方");
+        return brought;
     }
 
     // ===== 造数据 =====

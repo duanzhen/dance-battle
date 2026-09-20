@@ -30,13 +30,14 @@ class AuditionGeneratorTest {
     }
 
     @Test
-    void singleCircle_isSingleCenterMatchWithoutSlots() {
+    void singleCircle_usesSameZoneNamingAsMultiCircle() {
         BracketPlan plan = generator.generate(List.of(11L, 22L), config(1, null));
 
         assertEquals(1, plan.getMatches().size());
         MatchPlan m = plan.getMatches().get(0);
         assertEquals("海选赛", m.getName());
-        assertEquals("CENTER", m.getDisplayZone());
+        // 圈编号与单/多圈无关:单圈就是第 1 圈(此前单圈另起 CENTER,导致加圈后圈集合分叉)
+        assertEquals("ZONE-1", m.getDisplayZone());
         assertEquals(1, m.getRound());
         assertTrue(m.isFinalMatch(), "每圈胜者晋级下一赛段");
         assertNotNull(m.getSlots());

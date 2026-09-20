@@ -284,4 +284,45 @@ class KnockoutStateFlowTest {
         assertEquals(2, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
             "只有两场半决赛的胜者晋级");
     }
+
+    /**
+     * 空区走到季军赛:4 人签表开了季军赛,但参赛不足导致两场半决赛都是轮空,
+     * 季军赛永远等不到败者——它必须能当作"空轮空"当场结算,否则赛段会卡死在
+     * "仍有 1 场未结算"(既开不了也结束不了)。
+     */
+    @Test
+    void thirdPlaceSettlesAsByeWhenSemisAreBothByes() {
+        Long tid = newTournament("季军赛空轮空");
+        TStageVo stage = newKnockoutStage(tid, "半决赛", 4, 2, true);
+        insertPending(tid, stage.getId(), "选手1", "1", 1);
+        insertPending(tid, stage.getId(), "选手2", "2", 2);
+
+        lifecycleService.startStage(stage.getId());
+        List<TMatch> matches = matchesOf(stage.getId());
+        List<TMatch> semis = matches.stream()
+            .filter(m -> !"季军赛".equals(m.getName()))
+            .toList();
+        assertEquals(2, semis.size());
+        for (TMatch semi : semis) {
+            assertEquals(1, realParticipants(semi.getId()).size(), "半决赛各只有 1 人 → 单边轮空");
+            matchResultService.startMatch(semi.getId());
+            assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(semi.getId()).getStatus(),
+                "轮空场次开始后应直接出结果");
+        }
+
+        TMatch third = matches.stream()
+            .filter(m -> "季军赛".equals(m.getName()))
+            .findFirst().orElseThrow(() -> new AssertionError("应生成季军赛场次"));
+        assertEquals(0, realParticipants(third.getId()).size(), "半决赛全是轮空 → 季军赛无人可打");
+
+        matchResultService.startMatch(third.getId());
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(third.getId()).getStatus(),
+            "无人可打的季军赛应按空轮空结算");
+
+        assertTrue(lifecycleService.completeStage(stage.getId()).getCompleted(),
+            "季军赛结算后赛段应能正常完成");
+        assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(stage.getId()).getStatus());
+        assertEquals(2, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
+            "两场半决赛的轮空胜者应直接晋级下一赛段");
+    }
 }

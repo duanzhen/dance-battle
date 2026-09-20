@@ -228,7 +228,7 @@ const loadData = async () => {
     const order: string[] = [];
     const grouped = new Map<string, any[]>();
     withParts.forEach((m: any) => {
-      const zone = m.displayZone || 'CENTER';
+      const zone = m.displayZone;
       if (!grouped.has(zone)) {
         grouped.set(zone, []);
         order.push(zone);
@@ -248,7 +248,7 @@ const loadData = async () => {
       const zoneMatches = grouped.get(zone) || [];
       // 只取晋级选手,按签到号码升序
       const advancers = auditionCompetitors
-        .filter((c: any) => c.outcomeStatus === 'ADVANCE' && c.competitorId != null && (c.zone || 'CENTER') === zone)
+        .filter((c: any) => c.outcomeStatus === 'ADVANCE' && c.competitorId != null && c.zone === zone)
         .map((p: any) => ({
           competitorId: p.competitorId,
           competitorName: p.name,

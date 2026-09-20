@@ -23,13 +23,13 @@ import com.dance.street.game.engine.scoring.ScoringEngine;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
-import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.DownstreamRouter;
+import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
 import org.springframework.stereotype.Service;
@@ -50,7 +50,6 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
 
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
-    private final TMatchRoundMapper matchRoundMapper;
     private final TRoundScoreMapper roundScoreMapper;
     private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
@@ -59,6 +58,8 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     private final ScoringEngine scoringEngine = new ScoringEngine();
     /** 场次状态推进唯一入口(场次 + 轮次成套写) */
     private final MatchStateWriter matchStateWriter;
+    /** 当前生效轮的唯一口径(与提交结果侧共用,避免"写入轮/回显轮"分叉) */
+    private final MatchRoundLocator matchRoundLocator;
     /** 淘汰链下游路由唯一入口 */
     private final DownstreamRouter downstreamRouter;
     /** 参赛方成绩批量写入口(整场一条 SQL) */
@@ -67,7 +68,7 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<MatchScoreResult> accumulateScores(TMatch match, TStage stage, SubmitResultBo bo) {
-        TMatchRound round = mustGetRound(match);
+        TMatchRound round = matchRoundLocator.current(match);
         Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
         List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
             .eq(TMatchParticipant::getMatchId, match.getId()));
@@ -142,7 +143,7 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
 
     /** 用全部裁判分计算本场最终总分/排名 */
     private List<MatchScoreResult> computeAll(TMatch match, TStage stage) {
-        TMatchRound round = mustGetRound(match);
+        TMatchRound round = matchRoundLocator.current(match);
         List<TRoundScore> all = roundScoreMapper.selectList(
             Wrappers.<TRoundScore>lambdaQuery().eq(TRoundScore::getRoundId, round.getId()));
         List<TMatchParticipant> parts = participantMapper.selectList(
@@ -216,23 +217,5 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
         participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
             .eq(TMatchParticipant::getMatchId, matchId)
             .eq(TMatchParticipant::getCompetitorId, competitorId));
-    }
-
-    private TMatchRound mustGetRound(TMatch match) {
-        List<TMatchRound> rounds = matchRoundMapper.selectList(
-            Wrappers.<TMatchRound>lambdaQuery()
-                .eq(TMatchRound::getMatchId, match.getId())
-                .orderByAsc(TMatchRound::getRoundSequence));
-        if (!rounds.isEmpty()) {
-            return rounds.get(0);
-        }
-        TMatchRound round = new TMatchRound();
-        round.setTournamentId(match.getTournamentId());
-        round.setMatchId(match.getId());
-        round.setTenantId(match.getTenantId());
-        round.setRoundSequence(1L);
-        round.setStatus(StageConstants.MATCH_GAMING);
-        matchRoundMapper.insert(round);
-        return round;
     }
 }

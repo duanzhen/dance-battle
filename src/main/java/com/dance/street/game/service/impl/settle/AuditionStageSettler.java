@@ -187,7 +187,7 @@ public class AuditionStageSettler implements StageSettler {
             if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
                 continue;
             }
-            String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+            String zone = match.getDisplayZone();
             StageFlowSupport.CircleQuota qb = zoneCtx.get(zone);
             if (qb == null) {
                 continue;
@@ -196,19 +196,35 @@ public class AuditionStageSettler implements StageSettler {
         }
     }
 
-    /** 统计海选各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额 */
+    /**
+     * 统计海选各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额。
+     *
+     * <p><b>必须按人去重</b>:加赛结算会把晋级结果同步回该选手在本赛段的全部参赛行
+     * (原始圈 + 各级加赛),同一名晋级者因此会留下多行 ADVANCE。按行计数会把二海晋级者
+     * 重复算进名额(二海 1 人晋级、剩 2 人进三海时,三海查到"名额已满"而把两人全淘汰,
+     * 本圈少一个晋级者——正是"选手没进下一赛段"那类现场事故)。</p>
+     */
     private Map<String, Integer> countAuditionAdvancedByZone(List<TMatch> matches) {
         Map<Long, String> matchZone = new HashMap<>();
         for (TMatch m : matches) {
-            matchZone.put(m.getId(), m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone());
+            matchZone.put(m.getId(), m.getDisplayZone());
         }
         List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery()
                 .in(TMatchParticipant::getMatchId, matchZone.keySet())
                 .eq(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-        Map<String, Integer> result = new HashMap<>();
+        // competitorId -> 所在圈:同一选手多行只留第一行(其所在圈唯一)
+        Map<Long, String> advancerZone = new HashMap<>();
         for (TMatchParticipant p : parts) {
-            result.merge(matchZone.getOrDefault(p.getMatchId(), "CENTER"), 1, Integer::sum);
+            if (p.getCompetitorId() == null) {
+                continue;
+            }
+            advancerZone.putIfAbsent(p.getCompetitorId(),
+                matchZone.getOrDefault(p.getMatchId(), ""));
+        }
+        Map<String, Integer> result = new HashMap<>();
+        for (String zone : advancerZone.values()) {
+            result.merge(zone, 1, Integer::sum);
         }
         return result;
     }
@@ -241,7 +257,7 @@ public class AuditionStageSettler implements StageSettler {
             return;
         }
         // 剩余晋级名额:按圈独立计算,加赛场次只争本圈尚未确定的晋级位
-        String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+        String zone = match.getDisplayZone();
         int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
         int remaining = Math.max(0, advanceQuota - alreadyAdvanced);
 
@@ -645,7 +661,7 @@ public class AuditionStageSettler implements StageSettler {
         Map<String, StageFlowSupport.CircleQuota> zoneCtx =
             StageFlowSupport.circleQuotaContext(stage, matches, "海选");
         Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(matches);
-        String zone = match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+        String zone = match.getDisplayZone();
         StageFlowSupport.CircleQuota qb = zoneCtx.get(zone);
         if (qb == null) {
             return false;

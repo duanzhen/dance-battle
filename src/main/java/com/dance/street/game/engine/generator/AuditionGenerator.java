@@ -1,6 +1,7 @@
 package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.RuleConfigHolder;
+import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 
 import java.util.ArrayList;
@@ -16,6 +17,9 @@ import java.util.List;
  * <p><b>生成器不再把选手按号码或随机塞进各圈。</b>否则同一批号码会因为
  * 「先建空圈再逐个签到」和「全部签完再生成对阵」的调用顺序不同,得到不同的分圈结果;
  * 落圈权统一归客户端,后端只负责建好空的圈结构。</p>
+ *
+ * <p>圈的编号与单圈/多圈无关:第 k 个圈恒为 {@code ZONE-k},单圈即 {@code ZONE-1}
+ * (与 {@link StageFlowSupport#circleZone(int)} 同一口径)。</p>
  */
 public class AuditionGenerator implements StageGenerator {
 
@@ -35,13 +39,9 @@ public class AuditionGenerator implements StageGenerator {
         // 每圈一个场次,全部为空圈:圈结构在签到/抽号前即存在,落圈由签到写入
         for (int c = 0; c < circles; c++) {
             MatchPlan m = new MatchPlan();
-            if (circles == 1) {
-                m.setName("海选赛");
-                m.setDisplayZone("CENTER");
-            } else {
-                m.setName("海选赛-" + (c + 1) + "圈");
-                m.setDisplayZone("ZONE-" + (c + 1));
-            }
+            // 圈编号与单/多圈无关:第 k 个圈恒为 ZONE-k(单圈即 ZONE-1),与生命周期服务同一口径
+            m.setName(StageFlowSupport.circleName(circles, c + 1));
+            m.setDisplayZone(StageFlowSupport.circleZone(c + 1));
             m.setRound(1);
             m.setMatchIndex(c);
             m.setDisplayCol(1);

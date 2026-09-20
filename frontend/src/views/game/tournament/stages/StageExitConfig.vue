@@ -158,14 +158,13 @@ const circleCount = computed(() => {
   }
 });
 /**
- * 圈选项:单圈海选不列「第N圈」。
+ * 圈选项:恒为 ZONE-1..n(单圈就是第 1 圈)。
  *
- * 单圈时圈场次的分区名是固定的 CENTER(多圈才是 ZONE-1..n),选「第1圈」会写成
- * ZONE-1 这种对不上的圈过滤,导致这条出口一个候选人都取不到(表现为选手进不了下一个赛段)。
- * 单圈本来也只有一个圈,直接走「全部 1 圈」即可。
+ * 圈的编号与单/多圈无关,后端圈场次的分区名也恒为 ZONE-k——出口规则按圈取人时
+ * 单圈与多圈走同一套过滤,不再有"单圈没有圈可选"的特例。
  */
 const zoneOptions = computed(() =>
-  circleCount.value > 1 ? Array.from({ length: circleCount.value }, (_, i) => 'ZONE-' + (i + 1)) : []
+  Array.from({ length: Math.max(1, circleCount.value) }, (_, i) => 'ZONE-' + (i + 1))
 );
 
 /** 出口写在"目标赛段"上:来源侧始终可配置,目标侧限制在 targetOptions(规划中未初始化) */
@@ -261,7 +260,8 @@ const resetForm = () => {
   form.rankMode = 'none';
   form.rankStart = null;
   form.rankEnd = null;
-  form.zone = isAudition.value && circleCount.value > 1 ? 'ZONE-1' : '__all__';
+  // 海选默认按第 1 圈(单圈也是第 1 圈);多圈时用户可切「全部圈」
+  form.zone = isAudition.value ? 'ZONE-1' : '__all__';
 };
 
 const openAdd = () => {

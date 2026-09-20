@@ -400,8 +400,9 @@ const loadCircleInfo = async () => {
     }
     for (let i = 0; i < ordered.length; i++) {
       const m = ordered[i];
-      // 只展示海选分圈场次(单场 CENTER 非分圈)
-      if (!m.displayZone || String(m.displayZone).startsWith('CENTER')) {
+      // 只展示圈场次:分区名恒为 ZONE-k;同分加赛场次复用原圈分区,不算独立的一圈
+      if (!String(m.displayZone || '').startsWith('ZONE-')
+        || String(m.remark || '').startsWith('同分加赛')) {
         continue;
       }
       const zoneNo = String(m.displayZone).replace('ZONE-', '');

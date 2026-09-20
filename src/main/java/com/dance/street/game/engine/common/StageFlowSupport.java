@@ -46,9 +46,20 @@ public final class StageFlowSupport {
         return advanceCount;
     }
 
-    /** 场次所属圈:displayZone 为空时视为 CENTER(未分圈时的唯一圈) */
-    public static String zoneOf(TMatch match) {
-        return match.getDisplayZone() == null ? "CENTER" : match.getDisplayZone();
+    /**
+     * 海选第 k 个圈(1 基)的场次分区名:<b>恒为 {@code ZONE-k}</b>。
+     *
+     * <p>单圈就是「只有一个圈」,与多圈共用同一套编号——此前单圈另起一个 {@code CENTER} 名字,
+     * 于是「圈集合」「每圈名额」「每圈裁判」「出口按圈取人」四处各按不同规则解析圈,
+     * 单圈加圈后立刻分叉(幻影圈、新圈 0 名额、裁判绑定丢失)。</p>
+     */
+    public static String circleZone(int circleNo) {
+        return "ZONE-" + circleNo;
+    }
+
+    /** 海选圈场次名:单圈沿用「海选赛」,多圈为「海选赛-N圈」(仅展示文案,不参与任何判定) */
+    public static String circleName(int totalCircles, int circleNo) {
+        return totalCircles <= 1 ? "海选赛" : "海选赛-" + circleNo + "圈";
     }
 
     /**
@@ -92,7 +103,7 @@ public final class StageFlowSupport {
             }
         }
         // 圈数以实际场次为准:配置圈数可能被生成器按人数收缩,也可能在生成后被修改
-        int circles = Math.max(1, (int) matches.stream().map(StageFlowSupport::zoneOf).distinct().count());
+        int circles = Math.max(1, (int) matches.stream().map(TMatch::getDisplayZone).distinct().count());
         int plannedCircles = rc != null && rc.getCircles() != null ? Math.max(1, rc.getCircles()) : circles;
         // 历史残留的"配置圈数之外"场次按 0 人晋级处理;正常名额按配置圈数均分
         int divideBy = Math.min(circles, plannedCircles);
@@ -104,7 +115,7 @@ public final class StageFlowSupport {
         int ordinal = 0;
         int acc = 0;
         for (TMatch m : matches) {
-            String zone = zoneOf(m);
+            String zone = m.getDisplayZone();
             if (ctx.containsKey(zone)) {
                 continue;
             }

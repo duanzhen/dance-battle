@@ -233,10 +233,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         // 海选赛/排名赛允许跳过显式初始化(兜底:自动初始化)
         if (perCompetitorRound && !Long.valueOf(1L).equals(stage.getIsInitialized())) {
-            // 海选已配置分圈但当前无人签到(预建空圈)时跳过自动初始化,
+            // 海选已配置圈(单圈也算)但当前无人签到(预建空圈)时跳过自动初始化,
             // 允许抽号前先生成按配置的空圈结构,待签到后再落圈;
             // 其余场景保持原逻辑(初始化会把名单锁定,不改变业务状态)
-            boolean emptyPlannedAudition = isAudition && plannedCircleCount(stage) > 1
+            boolean emptyPlannedAudition = isAudition && plannedCircleCount(stage) >= 1
                 && competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
                     .eq(TCompetitor::getStageId, stage.getId())
                     .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode())) == 0;
@@ -484,34 +484,38 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
      * 未配置时:圈数 = 赛段裁判数则按圈顺序 1:1,否则把赛段全部裁判绑到每个圈。
      */
     private void autoAssignCircleReferees(TStage stage) {
-        List<TMatch> circles = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stage.getId())
-            .orderByAsc(TMatch::getDisplayRow)
-            .orderByAsc(TMatch::getId));
+        // 圈集合与"每圈名额/出口按圈取人"同一口径(正式圈,不含加赛场次)
+        List<TMatch> circles = auditionCircles(stage);
         if (circles.isEmpty()) {
             return;
         }
-        // 幂等:重建前先清掉该批场次已有的圈-裁判绑定
         List<Long> circleIds = circles.stream().map(TMatch::getId).toList();
-        matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery()
-            .in(TMatchReferee::getMatchId, circleIds));
 
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
         List<List<Long>> cfg = rc != null ? rc.getCircleRefereeIds() : null;
         boolean useConfig = cfg != null && cfg.size() == circles.size();
         List<Long> stageRefereeIds = refereeStageService.getRefereeIdsByStageId(stage.getId());
         if (!useConfig && stageRefereeIds.isEmpty()) {
+            // 既没有"每圈裁判"配置、也没有赛段级裁判:没有任何可用于绑定的信息,
+            // 保持现状(既不删也不写)。此前是先删光再判断,这一步会把圈级绑定静默清空,
+            // 且因为配置长度对不上而永远恢复不回来(开赛守卫随即报"某圈还没有裁判")。
             return;
         }
         boolean oneToOne = !useConfig && circles.size() == stageRefereeIds.size();
+        // 先把"每圈绑谁"算清楚,再一次性重建,保证任何情况下都不会删了不补
+        List<List<Long>> plan = new ArrayList<>(circles.size());
+        for (int i = 0; i < circles.size(); i++) {
+            List<Long> assigned = useConfig
+                ? (cfg.get(i) == null ? List.of() : cfg.get(i))
+                : (oneToOne ? List.of(stageRefereeIds.get(i)) : stageRefereeIds);
+            plan.add(assigned);
+        }
+        // 幂等:重建前先清掉该批场次已有的圈-裁判绑定
+        matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery()
+            .in(TMatchReferee::getMatchId, circleIds));
         int assignedCount = 0;
         for (int i = 0; i < circles.size(); i++) {
-            List<Long> assigned;
-            if (useConfig) {
-                assigned = cfg.get(i) == null ? List.of() : cfg.get(i);
-            } else {
-                assigned = oneToOne ? List.of(stageRefereeIds.get(i)) : stageRefereeIds;
-            }
+            List<Long> assigned = plan.get(i);
             if (assigned.isEmpty()) {
                 continue;
             }
@@ -548,8 +552,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (anyStarted) {
             return;
         }
-        int planned = plannedCircleCount(stage);
         List<TMatch> zones = auditionCircles(stage);
+        int planned = plannedCircleCount(stage);
         if (zones.isEmpty()) {
             // 统一预建空圈:只建圈结构,不分配选手——落圈一律由客户端在签到时指定,
             // 因此这里不能走会按号码/名额分人的生成路径。
@@ -855,9 +859,11 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (real.size() >= 2) {
             return false; // 正常对决,不处理
         }
-        // 0 参赛者的场次:仅首轮视为双边轮空可结算;后续轮次是等待上游胜者填入的占位,
-        // 不能按轮空结算,否则整条淘汰链会在开赛瞬间塌掉
-        if (real.isEmpty() && m.getDisplayCol() != null && m.getDisplayCol() > 1L) {
+        // 空场次能否按轮空结算,取决于"还会不会有人补进来":本赛段内所有会向本场送人的
+        // 上游场次都已结算(胜/败者该来的都来了、该空的就永远空),才能结算为空轮空。
+        // 此前用 displayCol > 1 粗判,导致"半决赛双方都是轮空"时季军赛永远等不到人:
+        // 既开不了(报"暂无参赛方")也结算不了,整个赛段卡死在"仍有 1 场未结算"。
+        if (real.isEmpty() && hasUnsettledUpstream(m)) {
             return false;
         }
         if (real.size() == 1) {
@@ -872,6 +878,31 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         settlementSupport.markMatchSettled(m);
         return true;
+    }
+
+    /**
+     * 本赛段内是否还有会向 {@code match} 填入参赛方的未结算场次(按 promotion_rule 反查)。
+     *
+     * <p>跨赛段的晋级走名单装配,开赛时参赛行已物化完毕(上一赛段必须 SETTLED 才能开赛),
+     * 因此只在本赛段内反查即可。</p>
+     */
+    private boolean hasUnsettledUpstream(TMatch match) {
+        List<TMatch> sameStage = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, match.getStageId())
+            .select(TMatch::getId, TMatch::getStatus, TMatch::getPromotionRule));
+        for (TMatch m : sameStage) {
+            if (Objects.equals(m.getId(), match.getId())
+                || StageConstants.MATCH_SETTLED.equals(m.getStatus())) {
+                continue;
+            }
+            Map<String, PromotionTarget> rule = RuleConfigParser.parsePromotionRule(m.getPromotionRule());
+            for (PromotionTarget target : rule.values()) {
+                if (target != null && Objects.equals(target.getTargetMatchId(), match.getId())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** 轮空胜者去向:填下游场次占位;finalMatch 则标记晋级下一赛段 */
@@ -995,17 +1026,27 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 自由对抗:对手由线下抽签/指认,场次全部由导播台手动添加,开赛不生成任何对阵
         boolean isFreeMatch = StageModeEnum.FREE_MATCH.getCode().equals(stage.getStageMode());
         if (exist == 0) {
-            if (!Long.valueOf(1L).equals(stage.getIsInitialized())) {
-                InitializeStageBo initBo = new InitializeStageBo();
-                initBo.setStageId(stageId);
-                initialize(initBo);
-                // 初始化后重新读取赛段(状态/isInitialized 已更新)
-                stage = mustGetStage(stageId);
-            }
-            if (!isArena && !isFreeMatch) {
-                GenerateMatchesBo gm = new GenerateMatchesBo();
-                gm.setStageId(stageId);
-                generateMatches(gm);
+            long entrants = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stageId)
+                .ne(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.WITHDRAWN.getCode()));
+            if (entrants == 0) {
+                // 本赛段没有参赛方(上一赛段晋级人数不足、甚至一个都没晋级):
+                // 不初始化也不生成对阵,直接进入进行中,由导播台完成赛段即可。
+                // 否则会卡在"赛段无可初始化的参赛方",后面的赛段整条链都走不下去。
+                log.warn("赛段[{}]没有参赛方,跳过初始化与生成对阵,直接进入进行中", stageId);
+            } else {
+                if (!Long.valueOf(1L).equals(stage.getIsInitialized())) {
+                    InitializeStageBo initBo = new InitializeStageBo();
+                    initBo.setStageId(stageId);
+                    initialize(initBo);
+                    // 初始化后重新读取赛段(状态/isInitialized 已更新)
+                    stage = mustGetStage(stageId);
+                }
+                if (!isArena && !isFreeMatch) {
+                    GenerateMatchesBo gm = new GenerateMatchesBo();
+                    gm.setStageId(stageId);
+                    generateMatches(gm);
+                }
             }
         }
         // 轮空场次不在此自动结算:保持 PENDING,由导播台逐场点「开始」时再自动结束(见 settleByeMatch),
@@ -1278,23 +1319,12 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .orElseThrow(() -> new ServiceException(
                     "目标圈场次不存在、已结算或为加赛场次,无法加入;请选择其他圈"));
         } else if (zoneIndex != null) {
-            // 客户端只给了圈序号(尚未拿到场次ID时):单圈即第 1 圈,多圈按 ZONE-n 定位
-            if (candidates.size() == 1) {
-                if (zoneIndex != 1) {
-                    throw new ServiceException("目标圈[第{}圈]不存在或不可用", zoneIndex);
-                }
-                target = candidates.get(0);
-            } else {
-            List<TMatch> zones = candidates.stream()
-                .filter(m -> m.getDisplayZone() != null && m.getDisplayZone().startsWith("ZONE-"))
-                .sorted(Comparator.comparing(TMatch::getDisplayRow, Comparator.nullsLast(Comparator.naturalOrder()))
-                    .thenComparing(TMatch::getId))
-                .toList();
-            if (zoneIndex <= 0 || zones.size() < zoneIndex) {
+            // 客户端只给了圈序号(尚未拿到场次ID时):第 k 圈 = 本赛段第 k 个正式圈场次
+            // (candidates 已按 displayRow、id 升序,与 auditionCircles 同一顺序)
+            if (zoneIndex <= 0 || candidates.size() < zoneIndex) {
                 throw new ServiceException("目标圈[第{}圈]不存在或不可用", zoneIndex);
             }
-            target = zones.get(zoneIndex - 1);
-            }
+            target = candidates.get(zoneIndex - 1);
         } else {
             // 落圈一律由客户端决定:后端不再按号码/名额择优推导,
             // 否则同一批号码会因「先建圈后签到 / 签完再生成」等调用顺序不同而落到不同的圈。
@@ -1504,27 +1534,22 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         return (rc != null && rc.getCircles() != null) ? Math.max(0, rc.getCircles()) : 0;
     }
 
-    /** 海选当前已生成的 ZONE 圈场次(按展示序) */
     /**
-     * 当前海选圈场次(同分加赛不计入"圈场次")。
+     * 海选圈场次的<b>唯一口径</b>:本赛段除同分加赛外的全部正式场次,按展示序。
      *
-     * <p>多圈配置取 ZONE-* 场次;单圈配置下唯一的圈是 CENTER 场次,
-     * 因此单圈时取本赛段全部正式场次——单圈也是显式配置的一个圈。</p>
+     * <p>圈就是正式场次,单圈/多圈不分开判断——圈序号即本列表下标 +1,分区名恒为
+     * {@code ZONE-k}(单圈即 {@code ZONE-1})。此前"多圈只认 ZONE-* 场次、单圈另取一个
+     * CENTER 名字"的分叉,会让单圈场次在加圈后掉出圈集合:名额算在它身上、裁判绑在它身上,
+     * 但"按圈取人"和"补圈"都不认它(表现为加一圈后新圈 0 名额、圈级裁判绑定被清空)。</p>
      */
     private List<TMatch> auditionCircles(TStage stage) {
-        List<TMatch> all = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+        return matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
                 .eq(TMatch::getStageId, stage.getId())
                 .orderByAsc(TMatch::getDisplayRow)
                 .orderByAsc(TMatch::getId))
             .stream()
             // 同分加赛复用原圈 displayZone,不计入"圈场次"
             .filter(m -> !settlementSupport.isTiebreaker(m))
-            .toList();
-        if (plannedCircleCount(stage) <= 1) {
-            return all;
-        }
-        return all.stream()
-            .filter(m -> m.getDisplayZone() != null && m.getDisplayZone().startsWith("ZONE-"))
             .toList();
     }
 
@@ -1556,16 +1581,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             m.setTournamentId(stage.getTournamentId());
             m.setTenantId(stage.getTenantId());
             m.setStageId(stage.getId());
-            if (planned == 1) {
-                // 单圈也是"提前配置好的一个圈",命名与生成器口径保持一致(CENTER)
-                m.setName("海选赛");
-                m.setDisplayZone("CENTER");
-                m.setDisplayRow(0L);
-            } else {
-                m.setName("海选赛-" + c + "圈");
-                m.setDisplayZone("ZONE-" + c);
-                m.setDisplayRow((long) (c - 1));
-            }
+            // 与生成器同一口径:第 k 个圈恒为 ZONE-k(单圈即 ZONE-1)
+            m.setName(StageFlowSupport.circleName(planned, c));
+            m.setDisplayZone(StageFlowSupport.circleZone(c));
+            m.setDisplayRow((long) (c - 1));
             m.setDisplayCol(1L);
             m.setStatus(StageConstants.MATCH_PENDING);
             m.setMatchMode(matchMode);
@@ -1598,21 +1617,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if ("PENDING".equals(status)) return "进行中";
         if ("WITHDRAWN".equals(status)) return "退赛";
         return status;
-    }
-
-    /** displayZone("ZONE-1"..) -> 圈序号(0 基);"CENTER" 或无圈返回 0;解析失败返回 -1 */
-    private int zoneIndexOf(String displayZone) {
-        if (displayZone == null || displayZone.isBlank()) {
-            return 0;
-        }
-        if (displayZone.startsWith("ZONE-")) {
-            try {
-                return Integer.parseInt(displayZone.substring(5)) - 1;
-            } catch (NumberFormatException ignored) {
-                return -1;
-            }
-        }
-        return -1;
     }
 
     @Override
@@ -2125,7 +2129,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             for (int i = nm.indexOf("加赛"); i >= 0; i = nm.indexOf("加赛", i + 2)) {
                 depth++;
             }
-            String zone = StageFlowSupport.zoneOf(m);
+            String zone = m.getDisplayZone();
             byDepthZone.computeIfAbsent(Math.max(1, depth), k -> new LinkedHashMap<>())
                 .computeIfAbsent(zone, k -> new ArrayList<>())
                 .add(m);
@@ -2627,7 +2631,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         for (int i = 0; i < matches.size(); i++) {
             TMatch m = matches.get(i);
             RankDetailVo.CircleRank cr = new RankDetailVo.CircleRank();
-            cr.setZone(m.getDisplayZone() == null ? "CENTER" : m.getDisplayZone());
+            cr.setZone(m.getDisplayZone());
             cr.setTitle(matches.size() > 1 ? "第" + (i + 1) + "圈" : "排名");
             List<RankDetailVo.CompetitorRank> comps = new ArrayList<>();
             for (TMatchParticipant p : partsByMatch.getOrDefault(m.getId(), List.of())) {

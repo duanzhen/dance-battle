@@ -49,10 +49,10 @@ public class SseEmitterManager extends AbstractSseEmitterManager {
         // 避免旧连接的关闭回调把刚登记的新连接从映射表里删掉(会表现为连接在但收不到消息)
         SseEmitter oldEmitter = emitters.put(token, emitter);
 
-        // 当 emitter 完成、超时或发生错误时，从映射表中移除对应的 token
-        emitter.onCompletion(() -> emitters.remove(token, emitter));
-        emitter.onTimeout(() -> emitters.remove(token, emitter));
-        emitter.onError((e) -> emitters.remove(token, emitter));
+        // 当 emitter 完成、超时或发生错误时，从映射表中移除对应的 token(并回收其发送队列)
+        emitter.onCompletion(() -> removeEmitter(emitters, token, emitter));
+        emitter.onTimeout(() -> removeEmitter(emitters, token, emitter));
+        emitter.onError((e) -> removeEmitter(emitters, token, emitter));
 
         if (oldEmitter != null && oldEmitter != emitter) {
             try {
@@ -68,9 +68,15 @@ public class SseEmitterManager extends AbstractSseEmitterManager {
             emitter.send(SseEmitter.event().comment("connected"));
         } catch (IOException e) {
             // 如果发送消息失败，则从映射表中移除 emitter
-            emitters.remove(token);
+            removeEmitter(emitters, token, emitter);
         }
         return emitter;
+    }
+
+    /** 从连接表移除并回收发送队列(统一出口,避免发送队列残留) */
+    private void removeEmitter(Map<String, SseEmitter> emitters, String token, SseEmitter emitter) {
+        emitters.remove(token, emitter);
+        SseSendDispatcher.getInstance().discard(emitter);
     }
 
     /**
@@ -111,9 +117,9 @@ public class SseEmitterManager extends AbstractSseEmitterManager {
                 return;
             }
 
-            emitterMap.entrySet().removeIf(entry -> {
-                return !sendHeartbeat(entry.getValue());
-            });
+            // 心跳异步派发:巡检线程不做网络写;不可读的连接由发送看门狗判定超时并断开,
+            // 断开回调(removeEmitter)负责把它从连接表移除
+            emitterMap.values().forEach(this::sendHeartbeat);
 
             // 移除空连接用户
             if (emitterMap.isEmpty()) {
@@ -142,22 +148,14 @@ public class SseEmitterManager extends AbstractSseEmitterManager {
      */
     public void sendMessage(Long userId, String message) {
         Map<String, SseEmitter> emitters = USER_TOKEN_EMITTERS.get(userId);
-        if (MapUtil.isNotEmpty(emitters)) {
-            for (Map.Entry<String, SseEmitter> entry : emitters.entrySet()) {
-                try {
-                    entry.getValue().send(SseEmitter.event()
-                        .name("message")
-                        .data(message));
-                } catch (Exception e) {
-                    SseEmitter remove = emitters.remove(entry.getKey());
-                    if (remove != null) {
-                        remove.complete();
-                    }
-                }
-            }
-        } else {
+        if (MapUtil.isEmpty(emitters)) {
             USER_TOKEN_EMITTERS.remove(userId);
+            return;
         }
+        // 异步派发:调用方(业务线程/Redis 监听线程)不再阻塞在网络写上;
+        // 发送失败或超时的连接由断开回调从连接表移除
+        emitters.values().forEach(emitter -> SseSendDispatcher.getInstance()
+            .send(emitter, SseEmitter.event().name("message").data(message)));
     }
 
     /**

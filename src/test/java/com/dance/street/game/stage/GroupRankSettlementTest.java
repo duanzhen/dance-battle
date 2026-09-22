@@ -266,6 +266,35 @@ class GroupRankSettlementTest {
     }
 
     /**
+     * 每组晋级数为 0(本组不晋级)是合法配置:应整组淘汰,而不是崩掉。
+     * 修复前结算里 {@code scored.get(advancePerGroup - 1)} 会取到下界下标 -1,
+     * 抛 IndexOutOfBoundsException,赛段无法结束。
+     */
+    @Test
+    void groupWithZeroAdvancePerGroupEliminatesAllInsteadOfCrashing() {
+        Long tid = newTournament("小组零晋级");
+        TStageVo stage = newStage(tid, "小组赛", "GROUP", 4, 2, groupRule(2, 0));
+        for (int i = 1; i <= 4; i++) {
+            insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
+        }
+
+        lifecycleService.startStage(stage.getId());
+        List<TMatch> matches = matchesOf(stage.getId());
+        assertEquals(2, matches.size(), "4 人 2 组应生成 2 场");
+        for (TMatch m : matches) {
+            finishByDirector(m.getId());
+        }
+
+        lifecycleService.completeStage(stage.getId());
+        assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(stage.getId()).getStatus(),
+            "每组晋级 0 人时赛段仍应能正常结束");
+        assertEquals(0, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
+            "每组晋级 0 人时不应有人晋级");
+        assertEquals(4, countOutcome(stage.getId(), OutcomeStatusEnum.ELIMINATED.getCode()),
+            "每组晋级 0 人时全组淘汰");
+    }
+
+    /**
      * 排名赛:单圈 4 人,1 名裁判按单维度打分;完成赛段后按总分取前 2 名晋级,
      * 并可通过排名明细查询各维度聚合分。
      */

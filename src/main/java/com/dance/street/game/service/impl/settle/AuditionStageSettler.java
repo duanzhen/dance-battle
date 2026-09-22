@@ -375,8 +375,9 @@ public class AuditionStageSettler implements StageSettler {
 
         // 名次段加赛(名次线上并列、双方结果早已确定):只决先后,不改晋级/淘汰结果
         Map<Long, String> keepOutcome = new HashMap<>();
+        String matchRemark = match.getRemark();
         boolean rankTiebreak = settlementSupport.isTiebreaker(match)
-            && match.getRemark().contains("名次段");
+            && matchRemark != null && matchRemark.contains("名次段");
         if (rankTiebreak) {
             for (TCompetitor c : compMap.values()) {
                 if (c.getOutcomeStatus() != null

@@ -189,7 +189,8 @@ const stageModeLabels: Record<string, string> = {
   [StageMode.GROUP]: '小组赛',
   [StageMode.AUDITION]: '海选赛',
   [StageMode.ARENA]: '擂台赛',
-  [StageMode.RANK]: '排名赛'
+  [StageMode.RANK]: '排名赛',
+  [StageMode.FREE_MATCH]: '自由对抗'
 };
 
 // 赛段状态:由流程操作(开始赛段/完成赛段/计算晋级)自动流转,仅展示

@@ -78,6 +78,7 @@ public class TournamentEventSseEmitterManager extends AbstractSseEmitterManager 
 
     private void remove(Long tournamentId, SseEmitter emitter) {
         REFEREE_OF.remove(emitter);
+        SseSendDispatcher.getInstance().discard(emitter);
         Set<SseEmitter> emitters = EMITTERS.get(tournamentId);
         if (emitters == null) {
             return;
@@ -96,15 +97,10 @@ public class TournamentEventSseEmitterManager extends AbstractSseEmitterManager 
         if (CollUtil.isEmpty(emitters)) {
             return;
         }
-        emitters.removeIf(emitter -> {
-            try {
-                emitter.send(SseEmitter.event().name("message").data(message));
-                return false;
-            } catch (Exception e) {
-                emitter.complete();
-                return true;
-            }
-        });
+        // 异步派发:调用方(提交后的 HTTP 线程 / Redisson 监听线程)不做网络写;
+        // 发送失败或超时的连接由断开回调(remove)负责摘除
+        emitters.forEach(emitter -> SseSendDispatcher.getInstance()
+            .send(emitter, SseEmitter.event().name("message").data(message)));
     }
 
     /**
@@ -119,18 +115,13 @@ public class TournamentEventSseEmitterManager extends AbstractSseEmitterManager 
             return;
         }
         Set<Long> targets = new HashSet<>(refereeIds);
-        emitters.removeIf(emitter -> {
+        emitters.forEach(emitter -> {
             Long rid = REFEREE_OF.get(emitter);
             if (rid == null || !targets.contains(rid)) {
-                return false; // 非目标连接:保留
+                return; // 非目标连接:跳过
             }
-            try {
-                emitter.send(SseEmitter.event().name("message").data(message));
-                return false;
-            } catch (Exception e) {
-                emitter.complete();
-                return true;
-            }
+            SseSendDispatcher.getInstance()
+                .send(emitter, SseEmitter.event().name("message").data(message));
         });
     }
 
@@ -141,13 +132,9 @@ public class TournamentEventSseEmitterManager extends AbstractSseEmitterManager 
     protected void sseMonitor() {
         List<Long> toRemove = new ArrayList<>();
         EMITTERS.forEach((tournamentId, emitters) -> {
-            emitters.removeIf(emitter -> {
-                if (!sendHeartbeat(emitter)) {
-                    REFEREE_OF.remove(emitter);
-                    return true;
-                }
-                return false;
-            });
+            // 心跳异步派发:巡检线程不做网络写,不会被读不动的连接(锁屏裁判手机)拖住;
+            // 超时/失败由发送看门狗断开连接,remove 回调负责清 REFEREE_OF 与连接集合
+            emitters.forEach(this::sendHeartbeat);
             if (emitters.isEmpty()) {
                 toRemove.add(tournamentId);
             }

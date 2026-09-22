@@ -495,6 +495,23 @@ public class RedisUtils {
     }
 
     /**
+     * 移除缓存Set中的成员
+     *
+     * @param key  缓存的键值
+     * @param data 待移除的数据
+     * @return 是否实际移除了成员
+     */
+    public static <T> boolean removeCacheSet(final String key, final T data) {
+        RedissonClient c = client();
+        if (c == null) {
+            Set<Object> set = LOCAL_SETS.get(key);
+            return set != null && set.remove(data);
+        }
+        RSet<T> rSet = c.getSet(key);
+        return rSet.remove(data);
+    }
+
+    /**
      * 注册Set监听器
      * <p>
      * key 监听器需开启 `notify-keyspace-events` 等 redis 相关配置

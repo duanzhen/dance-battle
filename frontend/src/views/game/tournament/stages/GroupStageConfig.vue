@@ -216,7 +216,7 @@ const localStage = ref<StageData>({ ...props.stage });
 const currentMode = computed(() => props.mode || ConfigMode.INIT);
 
 // 配置对象
-const config = ref<GroupConfig & { headToHeadFirst?: boolean; tiebreakerPlayoff?: boolean; scoring?: any; transition?: any }>({
+const config = ref<GroupConfig & { headToHeadFirst?: boolean; tiebreakerPlayoff?: boolean; scoring?: any }>({
   groupCount: 4,
   teamsPerGroup: 4,
   winPoints: 3,
@@ -234,8 +234,7 @@ const config = ref<GroupConfig & { headToHeadFirst?: boolean; tiebreakerPlayoff?
     trimRatio: 0.1,
     dimensions: [],
     outcomeRules: { winScore: 1, drawScore: 0.5, lossScore: 0 }
-  },
-  transition: {}
+  }
 });
 
 // 计算总选手数
@@ -258,7 +257,6 @@ const parseConfig = () => {
     if (g.lossPoints !== undefined) config.value.lossPoints = g.lossPoints;
     if (g.advancePerGroup !== undefined) config.value.advancePerGroup = g.advancePerGroup;
     if (parsed.scoring) config.value.scoring = parsed.scoring;
-    if (parsed.transition) config.value.transition = parsed.transition;
   } catch (e) {
     console.warn('Failed to parse ruleConfig:', e);
   }
@@ -277,8 +275,9 @@ const serializeConfig = () => {
       lossPoints: config.value.lossPoints,
       advancePerGroup: config.value.advancePerGroup
     },
-    scoring: config.value.scoring,
-    transition: config.value.transition
+    scoring: config.value.scoring
+    // 不写 transition:下一赛段以赛段链 next 为唯一事实源(详见 api/game/stage/index.ts 的说明);
+    // 该字段已由 API 层统一剥离,组件内不再保留/回写
   });
 };
 

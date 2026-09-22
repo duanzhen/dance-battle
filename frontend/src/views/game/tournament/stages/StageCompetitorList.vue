@@ -227,6 +227,7 @@ import { withdrawArenaCompetitor } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listMatchReferee } from '@/api/game/matchReferee';
+import { isTiebreakerMatch } from '@/utils/tiebreaker';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import FileSaver from 'file-saver';
@@ -553,7 +554,7 @@ const loadCircleLabels = async () => {
     const matchRes: any = await listMatch({ stageId: props.stageId, pageNum: 1, pageSize: 99 } as any);
     const matches: any[] = Array.isArray(matchRes?.data) ? matchRes.data : matchRes?.data?.data || [];
     const zones = matches
-      .filter((m) => m.displayZone && String(m.displayZone).startsWith('ZONE-') && !String(m.remark || '').startsWith('同分加赛'))
+      .filter((m) => m.displayZone && String(m.displayZone).startsWith('ZONE-') && !isTiebreakerMatch(m))
       .sort((a, b) => (Number(a.displayRow) || 0) - (Number(b.displayRow) || 0) || String(a.id).localeCompare(String(b.id)));
     if (zones.length < 2) {
       return;

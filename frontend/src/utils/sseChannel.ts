@@ -9,6 +9,9 @@
  * - 移动端适配:锁屏/切应用/网络切换导致连接被系统挂起或静默断开时,
  *   页面恢复可见(visibilitychange/pageshow)、网络恢复(online)按需重连;
  *   另有定时健康检查 + 空闲看门狗(后端 60s 命名事件 ping 心跳),兜底"半死"连接;
+ * - 回到前台补偿:锁屏/切应用期间 JS 被挂起,这期间的事件一条都收不到,
+ *   因此只要在后台待够一段时间,恢复时除重连外还会主动补一次 onRefresh 全量刷新
+ *   (裁判/导播解锁后必须看到当前状态,而不是锁屏前的旧画面);
  * - 只在连接确实不健康时才重连:连接正常时切标签页/回前台不再强拆重连,
  *   避免"重连 → 全量刷新"把页面刷得一直闪;
  * - 首次连接建立不触发 onRefresh(订阅方挂载时已自行拉取),避免重复请求。
@@ -29,6 +32,10 @@ interface SseChannelConn {
   reopened: boolean;
   closed: boolean;
   lastEventAt: number;
+  /** 进入后台的时间点(null=当前在前台),用于恢复时判断是否需要补偿刷新 */
+  hiddenAt: number | null;
+  /** 上次「恢复前台补偿刷新」的时间,用于去重 visibilitychange + pageshow 的双触发 */
+  lastResumeRefreshAt: number;
 }
 
 const channels = new Map<string, SseChannelConn>();
@@ -37,6 +44,10 @@ const MAX_RETRY_DELAY = 30000;
 const HEARTBEAT_CHECK_INTERVAL = 20000;
 /** 空闲超时:后端每 60s 发送 ping 心跳,超过 150s 未收到任何数据视为连接已死 */
 const IDLE_TIMEOUT = 150000;
+/** 后台停留超过该时长,恢复前台时补一次全量刷新(短于它的切标签不必刷新) */
+const RESUME_REFRESH_MIN_HIDDEN_MS = 5000;
+/** 同一次恢复可能同时触发 visibilitychange 与 pageshow,用它节流去重 */
+const RESUME_REFRESH_THROTTLE_MS = 2000;
 
 /** 连接是否健康:存在、未关闭、且最近收到过消息或心跳 */
 const isHealthy = (conn: SseChannelConn) => {
@@ -90,6 +101,48 @@ const reconnect = (conn: SseChannelConn, immediate = false) => {
 const ensureAlive = (conn: SseChannelConn) => {
   if (conn.closed) return;
   reconnectIfUnhealthy(conn);
+};
+
+/** 页面进入后台/被隐藏:记录时间点,供恢复时判断是否需要补偿刷新 */
+const markHidden = () => {
+  const now = Date.now();
+  channels.forEach((conn) => {
+    conn.hiddenAt = now;
+  });
+};
+
+/**
+ * 页面回到前台(解锁 / 切回应用 / 从 bfcache 恢复)。
+ *
+ * <p>手机锁屏或切到其它应用时浏览器会把 JS 挂起:期间后端推送的事件一条也收不到,
+ * 而 TCP 连接可能"看起来还是开的"(对端没发 FIN)。所以这里做两件事:
+ * 连接不健康就重连(重连成功后会触发一次 onRefresh 补偿);只要在后台待了足够久,
+ * 再额外补一次全量刷新——因为「没收到事件」不等于「数据没变」,裁判/导播解锁后
+ * 必须看到当前真实状态,而不是锁屏前的旧画面。</p>
+ */
+const handleResume = () => {
+  const now = Date.now();
+  channels.forEach((conn) => {
+    const hiddenFor = conn.hiddenAt == null ? 0 : now - conn.hiddenAt;
+    conn.hiddenAt = null;
+    // 1) 连接可能已死:按健康度决定是否重连
+    reconnectIfUnhealthy(conn);
+    // 2) 后台期间的变更需要补拉,与连接是否健康无关
+    if (hiddenFor < RESUME_REFRESH_MIN_HIDDEN_MS) {
+      return;
+    }
+    if (now - conn.lastResumeRefreshAt < RESUME_REFRESH_THROTTLE_MS) {
+      return;
+    }
+    conn.lastResumeRefreshAt = now;
+    conn.listeners.forEach((l) => {
+      try {
+        l.onRefresh?.();
+      } catch {
+        // 单个订阅者异常不影响其他订阅者
+      }
+    });
+  });
 };
 
 const open = (conn: SseChannelConn) => {
@@ -184,12 +237,14 @@ const open = (conn: SseChannelConn) => {
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      channels.forEach(reconnectIfUnhealthy);
+      handleResume();
+    } else {
+      markHidden();
     }
   });
-  window.addEventListener('pageshow', () => {
-    channels.forEach(reconnectIfUnhealthy);
-  });
+  // pagehide 覆盖「切应用被冻结 / 进入 bfcache」,pageshow 覆盖恢复
+  window.addEventListener('pagehide', markHidden);
+  window.addEventListener('pageshow', handleResume);
   window.addEventListener('online', () => {
     channels.forEach(reconnectIfUnhealthy);
   });
@@ -224,7 +279,9 @@ export function subscribeChannel(options: {
       retryTimer: null,
       reopened: false,
       closed: false,
-      lastEventAt: Date.now()
+      lastEventAt: Date.now(),
+      hiddenAt: null,
+      lastResumeRefreshAt: 0
     };
     channels.set(options.key, conn);
     open(conn);

@@ -26,7 +26,6 @@ public final class StageConstants {
     /** promotion_rule 中的 action 取值 */
     public static final String ACTION_ADVANCE = "ADVANCE";
     public static final String ACTION_FINAL_ADVANCE = "FINAL_ADVANCE";
-    public static final String ACTION_ELIMINATE = "ELIMINATE";
 
     /** TRoundScore.action 取值 */
     public static final String SCORE_ACTION_SCORE = "SCORE";

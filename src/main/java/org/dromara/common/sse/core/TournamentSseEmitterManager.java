@@ -1,6 +1,7 @@
 package org.dromara.common.sse.core;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -44,6 +45,15 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
      * value: Set<screenId>
      */
     private final static String TOURNAMENT_SCREENS_KEY_PREFIX = "global:sse:tournament:screens:";
+
+    /**
+     * 屏幕注册标记 key 前缀:key = sse:screen:registered:{screenId},value = tournamentId,带 TTL。
+     *
+     * <p>本机的 {@link #REGISTERED_SCREENS} 只覆盖「注册连接落在本实例」的情况;多实例部署
+     * 且无粘性会话时,导播的控制连接可能落在实例 A,而观众的浏览连接落到实例 B,
+     * 只看本机内存会把 B 上的观众误判为「屏幕未注册」而拒绝连接。这里把注册信息同步到 Redis 兜底。</p>
+     */
+    private final static String SCREEN_REGISTERED_KEY_PREFIX = "global:sse:screen:registered:";
 
     /**
      * 屏幕注册表：记录哪些屏幕已被管理端注册
@@ -159,6 +169,11 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
             isNewRegistration = true;
         }
 
+        // 注册信息落 Redis(带 TTL,与屏幕超时同长):多实例下观众可能连到别的实例,
+        // 同时避免注册信息永不过期
+        RedisUtils.setCacheObject(SCREEN_REGISTERED_KEY_PREFIX + screenId, tournamentId,
+            Duration.ofMillis(SCREEN_TIMEOUT_MS));
+
         // 将屏幕添加到赛事的屏幕列表中（新注册时）
         if (isNewRegistration) {
             String tournamentScreensKey = TOURNAMENT_SCREENS_KEY_PREFIX + tournamentId;
@@ -176,7 +191,20 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
      * @return 是否已注册
      */
     public boolean isScreenRegistered(String screenId) {
-        return screenId != null && REGISTERED_SCREENS.containsKey(screenId);
+        if (screenId == null) {
+            return false;
+        }
+        if (REGISTERED_SCREENS.containsKey(screenId)) {
+            return true;
+        }
+        // 本机没有:可能是别的实例注册的(多实例 + 无粘性会话),回查 Redis;
+        // 命中后补齐到本机,后续判定不必每次都走 Redis
+        String tournamentId = RedisUtils.getCacheObject(SCREEN_REGISTERED_KEY_PREFIX + screenId);
+        if (tournamentId != null) {
+            REGISTERED_SCREENS.putIfAbsent(screenId, System.currentTimeMillis());
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -185,9 +213,13 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
      * @param screenId 屏幕ID
      */
     public void updateScreenActivity(String screenId) {
-        if (screenId != null && REGISTERED_SCREENS.containsKey(screenId)) {
-            REGISTERED_SCREENS.put(screenId, System.currentTimeMillis());
+        if (screenId == null) {
+            return;
         }
+        REGISTERED_SCREENS.computeIfPresent(screenId, (k, v) -> System.currentTimeMillis());
+        // 顺带续期 Redis 注册标记:否则活跃屏幕的注册信息会在 TTL 到期后被清掉,
+        // 多实例下又变回"未注册"
+        RedisUtils.expire(SCREEN_REGISTERED_KEY_PREFIX + screenId, Duration.ofMillis(SCREEN_TIMEOUT_MS));
     }
 
     /**
@@ -223,16 +255,19 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         // 设置连接回调:按 emitter 身份移除,避免旧连接的回调误删新连接
         emitter.onCompletion(() -> {
             emitters.remove(terminalId, emitter);
+            SseSendDispatcher.getInstance().discard(emitter);
             checkAndCleanupScreen(screenId);
         });
 
         emitter.onTimeout(() -> {
             emitters.remove(terminalId, emitter);
+            SseSendDispatcher.getInstance().discard(emitter);
             checkAndCleanupScreen(screenId);
         });
 
         emitter.onError((e) -> {
             emitters.remove(terminalId, emitter);
+            SseSendDispatcher.getInstance().discard(emitter);
             checkAndCleanupScreen(screenId);
         });
 
@@ -255,7 +290,8 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
                 notifyManagerViewerStatus(screenId);
             }
         } catch (IOException e) {
-            emitters.remove(terminalId);
+            emitters.remove(terminalId, emitter);
+            SseSendDispatcher.getInstance().discard(emitter);
         }
 
         return emitter;
@@ -319,6 +355,7 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         if (TERMINAL_EMITTERS.get(terminalId) != emitter) {
             return;
         }
+        SseSendDispatcher.getInstance().discard(emitter);
         TERMINAL_EMITTERS.remove(terminalId);
         Set<String> screenIds = TERMINAL_SCREENS.remove(terminalId);
         if (screenIds == null) {
@@ -353,21 +390,10 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         }
 
         String statusMessage = buildViewerStatusMessage(screenId, connections);
-        connections.getManagers().forEach((terminalId, emitter) -> {
-            try {
-                emitter.send(SseEmitter.event()
-                    .name("viewerStatus")
-                    .data(statusMessage));
-            } catch (Exception e) {
-                // 发送失败，连接可能已断开
-                try {
-                    emitter.complete();
-                } catch (Exception ignore) {
-                    // 重复关闭忽略
-                }
-                connections.getManagers().remove(terminalId);
-            }
-        });
+        // 异步派发:本方法在连接建立、心跳巡检、观众上下线时都会被调用,
+        // 不能把调用线程阻塞在网络写上;断开由发送看门狗负责,回调自动摘除连接
+        connections.getManagers().values().forEach(emitter -> SseSendDispatcher.getInstance()
+            .send(emitter, SseEmitter.event().name("viewerStatus").data(statusMessage)));
     }
 
     /**
@@ -560,14 +586,8 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
 
             SseEmitter emitter = emitters.get(terminalId);
             if (emitter != null) {
-                try {
-                    emitter.send(SseEmitter.event()
-                        .name("message")
-                        .data(message));
-                } catch (Exception e) {
-                    emitter.complete();
-                    emitters.remove(terminalId);
-                }
+                SseSendDispatcher.getInstance().send(emitter,
+                    SseEmitter.event().name("message").data(message));
             }
         }
     }
@@ -579,17 +599,10 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         if (MapUtil.isEmpty(emitters)) {
             return;
         }
-        emitters.entrySet().removeIf(entry -> {
-            try {
-                entry.getValue().send(SseEmitter.event()
-                    .name("message")
-                    .data(message));
-                return false;
-            } catch (Exception e) {
-                entry.getValue().complete();
-                return true;
-            }
-        });
+        // 异步派发:调用方(提交后的 HTTP 线程 / Redisson 监听线程)不做网络写;
+        // 发送失败或超时的连接由断开回调摘除
+        emitters.values().forEach(emitter -> SseSendDispatcher.getInstance()
+            .send(emitter, SseEmitter.event().name("message").data(message)));
     }
 
     /**
@@ -673,6 +686,14 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         // 移除超时的屏幕
         expiredScreens.forEach(screenId -> {
             REGISTERED_SCREENS.remove(screenId);
+            // 同步清理 Redis 注册标记与赛事屏幕集合成员:此前只清本机注册表,
+            // 集合成员只增不减,会让 notifySceneUpdate 长期向已注销屏幕发消息,Redis 键也无限增长
+            String registeredKey = SCREEN_REGISTERED_KEY_PREFIX + screenId;
+            String tournamentId = RedisUtils.getCacheObject(registeredKey);
+            RedisUtils.deleteObject(registeredKey);
+            if (tournamentId != null) {
+                RedisUtils.removeCacheSet(TOURNAMENT_SCREENS_KEY_PREFIX + tournamentId, screenId);
+            }
             // 断开该屏幕的所有连接
             disconnect(screenId);
             log.info("屏幕 {} 已超时自动注销", screenId);
@@ -686,7 +707,9 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         if (MapUtil.isEmpty(emitters)) {
             return;
         }
-        emitters.entrySet().removeIf(entry -> !sendHeartbeat(entry.getValue()));
+        // 心跳异步派发:巡检线程不做网络写(读不动的连接会由发送看门狗判定超时并断开,
+        // 断开回调负责把它从屏幕连接表移除),因此一条锁屏手机/断网大屏不会拖住整轮巡检
+        emitters.values().forEach(this::sendHeartbeat);
         // 还有连接在线说明屏幕仍在使用:刷新活跃时间,避免长时间不重连被 30 分钟超时注销
         if (MapUtil.isNotEmpty(emitters)) {
             updateScreenActivity(screenId);

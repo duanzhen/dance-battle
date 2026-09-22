@@ -75,7 +75,9 @@ public class GroupStageSettler implements StageSettler {
         int winP = (gc != null && gc.getWinPoints() != null) ? gc.getWinPoints() : 3;
         int drawP = (gc != null && gc.getDrawPoints() != null) ? gc.getDrawPoints() : 1;
         int lossP = (gc != null && gc.getLossPoints() != null) ? gc.getLossPoints() : 0;
-        int advancePerGroup = (gc != null && gc.getAdvancePerGroup() != null) ? gc.getAdvancePerGroup() : 1;
+        // 名额下界兜底:配置误填 0/负数时表示"本组不晋级",而不是在下面取 scored.get(-1) 崩掉
+        int advancePerGroup = (gc != null && gc.getAdvancePerGroup() != null)
+            ? Math.max(0, gc.getAdvancePerGroup()) : 1;
 
         List<TMatch> matches = matchMapper.selectList(
             Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stage.getId()));
@@ -146,7 +148,7 @@ public class GroupStageSettler implements StageSettler {
             int rankCursor = 1;
             // 晋级线同分并列:同分者保持 PENDING,由导播台在中间态用 adjustAdvancement 定夺
             Set<Long> pendingSet = new HashSet<>();
-            if (advancePerGroup < n) {
+            if (advancePerGroup > 0 && advancePerGroup < n) {
                 int cutoff = points.get(scored.get(advancePerGroup - 1));
                 List<Long> tied = scored.stream()
                     .filter(c -> points.get(c) == cutoff).collect(Collectors.toList());

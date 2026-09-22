@@ -278,6 +278,7 @@ import { ensureAuditionCircles } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
 import { listMatchReferee } from '@/api/game/matchReferee';
+import { isTiebreakerMatch } from '@/utils/tiebreaker';
 import PortraitMatting from './PortraitMatting.vue';
 import GameDialog from '@/components/GameDialog/index.vue';
 
@@ -402,7 +403,7 @@ const loadCircleInfo = async () => {
       const m = ordered[i];
       // 只展示圈场次:分区名恒为 ZONE-k;同分加赛场次复用原圈分区,不算独立的一圈
       if (!String(m.displayZone || '').startsWith('ZONE-')
-        || String(m.remark || '').startsWith('同分加赛')) {
+        || isTiebreakerMatch(m)) {
         continue;
       }
       const zoneNo = String(m.displayZone).replace('ZONE-', '');

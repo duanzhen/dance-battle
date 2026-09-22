@@ -83,6 +83,15 @@ public class TMatchVo implements Serializable {
     private String matchMode;
 
     /**
+     * 场次类型:NORMAL=普通场 / TIEBREAKER=同分加赛(二海/三海…)。
+     *
+     * <p>加赛的规范标记,供前端识别加赛场次(此前只能靠 remark 文本前缀)。
+     * 历史数据该列为空,消费方需按 remark 前缀兜底——见后端
+     * {@code SettlementSupport.isTiebreaker}。</p>
+     */
+    private String matchType;
+
+    /**
      * 槽位0(左侧)参赛方名称,列表展示用
      */
     private String leftName;

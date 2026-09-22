@@ -284,7 +284,6 @@ const config = ref<
     pairingMode?: string;
     publishMode?: string;
     scoring?: any;
-    transition?: any;
   }
 >({
   template: KnockoutTemplate.ROUND_32,
@@ -302,8 +301,7 @@ const config = ref<
     trimRatio: 0.1,
     dimensions: [],
     outcomeRules: { winScore: 1, drawScore: 0.5, lossScore: 0 }
-  },
-  transition: {}
+  }
 });
 
 // 模板列表
@@ -343,7 +341,6 @@ const parseConfig = () => {
     if (ko.publishMode !== undefined) config.value.publishMode = ko.publishMode;
     if (ko.thirdPlaceMatch !== undefined) config.value.playThirdPlace = ko.thirdPlaceMatch;
     if (parsed.scoring) config.value.scoring = parsed.scoring;
-    if (parsed.transition) config.value.transition = parsed.transition;
   } catch (e) {
     console.warn('Failed to parse ruleConfig:', e);
   }
@@ -373,8 +370,11 @@ const serializeConfig = () => {
       publishMode: config.value.publishMode,
       thirdPlaceMatch: config.value.playThirdPlace
     },
-    scoring: config.value.scoring,
-    transition: config.value.transition
+    scoring: config.value.scoring
+    // 不写 transition:下一赛段以赛段链 next 为唯一事实源,后端对
+    // "链 next 与 transition.targetStageId 不一致"会直接报错。
+    // 前端无该字段的编辑入口,保留并回写只会让历史脏值永久存续、且界面上无法修复,
+    // 因此保存时一律不输出(下次保存即清除历史遗留值)。
   });
 };
 

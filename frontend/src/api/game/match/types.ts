@@ -45,6 +45,12 @@ export interface MatchVO {
   matchMode: string;
 
   /**
+   * 场次类型:NORMAL=普通场 / TIEBREAKER=同分加赛(二海/三海…)
+   * 识别加赛请统一用 @/utils/tiebreaker 的 isTiebreakerMatch(带 remark 兜底)
+   */
+  matchType?: string;
+
+  /**
    *
    */
   promotionRule: string;

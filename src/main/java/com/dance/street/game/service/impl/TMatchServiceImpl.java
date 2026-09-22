@@ -254,15 +254,21 @@ public class TMatchServiceImpl implements ITMatchService {
                     .map(TMatchRound::getId).filter(Objects::nonNull).collect(Collectors.toSet());
                 // 二海(加赛):轮次未绑定选手,单轮共享多名选手评分,按参赛方逐人展示(与海选主赛一致)
                 if (r.getCompetitorId() == null) {
+                    // 历史数据:老加赛只建了一轮,这里按上场顺序逐人铺开并补上展示序号,
+                    // 否则 N 个人会挤在同一轮里(前端 key 重复、全部显示成「第1轮」)。
+                    long seq = 0;
                     for (TMatchParticipant p : byMatch.getOrDefault(vo.getId(), List.of())) {
                         if (p.getCompetitorId() == null) {
                             continue;
                         }
-                        roundScores.add(buildAuditionRoundItem(r, p.getCompetitorId(),
+                        seq++;
+                        MatchRoundScoreVo item = buildAuditionRoundItem(r, p.getCompetitorId(),
                             roundScoresOfRound.stream()
                                 .filter(s -> Objects.equals(s.getCompetitorId(), p.getCompetitorId()))
                                 .toList(),
-                            nameById, participantByCid, refereeNameById));
+                            nameById, participantByCid, refereeNameById);
+                        item.setRoundSequence(seq);
+                        roundScores.add(item);
                     }
                     continue;
                 }

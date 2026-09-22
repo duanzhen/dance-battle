@@ -140,6 +140,56 @@ class AuditionCompleteGuardTest {
         assertTrue(result.getCompleted(), "打 0 分与标记退赛都不应算未判完");
     }
 
+    /**
+     * 晋级线同分时「完成赛段」不是完成,而是当场生成加赛:返回值必须显式标记 tiebreaker,
+     * 前端据此弹「需要加赛」——否则导播只看到赛段还是进行中,不知道要拉谁回来打分。
+     */
+    @Test
+    void completeReportsTiebreakerAsPendingWithReason() {
+        Long tid = newTournament("海选加赛提示");
+        TStageVo stage = startAuditionWithThreePlayers(tid, "海选");
+        Long circleId = circlesOf(stage.getId()).get(0).getId();
+        List<TMatchParticipant> parts = participantsOf(circleId);
+        // 前两名同分争 1 个晋级名额 → 加赛;第三名 4 分被淘汰
+        score(circleId, parts.get(0).getCompetitorId(), new BigDecimal("9"));
+        score(circleId, parts.get(1).getCompetitorId(), new BigDecimal("9"));
+        score(circleId, parts.get(2).getCompetitorId(), new BigDecimal("4"));
+
+        // 1) 首次点完成:当场生成加赛,返回值标记 tiebreaker 并给出可直接展示的原因
+        StageCompleteVo result = lifecycleService.completeStage(stage.getId());
+        assertFalse(result.getCompleted(), "有加赛未判完不应算结束");
+        assertTrue(result.getTiebreaker(), "同分加赛必须显式标记,前端才能弹「需要加赛」");
+        assertNotNull(result.getMessage());
+        assertTrue(result.getMessage().contains("需要加赛"),
+            "原因应说明需要加赛,实际: " + result.getMessage());
+        assertTrue(result.getMessage().contains("二海"),
+            "原因应说明是几海,实际: " + result.getMessage());
+        assertEquals(StageConstants.STAGE_GAMING, stageMapper.selectById(stage.getId()).getStatus(),
+            "加赛未判完时赛段应保持进行中");
+
+        // 2) 加赛还没打分就再点:仍是加赛口径(而不是笼统的"还有选手未打分")
+        StageCompleteVo again = lifecycleService.completeStage(stage.getId());
+        assertFalse(again.getCompleted());
+        assertTrue(again.getTiebreaker(), "加赛未判完再次点击同样应标记 tiebreaker");
+        assertTrue(again.getMessage().contains("需要加赛"),
+            "原因应继续指向加赛,实际: " + again.getMessage());
+
+        // 3) 裁判打完加赛(全员有分即自动结算)后再点:正常结束
+        List<TMatch> tiebreakers = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER));
+        assertEquals(1, tiebreakers.size(), "晋级线同分应创建 1 场二海");
+        List<TMatchParticipant> tbParts = participantsOf(tiebreakers.get(0).getId());
+        assertEquals(2, tbParts.size(), "二海应只有同分的两位选手参加");
+        score(tiebreakers.get(0).getId(), tbParts.get(0).getCompetitorId(), new BigDecimal("9.8"));
+        score(tiebreakers.get(0).getId(), tbParts.get(1).getCompetitorId(), new BigDecimal("9.1"));
+
+        StageCompleteVo settled = lifecycleService.completeStage(stage.getId());
+        assertTrue(settled.getCompleted(), "加赛判完后应能结束赛段");
+        assertFalse(settled.getTiebreaker(), "已结束时不应再标记加赛");
+        assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(stage.getId()).getStatus());
+    }
+
     // ===== 造数据 =====
 
     private Long newTournament(String name) {

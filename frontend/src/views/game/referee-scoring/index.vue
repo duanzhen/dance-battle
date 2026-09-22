@@ -177,7 +177,8 @@
                   >
                     第{{ r.roundSequence }}轮{{ r.outcome === 'DRAW' ? '·平局' : '·已结算' }}
                   </span>
-                  <span v-if="selectedOverview?.winnerName" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
+                  <!-- 海选没有对阵胜负,不展示「胜者」:名次第一只是分数最高 -->
+                  <span v-if="selectedOverview?.winnerName && !isAudition" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
                     胜者 {{ selectedOverview.winnerName }}
                   </span>
                 </div>
@@ -230,7 +231,7 @@
                 >
                   第{{ r.roundSequence }}轮{{ r.outcome === 'DRAW' ? '·平局' : r.status === 'GAMING' ? '·进行中' : '·已结算' }}
                 </span>
-                <span v-if="m.winnerName" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
+                <span v-if="m.winnerName && !isAudition" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
                   胜者 {{ m.winnerName }}
                 </span>
               </div>

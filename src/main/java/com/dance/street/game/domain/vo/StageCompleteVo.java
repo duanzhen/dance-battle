@@ -31,11 +31,20 @@ public class StageCompleteVo implements Serializable {
     /** 未结束时的人话原因(可直接展示给导播),已结束时为 null */
     private String message;
 
+    /**
+     * 未结束是否因为产生了同分加赛(二海/三海…)。
+     *
+     * <p>首次点「完成赛段」会当场生成加赛场次、再次点则是加赛还没判完,
+     * 两种情况前端都要弹「需要加赛」提示,而不是当成"漏判了场次"。</p>
+     */
+    private Boolean tiebreaker;
+
     /** 赛段已结束 */
     public static StageCompleteVo settled() {
         StageCompleteVo vo = new StageCompleteVo();
         vo.setStatus(StageConstants.STAGE_SETTLED);
         vo.setCompleted(true);
+        vo.setTiebreaker(false);
         return vo;
     }
 
@@ -45,6 +54,17 @@ public class StageCompleteVo implements Serializable {
         vo.setStatus(StageConstants.STAGE_GAMING);
         vo.setCompleted(false);
         vo.setMessage(message);
+        vo.setTiebreaker(false);
+        return vo;
+    }
+
+    /** 结算产生了同分加赛(二海/三海…),赛段保持进行中 */
+    public static StageCompleteVo pendingTiebreaker(String message) {
+        StageCompleteVo vo = new StageCompleteVo();
+        vo.setStatus(StageConstants.STAGE_GAMING);
+        vo.setCompleted(false);
+        vo.setMessage(message);
+        vo.setTiebreaker(true);
         return vo;
     }
 }

@@ -10,19 +10,30 @@ package com.dance.street.game.service.impl.settle;
  *
  * @param closable 结算已完成,赛段可以置为 SETTLED
  * @param reason   {@code closable=false} 时的原因(可直接展示给导播)
+ * @param tiebreaker 未结束是否因为产生了同分加赛(二海/三海…):
+ *                   前端据此弹「需要加赛」,而不是笼统的"仍有场次未完成"
  * @author duane
  */
-public record StageSettleOutcome(boolean closable, String reason) {
+public record StageSettleOutcome(boolean closable, String reason, boolean tiebreaker) {
 
-    private static final StageSettleOutcome COMPLETED = new StageSettleOutcome(true, null);
+    private static final StageSettleOutcome COMPLETED = new StageSettleOutcome(true, null, false);
 
     /** 结算完成,赛段可关闭 */
     public static StageSettleOutcome completed() {
         return COMPLETED;
     }
 
-    /** 结算产生了后续工作(如二海加赛),赛段保持进行中 */
+    /** 结算产生了后续工作(仍有场次未判完等),赛段保持进行中 */
     public static StageSettleOutcome pending(String reason) {
-        return new StageSettleOutcome(false, reason);
+        return new StageSettleOutcome(false, reason, false);
+    }
+
+    /**
+     * 结算产生了同分加赛(二海/三海…),赛段保持进行中:
+     * 首次结算是当场生成加赛、再次结算是加赛还没判完,两种情况导播都要去盯加赛。
+     * 单独标记出来,前端才能弹「需要加赛」而不是让人以为只是漏判。
+     */
+    public static StageSettleOutcome tiebreaker(String reason) {
+        return new StageSettleOutcome(false, reason, true);
     }
 }

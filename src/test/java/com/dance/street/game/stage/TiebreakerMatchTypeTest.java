@@ -5,7 +5,9 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchReferee;
+import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TReferee;
+import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
@@ -18,7 +20,9 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
+import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
+import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
@@ -36,6 +40,9 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -78,6 +85,10 @@ class TiebreakerMatchTypeTest {
     private TMatchMapper matchMapper;
     @Autowired
     private TMatchParticipantMapper participantMapper;
+    @Autowired
+    private TMatchRoundMapper matchRoundMapper;
+    @Autowired
+    private TRoundScoreMapper roundScoreMapper;
     @Autowired
     private TCompetitorMapper competitorMapper;
     @Autowired
@@ -132,6 +143,61 @@ class TiebreakerMatchTypeTest {
             .set(TMatch::getMatchType, null));
         assertTrue(settlementSupport.isTiebreaker(matchMapper.selectById(tb.getId())),
             "老库(match_type 为空)应回退按 remark 前缀识别");
+    }
+
+    /**
+     * 加赛场次同样按「逐选手轮次」建:3 人加赛 = 3 个轮次,每个轮次绑定一名选手,分数落在自己的轮次上。
+     *
+     * <p>回归的事故:加赛只建了 1 个轮次(无选手绑定),裁判端「第N轮」只显示一轮,
+     * 3 个人的加赛看起来像只判了 1 个人;打分也只能退化成"单轮多人共享",
+     * 与正式圈的逐选手轮次是两套口径。</p>
+     */
+    @Test
+    void tiebreakerHasOneRoundPerTiedCompetitor() {
+        Long tid = newTournament("加赛轮次");
+        TStageVo stage = newAuditionStage(tid, "海选", 2);
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        Long refereeId = insertReferee(tid, "裁判A");
+        Long circleId = circlesOf(stage.getId()).get(0).getId();
+        bindRefereeToCircle(circleId, refereeId, tid);
+        for (int i = 1; i <= 4; i++) {
+            putPlayerInCircle(tid, stage, "选手" + i, String.valueOf(i));
+        }
+        lifecycleService.startStage(stage.getId());
+
+        // 4 人取 2 人,前三名同分 → 晋级线被同分横跨,结算创建 3 人的二海
+        List<TMatchParticipant> parts = participantsOf(circleId);
+        score(circleId, parts.get(0).getCompetitorId(), new BigDecimal("9"));
+        score(circleId, parts.get(1).getCompetitorId(), new BigDecimal("9"));
+        score(circleId, parts.get(2).getCompetitorId(), new BigDecimal("9"));
+        score(circleId, parts.get(3).getCompetitorId(), new BigDecimal("4"));
+        lifecycleService.completeStage(stage.getId());
+
+        TMatch tb = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, stage.getId())
+                .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER))
+            .get(0);
+        List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, tb.getId())
+            .orderByAsc(TMatchRound::getRoundSequence));
+        assertEquals(3, rounds.size(), "3 人加赛应有 3 个轮次(逐选手一轮),而不是 1 轮");
+        assertEquals(List.of(1L, 2L, 3L),
+            rounds.stream().map(TMatchRound::getRoundSequence).toList(), "轮次序号应连续");
+        List<Long> roundCompetitorIds = rounds.stream().map(TMatchRound::getCompetitorId).toList();
+        assertTrue(roundCompetitorIds.stream().noneMatch(Objects::isNull),
+            "每个轮次都应绑定一名同分选手");
+        assertEquals(3, roundCompetitorIds.stream().distinct().count(), "轮次与同分选手一一对应");
+
+        // 打分写进选手自己的轮次(不再把 3 个人的分全塞进同一轮)
+        Map<Long, Long> roundIdByCompetitor = rounds.stream()
+            .collect(Collectors.toMap(TMatchRound::getCompetitorId, TMatchRound::getId));
+        Long firstTied = participantsOf(tb.getId()).get(0).getCompetitorId();
+        score(tb.getId(), firstTied, new BigDecimal("9.5"));
+        List<TRoundScore> scoreRows = roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+            .in(TRoundScore::getRoundId, rounds.stream().map(TMatchRound::getId).toList()));
+        assertTrue(scoreRows.stream().allMatch(r ->
+                Objects.equals(r.getRoundId(), roundIdByCompetitor.get(r.getCompetitorId()))),
+            "选手的加赛分应落在自己的轮次上");
     }
 
     // ===== 造数据 =====

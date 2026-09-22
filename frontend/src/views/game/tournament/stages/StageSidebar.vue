@@ -290,9 +290,17 @@ const doComplete = async () => {
     if (result?.completed || result?.status === 'SETTLED') {
       localStage.value.status = 'SETTLED';
       ElMessage.success('赛段已完成');
+    } else if (result?.tiebreaker) {
+      // 同分加赛必须弹窗:加赛场次是刚生成的,导播要立刻安排裁判打分,
+      // 一闪而过的 toast 会让人以为赛段已经结束了。
+      ElMessageBox.alert(
+        result?.message || '海选出现同分,需要加赛,请裁判完成加赛打分后再点「完成赛段」。',
+        '需要加赛',
+        { type: 'warning', confirmButtonText: '知道了' }
+      ).catch(() => {});
     } else {
       // 结算未完成不是错误:后端统一返回 completed=false + 可直接展示的原因
-      // (如「海选产生二海(同分加赛),完成二海判罚后才能结束赛段」)
+      // (如「海选还有 3 位选手未打分(…),判完才能结束赛段」)
       ElMessage.warning(result?.message || '赛段仍有未完成场次,完成全部判罚后才能结束赛段');
     }
     emit('update', localStage.value);

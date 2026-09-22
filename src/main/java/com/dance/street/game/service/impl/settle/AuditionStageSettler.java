@@ -76,20 +76,99 @@ public class AuditionStageSettler implements StageSettler {
     @Override
     public StageSettleOutcome settle(TStage stage) {
         // 前置守卫:还有选手一条分都没打就不许结束(正式圈与二海/加赛一视同仁)
-        String blocked = blockedReason(stage);
+        List<TMatch> unfinished = unfinishedMatches(stage);
+        String blocked = unjudgedReason(stage, unfinished);
+        if (blocked == null) {
+            // 全员判完才结算:结算会在晋级线同分处当场生成加赛场次(二海/三海…)
+            settleAuditionStage(stage);
+            unfinished = unfinishedMatches(stage);
+        }
+        // 加赛未决出时统一走「需要加赛」口径:首次点是刚生成了加赛、再点是加赛还没判完,
+        // 两种情况导播要做的都是去盯加赛,混进"仍有场次未完成"会被当成漏判了场次。
+        List<TMatch> tiebreakers = unfinished.stream().filter(SettlementSupport::isTiebreaker).toList();
+        if (!tiebreakers.isEmpty()) {
+            String reason = tiebreakerReason(tiebreakers);
+            if (blocked != null) {
+                reason = reason + " " + blocked;
+            }
+            return StageSettleOutcome.tiebreaker(reason);
+        }
         if (blocked != null) {
             return StageSettleOutcome.pending(blocked);
         }
-        settleAuditionStage(stage);
-        long tbUnfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stage.getId())
-            .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-        if (tbUnfinished > 0) {
-            // 海选出现二海(同分加赛):首次结算当场生成,赛段保持 GAMING,
-            // 必须等裁判完成二海判罚后再次调用 completeStage 才能结束赛段。
-            return StageSettleOutcome.pending("海选产生二海(同分加赛),完成二海判罚后才能结束赛段");
+        if (!unfinished.isEmpty()) {
+            return StageSettleOutcome.pending(
+                "赛段仍有 " + unfinished.size() + " 场未结算,完成全部判罚后才能结束赛段");
         }
         return StageSettleOutcome.completed();
+    }
+
+    /** 本赛段尚未结算的场次(正式圈 + 加赛):能否结束赛段只看它们 */
+    private List<TMatch> unfinishedMatches(TStage stage) {
+        if (stage == null || stage.getId() == null) {
+            return List.of();
+        }
+        return matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
+    }
+
+    /** 加赛未结束的人话原因:说清是几海、哪个圈、争什么、几人同分 */
+    private String tiebreakerReason(List<TMatch> tiebreakers) {
+        List<String> labels = new ArrayList<>();
+        for (TMatch tb : tiebreakers) {
+            labels.add(tiebreakerLabel(tb));
+        }
+        return "海选出现同分,需要加赛:" + String.join("、", labels)
+            + "。请裁判完成加赛打分后再点「完成赛段」结束赛段。";
+    }
+
+    /** 加赛场次标签,如「第2圈 二海(晋级名额 3 人同分)」 */
+    private String tiebreakerLabel(TMatch tb) {
+        long people = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, tb.getId())
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        return zoneLabel(tb.getDisplayZone()) + tiebreakerRoundName(tiebreakerDepth(tb))
+            + "(" + tiebreakerTag(tb.getRemark()) + " " + people + " 人同分)";
+    }
+
+    /** 圈标签:displayZone「ZONE-2」→「第2圈 」,无圈时为空 */
+    private String zoneLabel(String zone) {
+        if (zone == null || zone.isBlank()) {
+            return "";
+        }
+        int idx = zone.lastIndexOf('-');
+        String no = idx >= 0 ? zone.substring(idx + 1) : zone;
+        return "第" + no + "圈 ";
+    }
+
+    /** 加赛深度:场次名里「加赛」出现的次数(1=二海,2=三海…),与导出 sheet 同名 */
+    private int tiebreakerDepth(TMatch tb) {
+        String name = tb.getName() == null ? "" : tb.getName();
+        int depth = 0;
+        for (int i = name.indexOf("加赛"); i >= 0; i = name.indexOf("加赛", i + 2)) {
+            depth++;
+        }
+        return Math.max(1, depth);
+    }
+
+    private String tiebreakerRoundName(int depth) {
+        return switch (depth) {
+            case 1 -> "二海";
+            case 2 -> "三海";
+            case 3 -> "四海";
+            case 4 -> "五海";
+            default -> "加赛" + depth;
+        };
+    }
+
+    /** 加赛争的边界标签:remark 形如「同分加赛,晋级名额,3人」,取第二段 */
+    private String tiebreakerTag(String remark) {
+        if (remark == null) {
+            return "晋级名额";
+        }
+        String[] parts = remark.split(",");
+        return parts.length > 1 && !parts[1].isBlank() ? parts[1].trim() : "晋级名额";
     }
 
     /**
@@ -98,11 +177,11 @@ public class AuditionStageSettler implements StageSettler {
      * <p>此前只在二海(同分加赛)上拦,正式圈整圈没判也能直接结束,等于把没打分的人
      * 当 0 分淘汰掉;现在正式圈与加赛一视同仁。</p>
      */
-    private String blockedReason(TStage stage) {
+    private String unjudgedReason(TStage stage, List<TMatch> pending) {
         if (stage == null || stage.getId() == null) {
             return null;
         }
-        List<String> unjudged = findUnjudgedNames(stage.getId());
+        List<String> unjudged = findUnjudgedNames(pending);
         if (unjudged.isEmpty()) {
             return null;
         }
@@ -119,10 +198,7 @@ public class AuditionStageSettler implements StageSettler {
      * 裁判打了 0 分会在 {@code t_round_score} 留下记录,算已判;已标记退赛(WITHDRAWN)
      * 的选手不参与判罚,不算未判。返回空表示所有人都已判完。</p>
      */
-    private List<String> findUnjudgedNames(Long stageId) {
-        List<TMatch> pending = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, stageId)
-            .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
+    private List<String> findUnjudgedNames(List<TMatch> pending) {
         if (pending.isEmpty()) {
             return List.of();
         }
@@ -577,15 +653,11 @@ public class AuditionStageSettler implements StageSettler {
         // 不复制绑定会导致二海的场次谁都看不到、判罚不了,赛段卡住无法结算。
         copyMatchReferees(parentMatch, tb);
 
-        // 一个轮次
-        TMatchRound round = new TMatchRound();
-        round.setTournamentId(tb.getTournamentId());
-        round.setMatchId(tb.getId());
-        round.setRoundSequence(1L);
-        round.setStatus(StageConstants.MATCH_PENDING);
-        matchRoundMapper.insert(round);
-
-        // 每个同分选手一个参赛位
+        // 每个同分选手一个参赛位 + 一个专属轮次(与正式圈同一口径):
+        // 海选是「逐选手轮次」,裁判端按轮次逐人展示与打分。
+        // 这里若只建一轮,3 个人的加赛在裁判端只会显示「第1轮」,看起来像只判了 1 个人;
+        // 打分写入也会退化成"单轮多人共享",回显与正式圈两套口径。
+        List<TMatchRound> rounds = new ArrayList<>();
         for (int i = 0; i < tiedCompetitorIds.size(); i++) {
             TMatchParticipant p = new TMatchParticipant();
             p.setTournamentId(tb.getTournamentId());
@@ -594,13 +666,24 @@ public class AuditionStageSettler implements StageSettler {
             p.setDisplaySlotIndex((long) (i + 1));
             p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
             participantMapper.insert(p);
+
+            TMatchRound round = new TMatchRound();
+            round.setTournamentId(tb.getTournamentId());
+            round.setMatchId(tb.getId());
+            round.setRoundSequence((long) (i + 1));
+            round.setCompetitorId(tiedCompetitorIds.get(i));
+            round.setStatus(StageConstants.MATCH_PENDING);
+            matchRoundMapper.insert(round);
+            rounds.add(round);
         }
 
         // 自动开始加赛
         tb.setStatus(StageConstants.MATCH_GAMING);
         matchMapper.updateById(tb);
-        round.setStatus(StageConstants.MATCH_GAMING);
-        matchRoundMapper.updateById(round);
+        for (TMatchRound round : rounds) {
+            round.setStatus(StageConstants.MATCH_GAMING);
+            matchRoundMapper.updateById(round);
+        }
         // 加赛创建后必须推送:裁判端需要看到新场次才能打分,导播端需要知道赛段尚未完成
         refereeSseNotifier.notifyMatch(tb.getStageId(), tb.getId(), "match");
         tournamentEventNotifier.notify(tb.getTournamentId(), tb.getStageId(), tb.getId(), "match");

@@ -251,7 +251,7 @@
               <div class="space-y-1">
                 <div
                   v-for="r in match.roundScores"
-                  :key="r.roundId"
+                  :key="String(r.roundId) + '-' + String(r.competitorId ?? '')"
                   @click="r.competitorId != null && handleMarkCurrent(match, r)"
                   class="py-1.5 border-b border-neutral-800/60 last:border-0 cursor-pointer transition-colors"
                   :class="
@@ -1117,12 +1117,22 @@ const handleComplete = async () => {
 
     const stillGaming = stages.value.some((s) => s.status === 'GAMING');
     isLive.value = stillGaming;
-      const result = payloadOf<any>(res);
-      if (result?.status && result.status !== 'SETTLED') {
-        // 后端统一返回可直接展示的原因(如「海选存在二海未完成判罚: 选手32, 选手34」);
+    const result = payloadOf<any>(res);
+    if (result?.status && result.status !== 'SETTLED') {
+      if (result.tiebreaker) {
+        // 同分加赛必须弹窗:加赛场次刚生成,导播要立刻安排裁判打分;
+        // toast 一闪而过,容易被当成"赛段已完成"而漏掉加赛。
+        ElMessageBox.alert(
+          result.message || '海选出现同分,需要加赛,请裁判完成加赛打分后再点「完成赛段」。',
+          '需要加赛',
+          { type: 'warning', confirmButtonText: '知道了' }
+        ).catch(() => {});
+      } else {
+        // 后端统一返回可直接展示的原因(如「海选还有 3 位选手未打分」);
         // 只有旧响应没有 message 时才回退到通用提示
         ElMessage.warning(result.message || '赛段仍有未完成场次,完成全部判罚后才能结束赛段');
       }
+    }
   } catch (e: any) {
     console.error('完成赛段失败:', e);
     ElMessage.error(e?.message || '完成赛段失败');

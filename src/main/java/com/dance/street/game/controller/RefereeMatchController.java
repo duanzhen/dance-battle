@@ -139,8 +139,9 @@ public class RefereeMatchController {
             publishMode = stageRc.getPublishMode();
         }
         String publishScope = stageRc != null ? stageRc.getPublishScope() : null;
+        boolean isAuditionStage = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
         boolean isRankStage = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
-        boolean perCompetitorStage = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode()) || isRankStage;
+        boolean perCompetitorStage = isAuditionStage || isRankStage;
         // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分
         boolean rankResultHidden = isRankStage && !"AUTO".equalsIgnoreCase(publishMode);
         // 分圈海选:裁判只应看到/判罚自己绑定的圈(t_match_referee 圈级绑定)。
@@ -393,7 +394,9 @@ public class RefereeMatchController {
                 spi.setCompetitorName(p.getCompetitorId() == null ? null : competitorNameById.get(p.getCompetitorId()));
                 spi.setOutcomeStatus(p.getOutcomeStatus());
                 sps.add(spi);
-                boolean isWinner = !rankResultHidden && ("WIN".equals(p.getOutcomeStatus())
+                // 海选是"逐选手打分 + 按名次晋级/淘汰",没有对阵胜负,也就没有"胜者"。
+                // 名次第一只是分数最高:打「胜者」标签会让裁判以为海选也决出了冠军。
+                boolean isWinner = !rankResultHidden && !isAuditionStage && ("WIN".equals(p.getOutcomeStatus())
                     || (p.getRankInMatch() != null && p.getRankInMatch() == 1 && p.getScoreValue() != null));
                 if (isWinner && p.getCompetitorId() != null) {
                     winnerName = competitorNameById.get(p.getCompetitorId());

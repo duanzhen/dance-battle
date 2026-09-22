@@ -1806,7 +1806,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             // 结算产生了后续工作(二海加赛、仍有场次未结算…):赛段保持进行中。
             // 「还不能结束」统一用返回值表达,不再与异常混用——导播台只需看 message。
             log.info("赛段[{}]暂不能结束:{}", stageId, outcome.reason());
-            return StageCompleteVo.pending(outcome.reason());
+            // 同分加赛单独标记:前端据此弹「需要加赛」,其余原因仍走普通提示。
+            return outcome.tiebreaker()
+                ? StageCompleteVo.pendingTiebreaker(outcome.reason())
+                : StageCompleteVo.pending(outcome.reason());
         }
         stage.setStatus(StageConstants.STAGE_SETTLED);
         stageMapper.updateById(stage);

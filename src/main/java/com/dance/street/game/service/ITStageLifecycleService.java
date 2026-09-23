@@ -175,7 +175,7 @@ public interface ITStageLifecycleService {
     AuditionResultVo queryAuditionResult(Long stageId);
 
     /**
-     * 海选加赛(二海/三海…)全员打分完成后自动结算:
+     * 海选加赛(二海/三海…)本场绑定的每名裁判都打完后自动结算:
      * 幂等,仅处理进行中的加赛场次;若再次同分会自动生成下一级加赛。
      * 返回是否执行了结算。
      */

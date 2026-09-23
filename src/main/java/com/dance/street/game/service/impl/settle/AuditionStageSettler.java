@@ -32,6 +32,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -176,6 +177,9 @@ public class AuditionStageSettler implements StageSettler {
      *
      * <p>此前只在二海(同分加赛)上拦,正式圈整圈没判也能直接结束,等于把没打分的人
      * 当 0 分淘汰掉;现在正式圈与加赛一视同仁。</p>
+     *
+     * <p>「判完」的口径不是「有一条分」,而是「本场(本圈)绑定的每一名裁判都打过分」
+     * ——多裁判赛场只到一个裁判的分就结算,会把其余裁判的分整段丢掉,晋级线判错。</p>
      */
     private String unjudgedReason(TStage stage, List<TMatch> pending) {
         if (stage == null || stage.getId() == null) {
@@ -187,22 +191,29 @@ public class AuditionStageSettler implements StageSettler {
         }
         int shown = Math.min(unjudged.size(), 8);
         String names = String.join("、", unjudged.subList(0, shown)) + (unjudged.size() > shown ? " 等" : "");
-        return "海选还有 " + unjudged.size() + " 位选手未打分(" + names + "),判完才能结束赛段;"
+        return "海选还有 " + unjudged.size() + " 位选手未判完(" + names + "),本场裁判需逐人打完分才能结束赛段;"
             + "确实不上场的选手请标记退赛,或由裁判打 0 分(0 分不参与晋级)";
     }
 
     /**
-     * 找出尚未打分(一条裁判分都没有)的选手姓名。
+     * 找出尚未判完的选手姓名。
      *
-     * <p>口径:只看尚未结算的场次——正式圈与二海/加赛都算。0 分与「没打分」是两件事:
-     * 裁判打了 0 分会在 {@code t_round_score} 留下记录,算已判;已标记退赛(WITHDRAWN)
-     * 的选手不参与判罚,不算未判。返回空表示所有人都已判完。</p>
+     * <p>口径:只看尚未结算的场次——正式圈与二海/加赛都算。一名选手「判完」=
+     * 给他的打分的不同裁判数 ≥ 本场(本圈)绑定的裁判数(未绑定裁判时退化为「至少一名裁判评过」,
+     * 与排名赛 BATCH 公布口径一致)。多圈海选各圈裁判不同,所以这个要求按场次单独算,
+     * 不能拿全赛段的裁判集合来比——否则某圈的选手永远等不到别圈的裁判。</p>
+     *
+     * <p>0 分与「没打分」是两件事:裁判打了 0 分会在 {@code t_round_score} 留下记录,
+     * 算已判;已标记退赛(WITHDRAWN)的选手不参与判罚,不算未判。返回空表示所有人都已判完。</p>
      */
     private List<String> findUnjudgedNames(List<TMatch> pending) {
         if (pending.isEmpty()) {
             return List.of();
         }
-        List<Long> pendingIds = pending.stream().map(TMatch::getId).toList();
+        List<Long> pendingIds = pending.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        if (pendingIds.isEmpty()) {
+            return List.of();
+        }
         List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery()
                 .in(TMatchParticipant::getMatchId, pendingIds)
@@ -213,35 +224,60 @@ public class AuditionStageSettler implements StageSettler {
         List<Long> compIds = parts.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
         Map<Long, TCompetitor> compMap = settlementSupport.competitorMap(compIds);
-        List<Long> roundIds = matchRoundMapper.selectList(
+        // 轮次先映射回场次:打分明细要按「场次 + 选手」归属,不能把同圈其他场次的分混进来
+        Map<Long, Long> roundToMatch = new HashMap<>();
+        matchRoundMapper.selectList(
                 Wrappers.<TMatchRound>lambdaQuery()
                     .in(TMatchRound::getMatchId, pendingIds)
-                    .select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        Set<Long> judged = roundIds.isEmpty() ? Set.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds)
-                    .select(TRoundScore::getCompetitorId))
-                .stream()
-                .map(TRoundScore::getCompetitorId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
+                    .select(TMatchRound::getId, TMatchRound::getMatchId))
+            .forEach(r -> roundToMatch.put(r.getId(), r.getMatchId()));
+        // (场次,选手) -> 已给出分数的裁判集合
+        Map<String, Set<Long>> scoredReferees = new HashMap<>();
+        if (!roundToMatch.isEmpty()) {
+            roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                    .in(TRoundScore::getRoundId, roundToMatch.keySet())
+                    .select(TRoundScore::getRoundId, TRoundScore::getCompetitorId, TRoundScore::getRefereeId))
+                .forEach(rs -> {
+                    Long mid = rs.getRoundId() == null ? null : roundToMatch.get(rs.getRoundId());
+                    if (mid == null || rs.getCompetitorId() == null) {
+                        return;
+                    }
+                    scoredReferees.computeIfAbsent(scoredKey(mid, rs.getCompetitorId()), k -> new HashSet<>())
+                        .add(rs.getRefereeId());
+                });
+        }
+        Map<Long, List<TMatchParticipant>> partsByMatch = parts.stream()
+            .filter(p -> p.getMatchId() != null)
+            .collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
         List<String> unjudged = new ArrayList<>();
-        for (TMatchParticipant p : parts) {
-            if (p.getCompetitorId() == null || judged.contains(p.getCompetitorId())) {
-                continue;
-            }
-            TCompetitor c = compMap.get(p.getCompetitorId());
-            // 已标记退赛(WITHDRAWN)的选手不参与判罚,不算未判罚
-            if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
-                continue;
-            }
-            String name = c != null && c.getName() != null ? c.getName() : ("选手" + p.getCompetitorId());
-            if (!unjudged.contains(name)) {
-                unjudged.add(name);
+        for (TMatch match : pending) {
+            int required = requiredRefereeCount(match);
+            for (TMatchParticipant p : partsByMatch.getOrDefault(match.getId(), List.of())) {
+                Long cid = p.getCompetitorId();
+                if (cid == null) {
+                    continue;
+                }
+                int scored = scoredReferees.getOrDefault(scoredKey(match.getId(), cid), Set.of()).size();
+                if (scored >= required) {
+                    continue;
+                }
+                TCompetitor c = compMap.get(cid);
+                // 已标记退赛(WITHDRAWN)的选手不参与判罚,不算未判罚
+                if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
+                    continue;
+                }
+                String name = c != null && c.getName() != null ? c.getName() : ("选手" + cid);
+                if (!unjudged.contains(name)) {
+                    unjudged.add(name);
+                }
             }
         }
         return unjudged;
+    }
+
+    /** (场次, 选手) → 打分明细归属键 */
+    private String scoredKey(Long matchId, Long competitorId) {
+        return matchId + ":" + competitorId;
     }
 
     /** 整段结算:逐场结算尚未结算的海选场(圈名额/排名起点统一口径) */
@@ -588,13 +624,33 @@ public class AuditionStageSettler implements StageSettler {
      * 加赛场次若不继承绑定,该圈的裁判就看不到二海,赛段会卡在"仍有场次未结算"。</p>
      */
     private void copyMatchReferees(TMatch source, TMatch target) {
+        for (Long refereeId : resolvedRefereeIds(source)) {
+            TMatchReferee row = new TMatchReferee();
+            row.setTournamentId(target.getTournamentId());
+            row.setMatchId(target.getId());
+            row.setRefereeId(refereeId);
+            matchRefereeMapper.insert(row);
+        }
+    }
+
+    /**
+     * 本场次应到场的裁判集合:优先取本场(本圈)的直接绑定;历史数据没有绑定时,
+     * 退回同圈其他场次的绑定(与 {@code RefereeMatchController#allowedMatchIds} 的可见圈口径一致)。
+     *
+     * <p>这是「谁该打分」的唯一解析点——加赛复制绑定、判定是否判完都走这里,
+     * 保证两处口径不会分叉(复制的是这几个人,要等的就是这几个人)。</p>
+     */
+    private Set<Long> resolvedRefereeIds(TMatch match) {
+        if (match == null || match.getId() == null) {
+            return Set.of();
+        }
         List<TMatchReferee> bindings = matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
-            .eq(TMatchReferee::getMatchId, source.getId()));
-        if (bindings.isEmpty() && source.getDisplayZone() != null) {
+            .eq(TMatchReferee::getMatchId, match.getId()));
+        if (bindings.isEmpty() && match.getDisplayZone() != null && !match.getDisplayZone().isBlank()) {
             // 原场次没有直接绑定(旧数据):退回用同圈其他场次的绑定
             List<Long> zoneMatchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, source.getStageId())
-                    .eq(TMatch::getDisplayZone, source.getDisplayZone())
+                    .eq(TMatch::getStageId, match.getStageId())
+                    .eq(TMatch::getDisplayZone, match.getDisplayZone())
                     .select(TMatch::getId))
                 .stream().map(TMatch::getId).toList();
             if (!zoneMatchIds.isEmpty()) {
@@ -608,13 +664,40 @@ public class AuditionStageSettler implements StageSettler {
                 refereeIds.add(r.getRefereeId());
             }
         }
-        for (Long refereeId : refereeIds) {
-            TMatchReferee row = new TMatchReferee();
-            row.setTournamentId(target.getTournamentId());
-            row.setMatchId(target.getId());
-            row.setRefereeId(refereeId);
-            matchRefereeMapper.insert(row);
+        return refereeIds;
+    }
+
+    /**
+     * 本场每名选手应被打分的裁判数:绑了几名裁判就要几名裁判各打一次。
+     *
+     * <p>多圈海选各圈裁判不同,所以按场次单独算(不是全赛段的裁判数);
+     * 未配置圈级裁判(单圈历史数据/管理端代打)时退化为 1,即「至少一名裁判评过」,
+     * 与排名赛 BATCH 公布口径一致,不会把这类数据卡死。</p>
+     */
+    private int requiredRefereeCount(TMatch match) {
+        Set<Long> ids = resolvedRefereeIds(match);
+        return ids.isEmpty() ? 1 : ids.size();
+    }
+
+    /** 单场打分明细:选手 → 已给出分数的裁判集合(去重) */
+    private Map<Long, Set<Long>> scoredRefereesOfMatch(Long matchId) {
+        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, matchId).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        if (roundIds.isEmpty()) {
+            return Map.of();
         }
+        Map<Long, Set<Long>> scored = new HashMap<>();
+        roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                .in(TRoundScore::getRoundId, roundIds)
+                .select(TRoundScore::getCompetitorId, TRoundScore::getRefereeId))
+            .forEach(rs -> {
+                if (rs.getCompetitorId() == null) {
+                    return;
+                }
+                scored.computeIfAbsent(rs.getCompetitorId(), k -> new HashSet<>()).add(rs.getRefereeId());
+            });
+        return scored;
     }
 
     /**
@@ -693,8 +776,13 @@ public class AuditionStageSettler implements StageSettler {
     }
 
     /**
-     * 海选加赛(二海/三海…)全员打分完成后自动结算:幂等,仅处理进行中的加赛场次;
+     * 海选加赛(二海/三海…)本场绑定的每名裁判都打完后自动结算:幂等,仅处理进行中的加赛场次;
      * 若再次同分会自动生成下一级加赛。
+     *
+     * <p>判定口径与 {@link #findUnjudgedNames} 一致:每名选手都要被本场(本圈)绑定的
+     * <b>全部</b>裁判打过分,而不是「任一名裁判打过就行」。旧口径下多裁判赛场只要第一个裁判
+     * 判完就自动结算,其余裁判的分整段作废,总分被低估、晋级线判错;多圈海选各圈裁判不同,
+     * 因此应到的裁判按本场单独解析(见 {@link #resolvedRefereeIds}),不是全赛段的裁判集合。</p>
      *
      * @return 是否执行了结算
      */
@@ -711,7 +799,7 @@ public class AuditionStageSettler implements StageSettler {
         if (stage == null || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
             return false;
         }
-        // 全员已打分(任一裁判打过即可,与 findUnjudgedTiebreakerNames 同口径);退赛选手不计
+        // 退赛选手不参与判定;其余每名选手都要被本场绑定的全部裁判打过分
         List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
             .eq(TMatchParticipant::getMatchId, matchId)
             .isNotNull(TMatchParticipant::getCompetitorId));
@@ -721,19 +809,16 @@ public class AuditionStageSettler implements StageSettler {
         List<Long> cids = parts.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
         Map<Long, TCompetitor> compById = settlementSupport.competitorMap(cids);
-        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                .eq(TMatchRound::getMatchId, matchId).select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        Set<Long> judged = roundIds.isEmpty() ? Set.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds).select(TRoundScore::getCompetitorId))
-                .stream().map(TRoundScore::getCompetitorId).filter(Objects::nonNull).collect(Collectors.toSet());
+        // 本场绑定的每名裁判都要给每名(非退赛)选手打过分才自动结算
+        int required = requiredRefereeCount(match);
+        Map<Long, Set<Long>> scoredReferees = scoredRefereesOfMatch(matchId);
         for (TMatchParticipant p : parts) {
-            TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
+            Long cid = p.getCompetitorId();
+            TCompetitor c = cid == null ? null : compById.get(cid);
             if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
                 continue;
             }
-            if (p.getCompetitorId() == null || !judged.contains(p.getCompetitorId())) {
+            if (cid == null || scoredReferees.getOrDefault(cid, Set.of()).size() < required) {
                 return false;
             }
         }

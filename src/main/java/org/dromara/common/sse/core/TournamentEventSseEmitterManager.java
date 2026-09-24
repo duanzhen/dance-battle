@@ -18,7 +18,7 @@ import java.util.function.Consumer;
  * 赛事事件 SSE 管理器。
  * 以 tournamentId 为维度维护长连接,通过 Redis 发布订阅实现多实例广播。
  * 裁判端复用同一通道:连接上标记 refereeId,消息带 refereeIds 时定向推送。
- * 统一 60s comment 心跳,避免空闲连接被代理/网关静默断开。
+ * 统一 15s 命名事件心跳,避免空闲连接被代理/网关静默断开。
  *
  * @author duane
  */
@@ -68,6 +68,8 @@ public class TournamentEventSseEmitterManager extends AbstractSseEmitterManager 
 
         try {
             emitter.send(SseEmitter.event().comment("connected"));
+            // 新连接立即补一次心跳:前端以"最近 20s 内有心跳"判定已连上,不补的话要等下一个巡检周期(最长 15s)才变绿
+            sendHeartbeat(emitter);
         } catch (Exception e) {
             remove(tournamentId, emitter);
         }

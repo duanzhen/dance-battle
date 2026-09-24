@@ -49,7 +49,8 @@
           <span class="text-[8px] font-bold px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
             {{ modeLabel }}
           </span>
-          <span class="text-[8px] font-bold px-1.5 py-0.5 rounded bg-green-600/20 text-green-400 border border-green-600/30">LIVE</span>
+          <!-- 右上角连接标识:绿=已连上(20s 内有心跳)/ 黄呼吸=连接中 / 红=连接失败 -->
+          <SseLiveBadge :status="sseStatus" />
         </div>
       </header>
 
@@ -602,6 +603,8 @@ import { ElMessage } from 'element-plus';
 import logo from '@/assets/logo/logo.png';
 import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore } from '@/api/game/referee/scoring';
 import { subscribeChannel } from '@/utils/sseChannel';
+import type { SseStatus } from '@/utils/sseChannel';
+import SseLiveBadge from '@/components/SseLiveBadge/index.vue';
 import { payloadOf } from '@/utils/apiEnvelope';
 
 const route = useRoute();
@@ -614,6 +617,8 @@ const fmtMatchName = (name?: string) => {
 
 const loading = ref(true);
 const error = ref('');
+/** 右上角连接标识状态:由统一 SSE 客户端按"最近 20s 是否有心跳"推导 */
+const sseStatus = ref<SseStatus>('connecting');
 const tournamentId = ref<number | string | null>(null);
 const submitting = ref(false);
 const submitted = ref(false);
@@ -1378,7 +1383,11 @@ const connectRefereeSse = (authKey: string) => {
       refresh();
     },
     // 断线重连成功后全量刷新,补回错过的事件
-    onRefresh: () => refresh()
+    onRefresh: () => refresh(),
+    // 右上角标识:由统一 SSE 客户端按"最近 20s 是否有心跳"推导三态
+    onStatus: (status) => {
+      sseStatus.value = status;
+    }
   });
 };
 
@@ -1386,6 +1395,7 @@ onMounted(async () => {
   const authKey = route.query.authKey;
   if (!authKey || Array.isArray(authKey)) {
     error.value = '缺少认证密钥，请扫描二维码进入';
+    sseStatus.value = 'error';
     loading.value = false;
     return;
   }

@@ -9,7 +9,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * SSE 管理器公共基类:统一 60s comment 心跳调度与发送逻辑。
+ * SSE 管理器公共基类:统一 15s 命名事件心跳调度与发送逻辑。
  * 各通道(SseEmitterManager/TournamentSseEmitterManager/TournamentEventSseEmitterManager)
  * 继承本类,只需实现 sseMonitor 遍历自己的连接表,心跳发送/失败清理完全一致。
  *
@@ -18,8 +18,14 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public abstract class AbstractSseEmitterManager {
 
-    /** 心跳间隔(秒):所有 SSE 通道统一,避免空闲连接被代理/网关静默断开 */
-    private static final long HEARTBEAT_INTERVAL_SECONDS = 60L;
+    /**
+     * 心跳间隔(秒):所有 SSE 通道统一,避免空闲连接被代理/网关静默断开。
+     *
+     * <p>取 15s 而非更长的间隔:前端以「最近 20s 内收到过心跳」作为"确认已连上"的唯一依据
+     * (绿灯)。间隔必须明显小于该窗口,否则连接正常时绿灯也会周期性熄灭、误报掉线;
+     * 20s 窗口留 5s 余量,足以覆盖一次心跳的异步派发与网络传输耗时。</p>
+     */
+    private static final long HEARTBEAT_INTERVAL_SECONDS = 15L;
 
     protected AbstractSseEmitterManager() {
         SpringUtils.getBean(ScheduledExecutorService.class)

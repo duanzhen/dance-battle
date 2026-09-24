@@ -1,5 +1,8 @@
 <template>
   <div class="w-screen h-screen bg-black text-white overflow-hidden relative group">
+    <!-- 右上角连接状态圆点:绿=已连上(20s 内有心跳)/ 黄呼吸=连接中或重连中 / 红=已停止重连 -->
+    <SseLiveBadge :status="sseStatus" dot-only class="absolute top-3 right-3 z-[60]" />
+
     <!-- 全屏提示按钮 -->
     <div
       @click="enterFullscreen"
@@ -136,6 +139,8 @@ import { ref, reactive, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Maximize } from 'lucide-vue-next';
 import { subscribeChannel } from '@/utils/sseChannel';
+import type { SseStatus } from '@/utils/sseChannel';
+import SseLiveBadge from '@/components/SseLiveBadge/index.vue';
 import ScreenRenderer from './SceneRenderer.vue';
 import type { SceneConfig } from './SceneRenderer.vue';
 import { getVisScene, listVisWidget } from '@/api/game/screen';
@@ -148,6 +153,8 @@ const currentSceneId = ref<string | null>(null);
 
 // 连接丢失状态
 const isConnectionLost = ref(false);
+/** 右上角状态圆点:由统一 SSE 客户端按"最近 20s 是否有心跳"推导三态 */
+const sseStatus = ref<SseStatus>('connecting');
 
 // 屏幕已关闭状态
 const isScreenClosed = ref(false);
@@ -209,7 +216,7 @@ const enterFullscreen = async () => {
   }
 };
 
-// 订阅屏幕视图 SSE:统一客户端负责指数退避重连,连接状态驱动"信号丢失"提示
+// 订阅屏幕视图 SSE:统一客户端负责固定 3s 重连,连接状态驱动右上角圆点与"信号丢失"提示
 const subscribeToScreenView = (screenId: string) => {
   const clientId = import.meta.env.VITE_APP_CLIENT_ID;
   const baseUrl = import.meta.env.VITE_APP_BASE_API;
@@ -231,25 +238,23 @@ const subscribeToScreenView = (screenId: string) => {
       }
     },
     onStatus: (status) => {
+      sseStatus.value = status;
       if (status === 'open') {
-        console.log('[ProjectionView] SSE 连接已建立');
+        console.log('[ProjectionView] SSE 连接已建立(心跳确认)');
         if (connectionLostTimer) {
           clearTimeout(connectionLostTimer);
           connectionLostTimer = null;
         }
-        // 连接建立后，停止加载状态，显示等待提示
-        loading.value = false;
         isConnectionLost.value = false;
-      } else if (status === 'error') {
-        console.error('[ProjectionView] SSE 连接错误,等待自动重连');
-        // 延迟显示"信号丢失":短暂断线会自动重连,避免黑屏闪烁
-        if (!connectionLostTimer) {
-          connectionLostTimer = setTimeout(() => {
-            isConnectionLost.value = true;
-            connectionLostTimer = null;
-          }, 8000);
-        }
+      } else if (!connectionLostTimer) {
+        // 连接中/重连中:给 8s 宽限,短暂断线自动重连时不黑屏;仍未恢复才提示"信号丢失"
+        console.warn('[ProjectionView] SSE 正在连接/重连,8s 内未恢复将提示信号丢失');
+        connectionLostTimer = setTimeout(() => {
+          isConnectionLost.value = true;
+          connectionLostTimer = null;
+        }, 8000);
       }
+      loading.value = false;
     }
   });
 };

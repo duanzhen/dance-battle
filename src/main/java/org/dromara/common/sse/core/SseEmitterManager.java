@@ -66,6 +66,8 @@ public class SseEmitterManager extends AbstractSseEmitterManager {
         try {
             // 向客户端发送一条连接成功的事件
             emitter.send(SseEmitter.event().comment("connected"));
+            // 新连接立即补一次心跳:前端以"最近 20s 内有心跳"判定已连上,不补的话要等下一个巡检周期(最长 15s)才变绿
+            sendHeartbeat(emitter);
         } catch (IOException e) {
             // 如果发送消息失败，则从映射表中移除 emitter
             removeEmitter(emitters, token, emitter);
@@ -91,13 +93,17 @@ public class SseEmitterManager extends AbstractSseEmitterManager {
         }
         Map<String, SseEmitter> emitters = USER_TOKEN_EMITTERS.get(userId);
         if (MapUtil.isNotEmpty(emitters)) {
-            try {
-                SseEmitter sseEmitter = emitters.get(token);
-                sseEmitter.send(SseEmitter.event().comment("disconnected"));
-                sseEmitter.complete();
-            } catch (Exception ignore) {
+            // 只关闭连接,不再同步写 "disconnected" 注释:那会在调用线程(/sse/close 的 HTTP 线程)
+            // 上做网络写,对端锁屏/断网时会阻塞到 TCP 缓冲填满;而 comment 不触发浏览器 onmessage,
+            // 客户端本就感知不到这条注释。关闭后由 onCompletion 回调摘除连接并回收发送队列。
+            SseEmitter sseEmitter = emitters.remove(token);
+            if (sseEmitter != null) {
+                try {
+                    sseEmitter.complete();
+                } catch (Exception ignore) {
+                    // 已完成/重复关闭:忽略
+                }
             }
-            emitters.remove(token);
         } else {
             USER_TOKEN_EMITTERS.remove(userId);
         }

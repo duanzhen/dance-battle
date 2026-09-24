@@ -283,6 +283,8 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
         try {
             // 向客户端发送连接成功事件
             emitter.send(SseEmitter.event().comment("connected"));
+            // 新连接立即补一次心跳:前端以"最近 20s 内有心跳"判定已连上,不补的话要等下一个巡检周期(最长 15s)才变绿
+            sendHeartbeat(emitter);
 
             // 如果是浏览端连接，发送当前场景ID并通知所有管理端有新的浏览端上线
             if (clientType == ClientType.VIEWER) {
@@ -341,6 +343,8 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
 
         try {
             emitter.send(SseEmitter.event().comment("connected"));
+            // 新连接立即补一次心跳:前端以"最近 20s 内有心跳"判定已连上,不补的话要等下一个巡检周期(最长 15s)才变绿
+            sendHeartbeat(emitter);
         } catch (IOException e) {
             removeTerminal(terminalId, emitter);
         }
@@ -495,10 +499,13 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
 
             SseEmitter emitter = emitters.remove(terminalId);
             if (emitter != null) {
+                // 只关闭连接,不再同步写 "disconnected" 注释:该方法会被巡检线程(屏幕超时注销)
+                // 调用,对端不可读时同步写会阻塞整轮心跳;comment 也不会触发浏览器 onmessage。
+                // onCompletion 回调会负责从各屏幕连接表摘除该连接并回收发送队列。
                 try {
-                    emitter.send(SseEmitter.event().comment("disconnected"));
                     emitter.complete();
                 } catch (Exception ignore) {
+                    // 已完成/重复关闭:忽略
                 }
             }
 
@@ -519,10 +526,11 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
             return;
         }
         emitters.forEach((terminalId, emitter) -> {
+            // 同上:断连路径只做关闭,不同步往对端写注释,避免阻塞调用线程
             try {
-                emitter.send(SseEmitter.event().comment("disconnected"));
                 emitter.complete();
             } catch (Exception ignore) {
+                // 已完成/重复关闭:忽略
             }
         });
         emitters.clear();

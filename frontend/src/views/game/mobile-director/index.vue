@@ -23,13 +23,8 @@
         </button>
       </div>
       <div class="flex-1 flex items-center justify-end gap-3">
-        <div
-          class="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold"
-          :class="isLive ? 'bg-red-600/20 text-red-500 border border-red-600/30' : 'bg-neutral-800 text-neutral-500 border border-neutral-700'"
-        >
-          <span class="w-1.5 h-1.5 rounded-full" :class="isLive ? 'bg-red-500 animate-pulse' : 'bg-neutral-500'"></span>
-          {{ isLive ? 'LIVE' : 'STANDBY' }}
-        </div>
+        <!-- 右上角连接标识:绿=已连上(20s 内有心跳)/ 黄呼吸=连接中 / 红=连接失败 -->
+        <SseLiveBadge :status="sseStatus" />
       </div>
     </header>
 
@@ -752,6 +747,8 @@ import {
 } from '@/api/game/director';
 import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
+import type { SseStatus } from '@/utils/sseChannel';
+import SseLiveBadge from '@/components/SseLiveBadge/index.vue';
 import { payloadOf, listOf } from '@/utils/apiEnvelope';
 
 const route = useRoute();
@@ -760,7 +757,8 @@ const authError = ref('');
 const tournamentId = ref<string>('');
 const tournamentName = ref('');
 const loading = ref(false);
-const isLive = ref(false);
+/** 右上角连接标识状态:由统一 SSE 客户端按"最近 20s 是否有心跳"推导 */
+const sseStatus = ref<SseStatus>('connecting');
 /** 赛事级红蓝配色(当前场次/裁判列表 左红右蓝 或 右红左蓝) */
 const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
 let colorLoaded = false;
@@ -985,7 +983,6 @@ const loadStages = async () => {
       const gamingStage = sorted.find((s) => s.status === 'GAMING');
       if (gamingStage) {
         selectedStageId.value = gamingStage.id;
-        isLive.value = true;
       }
     }
   } catch (e) {
@@ -1086,7 +1083,6 @@ const handleStartStage = async () => {
       await directorAdvanceStage(stage.id);
     }
     await directorStartStage(stage.id);
-    isLive.value = true;
     await loadStages();
     await loadMatchesForStage(stage.id);
   } catch (e: any) {
@@ -1115,8 +1111,6 @@ const handleComplete = async () => {
     }
     await loadMatchesForStage(selectedStageId.value);
 
-    const stillGaming = stages.value.some((s) => s.status === 'GAMING');
-    isLive.value = stillGaming;
     const result = payloadOf<any>(res);
     if (result?.status && result.status !== 'SETTLED') {
       if (result.tiebreaker) {
@@ -1493,6 +1487,7 @@ onMounted(async () => {
   const key = route.query.authKey;
   if (!key || Array.isArray(key)) {
     authError.value = '缺少认证密钥，请扫描二维码进入';
+    sseStatus.value = 'error';
     return;
   }
   setDirectorAuthKey(key);
@@ -1503,6 +1498,7 @@ onMounted(async () => {
   } catch (e: any) {
     if (e?.response?.status === 401) {
       authError.value = '认证凭证无效，请扫描最新二维码进入';
+      sseStatus.value = 'error';
       return;
     }
     console.error('加载赛事信息失败:', e);
@@ -1511,8 +1507,15 @@ onMounted(async () => {
   if (selectedStageId.value) {
     await loadMatchesForStage(selectedStageId.value);
   }
+  if (!tournamentId.value) {
+    // 没拿到赛事ID就没有可订阅的通道,标识按连接失败处理,避免一直停在"连接中"
+    sseStatus.value = 'error';
+    return;
+  }
   // SSE 实时订阅:赛段/场次/打分变化自动刷新,替代轮询
-  subscribeTournamentEvents(tournamentId.value, handleTournamentEvent);
+  subscribeTournamentEvents(tournamentId.value, handleTournamentEvent, (status) => {
+    sseStatus.value = status;
+  });
 });
 
 onUnmounted(() => {

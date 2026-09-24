@@ -5,6 +5,7 @@
  */
 
 import { subscribeChannel } from './sseChannel';
+import type { SseStatus } from './sseChannel';
 
 /** 按赛事维护 回调 -> 取消订阅 的映射,兼容 subscribe/unsubscribe 成对调用 */
 const subs = new Map<string, Map<(data: any) => void, () => void>>();
@@ -52,7 +53,8 @@ function coalesce(handler: (data: any) => void) {
 
 export function subscribeTournamentEvents(
   tournamentId: string | number | null | undefined,
-  onMessage: (data: any) => void
+  onMessage: (data: any) => void,
+  onStatus?: (status: SseStatus) => void
 ) {
   if (tournamentId === null || tournamentId === undefined) {
     return;
@@ -67,7 +69,9 @@ export function subscribeTournamentEvents(
       `${baseUrl}/tournament/event/sse?tournamentId=${encodeURIComponent(key)}&clientid=${clientId}`,
     onMessage: listener,
     // 重连补偿:断线重连后触发一次全量刷新(调用方 loadData 不依赖事件内容)
-    onRefresh: () => listener(null)
+    onRefresh: () => listener(null),
+    // 连接状态(绿/黄/红标识):由统一 SSE 客户端按"最近 20s 是否有心跳"推导
+    onStatus
   });
   let m = subs.get(key);
   if (!m) {

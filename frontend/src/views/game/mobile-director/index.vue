@@ -736,6 +736,7 @@ import {
   directorAdvanceStage,
   directorCompleteStage,
   directorArenaNext,
+  directorArenaOverview,
   directorArenaTempWithdraw,
   directorStartMatch,
   directorCancelStartMatch,
@@ -749,8 +750,6 @@ import {
   directorDeleteFreeMatch,
   directorSaveFreeMatchAdvancers
 } from '@/api/game/director';
-import { getArenaOverview } from '@/api/game/stage';
-import { getTournament } from '@/api/game/tournament';
 import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import { payloadOf, listOf } from '@/utils/apiEnvelope';
@@ -769,8 +768,9 @@ const loadColorConfig = async () => {
   if (colorLoaded || !tournamentId.value) return;
   colorLoaded = true;
   try {
-    const tr: any = await getTournament(tournamentId.value);
-    colorConfig.value = parseTournamentColorConfig(tr?.data?.themeConfig);
+    // 走导播 authKey 认证的赛事信息接口(与管理端同结构),不带管理员 JWT
+    const tr: any = await getDirectorTournament();
+    colorConfig.value = parseTournamentColorConfig(payloadOf<any>(tr)?.themeConfig);
   } catch (e) {
     colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
   }
@@ -1308,7 +1308,7 @@ const openTempWithdraw = async () => {
   const stage = currentStage.value;
   if (!stage) return;
   try {
-    const res: any = await getArenaOverview(stage.id);
+    const res: any = await directorArenaOverview(stage.id);
     const data = payloadOf(res);
     const cur = data?.currentMatch || {};
     const list: any[] = [];

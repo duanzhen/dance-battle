@@ -138,8 +138,7 @@ import { Maximize } from 'lucide-vue-next';
 import { subscribeChannel } from '@/utils/sseChannel';
 import ScreenRenderer from './SceneRenderer.vue';
 import type { SceneConfig } from './SceneRenderer.vue';
-import { getVisScene } from '@/api/game/visScene';
-import { listVisWidget } from '@/api/game/visWidget';
+import { getVisScene, listVisWidget } from '@/api/game/screen';
 
 const route = useRoute();
 const screenId = ref('');

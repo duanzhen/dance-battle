@@ -175,11 +175,15 @@ import { Ban } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
 import ColorInput from './common/ColorInput.vue';
 import TextInput from './common/TextInput.vue';
-import { listMatch } from '@/api/game/match';
-import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
-import { listCompetitor } from '@/api/game/competitor';
-import { getStage, getStagePreBracket } from '@/api/game/stage';
-import { getTournament } from '@/api/game/tournament';
+import {
+  listMatch,
+  listMatchParticipant,
+  listParticipantsByStage,
+  listCompetitor,
+  getStage,
+  getStagePreBracket,
+  getTournament
+} from '@/api/game/screen';
 import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { seedLayout } from '@/utils/seedLayout';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';

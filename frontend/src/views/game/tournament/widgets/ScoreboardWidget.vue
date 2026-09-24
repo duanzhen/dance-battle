@@ -68,13 +68,17 @@ import { useRoute } from 'vue-router';
 import StageSelector from '../stages/StageSelector.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
 import TextInput from './common/TextInput.vue';
-import { getStage, getAuditionResult } from '@/api/game/stage';
-import { listMatch } from '@/api/game/match';
-import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
-import { listCompetitor } from '@/api/game/competitor';
-import { getStageRefereeIds } from '@/api/game/refereeStage';
-import { listReferee } from '@/api/game/referee';
-import { listMatchReferee } from '@/api/game/matchReferee';
+import {
+  getStage,
+  getAuditionResult,
+  listMatch,
+  listMatchParticipant,
+  listParticipantsByStage,
+  listCompetitor,
+  getStageRefereeIds,
+  listReferee,
+  listMatchReferee
+} from '@/api/game/screen';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 const props = defineProps<{

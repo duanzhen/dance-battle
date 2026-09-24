@@ -109,7 +109,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { Crown } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
-import { getArenaOverview } from '@/api/game/stage';
+import { getArenaOverview } from '@/api/game/screen';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 const props = defineProps<{

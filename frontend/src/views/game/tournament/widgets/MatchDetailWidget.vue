@@ -154,10 +154,7 @@
 import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import AssetUpload from './common/AssetUpload.vue';
-import { getStageFlow } from '@/api/game/stage';
-import { getMatch } from '@/api/game/match';
-import { listCompetitor } from '@/api/game/competitor';
-import { getTournament } from '@/api/game/tournament';
+import { getStageFlow, getMatch, listCompetitor, getTournament } from '@/api/game/screen';
 import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import { StageMode } from '../stages/types';

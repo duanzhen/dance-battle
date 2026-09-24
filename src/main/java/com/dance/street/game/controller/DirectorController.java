@@ -10,6 +10,7 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
+import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -259,6 +260,20 @@ public class DirectorController {
         assertStageInTournament(currentTournament(request), id);
         stageLifecycleService.tempWithdrawArenaCompetitor(id, competitorId);
         return R.ok();
+    }
+
+    /**
+     * 擂台赛总览:轮转队列(含每人积分)与当前对决。
+     *
+     * <p>MC 导播台此前只能借用管理端 {@code GET /game/stage/{id}/arena-overview}
+     * ({@code @SaCheckPermission})来读擂台队列:手机端只带导播 authKey、没有管理员 JWT,
+     * 该请求会 401,而管理端响应拦截器见到 401 就弹「登录状态已过期」,把现场页面挡掉。
+     * 这里提供导播 authKey 认证的同口径读接口,并校验赛段确属当前凭证赛事。</p>
+     */
+    @GetMapping("/stage/{id}/arena-overview")
+    public R<ArenaOverviewVo> arenaOverview(@PathVariable("id") Long id, HttpServletRequest request) {
+        assertStageInTournament(currentTournament(request), id);
+        return R.ok(stageLifecycleService.getArenaOverview(id));
     }
 
     /**

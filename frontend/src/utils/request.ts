@@ -16,6 +16,18 @@ const encryptHeader = 'encrypt-key';
 let downloadLoadingInstance: LoadingInstance;
 // 是否显示重新登录
 export const isRelogin = { show: false };
+
+/**
+ * 公共现场页(免登录白名单):用 authKey 或完全公开的凭证工作,从不持有管理员 JWT。
+ * 这些页面上的 401 不是"管理员登录过期",不能弹重新登录框把大屏/判罚挡住——
+ * 只把错误抛给调用方,由各页自己内联提示或降级。
+ */
+const PUBLIC_PAGES = ['/tournament/projection', '/tournament/referee-scoring', '/tournament/mobile-director'];
+const isPublicPage = () => {
+  const path = router.currentRoute.value.path || '';
+  return PUBLIC_PAGES.some((p) => path === p || path.startsWith(p + '/'));
+};
+
 export const globalHeaders = () => {
   const token = getToken();
   return token ? { Authorization: 'Bearer ' + token } : {};
@@ -127,6 +139,11 @@ service.interceptors.response.use(
       return res.data;
     }
     if (code === 401) {
+      // 公共现场页(大屏/裁判/手机导播台)不弹管理端"重新登录",避免打断现场;
+      // 这些页面本就靠 authKey 工作,漏出来的管理端 401 交给调用方处理。
+      if (isPublicPage()) {
+        return Promise.reject(new Error(msg));
+      }
       // prettier-ignore
       if (!isRelogin.show) {
         isRelogin.show = true;

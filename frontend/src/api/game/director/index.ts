@@ -96,6 +96,18 @@ export function directorArenaTempWithdraw(id: string | number, competitorId: str
   });
 }
 
+/**
+ * 擂台赛总览:轮转队列(含每人积分)与当前对决。
+ * 走导播 authKey 认证,不再借用管理端 /game/stage/{id}/arena-overview,
+ * 避免手机端没有管理员 JWT 时 401、弹出管理端「登录状态已过期」。
+ */
+export function directorArenaOverview(stageId: string | number) {
+  return directorRequest({
+    url: `/game/director/stage/${stageId}/arena-overview`,
+    method: 'get'
+  });
+}
+
 /** 开始场次 */
 export function directorStartMatch(id: string | number) {
   return directorRequest({

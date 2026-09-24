@@ -99,10 +99,14 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import StageSelector from '../stages/StageSelector.vue';
-import { getStage, getStageRankDetail } from '@/api/game/stage';
-import { listMatch } from '@/api/game/match';
-import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
-import { listCompetitor } from '@/api/game/competitor';
+import {
+  getStage,
+  getStageRankDetail,
+  listMatch,
+  listMatchParticipant,
+  listParticipantsByStage,
+  listCompetitor
+} from '@/api/game/screen';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
 const props = defineProps<{

@@ -60,6 +60,9 @@ public class TVisSceneController extends BaseController {
     /**
      * 获取可视化场景配置详细信息
      *
+     * <p>大屏投射端读场景走公开的 {@code GET /tournament/screen/scene/{id}}
+     * (见 {@link ScreenController}),管理端口径不变。</p>
+     *
      * @param id 主键
      */
     @SaCheckPermission("game:visScene:query")

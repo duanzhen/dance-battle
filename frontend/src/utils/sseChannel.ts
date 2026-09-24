@@ -9,10 +9,11 @@
  *   补回断线期间错过的事件;
  * - 移动端适配:锁屏/切应用/网络切换导致连接被系统挂起或静默断开时,
  *   页面恢复可见(visibilitychange/pageshow)、网络恢复(online)按需重连;
- *   另有定时健康检查 + 空闲看门狗(后端 15s 命名事件 ping 心跳),兜底"半死"连接;
- * - 回到前台补偿:锁屏/切应用期间 JS 被挂起,这期间的事件一条都收不到,
- *   因此只要在后台待够一段时间,恢复时除重连外还会主动补一次 onRefresh 全量刷新
- *   (裁判/导播解锁后必须看到当前状态,而不是锁屏前的旧画面);
+ *   另有定时健康检查 + 空闲看门狗(后端 15s 带时间戳的命名事件 ping 心跳),兜底"半死"连接;
+ * - 回到前台用「本机时间戳」判断离开了多久:超过阈值就主动静默重连一次,由重连成功触发的
+ *   onRefresh 重新调接口取最新数据(不整页重建);离开很短则只在连接不健康时才重连。
+ *   用时间戳而不是定时器/计数器:JS 被挂起时定时器不会执行,会误判成"没过去多久";
+ *   也不依赖服务端时间戳,避免设备时钟不同步导致的误判;
  * - 只在连接确实不健康时才重连:连接正常时切标签页/回前台不再强拆重连,
  *   避免"重连 → 全量刷新"把页面刷得一直闪;
  * - 首次连接建立不触发 onRefresh(订阅方挂载时已自行拉取),避免重复请求。
@@ -21,7 +22,7 @@
 /**
  * 对外暴露的连接状态(绿/黄/红标识的唯一来源):
  * - connecting:正在建连 / 等待首次心跳确认 / 等待下一次重试 → 黄色呼吸;
- * - open:已连上且最近 {@link HEARTBEAT_FRESH_MS} 内收到过心跳(或业务事件)→ 绿色;
+ * - open:已连上且最近 {@link HEARTBEAT_FRESH_MS} 内收到过新鲜心跳 → 绿色;
  * - error:通道已关闭、不再重连(订阅方全部取消订阅)→ 红色。
  *
  * <p>注意:断线后的等待与重试过程都归入 connecting(黄),不显示红色——重试永不停止,
@@ -46,12 +47,12 @@ interface SseChannelConn {
   lastEventAt: number;
   /** 当前这条连接最近一次收到数据(心跳/业务事件)的时间;0=本次连接还没收到过,尚未"确认连上" */
   lastLiveAt: number;
+  /** 页面进入后台/被隐藏的时刻(本机墙钟时间戳);null=当前在前台。JS 被挂起期间墙钟照样在走 */
+  hiddenAt: number | null;
   /** 当前对外状态 */
   status: SseStatus;
-  /** 进入后台的时间点(null=当前在前台),用于恢复时判断是否需要补偿刷新 */
-  hiddenAt: number | null;
-  /** 上次「恢复前台补偿刷新」的时间,用于去重 visibilitychange + pageshow 的双触发 */
-  lastResumeRefreshAt: number;
+  /** 重连后待补偿刷新:标记后由"首条心跳确认连上"时触发,而不是传输层一建连就拉数据 */
+  refreshOnConfirm: boolean;
 }
 
 const channels = new Map<string, SseChannelConn>();
@@ -59,19 +60,20 @@ const channels = new Map<string, SseChannelConn>();
 /** 自动重连间隔:失败后固定每 3s 重试一次,永不停止(活动现场优先尽快接回) */
 const RETRY_DELAY_MS = 3000;
 const HEARTBEAT_CHECK_INTERVAL = 10000;
-/** 心跳新鲜窗口:后端每 15s 发一次 ping,该窗口内收到过心跳即视为"确认已连上"(绿灯) */
+/** 心跳新鲜窗口:后端每 15s 发一次 ping,窗口内收到过心跳即视为"确认已连上"(绿灯) */
 const HEARTBEAT_FRESH_MS = 20000;
 /**
- * 空闲超时:后端每 15s 发 ping,超过 35s(容忍一次丢失)未收到任何数据即视为连接已死,触发重连。
- * 该值决定了"标识变红(20s 无心跳)之后多久开始自动重连",取 35s 兼顾"尽快恢复"与"不因偶发丢一次心跳就拆连接"。
+ * 心跳空闲超时:后端每 15s 发 ping,超过 35s(容忍一次丢失)没有心跳即视为连接已死,触发重连。
+ * 取 35s 兼顾"尽快恢复"与"不因偶发丢一次心跳就拆连接"。
  */
 const IDLE_TIMEOUT = 35000;
-/** 后台停留超过该时长,恢复前台时补一次全量刷新(短于它的切标签不必刷新) */
-const RESUME_REFRESH_MIN_HIDDEN_MS = 5000;
-/** 同一次恢复可能同时触发 visibilitychange 与 pageshow,用它节流去重 */
-const RESUME_REFRESH_THROTTLE_MS = 2000;
-
-/** 连接是否健康:存在、未关闭、且最近收到过消息或心跳 */
+/**
+ * 离开前台超过该时长才判定"后台期间很可能被挂起过",回到前台时主动重连一次并重拉数据。
+ * 取 30s:短暂切应用/回消息(几秒)不触发任何重连与重拉,避免"一切回来页面数据就重建"的观感;
+ * 只有真正锁屏、长时间切走才重连。判定用页面隐藏时刻的本机时间戳,与设备/服务端时钟是否同步无关。
+ */
+const RESUME_RECONNECT_MIN_HIDDEN_MS = 30000;
+/** 连接是否健康:存在、未关闭、且最近收到过心跳(心跳按本机时间戳记账) */
 const isHealthy = (conn: SseChannelConn) => {
   const es = conn.es;
   if (!es || es.readyState === EventSource.CLOSED) {
@@ -95,7 +97,7 @@ const setStatus = (conn: SseChannelConn, status: SseStatus) => {
 
 /**
  * 由连接现状推导三态:
- * 只有「通道打开 且 最近 20s 内收到过心跳/事件」才算真正连上(绿)。
+ * 只有「通道打开 且 最近 20s 内收到过新鲜心跳」才算真正连上(绿)。
  * 其余一律算"连接中"(黄):正在握手、刚握手还没等到首条心跳、已断开等待下一次重试、
  * 心跳超时——它们都在"正在尝试/即将重连"的范围内,显示黄色而不是红色。
  */
@@ -172,7 +174,7 @@ const ensureAlive = (conn: SseChannelConn) => {
   reconnectIfUnhealthy(conn);
 };
 
-/** 页面进入后台/被隐藏:记录时间点,供恢复时判断是否需要补偿刷新 */
+/** 页面进入后台/被隐藏:记录本机墙钟时间戳(JS 被挂起时它照样在走,不是定时器计数) */
 const markHidden = () => {
   const now = Date.now();
   channels.forEach((conn) => {
@@ -181,36 +183,29 @@ const markHidden = () => {
 };
 
 /**
- * 页面回到前台(解锁 / 切回应用 / 从 bfcache 恢复)。
+ * 页面回到前台(解锁 / 切回应用 / 从 bfcache 恢复)或网络恢复。
  *
- * <p>手机锁屏或切到其它应用时浏览器会把 JS 挂起:期间后端推送的事件一条也收不到,
- * 而 TCP 连接可能"看起来还是开的"(对端没发 FIN)。所以这里做两件事:
- * 连接不健康就重连(重连成功后会触发一次 onRefresh 补偿);只要在后台待了足够久,
- * 再额外补一次全量刷新——因为「没收到事件」不等于「数据没变」,裁判/导播解锁后
- * 必须看到当前真实状态,而不是锁屏前的旧画面。</p>
+ * <p>用「隐藏时刻的本机时间戳」算出离开了多久:定时器/计数器在 JS 被挂起时不会执行,
+ * 会把几分钟的挂起误判成"没过去多久";墙钟时间戳不受影响。这里也不依赖服务端时间戳,
+ * 因此设备时钟是否同步都不影响判定。恢复后只重拉数据、不做整页重建:</p>
+ * <ul>
+ *   <li>离开够久(≥ {@link RESUME_RECONNECT_MIN_HIDDEN_MS})说明后台期间多半被挂起过:
+ *       主动静默重连一次,重连成功后由 onopen 触发 onRefresh 重新调接口取最新数据;</li>
+ *   <li>离开很短则只在连接确实不健康时才重连,避免无谓抖动。</li>
+ * </ul>
  */
 const handleResume = () => {
   const now = Date.now();
   channels.forEach((conn) => {
     const hiddenFor = conn.hiddenAt == null ? 0 : now - conn.hiddenAt;
     conn.hiddenAt = null;
-    // 1) 连接可能已死:不健康就立即重连,不等下一次 3s 周期
+    if (hiddenFor >= RESUME_RECONNECT_MIN_HIDDEN_MS) {
+      // 后台期间可能被挂起过:这条连接即便"看起来还开着",期间到达的心跳也可能是排队补发的旧消息,
+      // 直接换一条新连接,后续数据由重连触发的 onRefresh 拉取
+      reconnect(conn, true);
+      return;
+    }
     reconnectNow(conn);
-    // 2) 后台期间的变更需要补拉,与连接是否健康无关
-    if (hiddenFor < RESUME_REFRESH_MIN_HIDDEN_MS) {
-      return;
-    }
-    if (now - conn.lastResumeRefreshAt < RESUME_REFRESH_THROTTLE_MS) {
-      return;
-    }
-    conn.lastResumeRefreshAt = now;
-    conn.listeners.forEach((l) => {
-      try {
-        l.onRefresh?.();
-      } catch {
-        // 单个订阅者异常不影响其他订阅者
-      }
-    });
   });
 };
 
@@ -246,17 +241,17 @@ const open = (conn: SseChannelConn) => {
   }
   conn.es = es;
 
-  // 心跳:仅更新存活时间,不触发业务刷新(命名事件不进 onmessage)
+  // 心跳:仅更新存活时间,不触发业务刷新(命名事件不进 onmessage)。
+  // 记账用本机墙钟时间戳,不依赖服务端时钟;JS 被挂起期间排队补发的旧心跳由
+  // handleResume 里的"离开时长(本机时间戳)"兜底——回到前台直接换新连接,不会被旧心跳骗过。
   es.addEventListener('ping', () => {
-    conn.lastEventAt = Date.now();
-    conn.lastLiveAt = Date.now();
+    const now = Date.now();
+    conn.lastEventAt = now;
+    conn.lastLiveAt = now;
+    // 先刷新状态(此刻才从"连接中"转为"已连上"),确认连上之后再触发重连补偿刷新
     refreshStatus(conn);
-  });
-
-  es.onopen = () => {
-    conn.lastEventAt = Date.now();
-    if (conn.reopened) {
-      // 断线重连成功:补偿刷新,补回断线期间错过的事件
+    if (conn.refreshOnConfirm) {
+      conn.refreshOnConfirm = false;
       conn.listeners.forEach((l) => {
         try {
           l.onRefresh?.();
@@ -265,15 +260,23 @@ const open = (conn: SseChannelConn) => {
         }
       });
     }
+  });
+
+  es.onopen = () => {
+    conn.lastEventAt = Date.now();
+    if (conn.reopened) {
+      // 传输层建连成功 ≠ 连接已确认:此时标识还是"连接中",先只标记待刷新,
+      // 等首条心跳到达、状态真正转为"已连上"后再触发订阅方重新调接口(见上面的 ping 处理)
+      conn.refreshOnConfirm = true;
+    }
     conn.reopened = true;
-    // 握手成功还不算"确认连上":等首条心跳(或业务事件)到达才转绿
+    // 握手成功还不算"确认连上":等首条心跳到达才转绿
     refreshStatus(conn);
   };
 
   es.onmessage = (e) => {
-    conn.lastEventAt = Date.now();
-    conn.lastLiveAt = Date.now();
-    refreshStatus(conn);
+    // 业务消息不参与存活判定:存活一律由心跳负责(建连即发 + 每 15s 一次),
+    // 避免排队补发的旧业务消息把一条其实已经断开的连接伪装成"刚刚还活着"。
     let data: any;
     try {
       data = JSON.parse(e.data);
@@ -309,10 +312,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   // pagehide 覆盖「切应用被冻结 / 进入 bfcache」,pageshow 覆盖恢复
   window.addEventListener('pagehide', markHidden);
   window.addEventListener('pageshow', handleResume);
-  window.addEventListener('online', () => {
-    // 网络恢复:立即重连,不等下一次 3s 周期
-    channels.forEach(reconnectNow);
-  });
+  window.addEventListener('online', handleResume);
   setInterval(() => {
     channels.forEach(ensureAlive);
   }, HEARTBEAT_CHECK_INTERVAL);
@@ -345,9 +345,9 @@ export function subscribeChannel(options: {
       closed: false,
       lastEventAt: Date.now(),
       lastLiveAt: 0,
-      status: 'connecting',
       hiddenAt: null,
-      lastResumeRefreshAt: 0
+      status: 'connecting',
+      refreshOnConfirm: false
     };
     channels.set(options.key, conn);
     open(conn);

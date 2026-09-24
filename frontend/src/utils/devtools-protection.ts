@@ -96,7 +96,7 @@ export function initDevToolsProtection(): void {
   }
 
   // 循环检测开发者工具（更频繁的检测）
-  const checkInterval = setInterval(() => {
+  setInterval(() => {
     const isOpen = detectDevTools();
 
     if (isOpen && !devToolsOpen) {
@@ -121,13 +121,10 @@ export function initDevToolsProtection(): void {
     }
   }, 500); // 每 500ms 检测一次，更频繁
 
-  // 页面卸载时清理
-  window.addEventListener('beforeunload', () => {
-    clearInterval(checkInterval);
-    if (debuggerInterval !== null) {
-      clearInterval(debuggerInterval);
-    }
-  });
+  // 注意:这里刻意不注册 beforeunload 监听。
+  // 注册 beforeunload 会让页面失去 bfcache(往返缓存)资格,手机切应用/锁屏再回来时
+  // 浏览器只能重新加载整个文档 —— 表现就是"整页刷新"。原先这个监听只是卸载时清理定时器,
+  // 而页面卸载后定时器自然消失,清不清都一样,为此牺牲 bfcache 不划算。
 
   // 额外的检测：监听窗口大小变化
   let lastWidth = window.innerWidth;

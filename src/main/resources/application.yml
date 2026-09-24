@@ -18,12 +18,12 @@ spring:
   datasource:
     # 默认 MySQL;改用 SQLite 时设置 DB_URL=jdbc:sqlite:./data/game.db
     # (SQLite 连接会自动补上 date_class=text,与建表脚本 TEXT 日期列一致,时间字段才能正常读写)
-    url: ${DB_URL:jdbc:mysql://${MYSQL_HOST:192.168.100.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:game_db}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    url: ${DB_URL:jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:game_db}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:${MYSQL_USER:root}}
     password: ${DB_PASSWORD:${MYSQL_PASSWORD:password}}
   data:
     redis:
-      host: ${REDIS_HOST:192.168.100.1}
+      host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: 0
@@ -51,7 +51,9 @@ app:
     type: ${DB_TYPE:auto}
     # MySQL 连接失败/未配置时自动回退到 SQLite 文件库(设为 false 关闭)
     fallback-to-sqlite: ${DB_FALLBACK_SQLITE:true}
-    # date_class=text 与 sql/game_db.sqlite.sql 的 TEXT 日期列保持一致,避免 "Error parsing time stamp"
+    # date_class=text 与 sql/game_db.sqlite.sql 的 TEXT 日期列保持一致,避免 "Error parsing time stamp";
+    # 并发护栏(WAL + busy_timeout + 事务 IMMEDIATE)由 SqliteFallbackEnvironmentPostProcessor
+    # 统一按「缺哪项补哪项」补齐(显式写了的以你为准),避免多连接下 SQLITE_BUSY
     sqlite-fallback-url: "${SQLITE_FALLBACK_URL:jdbc:sqlite:./data/game.db?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS}"
   redis:
     # Redis 未配置/不可达时自动进入单机模式(SSE 本地广播、无分布式锁);设为 false 显式关闭 Redis

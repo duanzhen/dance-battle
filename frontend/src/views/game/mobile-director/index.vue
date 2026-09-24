@@ -979,10 +979,13 @@ const loadStages = async () => {
     stages.value = sorted;
 
     if (sorted.length > 0) {
-      selectedStageId.value = sorted[0].id;
-      const gamingStage = sorted.find((s) => s.status === 'GAMING');
-      if (gamingStage) {
-        selectedStageId.value = gamingStage.id;
+      // 保留用户当前选中的赛段:只有它已不存在时才回退到「进行中 / 第一个」。
+      // 此前每次 loadStages 都无条件重置选中项,导致任何 SSE 事件或重连后的数据重拉
+      // 都会把导播手动选的赛段顶掉,观感就像页面被重新加载。
+      const kept = sorted.find((s) => s.id === selectedStageId.value);
+      if (!kept) {
+        const gamingStage = sorted.find((s) => s.status === 'GAMING');
+        selectedStageId.value = (gamingStage ?? sorted[0]).id;
       }
     }
   } catch (e) {

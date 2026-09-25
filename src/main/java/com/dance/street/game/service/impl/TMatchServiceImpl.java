@@ -224,12 +224,9 @@ public class TMatchServiceImpl implements ITMatchService {
             .stream()
             .filter(s -> s.getCompetitorId() != null)
             .toList();
-        // 打分明细按轮次归组:常规海选每轮一名选手;二海(加赛)是单轮多选手共享轮次
+        // 打分明细按轮次归组:海选(含加赛)每个轮次对应一名选手
         Map<Long, List<TRoundScore>> scoresByRound = allScores.stream()
             .collect(Collectors.groupingBy(TRoundScore::getRoundId));
-        // 兼容历史数据:早期写入把所有选手分挂在同一轮,按选手回退归组兜底
-        Map<Long, List<TRoundScore>> scoresByCompetitor = allScores.stream()
-            .collect(Collectors.groupingBy(TRoundScore::getCompetitorId));
 
         List<Long> refereeIds = allScores.stream()
             .map(TRoundScore::getRefereeId).filter(Objects::nonNull).distinct().toList();
@@ -250,37 +247,10 @@ public class TMatchServiceImpl implements ITMatchService {
             List<MatchRoundScoreVo> roundScores = new ArrayList<>();
             for (TMatchRound r : roundList) {
                 List<TRoundScore> roundScoresOfRound = scoresByRound.getOrDefault(r.getId(), List.of());
-                Set<Long> matchRoundIds = roundList.stream()
-                    .map(TMatchRound::getId).filter(Objects::nonNull).collect(Collectors.toSet());
-                // 二海(加赛):轮次未绑定选手,单轮共享多名选手评分,按参赛方逐人展示(与海选主赛一致)
-                if (r.getCompetitorId() == null) {
-                    // 历史数据:老加赛只建了一轮,这里按上场顺序逐人铺开并补上展示序号,
-                    // 否则 N 个人会挤在同一轮里(前端 key 重复、全部显示成「第1轮」)。
-                    long seq = 0;
-                    for (TMatchParticipant p : byMatch.getOrDefault(vo.getId(), List.of())) {
-                        if (p.getCompetitorId() == null) {
-                            continue;
-                        }
-                        seq++;
-                        MatchRoundScoreVo item = buildAuditionRoundItem(r, p.getCompetitorId(),
-                            roundScoresOfRound.stream()
-                                .filter(s -> Objects.equals(s.getCompetitorId(), p.getCompetitorId()))
-                                .toList(),
-                            nameById, participantByCid, refereeNameById);
-                        item.setRoundSequence(seq);
-                        roundScores.add(item);
-                    }
-                    continue;
-                }
-                // 常规海选:取本轮该选手评分;本轮无分时回退到同场其他轮次(兼容历史单轮写入)
+                // 每个轮次绑定一名选手,取该选手本轮的评分明细
                 List<TRoundScore> rs = roundScoresOfRound.stream()
                     .filter(s -> Objects.equals(s.getCompetitorId(), r.getCompetitorId()))
                     .toList();
-                if (rs.isEmpty()) {
-                    rs = scoresByCompetitor.getOrDefault(r.getCompetitorId(), List.of()).stream()
-                        .filter(s -> matchRoundIds.contains(s.getRoundId()))
-                        .toList();
-                }
                 roundScores.add(buildAuditionRoundItem(r, r.getCompetitorId(), rs,
                     nameById, participantByCid, refereeNameById));
             }

@@ -15,6 +15,8 @@ import java.util.Map;
  * VOTING 模式:总分制。
  * <p>汇总每个参赛方的所有原始分(投票/计票)为 scoreValue,再排名。不设本场 WIN/LOSS,
  * 晋级由 Resolver 按排名决定。</p>
+ *
+ * @author duane
  */
 public class TotalScoreStrategy implements ScoreStrategy {
 

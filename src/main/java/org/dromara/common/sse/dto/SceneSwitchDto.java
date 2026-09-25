@@ -8,7 +8,7 @@ import java.io.Serializable;
 /**
  * 场景切换通知 DTO
  *
- * @author Lion Li
+ * @author duane
  */
 @Data
 public class SceneSwitchDto implements Serializable {

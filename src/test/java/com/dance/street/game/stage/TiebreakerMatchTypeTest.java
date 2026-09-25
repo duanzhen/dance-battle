@@ -53,7 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>旧实现把"是不是二海/三海"编码在 {@code t_match.remark} 前缀里,判定散落在
  * 6 处字符串 startsWith,改文案就会静默改变行为。现在 {@code match_type=TIEBREAKER}
- * 是唯一判据(历史行 match_type 为 null 时仍兼容 remark 前缀)。</p>
+ * 是唯一判据。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -105,7 +105,7 @@ class TiebreakerMatchTypeTest {
     private SettlementSupport settlementSupport;
 
     @Test
-    void tiebreakerIsMarkedExplicitlyAndLegacyRemarkStillWorks() {
+    void tiebreakerIsMarkedExplicitlyByMatchType() {
         Long tid = newTournament("加赛类型");
         TStageVo stage = newAuditionStage(tid, "海选", 2);
         lifecycleService.ensureAuditionCircles(stage.getId());
@@ -137,12 +137,13 @@ class TiebreakerMatchTypeTest {
         assertFalse(settlementSupport.isTiebreaker(circlesOf(stage.getId()).get(0)),
             "正式圈不是加赛");
 
-        // 历史数据兼容:match_type 为 null 时仍按 remark 前缀识别
+        // 备注文本不再是判据:正式圈的 remark 即使写成加赛格式,也不按加赛处理
+        TMatch circle = circlesOf(stage.getId()).get(0);
         matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
-            .eq(TMatch::getId, tb.getId())
-            .set(TMatch::getMatchType, null));
-        assertTrue(settlementSupport.isTiebreaker(matchMapper.selectById(tb.getId())),
-            "老库(match_type 为空)应回退按 remark 前缀识别");
+            .eq(TMatch::getId, circle.getId())
+            .set(TMatch::getRemark, "同分加赛,晋级名额,3人"));
+        assertFalse(settlementSupport.isTiebreaker(matchMapper.selectById(circle.getId())),
+            "加赛判定只看 match_type,不看备注文本");
     }
 
     /**

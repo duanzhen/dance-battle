@@ -24,6 +24,8 @@ import java.util.Set;
  * <p>跳过探测、直接走本地广播的显式写法:{@code REDIS_ENABLED=false} 或
  * {@code DEPLOY_MODE=standalone}。反之 {@code DEPLOY_MODE=distributed} 表示必须使用
  * Redis:探测失败直接启动失败,不再静默降级。</p>
+ *
+ * @author duane
  */
 public class RedisStandaloneEnvironmentPostProcessor implements EnvironmentPostProcessor {
 

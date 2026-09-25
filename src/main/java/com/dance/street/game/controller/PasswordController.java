@@ -20,6 +20,8 @@ import java.util.Map;
 /**
  * 修改密码:必须登录(否则任何人都可无限试旧密码),校验旧密码后持久化新密码;
  * 仍在使用默认密码时允许不传旧密码(首次登录强制修改场景)。
+ *
+ * @author duane
  */
 @Validated
 @RequiredArgsConstructor

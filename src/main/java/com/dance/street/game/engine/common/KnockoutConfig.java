@@ -8,6 +8,8 @@ import java.io.Serializable;
 
 /**
  * 淘汰赛配置(ruleConfig.knockout)。
+ *
+ * @author duane
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)

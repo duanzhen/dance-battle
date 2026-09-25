@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>用 {@link SmartInitializingSingleton} 而非容器事件监听器,与项目内其他初始化器一致,
  * 且对 GraalVM native image 的 AOT 更友好(不依赖运行期解析泛型事件类型)。</p>
+ *
+ * @author duane
  */
 @Component
 public class DeployModeReportLogger implements SmartInitializingSingleton {

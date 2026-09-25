@@ -9,16 +9,17 @@ import java.math.BigDecimal;
 
 /**
  * 赛段规则配置(对应 TStage.rule_config JSON)。
- * <p>顶层承载赛制类型与轮次,子配置承载各赛制特有参数、打分规则、转场规则。</p>
+ * <p>顶层承载赛制类型与轮次,子配置承载各赛制特有参数与打分规则。</p>
  *
  * <pre>
  * {
  *   "mode": "KNOCKOUT", "format": "BO1",
  *   "knockout": { "template":"QUARTER_FINAL", "teamsCount":8, "advanceCount":4 },
- *   "scoring":  { "type":"MULTI_DIM", "matchMode":"RANKING", ... },
- *   "transition": { "targetStageId": 123 }
+ *   "scoring":  { "type":"MULTI_DIM", "matchMode":"RANKING", ... }
  * }
  * </pre>
+ *
+ * @author duane
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -74,7 +75,4 @@ public class RuleConfigHolder implements Serializable {
 
     /** 打分配置(决定每局如何判定胜负) */
     private ScoringConfig scoring;
-
-    /** 转场配置(决定晋级如何触发) */
-    private TransitionConfig transition;
 }

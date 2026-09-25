@@ -46,12 +46,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 单圈海选 + 「第1圈名次」出口:选手必须能进下一个赛段。
  *
- * <p>回归的事故(历史):单圈场次的 {@code display_zone} 曾是 {@code CENTER}(多圈才是 ZONE-1..n),
- * 而出口规则里的圈过滤写的是 {@code ZONE-1},名单候选按字符串直接比对一个都取不到——
- * 现场表现就是「海选结束了,选手没进 32 强」,而且不报任何错。</p>
+ * <p>回归的事故:单圈场次的 {@code display_zone} 曾另起一个 {@code CENTER}(多圈才是
+ * {@code ZONE-1..n}),而出口规则里的圈过滤写的是 {@code ZONE-1},名单候选按字符串直接比对
+ * 一个都取不到——现场表现就是「海选结束了,选手没进 32 强」,而且不报任何错。</p>
  *
- * <p>现在圈编号统一:{@code ZONE-k} 恒为"第 k 个圈",单圈即 {@code ZONE-1};老库里的
- * CENTER 行仍按"第 1 个圈"解析,保证未重排的历史赛段继续能取到人。</p>
+ * <p>现在圈编号统一:{@code ZONE-k} 恒为"第 k 个圈",单圈即 {@code ZONE-1}。圈过滤按
+ * {@code display_zone} 字符串精确匹配,所以生成侧与出口配置必须用同一套编号。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",

@@ -7,6 +7,8 @@ import org.dromara.common.core.exception.ServiceException;
 /**
  * 赛段级参赛单位结果(对应 TCompetitor.outcome_status)。
  * <p>与前端 StageCompetitorList 的 outcomeStatusMap 对齐。</p>
+ *
+ * @author duane
  */
 @Getter
 @AllArgsConstructor

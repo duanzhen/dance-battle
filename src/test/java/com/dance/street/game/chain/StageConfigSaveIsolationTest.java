@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * <p>三条用例对应三层修复:</p>
  * <ol>
  *   <li>配置入口(updateConfig)不写下游行,也不改任何指针;</li>
- *   <li>兼容入口(updateByBo)即使被回传了过期指针也不改链;</li>
+ *   <li>配置更新入口(updateByBo)的 BO 里没有 prev/next 字段,过期指针根本表达不出来;</li>
  *   <li>改链走意图接口:插入按 afterStageId、移动按 moveStageAfter,顺序由后端推导。</li>
  * </ol>
  */
@@ -140,19 +140,17 @@ class StageConfigSaveIsolationTest {
     }
 
     @Test
-    void legacyUpdateIgnoresStalePointers() {
+    void configUpdateCannotCarryChainPointers() {
         Long tid = newTournament("过期指针赛事");
         TStageVo a = newStage(tid, "海选", "AUDITION", null);
         TStageVo b = newStage(tid, "32强", "KNOCKOUT", a.getId());
         TStageVo c = newStage(tid, "16强", "KNOCKOUT", b.getId());
 
-        // 模拟前端手里那份过期的赛段数据:声称本赛段是链头、下游指向 C
+        // 配置更新入口的 BO 里没有前后指针字段:客户端手里那份副本再过期也表达不出来
         TStageBo stale = new TStageBo();
         stale.setId(b.getId());
         stale.setTournamentId(tid);
         stale.setName("32强(改)");
-        stale.setPrevStageId(null);
-        stale.setNextStageId(c.getId());
         stageService.updateByBo(stale);
 
         assertEquals("32强(改)", reload(b.getId()).getName(), "配置字段仍应写入");

@@ -10,6 +10,8 @@ import java.util.Map;
  * 打分引擎入口。按 {@link MatchModeEnum} 分派到对应 {@link ScoreStrategy}。
  *
  * <p>无状态、不依赖 Spring,可直接 {@code new ScoringEngine()} 使用(便于单测);Service 层持有单例字段即可。</p>
+ *
+ * @author duane
  */
 public class ScoringEngine {
 

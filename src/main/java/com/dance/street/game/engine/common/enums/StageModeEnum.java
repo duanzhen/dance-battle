@@ -6,7 +6,9 @@ import org.dromara.common.core.exception.ServiceException;
 
 /**
  * 赛段模式(赛制类型)。
- * <p>与前端 game-ui/src/views/game/tournament/stages/types.ts 的 StageMode 枚举对齐。</p>
+ * <p>与前端 frontend/src/views/game/tournament/stages/types.ts 的 StageMode 枚举对齐。</p>
+ *
+ * @author duane
  */
 @Getter
 @AllArgsConstructor

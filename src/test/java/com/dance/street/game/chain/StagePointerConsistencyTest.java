@@ -11,7 +11,6 @@ import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.impl.StageChain;
-import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,20 +26,13 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 赛段指针一致性:prev 列的对称校正,以及下一赛段的双来源冲突。
+ * 赛段指针一致性:prev 列的对称校正(两个方向都以 next 链为准)。
  *
- * <p>两处此前只覆盖了一半:</p>
- * <ul>
- *   <li>开赛守卫只拦「prev 列有值、链上无人指向」,反向(链上有前驱、列为空)
- *       没人管,导播台会把「上一赛段」显示成「未知」;</li>
- *   <li>{@code resolveNextStageId} 优先读 {@code ruleConfig.transition.targetStageId},
- *       与 {@code next_stage_id} 冲突时静默选配置——开赛守卫看链、装配看配置,
- *       两个答案会做出错配的晋级名单。</li>
- * </ul>
+ * <p>开赛守卫此前只拦「prev 列有值、链上无人指向」,反向(链上有前驱、列为空)
+ * 没人管,导播台会把「上一赛段」显示成「未知」。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -110,34 +102,28 @@ class StagePointerConsistencyTest {
         assertNull(reload(a.getId()).getPrevStageId(), "链头的 prev 应被清空");
     }
 
-    /** next 链与 transition.targetStageId 指向不同赛段时必须报错,不能静默选一个。 */
+    /**
+     * ruleConfig 里残留的 {@code transition.targetStageId} 不再参与解析:
+     * 下一赛段只认 {@code next_stage_id} 链,旧字段既不生效也不再报「两个答案」。
+     */
     @Test
-    void conflictingNextStageAnswersAreRejected() {
-        Long tid = newTournament("双来源冲突");
+    void legacyTransitionConfigIsIgnored() {
+        Long tid = newTournament("忽略遗留transition");
         TStageVo a = newStage(tid, "海选", null);
         TStageVo b = newStage(tid, "4强", a.getId());
         TStageVo other = newStage(tid, "另一段", b.getId());
 
         // 链上 A.next = B,但配置里把晋级目标写成 other
-        TStage withConflict = new TStage();
-        withConflict.setId(a.getId());
-        withConflict.setStatus(StageConstants.STAGE_SETTLED);
-        withConflict.setRuleConfig("{\"mode\":\"AUDITION\",\"advanceCount\":2,"
+        TStage settled = new TStage();
+        settled.setId(a.getId());
+        settled.setStatus(StageConstants.STAGE_SETTLED);
+        settled.setRuleConfig("{\"mode\":\"AUDITION\",\"advanceCount\":2,"
             + "\"transition\":{\"targetStageId\":" + other.getId() + "}}");
-        stageMapper.updateById(withConflict);
+        stageMapper.updateById(settled);
 
-        ServiceException ex = assertThrows(ServiceException.class,
-            () -> lifecycleService.calculateAdvancement(a.getId()));
-        assertTrue(ex.getMessage().contains("两个答案"),
-            "应提示 next 与 transition 冲突,实际: " + ex.getMessage());
-
-        // 配置与链一致时正常放行(不再报错),走名单整单装配
-        TStage aligned = new TStage();
-        aligned.setId(a.getId());
-        aligned.setRuleConfig("{\"mode\":\"AUDITION\",\"advanceCount\":2,"
-            + "\"transition\":{\"targetStageId\":" + b.getId() + "}}");
-        stageMapper.updateById(aligned);
-        lifecycleService.calculateAdvancement(a.getId());
+        // 不抛异常(旧实现会因"两个答案"报错),按链 next 装配(无人可带 → 0)
+        assertEquals(0, lifecycleService.calculateAdvancement(a.getId()),
+            "遗留 transition 字段应被忽略,晋级只按链 next 解析");
     }
 
     /**
@@ -172,7 +158,7 @@ class StagePointerConsistencyTest {
         return t.getId();
     }
 
-    private TStageVo newStage(Long tournamentId, String name, Long prevStageId) {
+    private TStageVo newStage(Long tournamentId, String name, Long afterStageId) {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tournamentId);
         bo.setName(name);
@@ -180,7 +166,7 @@ class StagePointerConsistencyTest {
         bo.setStatus(StageConstants.STAGE_DRAFT);
         bo.setTeamCountStart(8L);
         bo.setTeamCountEnd(4L);
-        bo.setPrevStageId(prevStageId);
+        bo.setAfterStageId(afterStageId);
         bo.setIsInitialized(0L);
         return stageService.insertByBo(bo);
     }

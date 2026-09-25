@@ -8,6 +8,8 @@ import java.io.Serializable;
 
 /**
  * 小组赛配置(ruleConfig.group)。
+ *
+ * @author duane
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)

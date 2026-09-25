@@ -162,8 +162,6 @@ public class TStageServiceImpl implements ITStageService {
         LambdaQueryWrapper<TStage> lqw = Wrappers.lambdaQuery();
         lqw.orderByAsc(TStage::getId);
         lqw.eq(bo.getTournamentId() != null, TStage::getTournamentId, bo.getTournamentId());
-        lqw.eq(bo.getPrevStageId() != null, TStage::getPrevStageId, bo.getPrevStageId());
-        lqw.eq(bo.getNextStageId() != null, TStage::getNextStageId, bo.getNextStageId());
         lqw.eq(bo.getParentStageId() != null, TStage::getParentStageId, bo.getParentStageId());
         lqw.like(StringUtils.isNotBlank(bo.getName()), TStage::getName, bo.getName());
         lqw.eq(StringUtils.isNotBlank(bo.getStageMode()), TStage::getStageMode, bo.getStageMode());
@@ -176,8 +174,8 @@ public class TStageServiceImpl implements ITStageService {
     /**
      * 新增赛段流程
      *
-     * <p>插入位置只认意图:{@code afterStageId}(兼容旧字段 {@code prevStageId})表示
-     * "插到该赛段之后",为空则插到链头。前后指针由 {@link StageChain} 按链顺序写入,
+     * <p>插入位置只认意图:{@code afterStageId} 表示"插到该赛段之后",
+     * 为空则插到链头。前后指针由 {@link StageChain} 按链顺序写入,
      * 客户端传的 {@code nextStageId} 不参与。</p>
      *
      * @param bo 赛段流程
@@ -191,8 +189,7 @@ public class TStageServiceImpl implements ITStageService {
         // 归一化 ruleConfig:补齐与 teamCountStart/teamCountEnd 对应的配置字段
         normalizeRuleConfig(add, null);
 
-        // 插入意图:afterStageId 优先;旧调用方用 prevStageId 表达同一件事
-        Long afterStageId = bo.getAfterStageId() != null ? bo.getAfterStageId() : bo.getPrevStageId();
+        Long afterStageId = bo.getAfterStageId();
 
         // 指针列一律由 StageChain 写:先落一行不带指针的记录,再按链顺序接入
         add.setPrevStageId(null);
@@ -201,13 +198,9 @@ public class TStageServiceImpl implements ITStageService {
         bo.setId(add.getId());
         stageChain.insertAfter(add, afterStageId);
 
-        // 名单:新赛段有直接前驱时同步写入默认来源组(source=prev, ADVANCE, AUTO);
-        // 先写名单再联动名额,使 syncAdvanceCountFromNext 能识别"目标是否多来源"
+        // 名单:新赛段有直接前驱时同步写入默认来源组(source=prev, ADVANCE, AUTO)。
+        // 晋级名额与人选一律以名单来源组 + 赛段配置为准,建链时不做任何名额联动。
         rosterService.ensureRosterForStage(add);
-        // 插入赛段后联动调整源赛段晋级名额:
-        // 前驱赛段的 teamCountEnd 对齐到新赛段的 teamCountStart,
-        // 保证「前段选多少人 = 后段收多少人」;具体人选仍由中间态(预排/顶替/GUEST)对接
-        syncAdvanceCountFromNext(afterStageId, add.getId());
         // 中间插入(A→Z→B):B 的 prev 已改为 Z,名单默认来源同步从 A 迁到 Z
         if (add.getNextStageId() != null) {
             rosterService.reconcileAfterLinkChange(add.getNextStageId());
@@ -219,10 +212,9 @@ public class TStageServiceImpl implements ITStageService {
     /**
      * 修改赛段流程
      *
-     * <p><b>只改配置,不动赛段链。</b>客户端提交的 {@code prevStageId}/{@code nextStageId}
-     * 一律忽略:那是它本地的展示副本,过期后写回会把链(以及下游名单来源)改歪——
-     * 此前"改一个场次配置却重写整条链"正是这么来的。需要调整链顺序请调用
-     * {@link #moveStageAfter(Long, Long)}。</p>
+     * <p><b>只改配置,不动赛段链。</b>入口 BO 里根本没有前后指针字段,改链只能调用
+     * {@link #moveStageAfter(Long, Long)};此前"改一个场次配置却重写整条链"的根因
+     * (客户端回传过期指针副本)从入口上就不存在了。</p>
      *
      * <p>配置写入见 {@link #updateConfig(TStageConfigBo)}。</p>
      *
@@ -233,7 +225,6 @@ public class TStageServiceImpl implements ITStageService {
     @Transactional(rollbackFor = Exception.class)
     public TStageVo updateByBo(TStageBo bo) {
         TStage update = MapstructUtils.convert(bo, TStage.class);
-        warnIfClientSendsChainPointers(update);
         return applyConfigUpdate(update);
     }
 
@@ -319,29 +310,6 @@ public class TStageServiceImpl implements ITStageService {
 
         // 返回库中整行:prev/next 是展示列,链由 StageChain 维护,回读才是最新口径
         return MapstructUtils.convert(baseMapper.selectById(patch.getId()), TStageVo.class);
-    }
-
-    /**
-     * 客户端通过普通更新接口回传了与本赛段现状不同的 prev/next:
-     * 说明它手里那份指针副本已经过期(或想改链),两者都不该按它的值写库。
-     */
-    private void warnIfClientSendsChainPointers(TStage incoming) {
-        if (incoming.getId() == null
-            || (incoming.getPrevStageId() == null && incoming.getNextStageId() == null)) {
-            return;
-        }
-        TStage current = baseMapper.selectById(incoming.getId());
-        if (current == null) {
-            return;
-        }
-        boolean differs = !Objects.equals(incoming.getPrevStageId(), current.getPrevStageId())
-            || !Objects.equals(incoming.getNextStageId(), current.getNextStageId());
-        if (differs) {
-            log.warn("赛段[{}]通过配置更新入口提交了前后指针(提交 prev={} next={},库中 prev={} next={}),已忽略;"
-                    + "改链请调用 PUT /game/stage/{}/link",
-                incoming.getId(), incoming.getPrevStageId(), incoming.getNextStageId(),
-                current.getPrevStageId(), current.getNextStageId(), incoming.getId());
-        }
     }
 
     /**
@@ -459,19 +427,6 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /**
-     * 晋级名额联动(旧链表模型遗留):名单化后**显式停用**。
-     *
-     * <p>每个赛段的晋级名额/容量与名单来源组是独立配置:
-     * 前驱赛段应输出多少人以来源组(晋级/落选/名次)为准,
-     * 下游赛段容量由 teamCountStart 决定。若在建链时临时把前驱 teamCountEnd
-     * 顶到下游容量,会在"先建链、后配复活/多来源"的流程里误改海选晋级名额,
-     * 因此这里保留调用点但不再修改任何数据。</p>
-     */
-    private void syncAdvanceCountFromNext(Long prevId, Long nextId) {
-        // no-op:名单流转由来源组与赛段配置决定
-    }
-
-    /**
      * 校验并批量删除赛段流程信息
      *
      * @param ids     待删除的主键集合
@@ -501,7 +456,6 @@ public class TStageServiceImpl implements ITStageService {
             }
             // 链表不在这里拼:删除落库后由 StageChain.realignPointers 按 next 链统一收口
             // (旧实现在删除前后各写一遍邻居指针,是同一件事做两遍)
-            // 名额联动(syncAdvanceCountFromNext)已改为名单驱动,不再依赖被删节点的前后指针
         }
         // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
         List<Long> stageIds = ids.stream().map(Long::valueOf).toList();

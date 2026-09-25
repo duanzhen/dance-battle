@@ -6,8 +6,10 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * 简化权限体系：单账号登录后授予全部 game:* 权限，
- * 保证复制过来的 @SaCheckPermission("game:xxx") 均能通过。
+ * 简化权限体系：单账号登录后授予通配权限 {@code *}(Sa-Token 匹配任意权限)，
+ * 因此复制过来的 @SaCheckPermission("game:xxx") 及后续新增的权限点均能通过。
+ *
+ * @author duane
  */
 @Component
 public class PermissionStpInterface implements StpInterface {

@@ -22,6 +22,8 @@ import java.util.Map;
 
 /**
  * 单账号登录：用户名/密码配置在 application.yml 的 login.*
+ *
+ * @author duane
  */
 @SaIgnore
 @Validated

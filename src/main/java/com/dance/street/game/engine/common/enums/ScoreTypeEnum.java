@@ -7,6 +7,8 @@ import org.dromara.common.core.exception.ServiceException;
 /**
  * 打分机制类型(ruleConfig.scoring.type)。
  * <p>与打分/轮次正交:本枚举决定「每局怎么判定胜负」,format(BO1/BO3)决定「打几局」。</p>
+ *
+ * @author duane
  */
 @Getter
 @AllArgsConstructor

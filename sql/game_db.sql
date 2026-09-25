@@ -114,7 +114,7 @@ CREATE TABLE `t_match` (
   `tournament_id` bigint NOT NULL,
   `stage_id` bigint NOT NULL,
   `name` varchar(100) DEFAULT NULL,
-  `display_zone` varchar(10) DEFAULT NULL COMMENT 'LEFT, RIGHT, CENTER',
+  `display_zone` varchar(10) DEFAULT NULL COMMENT '显示分区: LEFT/RIGHT(淘汰赛)、CENTER(季军赛/排名赛)、ZONE-n(海选圈)、G1..Gn(小组赛)',
   `display_row` int DEFAULT NULL COMMENT 'Y轴排序',
   `display_col` int DEFAULT NULL,
   `status` enum('PENDING','GAMING','SETTLED') NOT NULL DEFAULT 'PENDING',

@@ -10,6 +10,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
  * Sa-Token 拦截器：启用 @SaCheckPermission/@SaIgnore 注解鉴权
+ *
+ * @author duane
  */
 @Configuration
 public class SaTokenConfig implements WebMvcConfigurer {

@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.GetMapping;
  * 注册 GET 兜底后,GET /login 会命中兜底映射,与 POST /login 互不冲突;
  * 具体接口(@RequestMapping)路径更具体,优先级更高,不会被覆盖;
  * 带扩展名的静态资源(js/css/图片等)由 {@code [^\\.]*} 排除,不受影响。</p>
+ *
+ * @author duane
  */
 @Controller
 public class SpaController {

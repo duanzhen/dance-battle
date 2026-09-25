@@ -12,6 +12,8 @@ import java.util.List;
  *
  * <p>小组信息编码在 {@code displayZone}("G1".."Gn");无淘汰式胜者连线
  * (小组晋级由 settleStage 按组累计积分决定)。</p>
+ *
+ * @author duane
  */
 public class GroupGenerator implements StageGenerator {
 

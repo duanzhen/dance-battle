@@ -80,11 +80,6 @@ export interface TournamentForm extends BaseEntity {
    * 备注
    */
   remark?: string;
-
-  /**
-   * 自动创建的裁判数量
-   */
-  refereeCount?: number;
 }
 
 export interface TournamentQuery extends PageQuery {

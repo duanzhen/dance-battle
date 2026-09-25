@@ -323,7 +323,7 @@ class AuditionShortfallByeTest {
     }
 
     private TStageVo createStage(Long tid, String name, String mode, Long start, Long end,
-                                 Long prevId, String rule) {
+                                 Long afterStageId, String rule) {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tid);
         bo.setName(name);
@@ -331,7 +331,7 @@ class AuditionShortfallByeTest {
         bo.setStatus(StageConstants.STAGE_DRAFT);
         bo.setTeamCountStart(start);
         bo.setTeamCountEnd(end);
-        bo.setPrevStageId(prevId);
+        bo.setAfterStageId(afterStageId);
         bo.setIsInitialized(0L);
         bo.setRuleConfig(rule);
         return stageService.insertByBo(bo);

@@ -63,7 +63,7 @@ class StageChainTest {
     @Autowired
     private StageChain stageChain;
 
-    private TStageBo baseStage(Long tournamentId, String name, Long start, Long end, Long prevStageId) {
+    private TStageBo baseStage(Long tournamentId, String name, Long start, Long end, Long afterStageId) {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tournamentId);
         bo.setName(name);
@@ -71,7 +71,7 @@ class StageChainTest {
         bo.setStatus(StageConstants.STAGE_DRAFT);
         bo.setTeamCountStart(start);
         bo.setTeamCountEnd(end);
-        bo.setPrevStageId(prevStageId);
+        bo.setAfterStageId(afterStageId);
         bo.setIsInitialized(0L);
         return bo;
     }
@@ -129,5 +129,20 @@ class StageChainTest {
         assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "前置条件:B.prev 仍指向 A");
         assertNull(stageChain.prevOf(reload(b.getId())), "next 链断开后 B 应被当作入口");
         assertTrue(stageChain.isEntry(reload(b.getId())), "B 此时是入口赛段");
+    }
+
+    /** 建链只动指针:插入新赛段不得改前驱的参赛规模/晋级名额(名额由来源组与赛段配置决定)。 */
+    @Test
+    void insertingStageDoesNotRewritePredecessorQuota() {
+        TTournament tournament = new TTournament();
+        tournament.setName("名额不联动赛事");
+        tournamentMapper.insert(tournament);
+
+        TStageVo a = stageService.insertByBo(baseStage(tournament.getId(), "海选", 32L, 8L, null));
+        TStageVo b = stageService.insertByBo(baseStage(tournament.getId(), "复活赛", 16L, 16L, a.getId()));
+
+        assertEquals(32L, reload(a.getId()).getTeamCountStart(), "前驱参赛规模不应被动过");
+        assertEquals(8L, reload(a.getId()).getTeamCountEnd(), "前驱晋级名额不应被下游容量顶掉");
+        assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "新赛段应接在前驱之后");
     }
 }

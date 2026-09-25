@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
  * Sa-Token 异常统一返回 R 结构
+ *
+ * @author duane
  */
 @Slf4j
 @RestControllerAdvice

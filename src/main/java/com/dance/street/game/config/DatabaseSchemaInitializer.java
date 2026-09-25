@@ -49,6 +49,8 @@ import java.util.regex.Pattern;
  *   <li>可开关: {@code app.schema-init.enabled=false} 或环境变量
  *       {@code SCHEMA_INIT_ENABLED=false} 关闭。</li>
  * </ol>
+ *
+ * @author duane
  */
 @Slf4j
 @Component
@@ -142,7 +144,6 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                     log.error("自动建表失败: {} - {}", table, e.getMessage());
                 }
             }
-            migrateLegacyStageStatus(connection);
         } catch (SQLException e) {
             log.error("连接数据库检查表结构失败: {}", e.getMessage());
             return;
@@ -197,7 +198,6 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                     log.error("自动建索引失败: {} - {}", extractIndexName(index), e.getMessage());
                 }
             }
-            migrateLegacyStageStatus(connection);
         } catch (SQLException e) {
             log.error("连接 SQLite 检查表结构失败: {}", e.getMessage());
             return;
@@ -213,24 +213,6 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
     private static void logAddedColumns(int added) {
         if (added > 0) {
             log.info("schema 自检: 为已有表补齐 {} 个缺失列", added);
-        }
-    }
-
-    /**
-     * 遗留数据迁移:赛段状态机已去掉 PENDING(初始化只锁名单,状态保持 DRAFT),
-     * 历史行若仍是 PENDING 会被开赛/装配守卫当成"非规划中"拒掉,这里统一收敛为 DRAFT。
-     *
-     * <p>幂等:没有匹配行时影响 0 行,不产生任何副作用。</p>
-     */
-    private static void migrateLegacyStageStatus(Connection connection) {
-        try (Statement statement = connection.createStatement()) {
-            int updated = statement.executeUpdate(
-                "UPDATE `t_stage` SET `status` = 'DRAFT' WHERE `status` = 'PENDING'");
-            if (updated > 0) {
-                log.info("数据迁移: {} 个遗留 PENDING 赛段已收敛为 DRAFT", updated);
-            }
-        } catch (SQLException e) {
-            log.warn("遗留赛段状态迁移跳过: {}", e.getMessage());
         }
     }
 

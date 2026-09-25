@@ -49,7 +49,6 @@ export const createTournamentByTemplate = (data: {
   coverImage?: string;
   templateCode: string;
   remark?: string;
-  refereeCount?: number;
   refereeNames?: string[];
 }) => {
   return request({

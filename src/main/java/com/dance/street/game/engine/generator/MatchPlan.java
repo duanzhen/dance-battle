@@ -9,6 +9,8 @@ import java.util.List;
  *
  * <p>下游引用用「轮次 + 轮内序号 + 槽位」表达(winnerTargetRound/MatchIndex/Slot),
  * 由 Service 落库后回填为真实 matchId 写入 promotion_rule。</p>
+ *
+ * @author duane
  */
 @Data
 public class MatchPlan {

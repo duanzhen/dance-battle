@@ -68,13 +68,8 @@ public class TTournamentBo extends BaseEntity {
     private String remark;
 
     /**
-     * 自动创建的裁判数量(非持久化字段:创建赛事时按此批量生成裁判)
-     */
-    private Integer refereeCount;
-
-    /**
      * 自动创建的裁判姓名列表(非持久化字段:创建赛事时按姓名批量生成裁判);
-     * 非空时优先于 refereeCount,为空回退按 refereeCount 生成默认名
+     * 为空则不创建裁判
      */
     private java.util.List<String> refereeNames;
 

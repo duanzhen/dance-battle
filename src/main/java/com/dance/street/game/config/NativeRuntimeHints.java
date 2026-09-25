@@ -7,7 +7,6 @@ import com.dance.street.game.engine.common.OutcomeScore;
 import com.dance.street.game.engine.common.PromotionTarget;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.ScoringConfig;
-import com.dance.street.game.engine.common.TransitionConfig;
 import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
@@ -50,8 +49,9 @@ import java.util.List;
  *       lambda 条件构造器的类登记为 {@code lambdaCapturingTypes}。缺这项时
  *       {@code Wrappers.lambdaQuery()} 解析列名会抛
  *       {@code ClassNotFoundException: XxxServiceImpl$$Lambda/0x...};</li>
- *   <li>{@code agent-hints/reachability-metadata.json}:历史遗留的 agent 采集结果。</li>
  * </ul>
+ *
+ * @author duane
  */
 @Configuration(proxyBeanMethods = false)
 @ImportRuntimeHints(NativeRuntimeHints.class)
@@ -144,7 +144,6 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 			KnockoutConfig.class,
 			GroupConfig.class,
 			ScoringConfig.class,
-			TransitionConfig.class,
 			DimensionConfig.class,
 			OutcomeScore.class,
 			StageModeEnum.class,

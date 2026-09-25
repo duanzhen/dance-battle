@@ -788,10 +788,6 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         return buildVo(match.getId(), StageConstants.MATCH_GAMING, results);
     }
 
-    /**
-     * 海选赛累计打分:从已写入的 TRoundScore 重新汇总每个参赛方的总分并回写 participant。
-     * 比赛场次保持 GAMING,不结算。管理员最终通过 completeStage 结算排名。
-     */
     /** 本次提交涉及的参赛方(去重);无有效明细时返回空列表(表示不需回写) */
     private List<Long> touchedCompetitorIds(SubmitResultBo bo, List<Long> allCompetitorIds) {
         if (bo.getScores() == null || bo.getScores().isEmpty()) {
@@ -807,6 +803,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         return new ArrayList<>(touched);
     }
 
+    /**
+     * 海选赛累计打分:从已写入的 TRoundScore 重新汇总每个参赛方的总分并回写 participant。
+     * 比赛场次保持 GAMING,不结算。管理员最终通过 completeStage 结算排名。
+     */
     private void accumulateAuditionScores(TMatch match, List<Long> competitorIds) {
         if (competitorIds == null || competitorIds.isEmpty()) {
             return;

@@ -20,6 +20,8 @@ import org.springframework.stereotype.Component;
  * <p>此处理器在 BeanDefinitionRegistryPostProcessor 之后、单例实例化之前执行:
  * 移除错误的 supplier 与构造参数,恢复 {@code AUTOWIRE_BY_TYPE}(AOT 生成定义丢失了该属性),
  * 让 mapper 走与 JVM 一致的经典实例化路径(无参构造 + setter byType 注入 + mapperInterface 属性)。</p>
+ *
+ * @author duane
  */
 @Component
 public class MapperBeanDefinitionAotFixer implements BeanFactoryPostProcessor {

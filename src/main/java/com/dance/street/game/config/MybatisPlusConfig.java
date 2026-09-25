@@ -10,6 +10,8 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * MyBatis-Plus 配置：分页插件(按 JDBC URL 自动选择 MySQL/SQLite 方言) + Mapper 扫描
+ *
+ * @author duane
  */
 @Configuration
 @MapperScan("com.dance.street.game.mapper")

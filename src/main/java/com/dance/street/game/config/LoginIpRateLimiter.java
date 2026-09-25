@@ -13,6 +13,8 @@ import java.time.Duration;
  *
  * <p>以 Redis 原子计数实现,窗口从第一次失败开始计时;登录成功后清除计数。
  * Redis 异常时降级放行(仅告警),不影响正常登录。</p>
+ *
+ * @author duane
  */
 @Slf4j
 @Component

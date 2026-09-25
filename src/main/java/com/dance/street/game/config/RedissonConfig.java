@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Configuration;
 /**
  * Redisson 连接定制:REDIS_PASSWORD 为空时不发送 AUTH(空密码场景)。
  * 避免 Redisson 把空字符串当成密码去认证,导致 Redis 无密码时报错。
+ *
+ * @author duane
  */
 @Configuration
 public class RedissonConfig {

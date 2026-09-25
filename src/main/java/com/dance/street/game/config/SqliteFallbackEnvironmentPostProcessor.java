@@ -46,6 +46,8 @@ import java.util.Map;
  *
  * <p>这两组参数对 {@code DB_URL}、{@code SQLITE_FALLBACK_URL}、Docker/native 里写死的
  * SQLite 连接一视同仁——只要最终数据源是 SQLite 就会被补齐,不需要各部署形态各配一遍。</p>
+ *
+ * @author duane
  */
 public class SqliteFallbackEnvironmentPostProcessor implements EnvironmentPostProcessor {
 

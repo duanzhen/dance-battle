@@ -6,6 +6,8 @@ package com.dance.street.game.engine.common;
  *
  * <p>赛段不再有 PENDING:初始化只锁定名单/排种子,业务状态保持 DRAFT,
  * 「开始赛段」一步从 DRAFT 直达 GAMING。</p>
+ *
+ * @author duane
  */
 public final class StageConstants {
 

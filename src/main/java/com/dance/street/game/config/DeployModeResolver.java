@@ -22,6 +22,8 @@ import java.util.Locale;
  *
  * <p>细粒度开关({@code DB_TYPE}、{@code REDIS_ENABLED}、{@code DB_FALLBACK_SQLITE})优先于本开关,
  * 便于"SQLite + Redis 多实例大屏"这类混搭部署。</p>
+ *
+ * @author duane
  */
 final class DeployModeResolver {
 

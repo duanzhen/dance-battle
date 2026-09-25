@@ -71,7 +71,7 @@ class TemplateAuditionCircleTest {
         TTournamentTemplateBo bo = new TTournamentTemplateBo();
         bo.setName("模板建赛-单圈");
         bo.setTemplateCode("AUDITION_16");
-        bo.setRefereeCount(2);
+        bo.setRefereeNames(java.util.List.of("裁判1", "裁判2"));
         TTournamentVo tournament = tournamentService.createByTemplate(bo);
         Long tid = tournament.getId();
         assertNotNull(tid);
@@ -117,5 +117,20 @@ class TemplateAuditionCircleTest {
         assertTrue(groups.stream().noneMatch(g -> Objects.equals(g.getSourceStageId(), audition.getId())
                 && g.getZone() == null && g.getRankStart() == null && g.getRankEnd() == null),
             "默认的「全场名次」来源组应已被按圈出口替换");
+    }
+
+    /** 没有 refereeCount 降级路径:不传裁判姓名就一个裁判也不建。 */
+    @Test
+    void templateWithoutRefereeNamesCreatesNoReferees() {
+        TTournamentTemplateBo bo = new TTournamentTemplateBo();
+        bo.setName("模板建赛-无裁判");
+        bo.setTemplateCode("AUDITION_16");
+        TTournamentVo tournament = tournamentService.createByTemplate(bo);
+        Long tid = tournament.getId();
+        assertNotNull(tid);
+
+        List<TReferee> referees = refereeMapper.selectList(Wrappers.<TReferee>lambdaQuery()
+            .eq(TReferee::getTournamentId, tid));
+        assertTrue(referees.isEmpty(), "未提供裁判姓名时不应创建裁判,实际: " + referees.size());
     }
 }

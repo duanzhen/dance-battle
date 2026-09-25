@@ -15,6 +15,8 @@ import java.util.Map;
  *   <li>{@code rawScores}:明细分(投票/多维度多裁判),VOTING/RANKING 模式使用</li>
  *   <li>{@code directOutcomes}:直接判定的胜负平,STANDARD 模式使用(competitorId -> WIN/LOSS/DRAW)</li>
  * </ul>
+ *
+ * @author duane
  */
 @Data
 @Builder

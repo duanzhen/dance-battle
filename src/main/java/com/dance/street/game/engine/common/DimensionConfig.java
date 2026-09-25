@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 
 /**
  * 单个评分维度配置(MULTI_DIM 打分时使用)。
+ *
+ * @author duane
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)

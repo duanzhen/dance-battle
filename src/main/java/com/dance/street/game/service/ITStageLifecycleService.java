@@ -47,7 +47,8 @@ public interface ITStageLifecycleService {
 
     /**
      * 海选/排名赛补签到:把新参赛方挂入圈场次(新增 participant + round),保证可被裁判打分并参与结算。
-     * 落圈由调用方决定,后端不推导圈位;仅当只有一个圈场次时才允许不指定。
+     * 落圈由调用方决定,后端不推导圈位;必须显式指定目标圈,未指定会被拒绝
+     * (见下方带 targetMatchId / zoneIndex 的重载)。
      * AUDITION/RANK 且处于 GAMING 或规划中(DRAFT)并已生成场次时生效,尚未生成场次时为空操作(后续生成会纳入)。
      */
     void appendStageCompetitor(Long stageId, Long competitorId);
@@ -133,7 +134,6 @@ public interface ITStageLifecycleService {
     /** 擂台赛总览:轮转队列(含积分)与当前对决 */
     ArenaOverviewVo getArenaOverview(Long stageId);
 
-    /** 赛段 GAMING→SETTLED(需所有场次已结算);结算后仅产出晋级者/排名,由导播台在中间态「确认晋级」 */
     /**
      * 完成赛段:GAMING→SETTLED(结算后需在中间态「确认晋级」)。
      *

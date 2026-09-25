@@ -179,7 +179,10 @@
                     第{{ r.roundSequence }}轮{{ r.outcome === 'DRAW' ? '·平局' : '·已结算' }}
                   </span>
                   <!-- 海选没有对阵胜负,不展示「胜者」:名次第一只是分数最高 -->
-                  <span v-if="selectedOverview?.winnerName && !isAudition" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
+                  <span
+                    v-if="selectedOverview?.winnerName && !isAudition"
+                    class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400"
+                  >
                     胜者 {{ selectedOverview.winnerName }}
                   </span>
                 </div>
@@ -383,7 +386,7 @@
                     @input="onKeypadInput"
                     @keydown.enter.prevent="confirmKeypad"
                   />
-                  <p class="text-[9px] text-neutral-600 -mt-1 mb-2 text-center">支持键盘直接输入，回车提交并跳下一位</p>
+                  <!-- <p class="text-[9px] text-neutral-600 -mt-1 mb-2 text-center">支持键盘直接输入，回车提交并跳下一位</p> -->
                   <div class="grid grid-cols-3 gap-2">
                     <button
                       v-for="k in keypadKeys"
@@ -846,7 +849,6 @@ const onKeypadInput = (e: Event) => {
   // 最高分限制:超限直接回退,输入框与已存值保持同步
   if (v !== '' && Number(v) > keypadMax.value) {
     el.value = keypadValue.value;
-    tipOverLimit(`本赛段满分 ${keypadMax.value} 分`);
     return;
   }
   keypadValue.value = v;
@@ -1212,6 +1214,12 @@ const applyData = (data: any) => {
     ? rawParts.sort((a, b) => numValue(a.number) - numValue(b.number) || (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0))
     : rawParts.sort((a, b) => (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0));
 
+  // 切换场次/轮次(如 一海结算 → 二海)后,旧的选中态与输入框内容必须失效:
+  // 否则选中态还停在上一位选手、输入框还留着上一轮敲进去的分。
+  // 这里只清空,真正选谁由调用方决定(loadData / refresh 会重新选中第一位未评选手)。
+  keypadTarget.value = null;
+  keypadValue.value = '';
+
   // 只用自己的分回显,不拿累计分顶替
   edits.value = {};
   participants.value.forEach((p) => {
@@ -1329,6 +1337,11 @@ const refresh = async () => {
     const serverHasParticipants = (data?.participants || []).length > 0;
     if (contextChanged || (participants.value.length === 0 && serverHasParticipants)) {
       applyData(data);
+      // 海选逐选手评分:上下文变化(如 一海→二海)后重新选中第一位未评选手,
+      // 与 loadData 口径一致(applyData 已清掉旧选中态,不补选的话页面会停在"未选中")。
+      if (isAudition.value) {
+        autoSelectNext(null);
+      }
     } else {
       mergeLive(data);
     }
@@ -1375,8 +1388,7 @@ const connectRefereeSse = (authKey: string) => {
   const clientId = (import.meta.env.VITE_APP_CLIENT_ID as string) || '';
   unsubSse = subscribeChannel({
     key: `referee:${authKey}`,
-    buildUrl: () =>
-      `${baseUrl}/tournament/event/sse?authKey=${encodeURIComponent(authKey)}&clientid=${clientId}`,
+    buildUrl: () => `${baseUrl}/tournament/event/sse?authKey=${encodeURIComponent(authKey)}&clientid=${clientId}`,
     onMessage: () => {
       // 所有广播都触发 refresh:refresh 内部按上下文变化决定整页应用或仅合并累计分,
       // 保证下一赛段场次开始/赛段切换等跨赛段事件也能被裁判端感知

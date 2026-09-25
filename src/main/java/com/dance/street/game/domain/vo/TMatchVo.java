@@ -53,9 +53,10 @@ public class TMatchVo implements Serializable {
     private String name;
 
     /**
-     * LEFT, RIGHT, CENTER
+     * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、
+     * ZONE-n(海选第 n 圈)、G1..Gn(小组赛分组)
      */
-    @ExcelProperty(value = "LEFT, RIGHT, CENTER")
+    @ExcelProperty(value = "显示分区")
     private String displayZone;
 
     /**
@@ -82,13 +83,7 @@ public class TMatchVo implements Serializable {
     @ExcelProperty(value = "STANDARD, VOTING, RANKING")
     private String matchMode;
 
-    /**
-     * 场次类型:NORMAL=普通场 / TIEBREAKER=同分加赛(二海/三海…)。
-     *
-     * <p>加赛的规范标记,供前端识别加赛场次(此前只能靠 remark 文本前缀)。
-     * 历史数据该列为空,消费方需按 remark 前缀兜底——见后端
-     * {@code SettlementSupport.isTiebreaker}。</p>
-     */
+    /** 场次类型:NORMAL=普通场 / TIEBREAKER=同分加赛(二海/三海…),供前端识别加赛场次 */
     private String matchType;
 
     /**

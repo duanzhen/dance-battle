@@ -20,6 +20,8 @@ import java.util.List;
  *
  * <p>圈的编号与单圈/多圈无关:第 k 个圈恒为 {@code ZONE-k},单圈即 {@code ZONE-1}
  * (与 {@link StageFlowSupport#circleZone(int)} 同一口径)。</p>
+ *
+ * @author duane
  */
 public class AuditionGenerator implements StageGenerator {
 

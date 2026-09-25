@@ -3,33 +3,6 @@ import { AxiosPromise } from 'axios';
 import { StageVO, StageForm, StageConfigForm, StageQuery } from '@/api/game/stage/types';
 
 /**
- * 剔除 ruleConfig 中已废弃的 transition 后再提交。
- *
- * <p>后端已把「下一赛段」的唯一事实源收敛为赛段链 next(见
- * {@code TStageLifecycleServiceImpl#resolveNextStageId}):{@code transition.targetStageId}
- * 是历史遗留项、后端已无写入方,且一旦与链 next 不一致会直接报错「下一赛段有两个答案」。</p>
- *
- * <p>各赛段配置组件会保留解析到的整个 ruleConfig(显式保留或整体展开),若不在此统一剥离,
- * 历史脏值会被反复回写,而界面上没有任何入口可以清除它——最终表现为「完成赛段」报错且无法修复。
- * 所有赛段写的入口(add/update/config)都过这里,新增赛制也自动覆盖。</p>
- */
-const stripLegacyTransition = (ruleConfig?: string): string | undefined => {
-  if (!ruleConfig) {
-    return ruleConfig;
-  }
-  try {
-    const parsed = JSON.parse(ruleConfig);
-    if (parsed && typeof parsed === 'object' && 'transition' in parsed) {
-      delete (parsed as Record<string, unknown>).transition;
-      return JSON.stringify(parsed);
-    }
-  } catch {
-    // ruleConfig 非法时不阻断提交(解析错误交由后端给出),原样透传
-  }
-  return ruleConfig;
-};
-
-/**
  * 查询赛段流程列表
  * @param query
  * @returns {*}
@@ -62,7 +35,7 @@ export const addStage = (data: StageForm) => {
   return request({
     url: '/game/stage',
     method: 'post',
-    data: { ...data, ruleConfig: stripLegacyTransition(data.ruleConfig) }
+    data
   });
 };
 
@@ -77,7 +50,7 @@ export const updateStage = (data: StageForm) => {
   return request({
     url: '/game/stage',
     method: 'put',
-    data: { ...data, ruleConfig: stripLegacyTransition(data.ruleConfig) }
+    data
   });
 };
 
@@ -90,7 +63,7 @@ export const updateStageConfig = (id: string | number, data: StageConfigForm) =>
   return request({
     url: '/game/stage/' + id + '/config',
     method: 'put',
-    data: { ...data, ruleConfig: stripLegacyTransition(data.ruleConfig) }
+    data
   });
 };
 

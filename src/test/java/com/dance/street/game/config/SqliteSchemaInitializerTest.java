@@ -32,30 +32,6 @@ class SqliteSchemaInitializerTest {
     }
 
     @Test
-    void legacyPendingStageStatusIsMigratedToDraft() {
-        DataSource dataSource = newSqliteDataSource();
-        DatabaseSchemaInitializer initializer = new DatabaseSchemaInitializer(
-            dataSource, "jdbc:sqlite::memory:", null, null, true);
-        initializer.afterSingletonsInstantiated();
-
-        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        // 模拟旧版本落库的数据:赛段状态机曾有 PENDING(初始化后进入该态)
-        jdbc.update("INSERT INTO t_stage (id, tenant_id, tournament_id, name, stage_mode, status, is_initialized)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?)", 900001L, 1L, 900001L, "历史赛段", "AUDITION", "PENDING", 1L);
-        jdbc.update("INSERT INTO t_stage (id, tenant_id, tournament_id, name, stage_mode, status)"
-            + " VALUES (?, ?, ?, ?, ?, ?)", 900002L, 1L, 900001L, "正常赛段", "KNOCKOUT", "GAMING");
-
-        // 启动自检再跑一次:遗留 PENDING 收敛为 DRAFT,其它状态不动,且幂等
-        initializer.afterSingletonsInstantiated();
-        initializer.afterSingletonsInstantiated();
-
-        assertEquals("DRAFT", jdbc.queryForObject(
-            "SELECT status FROM t_stage WHERE id = 900001", String.class));
-        assertEquals("GAMING", jdbc.queryForObject(
-            "SELECT status FROM t_stage WHERE id = 900002", String.class));
-    }
-
-    @Test
     void oldDatabaseGetsNewMatchColumnsWithoutLosingData() throws Exception {
         DataSource dataSource = newSqliteDataSource();
         DatabaseSchemaInitializer initializer = new DatabaseSchemaInitializer(

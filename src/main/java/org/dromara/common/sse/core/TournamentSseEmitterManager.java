@@ -22,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
  * 赛事 SSE 管理器
  * 支持管理端和浏览端两种连接类型
  *
- * @author Lion Li
+ * @author duane
  */
 @Slf4j
 public class TournamentSseEmitterManager extends AbstractSseEmitterManager {

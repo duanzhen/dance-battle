@@ -10,6 +10,8 @@ import java.util.Date;
  * 字段自动填充：
  * 1. createTime/updateTime 由 BaseEntity 的 @TableField(fill=...) 触发
  * 2. tenantId 不做多租户，但保留字段，插入时兜底填 "0"
+ *
+ * @author duane
  */
 @Component
 public class MyMetaObjectHandler implements MetaObjectHandler {

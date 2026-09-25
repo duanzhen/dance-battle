@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 
 /**
  * 胜负平对应积分(ScoringConfig.outcomeRules,WIN_LOSS_DRAW 打分时使用)。
+ *
+ * @author duane
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)

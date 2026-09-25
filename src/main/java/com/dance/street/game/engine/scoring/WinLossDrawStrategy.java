@@ -16,6 +16,8 @@ import java.util.Map;
  * STANDARD 模式:判胜负平。
  * <p>胜负直接由 {@link MatchScoreInput#getDirectOutcomes()} 给定(裁判/批量录入 WIN/LOSS/DRAW),
  * 总分按 {@code outcomeRules}(winScore/drawScore/lossScore)映射,用于排名与累计积分。</p>
+ *
+ * @author duane
  */
 public class WinLossDrawStrategy implements ScoreStrategy {
 

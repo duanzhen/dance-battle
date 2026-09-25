@@ -78,7 +78,7 @@ public interface ITPlayerService {
     TPlayerVo checkIn(CheckInBo bo);
 
     /**
-     * 编辑签到结果:已签到选手改号码(按号分圈自动换圈/随机分圈可指定圈)或改名/头像。
+     * 编辑签到结果:已签到选手改号码(仅在原圈内按新号码重排,换圈需显式指定目标圈)或改名/头像。
      * 该选手所在场次已有打分记录时由底层校验拦截。
      *
      * @param bo 编辑签到请求

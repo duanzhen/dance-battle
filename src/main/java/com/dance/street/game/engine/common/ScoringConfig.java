@@ -10,6 +10,8 @@ import java.util.List;
 
 /**
  * 打分配置(ruleConfig.scoring)。决定单场比赛如何从原始打分(可能多裁判×多维度)汇总出总分与排名。
+ *
+ * @author duane
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)

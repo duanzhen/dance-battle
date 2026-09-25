@@ -15,6 +15,8 @@ import java.util.Map;
  *
  * <p>rule_config 是后端内部配置 JSON,不需要全局 ObjectMapper 的定制(如 Long→String 防前端精度丢失),
  * 标准 Jackson 行为已足够。</p>
+ *
+ * @author duane
  */
 public final class RuleConfigParser {
 

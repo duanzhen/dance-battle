@@ -4,6 +4,8 @@ import lombok.Data;
 
 /**
  * 对阵计划中一个位置槽(对应一个 TMatchParticipant)。
+ *
+ * @author duane
  */
 @Data
 public class SlotPlan {

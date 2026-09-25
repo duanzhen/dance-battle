@@ -9,6 +9,8 @@ import java.util.List;
  * 海选赛段结果统一视图:原始海选成绩 + 二海/三海…加赛明细。
  * <p>统一口径:二海(同分加赛)分数只用于同分者决出晋级顺序,不进入主表总分;
  * 展示/导出/大屏组件一律消费本视图,不再各自聚合场次分数。</p>
+ *
+ * @author duane
  */
 @Data
 public class AuditionResultVo {

@@ -10,7 +10,7 @@ import org.dromara.common.sse.dto.TournamentSseMessageDto;
 /**
  * 赛事SSE工具类
  *
- * @author Lion Li
+ * @author duane
  */
 @Slf4j
 @NoArgsConstructor(access = AccessLevel.PRIVATE)

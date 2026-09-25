@@ -12,6 +12,8 @@ import java.io.Serial;
  * 裁判-场次(圈)关联对象 t_match_referee
  *
  * <p>海选分圈时记录每个圈(场次)对应的裁判,大屏晋级名单按圈展示裁判。</p>
+ *
+ * @author duane
  */
 @Data
 @EqualsAndHashCode(callSuper = true)

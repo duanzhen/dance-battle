@@ -8,6 +8,8 @@ import java.util.Map;
 
 /**
  * 排名计算工具(无状态)。按 scoreValue 降序排名,同分并列(standard competition ranking: 1,2,2,4)。
+ *
+ * @author duane
  */
 public final class RankCalculator {
 

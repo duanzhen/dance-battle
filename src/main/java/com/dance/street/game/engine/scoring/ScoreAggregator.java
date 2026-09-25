@@ -10,6 +10,8 @@ import java.util.Objects;
 /**
  * 分数汇总工具(无状态,纯函数,易单测)。
  * <p>支持四种规则:SUM 求和 / AVG 平均 / TRIMMED_MEAN 去极值平均 / WEIGHTED 加权(由 weightedSum 专门处理)。</p>
+ *
+ * @author duane
  */
 public final class ScoreAggregator {
 

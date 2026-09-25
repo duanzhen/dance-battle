@@ -10,7 +10,10 @@ import java.util.Map;
 /**
  * 赛段对阵生成器工厂(按 stageMode 路由)。无状态,不依赖 Spring。
  *
- * <p>MVP 仅注册 KNOCKOUT;GROUP 在 M4 加入;其余赛制后续增量扩展。</p>
+ * <p>已注册 KNOCKOUT/GROUP/AUDITION/RANK/FREE_MATCH 五种;ARENA(擂台赛)不在此列——
+ * 擂台赛不生成对阵树,开始赛段后由导播台按轮转队列逐场创建对决。</p>
+ *
+ * @author duane
  */
 public class StageGeneratorFactory {
 

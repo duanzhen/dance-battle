@@ -99,16 +99,6 @@ export interface StageForm extends BaseEntity {
   tournamentId?: string | number;
 
   /**
-   * 上一赛段ID
-   */
-  prevStageId?: string | number;
-
-  /**
-   * 下一赛段ID (可修改以实现途中变轨)
-   */
-  nextStageId?: string | number;
-
-  /**
    * 新增赛段的插入位置:插在该赛段之后,不传 = 插到链头。
    * 链顺序由后端按意图维护,不需要前端自己算前后指针。
    */
@@ -180,16 +170,6 @@ export interface StageQuery extends PageQuery {
    *
    */
   tournamentId?: string | number;
-
-  /**
-   * 上一赛段ID
-   */
-  prevStageId?: string | number;
-
-  /**
-   * 下一赛段ID (可修改以实现途中变轨)
-   */
-  nextStageId?: string | number;
 
   /**
    * 父ID (用于同分加赛)

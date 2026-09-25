@@ -14,6 +14,8 @@ import java.util.List;
  * 不在同一赛段内生成后续轮次。核心是标准种子位排布
  * (SEED 走 {@link #seedLayout(int)},强种子分散不提前相遇)与
  * 选手数非 2 的幂时高种子对手位填 BYE 轮空。</p>
+ *
+ * @author duane
  */
 public class KnockoutGenerator implements StageGenerator {
 

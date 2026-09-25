@@ -20,6 +20,8 @@ import java.util.Map;
  *   <li>每个 (competitor, dimension) 用 {@code refereeAggregateRule} 合并多裁判分 → 单维度分</li>
  *   <li>各维度分用 {@code aggregateRule} 合成总分;WEIGHTED 时按维度 {@code weight} 加权</li>
  * </ol>
+ *
+ * @author duane
  */
 public class MultiDimStrategy implements ScoreStrategy {
 

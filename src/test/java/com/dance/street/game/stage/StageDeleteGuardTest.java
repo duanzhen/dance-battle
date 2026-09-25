@@ -76,7 +76,7 @@ class StageDeleteGuardTest {
         return t.getId();
     }
 
-    private TStageVo newStage(Long tournamentId, String name, Long prevStageId) {
+    private TStageVo newStage(Long tournamentId, String name, Long afterStageId) {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tournamentId);
         bo.setName(name);
@@ -84,7 +84,7 @@ class StageDeleteGuardTest {
         bo.setStatus(StageConstants.STAGE_DRAFT);
         bo.setTeamCountStart(4L);
         bo.setTeamCountEnd(2L);
-        bo.setPrevStageId(prevStageId);
+        bo.setAfterStageId(afterStageId);
         bo.setIsInitialized(0L);
         return stageService.insertByBo(bo);
     }

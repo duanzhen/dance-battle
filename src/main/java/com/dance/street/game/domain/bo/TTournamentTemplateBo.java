@@ -38,13 +38,7 @@ public class TTournamentTemplateBo {
     private String remark;
 
     /**
-     * 自动创建的裁判数量;按模版创建时这些裁判会自动绑定到所有赛段
-     */
-    private Integer refereeCount;
-
-    /**
-     * 自动创建的裁判姓名列表;按模版创建时这些裁判会自动绑定到所有赛段;
-     * 非空时优先于 refereeCount
+     * 自动创建的裁判姓名列表;按模版创建时这些裁判会自动绑定到所有赛段
      */
     private java.util.List<String> refereeNames;
 }

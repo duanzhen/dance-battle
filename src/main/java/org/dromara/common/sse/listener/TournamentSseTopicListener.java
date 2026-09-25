@@ -12,7 +12,7 @@ import org.springframework.core.Ordered;
 /**
  * 赛事SSE 主题订阅监听器
  *
- * @author Lion Li
+ * @author duane
  */
 @Slf4j
 public class TournamentSseTopicListener implements ApplicationRunner, Ordered {

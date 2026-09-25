@@ -376,7 +376,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
     }
 
     /**
-     * 编辑签到结果:已签到选手改号码(按号分圈自动换圈/随机分圈指定圈)或改名/头像。
+     * 编辑签到结果:已签到选手改号码(仅在原圈内按新号码重排,换圈需显式指定目标圈)或改名/头像。
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -436,7 +436,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
                 numberChanged = true;
             }
         }
-        // 改号或指定换圈时,把参赛方从旧场次挪到新号码对应圈/目标圈并重排
+        // 改号(原圈内按新号码重排)或指定换圈时,把参赛方从旧场次挪到目标圈并重排
         if (numberChanged || bo.getMatchId() != null) {
             stageLifecycleService.relocateCheckInCompetitor(firstStage.getId(), competitor.getId(), bo.getMatchId());
         }
@@ -472,15 +472,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
         }
         TCompetitor competitor = competitorMapper.selectById(player.getCompetitorId());
         if (competitor == null) {
-            // 历史脏数据:参赛单位已被删除但选手仍残留 competitor_id,
-            // 直接清空关联,避免旧版本留下"已签到但找不到参赛单位"的死状态
-            log.warn("选手[{}]解除签到:参赛单位[{}]已不存在,仅清理选手关联",
-                playerId, player.getCompetitorId());
-            baseMapper.update(null, Wrappers.<TPlayer>lambdaUpdate()
-                .eq(TPlayer::getId, playerId)
-                .set(TPlayer::getCompetitorId, null));
-            tournamentEventNotifier.notify(player.getTournamentId(), null, null, "competitor");
-            return;
+            throw new RuntimeException("该选手关联的参赛单位不存在");
         }
         TTournamentVo tournament = tournamentService.queryById(player.getTournamentId());
         if (tournament == null) {

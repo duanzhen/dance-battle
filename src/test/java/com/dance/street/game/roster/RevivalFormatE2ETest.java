@@ -253,7 +253,7 @@ class RevivalFormatE2ETest {
         assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(audition.getId()).getStatus());
         List<TMatch> tiebreaks = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, audition.getId())
-            .likeRight(TMatch::getRemark, "同分加赛"));
+            .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER));
         assertEquals(0, tiebreaks.size());
 
         List<TMatchParticipant> ranked = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
@@ -529,7 +529,7 @@ class RevivalFormatE2ETest {
     private List<TMatch> tiebreakerMatches(Long stageId) {
         return matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId)
-            .likeRight(TMatch::getRemark, "同分加赛")
+            .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER)
             .orderByAsc(TMatch::getDisplayRow)
             .orderByAsc(TMatch::getId));
     }
@@ -539,20 +539,20 @@ class RevivalFormatE2ETest {
         return matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
                 .eq(TMatch::getStageId, stageId))
             .stream()
-            .filter(m -> !(m.getRemark() != null && m.getRemark().startsWith("同分加赛")))
+            .filter(m -> !StageConstants.MATCH_TYPE_TIEBREAKER.equals(m.getMatchType()))
             .toList();
     }
 
     // ---- 工具方法 ----
 
-    private TStageVo createStage(Long tid, String name, String mode, Long start, Long end, Long prevId, String rule) {
-        TStageBo bo = baseStage(tid, name, mode, start, end, prevId);
+    private TStageVo createStage(Long tid, String name, String mode, Long start, Long end, Long afterStageId, String rule) {
+        TStageBo bo = baseStage(tid, name, mode, start, end, afterStageId);
         bo.setRuleConfig(rule);
         TStageVo vo = stageService.insertByBo(bo);
         return vo;
     }
 
-    private TStageBo baseStage(Long tid, String name, String mode, Long start, Long end, Long prevId) {
+    private TStageBo baseStage(Long tid, String name, String mode, Long start, Long end, Long afterStageId) {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tid);
         bo.setName(name);
@@ -560,7 +560,7 @@ class RevivalFormatE2ETest {
         bo.setStatus(StageConstants.STAGE_DRAFT);
         bo.setTeamCountStart(start);
         bo.setTeamCountEnd(end);
-        bo.setPrevStageId(prevId);
+        bo.setAfterStageId(afterStageId);
         bo.setIsInitialized(0L);
         return bo;
     }

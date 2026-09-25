@@ -234,12 +234,9 @@ public class TTournamentServiceImpl implements ITTournamentService {
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
-        // 按表单选择自动创建裁判(普通创建无赛段,不绑定);
-        // 优先按姓名列表创建,未传时回退按 refereeCount 生成默认名
+        // 按表单选择自动创建裁判(普通创建无赛段,不绑定)
         if (bo.getRefereeNames() != null && !bo.getRefereeNames().isEmpty()) {
             createRefereesIfNeeded(add.getId(), bo.getRefereeNames(), null);
-        } else {
-            createRefereesIfNeeded(add.getId(), bo.getRefereeCount(), null);
         }
         return MapstructUtils.convert(add, TTournamentVo.class);
     }
@@ -412,7 +409,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         if (bo.getRefereeNames() != null && !bo.getRefereeNames().isEmpty()) {
             refereeIds = createRefereesIfNeeded(tid, bo.getRefereeNames(), stageIds);
         } else {
-            refereeIds = createRefereesIfNeeded(tid, bo.getRefereeCount(), stageIds);
+            refereeIds = List.of();
         }
 
         // 6.5 海选圈自动配置(模板赛事免手工):只建 1 个圈、晋级名额全给它、
@@ -455,28 +452,6 @@ public class TTournamentServiceImpl implements ITTournamentService {
         wb.setVisible(1L);
         wb.setLocked(0L);
         visWidgetService.insertByBo(wb);
-    }
-
-    /**
-     * 按 refereeCount 自动创建裁判(兼容旧参数,生成"裁判1..N"默认名)。
-     *
-     * @param tournamentId 赛事ID
-     * @param refereeCount 裁判数量(空或≤0 不创建)
-     * @param stageIds     需要绑定的赛段ID列表(可为 null)
-     * @return 创建的裁判ID列表
-     */
-    private List<Long> createRefereesIfNeeded(Long tournamentId, Integer refereeCount, List<Long> stageIds) {
-        if (refereeCount == null || refereeCount <= 0) {
-            return List.of();
-        }
-        if (refereeCount > 100) {
-            throw new ServiceException("裁判数量最多 100 人");
-        }
-        List<String> names = new ArrayList<>();
-        for (int i = 1; i <= refereeCount; i++) {
-            names.add("裁判" + i);
-        }
-        return createRefereesIfNeeded(tournamentId, names, stageIds);
     }
 
     /**

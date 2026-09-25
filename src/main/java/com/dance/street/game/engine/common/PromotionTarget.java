@@ -20,6 +20,8 @@ import java.io.Serializable;
  * {@code "2"} = 本场第 2 名(败者,仅季军赛这类败者组场次有)。生成侧见
  * {@code TStageLifecycleServiceImpl#generateMatchesInternal} 的回填循环,
  * 消费侧见 {@code DownstreamRouter#route}。</p>
+ *
+ * @author duane
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)

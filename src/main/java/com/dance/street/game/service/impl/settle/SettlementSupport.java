@@ -8,7 +8,6 @@ import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import lombok.RequiredArgsConstructor;
-import org.dromara.common.core.utils.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
@@ -46,23 +45,9 @@ public class SettlementSupport {
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
     }
 
-    /**
-     * 场次是否为同分加赛(二海/三海…)。
-     *
-     * <p>口径:优先看 {@code t_match.match_type}(显式字段);历史数据该列为 null,
-     * 退回 remark 前缀「同分加赛」识别——老库不需要迁移即可继续工作。</p>
-     */
+    /** 场次是否为同分加赛(二海/三海…):以 {@code t_match.match_type} 为唯一口径 */
     public static boolean isTiebreaker(TMatch match) {
-        if (match == null) {
-            return false;
-        }
-        if (StageConstants.MATCH_TYPE_TIEBREAKER.equals(match.getMatchType())) {
-            return true;
-        }
-        if (match.getMatchType() != null) {
-            return false;
-        }
-        return StringUtils.isNotBlank(match.getRemark()) && match.getRemark().startsWith(TIEBREAKER_PREFIX);
+        return match != null && StageConstants.MATCH_TYPE_TIEBREAKER.equals(match.getMatchType());
     }
 
     /** 参赛号码转数值用于排序:非数字号码排最后 */

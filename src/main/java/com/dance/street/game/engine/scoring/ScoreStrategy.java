@@ -9,6 +9,8 @@ import java.util.List;
  * 负责从 {@link MatchScoreInput} 计算出本场所有参赛方的得分/排名/结果。
  *
  * <p>实现必须为无状态(线程安全),不依赖 Spring。</p>
+ *
+ * @author duane
  */
 public interface ScoreStrategy {
 

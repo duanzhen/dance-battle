@@ -7,6 +7,8 @@ import org.dromara.common.core.exception.ServiceException;
 /**
  * 单场比赛中某参赛方的本场结果(对应 TMatchParticipant.outcome_status)。
  * <p>STANDARD 打分模式下由比分判定 WIN/LOSS/DRAW;未结算为 PENDING。</p>
+ *
+ * @author duane
  */
 @Getter
 @AllArgsConstructor

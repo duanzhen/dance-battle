@@ -6,6 +6,8 @@ import java.util.List;
 
 /**
  * 整个赛段的对阵计划(Generator 纯计算产出,Service 据此落库)。
+ *
+ * @author duane
  */
 @Data
 public class BracketPlan {

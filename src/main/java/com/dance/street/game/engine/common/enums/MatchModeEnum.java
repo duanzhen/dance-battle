@@ -7,6 +7,8 @@ import org.dromara.common.core.exception.ServiceException;
 /**
  * 比赛模式(对应 TMatch.match_mode),决定该场采用哪种打分策略。
  * <p>STANDARD=判胜负平;VOTING=投票/总分计票;RANKING=多维度多裁判排名。</p>
+ *
+ * @author duane
  */
 @Getter
 @AllArgsConstructor

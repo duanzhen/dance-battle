@@ -2296,36 +2296,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         return rosterService.applyRoster(nextStageId, null);
     }
 
-    /**
-     * 下一赛段(晋级者要写进哪一段):以 {@code next_stage_id} 链为唯一事实源。
-     *
-     * <p>{@code ruleConfig.transition.targetStageId} 是历史遗留的可选覆盖项,现已无写入方。
-     * 两者都可能存在,一旦指向不同赛段就会出现两个答案——开赛守卫看链、装配看配置,
-     * 正是这类分叉会导致晋级名单错配。所以不一致时直接报错让人修,不静默选一个。</p>
-     */
+    /** 下一赛段(晋级者要写进哪一段):以 {@code next_stage_id} 链为唯一事实源。 */
     private Long resolveNextStageId(TStage stage) {
-        Long chainNext = stage.getNextStageId();
-        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        Long configured = (rc != null && rc.getTransition() != null)
-            ? rc.getTransition().getTargetStageId() : null;
-        if (configured == null) {
-            return chainNext;
-        }
-        if (chainNext != null && !configured.equals(chainNext)) {
-            throw new ServiceException(
-                "赛段[{}]的下一赛段有两个答案:赛段链 next={},规则配置 transition.targetStageId={};请先修正配置",
-                stage.getId(), chainNext, configured);
-        }
-        // 链未连但配置指定了目标:以配置为准(兼容历史数据),并校验目标属于同一赛事
-        if (chainNext == null) {
-            TStage target = stageMapper.selectById(configured);
-            if (target == null || !Objects.equals(target.getTournamentId(), stage.getTournamentId())) {
-                throw new ServiceException("赛段[{}]配置的 transition.targetStageId={} 不存在或不属于本赛事",
-                    stage.getId(), configured);
-            }
-            return configured;
-        }
-        return chainNext;
+        return stage.getNextStageId();
     }
 
     @Override

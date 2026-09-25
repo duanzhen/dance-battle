@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 赛事SSE消息的dto
  *
- * @author Lion Li
+ * @author duane
  */
 @Data
 public class TournamentSseMessageDto implements Serializable {

@@ -6,6 +6,8 @@ import java.math.BigDecimal;
 
 /**
  * 单个参赛方在本场的打分结果(由 ScoringEngine 计算产出,供 Service 回写 TMatchParticipant)。
+ *
+ * @author duane
  */
 @Data
 public class MatchScoreResult {

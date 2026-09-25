@@ -31,7 +31,7 @@ class RuleConfigParserTest {
                 ],
                 "outcomeRules": { "winScore": 1, "drawScore": 0.5, "lossScore": 0 }
               },
-              "transition": {}
+              "futureUnknownField": {}
             }
             """;
 

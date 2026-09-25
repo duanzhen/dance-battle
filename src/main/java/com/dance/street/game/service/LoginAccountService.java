@@ -18,6 +18,8 @@ import java.sql.Timestamp;
  * <p>登录密码修改后持久化到数据库 {@code t_login_account} 表;
  * {@code login.username / login.password}(环境变量 LOGIN_USERNAME / LOGIN_PASSWORD)
  * 仅作为首次运行时的默认账号密码,初始化之后以数据库记录为准。</p>
+ *
+ * @author duane
  */
 @Slf4j
 @Service

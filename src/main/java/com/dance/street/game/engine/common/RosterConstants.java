@@ -2,8 +2,9 @@ package com.dance.street.game.engine.common;
 
 /**
  * 名单(roster)常量。
- * <p>名单是赛段属性:来源组规则 + 人工覆盖 + 快照,见设计文档
- * {@code design/roster-rule-snapshot.md}。</p>
+ * <p>名单是赛段属性:来源组规则 + 人工覆盖 + 快照。</p>
+ *
+ * @author duane
  */
 public final class RosterConstants {
 

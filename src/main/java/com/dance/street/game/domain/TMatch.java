@@ -43,7 +43,8 @@ public class TMatch extends TenantEntity {
     private String name;
 
     /**
-     * LEFT, RIGHT, CENTER
+     * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、
+     * ZONE-n(海选第 n 圈)、G1..Gn(小组赛分组)
      */
     private String displayZone;
 
@@ -69,9 +70,7 @@ public class TMatch extends TenantEntity {
 
     /**
      * 场次性质:NORMAL=正常场次(圈/对阵/擂台/自由对抗),TIEBREAKER=同分加赛(二海/三海…)。
-     *
-     * <p>历史数据该列为 null,按 remark 前缀「同分加赛」兜底识别(见 SettlementSupport.isTiebreaker);
-     * 新产生的加赛场次一律显式写入,判断不再依赖备注文本。</p>
+     * 加赛判断一律以本列为准,不依赖备注文本。
      */
     private String matchType;
 

@@ -180,7 +180,7 @@ class RosterSmokeTest {
                 .eq(TCompetitor::getStageId, stage2.getId())));
         assertEquals(RosterConstants.ROSTER_READY, rosterService.listByTarget(stage2.getId()).get(0).getState());
 
-        // 7a) 名单守卫:未确认时开赛被拦(兼容路径不再误放行)
+        // 7a) 名单守卫:未确认时开赛被拦
         ServiceException blocked = assertThrows(ServiceException.class,
             () -> lifecycleService.startStage(stage2.getId()));
         assertTrue(blocked.getMessage().contains("名单尚未确认"));
@@ -773,9 +773,8 @@ class RosterSmokeTest {
             baseStage(tournament.getId(), "16强", "KNOCKOUT", 8L, 1L, audition.getId()));
         assertEquals(audition.getId(), rosterService.listByTarget(round16.getId()).get(0).getGroups().get(0).getSourceStageId());
 
-        // 在海选与 16 强之间插入"复活赛"(prev=海选,next=16强)
+        // 在海选与 16 强之间插入"复活赛"(插到海选之后)
         TStageBo inserted = baseStage(tournament.getId(), "复活赛", "KNOCKOUT", 8L, 4L, audition.getId());
-        inserted.setNextStageId(round16.getId());
         stageService.insertByBo(inserted);
 
         TStage round16After = stageMapper.selectById(round16.getId());
@@ -898,8 +897,8 @@ class RosterSmokeTest {
     }
 
     private TStageVo createStage(Long tournamentId, String name, String mode,
-                                 Long start, Long end, Long prevStageId, String ruleConfig) {
-        TStageBo bo = baseStage(tournamentId, name, mode, start, end, prevStageId);
+                                 Long start, Long end, Long afterStageId, String ruleConfig) {
+        TStageBo bo = baseStage(tournamentId, name, mode, start, end, afterStageId);
         bo.setRuleConfig(ruleConfig);
         return stageService.insertByBo(bo);
     }
@@ -1066,7 +1065,7 @@ class RosterSmokeTest {
     }
 
     private TStageBo baseStage(Long tournamentId, String name, String mode,
-                               Long start, Long end, Long prevStageId) {
+                               Long start, Long end, Long afterStageId) {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tournamentId);
         bo.setName(name);
@@ -1074,7 +1073,7 @@ class RosterSmokeTest {
         bo.setStatus(StageConstants.STAGE_DRAFT);
         bo.setTeamCountStart(start);
         bo.setTeamCountEnd(end);
-        bo.setPrevStageId(prevStageId);
+        bo.setAfterStageId(afterStageId);
         bo.setIsInitialized(0L);
         return bo;
     }
@@ -1117,7 +1116,7 @@ class RosterSmokeTest {
         settled.setStatus(StageConstants.STAGE_SETTLED);
         stageMapper.updateById(settled);
 
-        // 模拟前端历史数据:空赛段被提前标记为已初始化(无对阵、无参赛行)
+        // 模拟误标:is_initialized 被提前置 1,但赛段没有任何对阵与参赛行
         TStage stale = new TStage();
         stale.setId(target.getId());
         stale.setIsInitialized(1L);
@@ -1128,7 +1127,7 @@ class RosterSmokeTest {
                 .eq(TCompetitor::getStageId, target.getId())));
 
         assertEquals(1, rosterService.applyRoster(target.getId(), null),
-            "空赛段(仅带历史误标)仍应能装配晋级名单");
+            "空赛段(仅 is_initialized 误标)仍应能装配晋级名单");
         assertEquals(1, countOutcome(target.getId(), OutcomeStatusEnum.PENDING.getCode()));
     }
 }

@@ -12,6 +12,8 @@ import java.util.List;
  *
  * <p>排名赛本身不产生两两对决,因此只需一场承载全部选手,
  * 后续由裁判端逐选手提交维度分,最终由 completeStage 聚合排名并晋级。</p>
+ *
+ * @author duane
  */
 public class RankGenerator implements StageGenerator {
 

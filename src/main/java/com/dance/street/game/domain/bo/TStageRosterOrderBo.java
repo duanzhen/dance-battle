@@ -13,7 +13,7 @@ import java.util.List;
  * 要么引用一条人工调整(overrideId,如外卡/补入)。</p>
  *
  * <p>每项可显式带 seedRank(拖拽/移出留空位时用,允许出现空位);
- * 未带 seedRank 的按数组顺序补齐到最小空闲位(兼容旧调用)。</p>
+ * 未带 seedRank 的按数组顺序补到最小空闲位。</p>
  *
  * @author duane
  */

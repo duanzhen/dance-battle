@@ -634,8 +634,7 @@ public class AuditionStageSettler implements StageSettler {
     }
 
     /**
-     * 本场次应到场的裁判集合:优先取本场(本圈)的直接绑定;历史数据没有绑定时,
-     * 退回同圈其他场次的绑定(与 {@code RefereeMatchController#allowedMatchIds} 的可见圈口径一致)。
+     * 本场次应到场的裁判集合:本场(本圈)的直接绑定。
      *
      * <p>这是「谁该打分」的唯一解析点——加赛复制绑定、判定是否判完都走这里,
      * 保证两处口径不会分叉(复制的是这几个人,要等的就是这几个人)。</p>
@@ -646,18 +645,6 @@ public class AuditionStageSettler implements StageSettler {
         }
         List<TMatchReferee> bindings = matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
             .eq(TMatchReferee::getMatchId, match.getId()));
-        if (bindings.isEmpty() && match.getDisplayZone() != null && !match.getDisplayZone().isBlank()) {
-            // 原场次没有直接绑定(旧数据):退回用同圈其他场次的绑定
-            List<Long> zoneMatchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, match.getStageId())
-                    .eq(TMatch::getDisplayZone, match.getDisplayZone())
-                    .select(TMatch::getId))
-                .stream().map(TMatch::getId).toList();
-            if (!zoneMatchIds.isEmpty()) {
-                bindings = matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
-                    .in(TMatchReferee::getMatchId, zoneMatchIds));
-            }
-        }
         Set<Long> refereeIds = new LinkedHashSet<>();
         for (TMatchReferee r : bindings) {
             if (r.getRefereeId() != null) {

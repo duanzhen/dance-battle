@@ -823,18 +823,28 @@ public class TStageServiceImpl implements ITStageService {
         }
         // 晋级者严格按 finalRank 顺序填充空位:GUEST 占位后顺延,超出计划规模的晋级者不进入
         // (淘汰赛承接胜者时 finalRank=场次位置,顺序填充与位置保留等价)
+        // 上一赛段也是淘汰赛时:晋级者按来源名次坐回对应座位。名次里的空洞来自"双方都轮空"的场次,
+        // 留空即代表该轮空座位同样晋级到本赛段(与名单装配 assignSeeds 同一口径,保证中间态与生成一致)。
+        boolean rankSeats = StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode());
         int cursor = 0;
         for (TCompetitor c : advancers) {
-            while (cursor < seedArr.length && seedArr[cursor] != null) {
-                cursor++;
-            }
-            if (cursor >= seedArr.length) {
-                break; // 名额已满
+            int seat = -1;
+            Long rank = c.getFinalRank();
+            if (rankSeats && rank != null && rank >= 1L && rank <= seedArr.length
+                && seedArr[(int) (rank - 1L)] == null) {
+                seat = (int) (rank - 1L);
+            } else {
+                while (cursor < seedArr.length && seedArr[cursor] != null) {
+                    cursor++;
+                }
+                if (cursor >= seedArr.length) {
+                    break; // 名额已满
+                }
+                seat = cursor;
             }
             PreBracketVo.PreSeed s = toPreSeed(c, null, sourceMatch.get(c.getId()));
-            s.setSeedRank((long) (cursor + 1));
-            seedArr[cursor] = s;
-            cursor++;
+            s.setSeedRank((long) (seat + 1));
+            seedArr[seat] = s;
         }
         List<PreBracketVo.PreSeed> seeds = new ArrayList<>();
         for (PreBracketVo.PreSeed s : seedArr) {

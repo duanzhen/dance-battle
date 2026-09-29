@@ -8,6 +8,7 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
+import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.RosterPreviewItemVo;
 import com.dance.street.game.domain.vo.RosterPreviewVo;
@@ -22,6 +23,7 @@ import com.dance.street.game.mapper.TStageRosterOverrideMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.domain.TStageRosterOverride;
 import com.dance.street.game.service.ITStageLifecycleService;
+import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
 import org.junit.jupiter.api.BeforeAll;
@@ -75,6 +77,7 @@ class KnockoutByeSlotTest {
     @Autowired private ITStageService stageService;
     @Autowired private ITStageRosterService rosterService;
     @Autowired private ITStageLifecycleService lifecycleService;
+    @Autowired private ITMatchResultService matchResultService;
 
     /** 每个座位都落行:1 人 + 1 轮空 = 2 行,轮空行 competitor_id 为空且 slot_kind=BYE。 */
     @Test
@@ -117,6 +120,62 @@ class KnockoutByeSlotTest {
         long byes = participantRows(stage.getId()).stream()
             .filter(p -> StageConstants.SLOT_BYE.equals(p.getSlotKind())).count();
         assertEquals(8, byes, "空座位数应等于轮空数");
+    }
+
+    /**
+     * 双方都轮空的场次不产生晋级者,但它的「座位名次」要留给下一赛段 —— 即轮空也晋级到下一 stage。
+     * 下一赛段按来源名次坐位,空洞原样留空(就是轮空),签表结构不塌。
+     */
+    @Test
+    void doubleByeKeepsItsSeatInNextStage() {
+        Long tid = newTournament("bye-advance");
+        TStageVo r32 = newStage(tid, "32强", 32L, 16L, null);
+        insertCompetitors(r32.getId(), 24, 5); // 座位 5..28 → 4 场双方轮空
+        initializeAndGenerate(r32.getId());
+
+        // 逐场结算:两人正常判胜负,双方轮空的开始即自动结算且不产生晋级者
+        java.util.Set<Long> byeRanks = new java.util.HashSet<>();
+        for (TMatch m : matchesOf(r32.getId())) {
+            List<TMatchParticipant> real = rowsOfMatch(m.getId()).stream()
+                .filter(p -> p.getCompetitorId() != null).toList();
+            matchResultService.startMatch(m.getId());
+            if (real.size() < 2) {
+                byeRanks.add(m.getDisplayRow() + 1);
+                continue;
+            }
+            SubmitResultBo bo = new SubmitResultBo();
+            bo.setMatchId(m.getId());
+            java.util.Map<Long, String> outcomes = new java.util.HashMap<>();
+            outcomes.put(real.get(0).getCompetitorId(), "WIN");
+            outcomes.put(real.get(1).getCompetitorId(), "LOSS");
+            bo.setOutcomes(outcomes);
+            matchResultService.submitResult(bo);
+        }
+        assertEquals(4, byeRanks.size(), "24 人进 32 签表应有 4 场双方轮空");
+        lifecycleService.completeStage(r32.getId());
+
+        List<TCompetitor> advancers = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, r32.getId())
+            .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
+        assertEquals(12, advancers.size(), "只有 12 个真人晋级(轮空场次不出人)");
+        for (TCompetitor a : advancers) {
+            assertTrue(!byeRanks.contains(a.getFinalRank()),
+                "真人晋级者的名次不应落在轮空场次的座位上");
+        }
+
+        // 下一赛段按来源名次坐位:轮空座位保持空着
+        TStageVo r16 = newStage(tid, "16强", 16L, 8L, r32.getId());
+        rosterService.applyRoster(r16.getId(), null);
+        List<TCompetitor> comps16 = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, r16.getId()));
+        assertEquals(12, comps16.size());
+        for (TCompetitor c : comps16) {
+            TCompetitor src = competitorMapper.selectById(c.getSourceCompetitorId());
+            assertEquals(src.getFinalRank(), c.getSeedRank(),
+                "晋级者应坐回自己的名次座位,轮空名次对应的座位留空");
+            assertTrue(!byeRanks.contains(c.getSeedRank()));
+        }
+        assertTrue(byeRanks.contains(1L), "本例轮空名次含 1(场1 双方轮空)");
     }
 
     /**
@@ -229,18 +288,28 @@ class KnockoutByeSlotTest {
     // ===== 工具 =====
 
     private TStageVo newKnockout(String name) {
+        return newStage(newTournament(name), name, 32L, 16L, null);
+    }
+
+    private Long newTournament(String name) {
         TTournament t = new TTournament();
         t.setName(name);
         tournamentMapper.insert(t);
+        return t.getId();
+    }
+
+    private TStageVo newStage(Long tournamentId, String name, Long start, Long end, Long prevStageId) {
         TStageBo bo = new TStageBo();
-        bo.setTournamentId(t.getId());
-        bo.setName("32强");
+        bo.setTournamentId(tournamentId);
+        bo.setName(name);
         bo.setStageMode("KNOCKOUT");
         bo.setStatus(StageConstants.STAGE_DRAFT);
-        bo.setTeamCountStart(32L);
-        bo.setTeamCountEnd(16L);
+        bo.setTeamCountStart(start);
+        bo.setTeamCountEnd(end);
+        bo.setAfterStageId(prevStageId);
         bo.setIsInitialized(0L);
-        bo.setRuleConfig("{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":32,\"advanceCount\":16,\"pairingMode\":\"SEED\"}}");
+        bo.setRuleConfig("{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":" + start
+            + ",\"advanceCount\":" + end + ",\"pairingMode\":\"SEED\"}}");
         return stageService.insertByBo(bo);
     }
 

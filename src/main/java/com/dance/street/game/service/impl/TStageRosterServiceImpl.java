@@ -1370,14 +1370,35 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
                 throw new ServiceException("种子覆盖位[{}]已被占用,请先在中间态调整预排位置", r.forcedSeed);
             }
         }
+        // 淘汰赛承接上一轮淘汰赛时:晋级者按来源名次(finalRank)坐回对应座位;
+        // 名次里的空洞来自"双方都轮空"的场次——把座位留空,等于让轮空也晋级到下一赛段对应的座位,
+        // 下一级签表因此不会塌陷/错位(名次 = 场次 displayRow + 1,见 DownstreamRouter.markAdvance)。
+        Map<Long, Boolean> knockoutSourceCache = new HashMap<>();
         for (AssembledRow r : rows) {
             if (r.forcedSeed != null) {
                 r.seedRank = r.forcedSeed;
-            } else {
-                r.seedRank = nextFreeSeed(occupied, plan);
-                occupied.add(r.seedRank);
+                continue;
             }
+            Long rank = r.source == null ? null : r.source.getFinalRank();
+            if (rank != null && rank >= 1L && (plan <= 0 || rank <= plan)
+                && isKnockoutSource(r.source, knockoutSourceCache) && occupied.add(rank)) {
+                r.seedRank = rank;
+                continue;
+            }
+            r.seedRank = nextFreeSeed(occupied, plan);
+            occupied.add(r.seedRank);
         }
+    }
+
+    /** 该来源参赛方是否来自淘汰赛赛段(只有淘汰赛的名次才对应"场次座位",含轮空留下的空洞) */
+    private boolean isKnockoutSource(TCompetitor source, Map<Long, Boolean> cache) {
+        if (source == null || source.getStageId() == null) {
+            return false;
+        }
+        return cache.computeIfAbsent(source.getStageId(), id -> {
+            TStage s = stageMapper.selectById(id);
+            return s != null && StageModeEnum.KNOCKOUT.getCode().equals(s.getStageMode());
+        });
     }
 
     private List<TCompetitor> autoCandidates(List<TStageRosterGroupBo> groups) {

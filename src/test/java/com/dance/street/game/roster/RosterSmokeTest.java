@@ -4,7 +4,9 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchReferee;
+import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TStageRosterOverride;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
@@ -23,7 +25,9 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
+import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.mapper.TStageRosterOverrideMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
@@ -99,6 +103,10 @@ class RosterSmokeTest {
     private TMatchParticipantMapper participantMapper;
     @Autowired
     private TMatchRefereeMapper matchRefereeMapper;
+    @Autowired
+    private TStageRosterOverrideMapper overrideMapper;
+    @Autowired
+    private TPlayerMapper playerMapper;
 
     @Test
     void defaultRosterSynthesisAndApplyRoster() {
@@ -610,6 +618,19 @@ class RosterSmokeTest {
         addX.setGuestName("外卡X");
         addX.setGuestType(0L);
         rosterService.addOverride(stageId, addX);
+        // 只填姓名加外卡:应同步建出一条选手(player)并回填到覆盖上,
+        // 使外卡物化时能带上成员行,而不是"有名无人"的裸名字。
+        TStageRosterOverride xOverride = overrideMapper.selectList(
+                com.baomidou.mybatisplus.core.toolkit.Wrappers.<TStageRosterOverride>lambdaQuery()
+                    .eq(TStageRosterOverride::getTargetStageId, stageId)
+                    .eq(TStageRosterOverride::getOp, RosterConstants.OVERRIDE_ADD_GUEST))
+            .stream().filter(o -> "外卡X".equals(o.getGuestName())).findFirst().orElse(null);
+        assertNotNull(xOverride, "应写入外卡覆盖");
+        assertNotNull(xOverride.getPlayerId(), "按姓名加外卡应回填 playerId");
+        TPlayer xPlayer = playerMapper.selectById(xOverride.getPlayerId());
+        assertNotNull(xPlayer, "应自动创建对应选手");
+        assertEquals("外卡X", xPlayer.getName());
+        assertEquals(tournament.getId(), xPlayer.getTournamentId());
         assertEquals(4, rosterService.applyRoster(round16.getId(), null));
         List<TCompetitor> afterGuest = competitorMapper.selectList(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()

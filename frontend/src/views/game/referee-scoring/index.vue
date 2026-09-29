@@ -338,6 +338,8 @@
                         type="number"
                         min="0"
                         :max="dim.maxScore || undefined"
+                        :readonly="blockSoftKeyboard"
+                        :inputmode="blockSoftKeyboard ? 'none' : 'decimal'"
                         :value="keypadTarget?.competitorId != null ? getDimScore(keypadTarget.competitorId, dim.key) : 0"
                         @input="keypadTarget?.competitorId != null && onDimInput(keypadTarget.competitorId, dim.key, $event)"
                         class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
@@ -379,7 +381,8 @@
                   <input
                     ref="scoreInputRef"
                     type="text"
-                    inputmode="decimal"
+                    :readonly="blockSoftKeyboard"
+                    :inputmode="blockSoftKeyboard ? 'none' : 'decimal'"
                     :value="keypadValue"
                     placeholder="0"
                     class="no-caret w-full h-12 bg-black text-center text-2xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums mb-2"
@@ -524,6 +527,8 @@
                         type="number"
                         min="0"
                         :max="dim.maxScore || undefined"
+                        :readonly="blockSoftKeyboard"
+                        :inputmode="blockSoftKeyboard ? 'none' : 'decimal'"
                         :value="getDimScore(p.competitorId!, dim.key)"
                         @input="onDimInput(p.competitorId!, dim.key, $event)"
                         class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
@@ -743,6 +748,15 @@ const keypadValue = ref('');
 const keypadSubmitting = ref(false);
 /** 海选分数输入框:选中选手后自动聚焦,支持物理键盘直接输入 */
 const scoreInputRef = ref<HTMLInputElement | null>(null);
+/**
+ * 触屏设备标记:裁判端主要在手机上使用,页面自带软键盘/加减按钮打分。
+ * 若让原生输入框获得焦点,系统会弹出手机键盘遮挡打分界面,因此触屏设备给分数输入框
+ * 加 readonly + inputmode="none",只接受页面内键盘/按钮的输入;
+ * 桌面端不限制,仍可用物理键盘直接输入(见 keyboard 事件处理)。
+ */
+const blockSoftKeyboard = ref(
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(hover: none), (pointer: coarse)').matches
+);
 /** 海选满分:来自后端 my-match 的 maxScore,按赛段配置切换 10分制/100分制 */
 const auditionMaxScore = ref(10);
 const keypadMax = computed(() => Math.max(1, Number(auditionMaxScore.value) || 10));
@@ -768,7 +782,8 @@ const selectParticipant = (p: Participant) => {
   if (p.competitorId != null) {
     nextTick(() => {
       chipEls.get(p.competitorId as number)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-      // 聚焦分数输入框,桌面键盘/触屏键盘都能直接输入;已有分数时全选便于覆盖
+      // 聚焦分数输入框:桌面端可直接用物理键盘输入,触屏端为 readonly 不会弹出系统键盘
+      // (仍可聚焦以便物理键盘输入);已有分数时全选便于覆盖
       scoreInputRef.value?.focus();
       scoreInputRef.value?.select();
     });

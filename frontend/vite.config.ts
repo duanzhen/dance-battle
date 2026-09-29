@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import createPlugins from './vite/plugins';
 import autoprefixer from 'autoprefixer'; // css自动添加兼容性前缀
+import gateHover from './postcss/gate-hover.js'; // 悬停样式仅在支持 hover 的设备生效
 import path from 'path';
 
 export default defineConfig(({ mode, command }) => {
@@ -48,6 +49,8 @@ export default defineConfig(({ mode, command }) => {
         plugins: [
           // 浏览器兼容性
           autoprefixer(),
+          // 把 :hover 规则包进 @media (hover: hover),修复触屏点按后颜色卡在悬停态
+          gateHover(),
           {
             postcssPlugin: 'internal:charset-removal',
             AtRule: {

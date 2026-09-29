@@ -157,6 +157,8 @@
                   @update:matchId="handleUpdateProp('matchId', $event)"
                   @update:showCurrent="handleUpdateProp('showCurrent', $event)"
                   @update:bgImage="handleUpdateProp('bgImage', $event)"
+                  @update:showVotePanel="handleUpdateProp('showVotePanel', $event)"
+                  @update:avatarBgColor="handleUpdateProp('avatarBgColor', $event)"
                   @update:showScore="handleUpdateProp('showScore', $event)"
                   @update:opacity="handleUpdateProp('opacity', $event)"
                   @update:textColor="handleUpdateProp('textColor', $event)"

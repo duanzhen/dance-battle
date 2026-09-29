@@ -46,6 +46,8 @@ label {
 html {
   height: 100%;
   box-sizing: border-box;
+  /* 去掉 iOS/Android 点按元素时系统叠加的高亮色块(常与残留 hover 一起造成"颜色错误") */
+  -webkit-tap-highlight-color: transparent;
 }
 
 html.dark .svg-icon {
@@ -109,6 +111,17 @@ button:where([class*="el-"]) {
   font-weight: inherit;
   line-height: inherit;
   transition: none;
+}
+
+/* 触屏端:点按会同时给元素 :hover 与 :focus;悬停样式已由 PostCSS(gate-hover)
+   限制到 hover 设备,这里再收敛触摸后残留的键盘焦点框。
+   键盘/无障碍导航仍走 :focus-visible,焦点可见性不受影响。 */
+@media (hover: none) {
+  button:focus:not(:focus-visible),
+  .el-button:focus:not(:focus-visible),
+  [role='button']:focus:not(:focus-visible) {
+    outline: none !important;
+  }
 }
 
 // 各类弹窗右上角关闭按钮 hover 时也不变色/加底

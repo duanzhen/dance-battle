@@ -6,7 +6,7 @@
         <div
           v-if="match"
           :key="match?.id"
-          class="w-full h-full relative bg-cover bg-center flex items-center justify-between px-[5%]"
+          class="w-full h-full relative bg-cover bg-center flex items-center justify-between px-[2%]"
           :style="bgImage ? { backgroundImage: `url(${bgImage})` } : { backgroundColor: '#0a0a0a' }"
         >
           <!-- 顶部信息:赛段 · 场次 · 轮次 -->
@@ -23,10 +23,12 @@
             :class="{ celebrating: celebration.active }"
             :style="playerClass('LEFT')"
           >
-            <img v-if="leftAvatar" :src="leftAvatar" class="h-[46%] max-w-full w-auto object-contain" @error="onImgError" />
-            <div v-else class="h-[46%] w-full"></div>
+            <!-- 照片区域固定正方形:背景色铺满,人像 object-contain 居中内嵌;50% 圆角裁成圆形 -->
+            <div class="h-[46%] aspect-square max-w-full rounded-[50%] flex items-center justify-center overflow-hidden" :style="avatarStyle">
+              <img v-if="leftAvatar" :src="leftAvatar" class="w-full h-full object-contain" @error="onImgError" />
+            </div>
             <span
-              class="font-bold text-[clamp(12px,2vw,30px)] drop-shadow text-center truncate w-full"
+              class="font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate w-full"
               :class="leftLead ? 'text-amber-400' : 'text-white'"
               :title="leftName"
               >{{ leftName }}</span
@@ -55,10 +57,12 @@
             :class="{ celebrating: celebration.active }"
             :style="playerClass('RIGHT')"
           >
-            <img v-if="rightAvatar" :src="rightAvatar" class="h-[46%] max-w-full w-auto object-contain" @error="onImgError" />
-            <div v-else class="h-[46%] w-full"></div>
+            <!-- 照片区域固定正方形:背景色铺满,人像 object-contain 居中内嵌;50% 圆角裁成圆形 -->
+            <div class="h-[46%] aspect-square max-w-full rounded-[50%] flex items-center justify-center overflow-hidden" :style="avatarStyle">
+              <img v-if="rightAvatar" :src="rightAvatar" class="w-full h-full object-contain" @error="onImgError" />
+            </div>
             <span
-              class="font-bold text-[clamp(12px,2vw,30px)] drop-shadow text-center truncate w-full"
+              class="font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate w-full"
               :class="rightLead ? 'text-amber-400' : 'text-white'"
               :title="rightName"
               >{{ rightName }}</span
@@ -70,7 +74,7 @@
 
           <!-- 底部:裁判判罚(每个裁判红/蓝/平/未判)+ 各轮判罚明细 -->
           <div
-            v-if="showVotePanel"
+            v-if="votePanelVisible"
             class="absolute bottom-[2.5%] left-1/2 -translate-x-1/2 w-[94%] max-w-[1700px] flex flex-col items-center gap-1.5"
           >
             <!-- 胜场汇总:谁赢的轮次多谁获胜(平局轮不计) -->
@@ -142,8 +146,34 @@
             @update:model-value="$emit('update:bgImage', $event as string)"
           />
         </div>
+        <div class="mt-3">
+          <CheckboxGroup
+            label="显示选项"
+            :model-value="{ showVotePanel }"
+            :options="[{ key: 'showVotePanel', label: '显示裁判判罚' }]"
+            @update:item="handleOptionUpdate"
+          />
+        </div>
+        <div class="mt-3">
+          <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">选手照片背景颜色</span>
+          <div class="flex items-center gap-1.5">
+            <div class="flex-1 min-w-0">
+              <ColorInput :model-value="avatarBgColor ?? ''" @update:model-value="$emit('update:avatarBgColor', $event)" />
+            </div>
+            <button
+              class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
+              :class="avatarBgColor === '' ? 'text-amber-400 bg-amber-500/10' : 'text-neutral-500 hover:text-amber-400 hover:bg-neutral-800'"
+              title="设为透明"
+              @click="$emit('update:avatarBgColor', '')"
+            >
+              <Ban class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
         <p class="text-[10px] text-neutral-600 mt-2">
-          <!-- 显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像/实时比分，领先方高亮。非淘汰赛赛段或暂无进行中场次时控件保持透明。 -->
+          显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像/实时比分，领先方高亮。
+          选手照片背景颜色默认透明（抠图人像可直接叠在背景上）；底部裁判判罚明细默认关闭，
+          需要时在「显示选项」里开启；非淘汰赛赛段或暂无进行中场次时控件保持透明。
         </p>
       </section>
     </div>
@@ -153,7 +183,10 @@
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute } from 'vue-router';
+import { Ban } from 'lucide-vue-next';
 import AssetUpload from './common/AssetUpload.vue';
+import CheckboxGroup from './common/CheckboxGroup.vue';
+import ColorInput from './common/ColorInput.vue';
 import { getStageFlow, getMatch, listCompetitor, getTournament } from '@/api/game/screen';
 import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
@@ -161,10 +194,24 @@ import { StageMode } from '../stages/types';
 
 const route = useRoute();
 
-const props = defineProps<{ bgImage?: string; mode?: 'view' | 'edit'; tournamentId?: string | number | null }>();
-defineEmits<{
-  'update:bgImage': [v: string];
+const props = defineProps<{
+  bgImage?: string;
+  mode?: 'view' | 'edit';
+  tournamentId?: string | number | null;
+  /** 是否显示底部裁判判罚明细(默认关闭,在组件属性里开启) */
+  showVotePanel?: boolean;
+  /** 选手照片背景颜色:空字符串 = 透明(默认) */
+  avatarBgColor?: string;
 }>();
+/** 事件:编辑面板的选项开关统一走 update:<key>,由 PropertyPanel 写回 dataConfig */
+const emit = defineEmits<{
+  'update:bgImage': [v: string];
+  'update:showVotePanel': [v: boolean];
+  'update:avatarBgColor': [v: string];
+}>();
+const handleOptionUpdate = (key: string, value: boolean) => {
+  emit(`update:${key}` as any, value);
+};
 
 const match = ref<any | null>(null);
 const matchDetail = ref<any | null>(null);
@@ -386,6 +433,13 @@ const onImgError = (e: Event) => {
 };
 const leftAvatar = computed(() => avatarOf(leftP.value));
 const rightAvatar = computed(() => avatarOf(rightP.value));
+/**
+ * 选手照片背景色:空字符串 = 用户选了「透明」,显式映射为 transparent;
+ * 未配置(旧场景)时为 undefined,不产出样式,保持原有透明效果。
+ */
+const avatarStyle = computed(() => ({
+  backgroundColor: props.avatarBgColor === '' ? 'transparent' : props.avatarBgColor || undefined
+}));
 const leftScore = computed(() => (leftP.value?.scoreValue == null ? '–' : String(leftP.value.scoreValue)));
 const rightScore = computed(() => (rightP.value?.scoreValue == null ? '–' : String(rightP.value.scoreValue)));
 const leftLead = computed(() => {
@@ -403,12 +457,14 @@ const rightOutcome = computed(() => rightP.value?.outcomeStatus || '');
 
 // ---- 裁判判罚展示 ----
 const voteRounds = computed<any[]>(() => (matchDetail.value?.roundVotes || []).slice());
-/** 有裁判分配(任一 轮次含判罚明细)时才展示判罚面板 */
-const showVotePanel = computed(() => {
+/** 当前场次确有裁判分配/判罚明细 */
+const hasVoteData = computed(() => {
   const d = matchDetail.value;
   if (!d) return false;
   return (d.roundVotes || []).some((r: any) => (r.refereeVotes || []).length > 0) || (d.refereeVotes || []).length > 0;
 });
+/** 底部判罚面板:需在组件属性里显式开启(默认关闭),且本场确有判罚数据 */
+const votePanelVisible = computed(() => props.showVotePanel === true && hasVoteData.value);
 
 const voteText = (v: string | null | undefined) =>
   v === 'LEFT' ? sideLabel('LEFT') : v === 'RIGHT' ? sideLabel('RIGHT') : v === 'DRAW' ? '平' : '未判';

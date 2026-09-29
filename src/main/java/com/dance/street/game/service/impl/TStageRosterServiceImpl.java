@@ -66,6 +66,9 @@ import java.util.stream.Collectors;
 @Service
 public class TStageRosterServiceImpl implements ITStageRosterService {
 
+    /** 按姓名新建外卡选手时写入 t_player.tags 的标签(json 列,与导入口径一致) */
+    private static final String GUEST_PLAYER_TAGS = "[\"GUEST\"]";
+
     private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
     private final TCompetitorMemberMapper competitorMemberMapper;
@@ -571,6 +574,21 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
                 bo.getGuestName() == null ? null : bo.getGuestName().trim()));
         if (existed > 0) {
             throw new ServiceException("同类型覆盖已存在,请先删除或编辑原覆盖");
+        }
+        // 只填姓名加外卡时:同步建一条选手(t_player)并回填 playerId。
+        // 这样外卡物化时会带上成员行,不再是"有名无人"的裸名字,同时成为赛事里真实可查的选手。
+        // 位置在去重之后:同名外卡仍按原口径被拦下,不会重复建人。
+        if (guestOp && (bo.getPlayerId() == null || bo.getPlayerId() <= 0L)) {
+            TPlayer guestPlayer = new TPlayer();
+            guestPlayer.setTenantId(target.getTenantId());
+            guestPlayer.setTournamentId(target.getTournamentId());
+            guestPlayer.setName(bo.getGuestName().trim());
+            guestPlayer.setTags(GUEST_PLAYER_TAGS);
+            guestPlayer.setRemark("名单加人-输入姓名自动创建");
+            playerMapper.insert(guestPlayer);
+            bo.setPlayerId(guestPlayer.getId());
+            log.info("赛段[{}]外卡[{}]按姓名新建选手[id={}]",
+                stageId, guestPlayer.getName(), guestPlayer.getId());
         }
         TStageRosterOverride o = new TStageRosterOverride();
         o.setTenantId(target.getTenantId());

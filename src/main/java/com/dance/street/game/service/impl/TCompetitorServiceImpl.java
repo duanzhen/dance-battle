@@ -173,21 +173,22 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
     public TCompetitorVo updateByBo(TCompetitorBo bo) {
         TCompetitor update = MapstructUtils.convert(bo, TCompetitor.class);
         validEntityBeforeSave(update);
+        TCompetitor before = update.getId() == null ? null : baseMapper.selectById(update.getId());
         // 改名联动 + 广播:仅在参赛单位名称实际变化时触发
         // (赛段配置内单独改名时传 syncPlayerName=false 跳过联动,广播仍保留)
-        boolean renamed = false;
-        if (update.getId() != null && StringUtils.isNotBlank(update.getName())) {
-            TCompetitor before = baseMapper.selectById(update.getId());
-            if (before != null && !Objects.equals(before.getName(), update.getName())) {
-                renamed = true;
-                if (!Boolean.FALSE.equals(bo.getSyncPlayerName())) {
-                    syncLinkedPlayerName(update.getId(), update.getName());
-                }
-            }
+        boolean renamed = before != null && StringUtils.isNotBlank(update.getName())
+            && !Objects.equals(before.getName(), update.getName());
+        if (renamed && !Boolean.FALSE.equals(bo.getSyncPlayerName())) {
+            syncLinkedPlayerName(update.getId(), update.getName());
         }
         baseMapper.updateById(update);
         if (renamed) {
-            tournamentEventNotifier.notify(update.getTournamentId(), update.getStageId(), null, "competitor");
+            // 赛事/赛段以库里的为准:调用方常只传 id+name(如赛段选手列表改名),BO 里是 null;
+            // 直接透传会被通知器判为「无赛事」静默丢弃,大屏/导播台就收不到改名事件
+            Long tournamentId = update.getTournamentId() != null
+                ? update.getTournamentId() : before.getTournamentId();
+            Long stageId = update.getStageId() != null ? update.getStageId() : before.getStageId();
+            tournamentEventNotifier.notify(tournamentId, stageId, null, "competitor");
         }
         return MapstructUtils.convert(update, TCompetitorVo.class);
     }

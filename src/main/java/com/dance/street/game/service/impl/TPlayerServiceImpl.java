@@ -41,9 +41,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Collection;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import tools.jackson.databind.ObjectMapper;
 
@@ -190,16 +192,59 @@ public class TPlayerServiceImpl implements ITPlayerService {
     public TPlayerVo updateByBo(TPlayerBo bo) {
         TPlayer update = MapstructUtils.convert(bo, TPlayer.class);
         validEntityBeforeSave(update);
+        TPlayer before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        boolean nameChanged = before != null && StringUtils.isNotBlank(update.getName())
+            && !Objects.equals(before.getName(), update.getName());
+        // 头像判空只看 null:空串是「清除照片」,同样算一次变更需要广播
+        boolean avatarChanged = before != null && update.getAvatar() != null
+            && !Objects.equals(before.getAvatar(), update.getAvatar());
         // 改名联动:选手姓名更新后,若其所属参赛单位名下只有这一个选手,同步更新参赛单位名称
-        if (update.getId() != null && StringUtils.isNotBlank(update.getName())) {
-            TPlayer before = baseMapper.selectById(update.getId());
-            if (before != null && before.getCompetitorId() != null
-                    && !Objects.equals(before.getName(), update.getName())) {
-                syncLinkedCompetitorName(before.getCompetitorId(), update.getName(), before.getId());
-            }
+        if (nameChanged && before.getCompetitorId() != null) {
+            syncLinkedCompetitorName(before.getCompetitorId(), update.getName(), before.getId());
         }
         baseMapper.updateById(update);
+        // 姓名/照片变更后广播:大屏、导播台、裁判端据此自动刷新,不必手动刷新页面
+        if (nameChanged || avatarChanged) {
+            notifyPlayerProfileChanged(before.getId(), before.getTournamentId(), before.getCompetitorId());
+        }
         return MapstructUtils.convert(update, TPlayerVo.class);
+    }
+
+    /**
+     * 选手姓名/照片变更后广播赛事事件。
+     *
+     * <p>大屏组件是按事件的 stageId 过滤刷新的(只带 tournamentId 或不带 stageId 会被丢弃),
+     * 所以这里要逐个「该选手所在的赛段」广播;同一个选手可能同时出现在多个赛段的参赛单位里
+     * (晋级后每个赛段都有一行副本,靠 t_competitor_member 关联回选手),逐个都发。</p>
+     *
+     * @param playerId           变更的选手
+     * @param tournamentId       所属赛事
+     * @param linkedCompetitorId 选手档案上直连的参赛单位(可能为空,如中途加入的外卡)
+     */
+    private void notifyPlayerProfileChanged(Long playerId, Long tournamentId, Long linkedCompetitorId) {
+        if (playerId == null || tournamentId == null) {
+            return;
+        }
+        Set<Long> competitorIds = new HashSet<>();
+        competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()
+                .eq(TCompetitorMember::getPlayerId, playerId)
+                .select(TCompetitorMember::getCompetitorId))
+            .forEach(m -> competitorIds.add(m.getCompetitorId()));
+        if (linkedCompetitorId != null) {
+            competitorIds.add(linkedCompetitorId);
+        }
+        competitorIds.remove(null);
+        if (competitorIds.isEmpty()) {
+            return;
+        }
+        Set<Long> stageIds = competitorMapper.selectByIds(competitorIds).stream()
+            .map(TCompetitor::getStageId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        for (Long stageId : stageIds) {
+            tournamentEventNotifier.notify(tournamentId, stageId, null, "competitor");
+        }
+        log.info("选手[{}]资料变更,已广播赛事[{}]的 {} 个赛段", playerId, tournamentId, stageIds.size());
     }
 
     /**

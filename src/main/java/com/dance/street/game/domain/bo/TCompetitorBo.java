@@ -29,13 +29,16 @@ public class TCompetitorBo extends BaseEntity {
     /**
      *
      */
-    @NotNull(message = "不能为空", groups = { AddGroup.class, EditGroup.class })
+    // 编辑是部分更新:调用方(如赛段选手列表改名)常只传 id+name,
+    // 赛事/赛段由服务端按 id 反查已有记录补全,所以只在新增时强制要求。
+    // 否则两个 NotNull 一起报错,前端只会看到一句「不能为空, 不能为空」。
+    @NotNull(message = "不能为空", groups = { AddGroup.class })
     private Long tournamentId;
 
     /**
      *
      */
-    @NotNull(message = "不能为空", groups = { AddGroup.class, EditGroup.class })
+    @NotNull(message = "不能为空", groups = { AddGroup.class })
     private Long stageId;
 
     /**

@@ -42,13 +42,18 @@
         <span class="hidden sm:inline">拖动移动 滚轮缩放</span>
         <span class="sm:hidden">单指拖动 双指缩放</span>
       </div>
+
+      <!-- 右上角移除照片:清空后回到「选择图片」空态,可重新选择/替换 -->
+      <button v-if="hasProcessedImg" type="button" class="clear-btn" title="移除照片" @click.stop="clearImage">
+        <X :size="16" />
+      </button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue';
-import { Upload } from 'lucide-vue-next';
+import { Upload, X } from 'lucide-vue-next';
 import { SelfieSegmentation } from '@mediapipe/selfie_segmentation';
 import request from '@/utils/request';
 import { globalHeaders } from '@/utils/request';
@@ -231,6 +236,24 @@ watch(
 // --- 触发文件选择 ---
 const triggerFileSelect = () => {
   fileInputRef.value?.click();
+};
+
+/**
+ * 移除当前照片:回到「选择图片」空态,并把空串回传给父组件(保存时即清空头像)。
+ *
+ * <p>同时清掉 imgSrc:否则清空后再选中同一张图,隐藏 img 的 :src 没变化、
+ * 不会触发 load,新图就加载不出来。</p>
+ */
+const clearImage = () => {
+  if (isProcessing.value || isUploading.value) return;
+  hasProcessedImg.value = false;
+  hasChanges.value = false;
+  imgSrc.value = '';
+  if (processedCanvas && processedCtx) {
+    processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+  }
+  render();
+  emit('update:modelValue', '');
 };
 
 // --- 文件上传处理 ---
@@ -693,6 +716,30 @@ canvas {
   font-size: 12px;
   pointer-events: none;
   user-select: none;
+}
+
+/* 右上角移除照片:浮在画布之上,上传/抠图时被 loading-overlay 盖住不可点 */
+.clear-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  transition: background 0.2s ease;
+}
+
+.clear-btn:hover {
+  background: rgba(220, 38, 38, 0.85);
 }
 
 .loading-overlay {

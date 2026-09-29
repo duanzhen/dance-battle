@@ -52,9 +52,9 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue';
+import { ref, watch, onMounted, getCurrentInstance } from 'vue';
 import { Upload, X } from 'lucide-vue-next';
-import { SelfieSegmentation } from '@mediapipe/selfie_segmentation';
+import { acquireSelfieSegmentation } from '@/utils/selfieSegmentation';
 import request from '@/utils/request';
 import { globalHeaders } from '@/utils/request';
 
@@ -102,25 +102,20 @@ const dragStartOffsetY = ref(0);
 const pinchStartDist = ref(0);
 const pinchStartScale = ref(1);
 
-// --- MediaPipe 实例 ---
+// --- MediaPipe 句柄(真正实例缓存在模块级单例里,见文件顶部 acquireSelfieSegmentation) ---
 let selfieSegmentation = null;
 let processedCanvas = null; // 存储抠图后的原始图片
 let processedCtx = null;
 
-// --- 初始化 MediaPipe ---
-const initMediaPipe = async () => {
-  selfieSegmentation = new SelfieSegmentation({
-    locateFile: (file) => {
-      // 本地加载模型/运行时(public/mediapipe),避免 CDN 被墙
-      return `${import.meta.env.BASE_URL}mediapipe/${file}`;
-    }
-  });
-
-  selfieSegmentation.setOptions({
-    modelSelection: modelSelection.value
-  });
-
-  selfieSegmentation.onResults(onResults);
+// --- 初始化/复用 MediaPipe(整页唯一实例,后续挂载只重绑回调) ---
+const initMediaPipe = () => {
+  selfieSegmentation = acquireSelfieSegmentation(
+    // 本地加载模型/运行时(public/mediapipe),避免 CDN 被墙
+    (file) => `${import.meta.env.BASE_URL}mediapipe/${file}`,
+    { modelSelection: modelSelection.value },
+    onResults
+  );
+  return selfieSegmentation;
 };
 
 // --- 加载编辑图片 ---
@@ -376,15 +371,21 @@ const loadOriginalImage = () => {
 
 // --- 执行抠图逻辑 ---
 const processImage = async () => {
-  if (!sourceImg.value || !selfieSegmentation) return;
+  if (!sourceImg.value || !selfieSegmentation || isProcessing.value) return;
 
   isProcessing.value = true;
 
-  selfieSegmentation.setOptions({
-    modelSelection: modelSelection.value
-  });
-
-  await selfieSegmentation.send({ image: sourceImg.value });
+  try {
+    selfieSegmentation.setOptions({
+      modelSelection: modelSelection.value
+    });
+    await selfieSegmentation.send({ image: sourceImg.value });
+  } catch (e) {
+    // 之前没有兜底:send 抛错会留下"AI 正在处理中..."卡死,再点一次更容易把运行时打死
+    console.error('自动抠图失败:', e);
+    isProcessing.value = false;
+    proxy.$modal.msgError('自动抠图失败,请重试或更换图片');
+  }
 };
 
 // --- AI 处理回调 ---
@@ -587,12 +588,6 @@ defineExpose({
 // --- 生命周期 ---
 onMounted(() => {
   initMediaPipe();
-});
-
-onBeforeUnmount(() => {
-  if (selfieSegmentation) {
-    selfieSegmentation.close();
-  }
 });
 </script>
 

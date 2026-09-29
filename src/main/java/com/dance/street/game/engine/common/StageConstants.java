@@ -44,4 +44,14 @@ public final class StageConstants {
     /** 比赛格式 */
     public static final String FORMAT_BO1 = "BO1";
 
+    /**
+     * t_match_participant.slot_kind 取值:座位类型。
+     *
+     * <p>每个座位都落一行,轮空不再"跳过"——否则参赛方数组下标 ≠ 座位下标,
+     * 前端/下游按槽位还原位置时会错位(轮空侧的人被当成另一侧)。</p>
+     */
+    public static final String SLOT_PLAYER = "PLAYER";
+    public static final String SLOT_BYE = "BYE";
+    public static final String SLOT_PENDING = "PENDING";
+
 }

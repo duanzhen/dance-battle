@@ -1,11 +1,16 @@
 package com.dance.street.game.config;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,6 +74,23 @@ class DatabaseSchemaInitializerTest {
         assertEquals(already, DatabaseSchemaInitializer.withIfNotExists(already));
     }
 
+    /** 注释里的分号不能把 CREATE TABLE 截断(否则该表后面的列永远补不出来)。 */
+    @Test
+    void statementSplitIgnoresSemicolonsInsideQuotes() {
+        String script = "CREATE TABLE `t_x` (\n"
+            + "  `id` bigint NOT NULL,\n"
+            + "  `a` bigint DEFAULT NULL COMMENT '甲;乙',\n"
+            + "  `b` varchar(10) NOT NULL DEFAULT 'P;Q'\n"
+            + ") ENGINE=InnoDB;\n"
+            + "CREATE INDEX `idx_x` ON `t_x` (`id`);\n";
+
+        List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
+        assertEquals(1, ddlList.size());
+        java.util.Map<String, String> cols = DatabaseSchemaInitializer.parseColumnDefinitions(ddlList.get(0));
+        assertEquals(java.util.Set.of("id", "a", "b"), cols.keySet());
+        assertEquals(1, DatabaseSchemaInitializer.parseCreateIndexStatements(script).size());
+    }
+
     @Test
     void sqliteScriptParsesTablesAndIndexes() throws IOException {
         String script = Files.readString(Path.of("sql/game_db.sqlite.sql"), StandardCharsets.UTF_8);
@@ -98,5 +120,59 @@ class DatabaseSchemaInitializerTest {
 
         String already = "CREATE UNIQUE INDEX IF NOT EXISTS `uk_username` ON `t_login_account` (`username`)";
         assertEquals(already, DatabaseSchemaInitializer.withIfNotExistsIndex(already));
+    }
+
+    /**
+     * 老 SQLite 库里 {@code t_match_participant.competitor_id} 是 NOT NULL 且没有 slot_kind;
+     * 启动自检必须放宽可空性(重建表)、补齐 slot_kind,并保留既有数据。
+     */
+    @Test
+    void sqliteMigrationRelaxesParticipantCompetitorAndAddsSlotKind() throws Exception {
+        Path db = Path.of("target/schema-migrate-participant.db");
+        for (String suffix : new String[]{"", "-wal", "-shm"}) {
+            Files.deleteIfExists(Path.of(db + suffix));
+        }
+        String url = "jdbc:sqlite:" + db;
+        try (Connection c = DriverManager.getConnection(url); Statement st = c.createStatement()) {
+            st.execute("CREATE TABLE `t_match_participant` ("
+                + "`id` INTEGER NOT NULL, `tenant_id` INTEGER NOT NULL, `tournament_id` INTEGER NOT NULL,"
+                + "`match_id` INTEGER NOT NULL, `competitor_id` INTEGER NOT NULL, `display_slot_index` INTEGER,"
+                + "`score_value` NUMERIC, `rank_in_match` INTEGER, `outcome_status` TEXT, `create_by` INTEGER,"
+                + "`create_time` TEXT, `update_by` INTEGER, `update_time` TEXT, `remark` TEXT, PRIMARY KEY (`id`))");
+            st.execute("INSERT INTO `t_match_participant`"
+                + " (id, tenant_id, tournament_id, match_id, competitor_id, display_slot_index)"
+                + " VALUES (1, 0, 0, 0, 42, 0)");
+        }
+
+        new DatabaseSchemaInitializer(new DriverManagerDataSource(url), url, "", "", true)
+            .afterSingletonsInstantiated();
+
+        try (Connection c = DriverManager.getConnection(url); Statement st = c.createStatement()) {
+            boolean notNull = true;
+            boolean hasSlotKind = false;
+            try (ResultSet rs = st.executeQuery("PRAGMA table_info(`t_match_participant`)")) {
+                while (rs.next()) {
+                    if ("competitor_id".equalsIgnoreCase(rs.getString("name"))) {
+                        notNull = rs.getInt("notnull") == 1;
+                    }
+                    if ("slot_kind".equalsIgnoreCase(rs.getString("name"))) {
+                        hasSlotKind = true;
+                    }
+                }
+            }
+            assertFalse(notNull, "competitor_id 应放宽为可空(支持轮空/待定占位行)");
+            assertTrue(hasSlotKind, "应补齐 slot_kind 列");
+
+            try (ResultSet rs = st.executeQuery(
+                "SELECT competitor_id, slot_kind FROM `t_match_participant` WHERE id = 1")) {
+                assertTrue(rs.next(), "既有行应被保留");
+                assertEquals(42L, rs.getLong("competitor_id"));
+                assertEquals("PLAYER", rs.getString("slot_kind"), "既有行应沿用默认座位类型");
+            }
+            // 放宽后可插入 NULL 座位(轮空)
+            st.execute("INSERT INTO `t_match_participant`"
+                + " (id, tenant_id, tournament_id, match_id, competitor_id, display_slot_index, slot_kind)"
+                + " VALUES (2, 0, 0, 0, NULL, 1, 'BYE')");
+        }
     }
 }

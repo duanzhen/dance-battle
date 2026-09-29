@@ -698,6 +698,7 @@ public class TStageServiceImpl implements ITStageService {
             sp.setCompetitorId(p.getCompetitorId());
             sp.setAvatar(avatarMap.get(p.getCompetitorId()));
             sp.setDisplaySlotIndex(p.getDisplaySlotIndex());
+            sp.setSlotKind(p.getSlotKind());
             sp.setScoreValue(p.getScoreValue());
             sp.setRankInMatch(p.getRankInMatch());
             sp.setOutcomeStatus(p.getOutcomeStatus());
@@ -705,7 +706,7 @@ public class TStageServiceImpl implements ITStageService {
                 var comp = competitorMapper.selectById(p.getCompetitorId());
                 sp.setCompetitorName(comp != null ? comp.getName() : ("选手 " + p.getCompetitorId()));
             } else {
-                sp.setCompetitorName("待定");
+                sp.setCompetitorName(StageConstants.SLOT_BYE.equals(p.getSlotKind()) ? "轮空" : "待定");
             }
             return sp;
         }).toList());

@@ -1455,7 +1455,8 @@ const computePairs = (list: any[], pairingMode: string, plannedSize = 0) => {
       });
     }
   } else {
-    const pairs = Math.max(1, Math.ceil(size / 2));
+    // SEQUENTIAL 同样按向上取整的签表规模铺满(与后端生成/大屏一致,避免非 2 的幂时场次数对不上)
+    const pairs = Math.max(1, nextPowerOfTwo(Math.max(size, 2)) / 2);
     const half = Math.ceil(pairs / 2);
     for (let i = 0; i < pairs; i++) {
       out.push({

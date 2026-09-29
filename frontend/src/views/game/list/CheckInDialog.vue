@@ -74,89 +74,28 @@
         </button>
       </div>
 
-      <!-- 分圈横排(海选分圈时,号码列表上方:抽号即同步看到圈位) -->
+      <!-- 分圈横排(海选分圈时,号码列表上方):圈位一律手动指定,不按号码自动分配 -->
       <div v-if="showCircleBar" class="bg-neutral-800/50 rounded-lg p-3 border border-neutral-700">
         <div class="flex items-center justify-between mb-2">
           <label class="block text-sm font-medium text-neutral-400">分圈</label>
-          <!-- <span v-if="splitByNumber && hasRealCircles" class="text-[10px] text-neutral-500">号码决定圈位，抽号即落圈</span> -->
-          <!-- <span v-else-if="splitByNumber" class="text-[10px] text-neutral-500">按号均分预估，实际以生成对阵为准</span> -->
-          <!-- <span v-else-if="hasRealCircles" class="text-[10px] text-neutral-500">线下抽签可手动选圈</span> -->
-          <!-- <span v-else class="text-[10px] text-neutral-500">签到后按所选圈落位</span> -->
+          <span class="text-[10px] text-neutral-500">{{ hasCircleSelection ? `已选：${targetCircleName}` : '请选择该选手落圈' }}</span>
         </div>
         <div class="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5">
-          <!-- 随机分圈:自动分配入口 -->
-          <button
-            v-if="!splitByNumber && circleBar.length > 0"
-            @click="handleAutoCircle"
-            class="flex-none rounded-lg border px-3 py-2 text-left transition-all min-w-[88px]"
-            :class="
-              selectedMatchId === null && selectedZoneIndex === null
-                ? 'border-amber-500 bg-amber-500/10'
-                : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'
-            "
-          >
-            <div class="text-xs font-bold" :class="selectedMatchId === null && selectedZoneIndex === null ? 'text-amber-500' : 'text-neutral-300'">
-              自动分配
-            </div>
-            <div class="text-[10px] text-neutral-500 mt-0.5">按剩余名额择优</div>
-          </button>
           <button
             v-for="(c, ci) in circleBar"
             :key="c.key"
             @click="handleCircleChipClick(c, ci)"
             class="flex-none rounded-lg border px-3 py-2 text-left transition-all min-w-[88px]"
-            :class="[
-              splitByNumber
-                ? ci === activeCircleIndex
-                  ? 'border-amber-500 bg-amber-500/10'
-                  : 'border-neutral-700 bg-neutral-900/40'
-                : isCircleChipActive(c, ci)
-                  ? 'border-amber-500 bg-amber-500/10'
-                  : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'
-            ]"
-            :title="splitByNumber ? '' : c.matchId == null ? '选择此圈抽号(签到后生效)' : '选择此圈抽号'"
+            :class="isCircleChipActive(ci) ? 'border-amber-500 bg-amber-500/10' : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'"
+            :title="c.matchId == null ? '选择此圈(签到后生效)' : '选择此圈'"
           >
-            <div class="text-xs font-bold flex items-center gap-1">
-              <span
-                :class="
-                  splitByNumber
-                    ? ci === activeCircleIndex
-                      ? 'text-amber-500'
-                      : 'text-neutral-200'
-                    : isCircleChipActive(c, ci)
-                      ? 'text-amber-500'
-                      : 'text-neutral-200'
-                "
-              >
-                {{ c.name }}
-              </span>
-              <span v-if="splitByNumber && ci === activeCircleIndex" class="text-[9px] px-1 py-px rounded bg-amber-500/20 text-amber-500">
-                {{ hasRealCircles ? '落此圈' : '预估此圈' }}
-              </span>
-            </div>
-            <div class="text-[10px] mt-0.5" :class="isCircleChipActive(c, ci) ? 'text-amber-400' : 'text-neutral-500'">
+            <div class="text-xs font-bold" :class="isCircleChipActive(ci) ? 'text-amber-500' : 'text-neutral-200'">{{ c.name }}</div>
+            <div class="text-[10px] mt-0.5" :class="isCircleChipActive(ci) ? 'text-amber-400' : 'text-neutral-500'">
               {{ c.count != null ? c.count + ' 人' : '—' }}<template v-if="c.quota !== null"> · 晋 {{ c.quota }}</template>
             </div>
           </button>
         </div>
-        <!-- 按号分圈:当前抽中号码的目标圈提示 -->
-        <p v-if="splitByNumber && selectedSlot && targetCircleName" class="mt-2 text-xs text-neutral-400">
-          <template v-if="editing && selectedSlot.competitor">
-            当前号码 <span class="text-white font-bold">{{ selectedSlot.number }}</span> 位于
-          </template>
-          <template v-else>
-            抽到号码 <span class="text-white font-bold">{{ selectedSlot.number }}</span> 将进入
-          </template>
-          <span class="text-amber-500 font-bold">{{ targetCircleName }}</span>
-          <template v-if="editing && selectedSlot.competitor">，换号后将按新号码自动落圈</template>
-        </p>
-        <p v-else-if="splitByNumber" class="mt-2 text-[10px] text-neutral-600">
-          {{
-            hasRealCircles
-              ? '按号码顺序均分，余数从前圈补；选中号码后自动显示对应圈'
-              : '按号码稳定轮转落圈（第N号 → 第 ((N-1) mod 圈数)+1 圈），不受签到顺序影响'
-          }}
-        </p>
+        <p class="mt-2 text-[10px] text-neutral-500">圈位不再按号码自动分配，请点击上方圈位手动指定</p>
       </div>
 
       <!-- 号码选择 -->
@@ -314,12 +253,10 @@ const circleList = ref<{ matchId: string | number; name: string; count: number; 
 const selectedMatchId = ref<string | number | null>(null);
 // 计划圈(尚未生成真圈)时选中的圈序号 1..n
 const selectedZoneIndex = ref<number | null>(null);
-// 编辑模式:当前选手实际所在圈场次ID(用于编辑时高亮真实圈,而非"自动")
+// 编辑模式:当前选手实际所在圈场次ID(编辑时默认选中该圈)
 const currentCircleMatchId = ref<string | number | null>(null);
 // 参赛方 -> 所在圈场次ID(编辑回显用)
 const competitorMatchMap = ref<Record<string, string | number>>({});
-// 海选圈是否按号码顺序均分(生成对阵时后端会把 randomSplit 写入 ruleConfig)
-const splitByNumber = ref(false);
 const circleConfigCount = ref(1);
 const stageMode = ref('');
 const circleQuotaList = ref<(number | null)[]>([]);
@@ -327,7 +264,6 @@ const circleQuotaList = ref<(number | null)[]>([]);
 // 加载分圈信息:赛段配置(circles/circleAdvanceCounts)+ 各圈当前人数(海选分圈且已生成对阵时)
 const loadCircleInfo = async () => {
   circleList.value = [];
-  splitByNumber.value = false;
   selectedMatchId.value = null;
   selectedZoneIndex.value = null;
   currentCircleMatchId.value = null;
@@ -345,12 +281,10 @@ const loadCircleInfo = async () => {
     stageMode.value = mode;
     let circles = 0;
     let quotas: number[] = [];
-    let randomSplit = false;
     try {
       const rc = JSON.parse(stage?.ruleConfig || '{}');
       circles = Math.max(1, Number(rc.circles) || 1);
       quotas = Array.isArray(rc.circleAdvanceCounts) ? rc.circleAdvanceCounts.map(Number) : [];
-      randomSplit = rc.randomSplit === true;
     } catch {
       // 忽略解析失败,不展示分圈信息
     }
@@ -359,8 +293,6 @@ const loadCircleInfo = async () => {
     }
     circleConfigCount.value = circles;
     circleQuotaList.value = Array.from({ length: circles }, (_, i) => (i < quotas.length && quotas[i] >= 0 ? quotas[i] : null));
-    // randomSplit=false / 旧数据未记录:按号分圈;randomSplit=true:随机分圈
-    splitByNumber.value = mode === 'AUDITION' && !randomSplit;
     // 非海选分圈(排名赛等)不按圈展示
     if (mode !== 'AUDITION') {
       return;
@@ -424,11 +356,11 @@ const loadCircleInfo = async () => {
     }
     circleList.value = list;
     competitorMatchMap.value = compMatchMap;
-    // 编辑已签到选手:预选并高亮其实际所在圈
+    // 编辑已签到选手:记录并默认选中其当前所在圈(仍可改点其他圈)
     if (editing.value && currentPlayer.value?.competitorId) {
       const actual = compMatchMap[String(currentPlayer.value.competitorId)];
       currentCircleMatchId.value = actual ?? null;
-      if (!splitByNumber.value && actual != null && list.some((c) => String(c.matchId) === String(actual))) {
+      if (actual != null && list.some((c) => String(c.matchId) === String(actual))) {
         selectedMatchId.value = actual;
       }
     }
@@ -529,10 +461,9 @@ const handleSelectSlot = (slot: { number: number; competitor: CompetitorVO | nul
   selectedSlot.value = slot;
 };
 
-// 随机分圈:顶部圈栏点击指定目标圈(按号分圈时圈由号码决定,点击无操作)。
+// 顶部圈栏点击指定目标圈:海选多圈一律手动选,点哪个圈就落哪个圈。
 // 已生成真圈时记录场次ID;尚未生成时记录计划圈序号,提交签到后由后端补建圈并落圈。
 const handleCircleChipClick = (c: { matchId: string | number | null }, ci: number) => {
-  if (splitByNumber.value) return;
   if (c.matchId != null) {
     selectedMatchId.value = c.matchId;
     selectedZoneIndex.value = null;
@@ -542,46 +473,16 @@ const handleCircleChipClick = (c: { matchId: string | number | null }, ci: numbe
   }
 };
 
-// 自动分配:清空手动选圈(含计划圈序号)
-const handleAutoCircle = () => {
-  selectedMatchId.value = null;
-  selectedZoneIndex.value = null;
-};
+// 圈卡片选中态:高亮当前手动指定的圈
+const isCircleChipActive = (ci: number) => ci === selectedCircleIndex.value;
 
-// 圈卡片选中态:按号分圈高亮号码对应圈;随机分圈高亮手动选中的真圈/计划圈
-const isCircleChipActive = (c: { matchId: string | number | null }, ci: number) => {
-  if (splitByNumber.value) {
-    return ci === activeCircleIndex.value;
-  }
-  if (c.matchId != null) {
-    return String(selectedMatchId.value) === String(c.matchId);
-  }
-  return ci + 1 === selectedZoneIndex.value;
-};
-
-// 与后端一致:退赛选手不参与按号分圈的人数计算
-const activeCompetitorNumbers = () =>
-  competitors.value
-    .filter((c) => c.outcomeStatus !== 'WITHDRAWN')
-    .map((c) => parseInt(c.number || '0'))
-    .filter((n) => !Number.isNaN(n) && n > 0)
-    .sort((a, b) => a - b);
-
-// 按号分圈:圈位由号码本身决定(第N号 → 第 ((N-1) mod 圈数)+1 圈),
-// 不依赖已签到人数/签到顺序,保证"先空圈、边签到边抽号"时各圈均分。
-// 单圈(圈数=1)也是显式配置的一个圈:恒为第 1 圈,同样要把目标圈传给后端。
-const circleIndexOfNumber = (num: number, circleCount: number) => {
-  if (circleCount < 1 || !Number.isFinite(num) || num <= 0) return -1;
-  return (num - 1) % circleCount;
-};
-
-// 当前生效的圈数:已生成对阵以实际场次数为准,否则按配置圈数预估
+// 当前生效的圈数:已生成对阵以实际场次数为准,否则按配置圈数
 const effectiveCircleCount = computed(() => (circleList.value.length > 1 ? circleList.value.length : Math.max(1, circleConfigCount.value)));
 
 // 是否已生成实际分圈场次
 const hasRealCircles = computed(() => circleList.value.length > 1);
 
-// 顶部圈栏:已生成对阵时展示实际圈(含人数/名额),否则按配置圈数实时预估
+// 顶部圈栏:已生成对阵时展示实际圈(含人数/名额),否则按配置圈数展示占位圈
 const circleBar = computed(() => {
   const total = hasRealCircles.value ? circleList.value.length : Math.max(1, circleConfigCount.value);
   const items: { key: string; matchId: string | number | null; name: string; count: number | null; quota: number | null }[] = [];
@@ -591,94 +492,54 @@ const circleBar = computed(() => {
       key: actual ? String(actual.matchId) : `cfg-${i}`,
       matchId: actual ? actual.matchId : null,
       name: actual ? actual.name : `第${i + 1}圈`,
-      // 未生成真圈时:按号分圈用当前号码实时预估,随机分圈(计划圈)暂无落位人数
-      count: actual ? actual.count : splitByNumber.value ? (liveCircleCounts.value[i] ?? 0) : 0,
+      // 未生成真圈时人数未知(圈位一律手动指定,不再按号码预估)
+      count: actual ? actual.count : null,
       quota: actual ? actual.quota : (circleQuotaList.value[i] ?? null)
     });
   }
   return items;
 });
 
-// 未生成对阵时按当前已签到号码预估各圈人数(与后端按号落圈口径一致)
-const liveCircleCounts = computed(() => {
-  const out = Array.from({ length: Math.max(1, circleConfigCount.value) }, () => 0);
-  const numbers = activeCompetitorNumbers();
-  if (numbers.length === 0) {
-    return out;
+// 海选分圈时展示顶部圈栏(圈位一律手动指定)
+const showCircleBar = computed(() => stageMode.value === 'AUDITION' && effectiveCircleCount.value > 1);
+
+// 是否已指定目标圈(海选多圈要求手动点选)
+const hasCircleSelection = computed(() => selectedMatchId.value != null || selectedZoneIndex.value != null);
+
+// 已指定目标圈在圈栏中的下标(未指定时为 -1)
+const selectedCircleIndex = computed(() => {
+  if (selectedMatchId.value != null) {
+    return circleBar.value.findIndex((c) => c.matchId != null && String(c.matchId) === String(selectedMatchId.value));
   }
-  numbers.forEach((n) => {
-    out[(n - 1) % out.length]++;
-  });
-  return out;
+  if (selectedZoneIndex.value != null) return selectedZoneIndex.value - 1;
+  return -1;
 });
 
-// 海选分圈(按号或随机)时展示顶部圈栏:
-// 已生成真圈按实际展示;未生成时按配置圈数展示计划圈(随机分圈下第一位签到后按圈落位)
-const showCircleBar = computed(() => stageMode.value === 'AUDITION' && circleConfigCount.value > 1);
-
-// 按号分圈:当前选中号码对应的圈下标(抽号即落圈)
-const activeCircleIndex = computed(() => {
-  if (!splitByNumber.value || !selectedSlot.value) return -1;
-  // 编辑模式且仍停留在本人当前号码:直接高亮其实际所在圈
-  if (editing.value && selectedSlot.value.competitor && currentCircleMatchId.value != null) {
-    return circleBar.value.findIndex((c) => c.matchId != null && String(c.matchId) === String(currentCircleMatchId.value));
-  }
-  const count = effectiveCircleCount.value;
-  return count >= 1 ? circleIndexOfNumber(Number(selectedSlot.value.number), count) : -1;
-});
-
-// 按号分圈:选中号码将进入的圈名
+// 当前目标圈名(未指定时为空)
 const targetCircleName = computed(() => {
-  if (!splitByNumber.value) return '';
-  const idx = activeCircleIndex.value;
+  const idx = selectedCircleIndex.value;
   return idx >= 0 && idx < circleBar.value.length ? circleBar.value[idx].name : '';
 });
 
 /**
- * 落圈参数:后端不再自行推导圈位,由前端算好并显式传入。
+ * 落圈参数:后端不再自行推导圈位,由前端显式传入。
  * 已生成圈场次时传 matchId;尚未生成时传计划圈序号 zoneIndex。
+ * 海选多圈一律手动指定:未选圈时不带圈位(提交前会拦截)。
  */
 const targetCirclePayload = (): { matchId?: string | number; zoneIndex?: number } => {
-  // 单圈(含排名赛的单场):唯一圈即第 1 圈,无论按号还是手动模式都要显式传,
-  // 后端不再自行决定落圈;已拿到场次ID 就传 matchId,否则传圈序号。
+  // 单圈(含排名赛的单场):唯一圈即第 1 圈,无需手动选择
   if ((stageMode.value === 'AUDITION' || stageMode.value === 'RANK') && effectiveCircleCount.value <= 1) {
     const only = circleBar.value[0];
     return only?.matchId != null ? { matchId: only.matchId } : { zoneIndex: 1 };
   }
-  if (!splitByNumber.value) {
-    // 手动选圈:用圈栏中选中的圈
-    if (selectedMatchId.value != null) return { matchId: selectedMatchId.value };
-    if (selectedZoneIndex.value != null) return { zoneIndex: selectedZoneIndex.value };
-    return {};
-  }
-  // 按号分圈:第 N 号 → 第 ((N-1) mod 圈数)+1 圈,与圈栏展示的高亮圈一致
-  const idx = activeCircleIndex.value;
-  if (idx < 0) return {};
-  const circle = circleBar.value[idx];
-  return circle?.matchId != null ? { matchId: circle.matchId } : { zoneIndex: idx + 1 };
+  // 多圈:一律用手动指定的圈
+  if (selectedMatchId.value != null) return { matchId: selectedMatchId.value };
+  if (selectedZoneIndex.value != null) return { zoneIndex: selectedZoneIndex.value };
+  return {};
 };
 
-// 已选择摘要:补充目标圈/手动圈信息
-const selectedCircleLabel = computed(() => {
-  if (!selectedSlot.value) return '';
-  if (splitByNumber.value) {
-    return targetCircleName.value;
-  }
-  if (circleBar.value.length === 0) {
-    return '';
-  }
-  const selected = circleBar.value.find((c) => c.matchId != null && String(c.matchId) === String(selectedMatchId.value ?? ''));
-  if (selected) {
-    return selected.name;
-  }
-  if (selectedMatchId.value === null && selectedZoneIndex.value != null) {
-    const planned = circleBar.value[selectedZoneIndex.value - 1];
-    if (planned) {
-      return planned.name;
-    }
-  }
-  return selectedMatchId.value === null && selectedZoneIndex.value === null ? '自动分配' : '';
-});
+// 已选择摘要:补充目标圈信息
+const selectedCircleLabel = computed(() => (selectedSlot.value ? targetCircleName.value : ''));
 
 const handleRandomSelect = () => {
   const availableSlots = numberSlots.value.filter((slot) => !slot.competitor);
@@ -732,6 +593,12 @@ const handleSubmit = async () => {
 
   if (!playerName.value.trim()) {
     ElMessage.warning('请输入选手名称');
+    return;
+  }
+
+  // 海选多圈:圈位一律手动指定,未选圈不允许提交(后端也不再自动落圈)
+  if (showCircleBar.value && !hasCircleSelection.value) {
+    ElMessage.warning('请选择该选手落圈');
     return;
   }
 

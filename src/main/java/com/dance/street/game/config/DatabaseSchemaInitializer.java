@@ -71,6 +71,8 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
     private static final String SQL_RESOURCE_FILESYSTEM = "sql/game_db.sql";
     private static final String SQLITE_SQL_RESOURCE_CLASSPATH = "sql/game_db.sqlite.sql";
     private static final String SQLITE_SQL_RESOURCE_FILESYSTEM = "sql/game_db.sqlite.sql";
+    /** 需要额外放宽 competitor_id 可空性(轮空/待定占位行)的表 */
+    private static final String PARTICIPANT_TABLE = "t_match_participant";
 
     private final DataSource dataSource;
     private final String jdbcUrl;
@@ -134,6 +136,9 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                         existed++;
                         log.debug("数据表已存在,跳过建表: {}", table);
                         added += addMissingColumns(connection, table, ddl, false);
+                        if (PARTICIPANT_TABLE.equals(table)) {
+                            relaxParticipantCompetitorNullable(connection, false, ddl);
+                        }
                     } else {
                         executeDdl(connection, withIfNotExists(ddl));
                         created++;
@@ -180,6 +185,9 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                         existed++;
                         log.debug("数据表已存在,跳过建表: {}", table);
                         added += addMissingColumns(connection, table, ddl, true);
+                        if (PARTICIPANT_TABLE.equals(table)) {
+                            relaxParticipantCompetitorNullable(connection, true, ddl);
+                        }
                     } else {
                         executeDdl(connection, withIfNotExists(ddl));
                         created++;
@@ -277,6 +285,80 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                 return rs.next() && rs.getInt(1) > 0;
             }
         }
+    }
+
+    /**
+     * 老库的 {@code t_match_participant.competitor_id} 是 NOT NULL;轮空/待定座位需要落 NULL 占位行,
+     * 这里做一次性放宽(只放宽可空性,不动数据):
+     * MySQL 用 {@code MODIFY COLUMN};SQLite 不支持改列,按重建表的方式搬迁。
+     */
+    private static void relaxParticipantCompetitorNullable(Connection connection, boolean sqlite, String ddl)
+        throws SQLException {
+        if (sqlite) {
+            Boolean notNull = null;
+            try (Statement statement = connection.createStatement();
+                 ResultSet rs = statement.executeQuery("PRAGMA table_info(`" + PARTICIPANT_TABLE + "`)")) {
+                while (rs.next()) {
+                    if ("competitor_id".equalsIgnoreCase(rs.getString("name"))) {
+                        notNull = rs.getInt("notnull") == 1;
+                        break;
+                    }
+                }
+            }
+            if (notNull == null || !notNull) {
+                return;
+            }
+            rebuildSqliteParticipant(connection, ddl);
+            log.info("schema 自检: 已放宽 {}.competitor_id 为可空(支持轮空/待定占位行)", PARTICIPANT_TABLE);
+            return;
+        }
+        String nullable = null;
+        try (PreparedStatement ps = connection.prepareStatement(
+            "SELECT is_nullable FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = 'competitor_id'")) {
+            ps.setString(1, connection.getCatalog());
+            ps.setString(2, PARTICIPANT_TABLE);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    nullable = rs.getString(1);
+                }
+            }
+        }
+        if (nullable == null || "YES".equalsIgnoreCase(nullable)) {
+            return;
+        }
+        executeDdl(connection, "ALTER TABLE `" + PARTICIPANT_TABLE
+            + "` MODIFY COLUMN `competitor_id` bigint NULL COMMENT '参赛方ID;轮空/待定占位行为 NULL'");
+        log.info("schema 自检: 已放宽 {}.competitor_id 为可空(支持轮空/待定占位行)", PARTICIPANT_TABLE);
+    }
+
+    /** SQLite 不支持 ALTER 去掉 NOT NULL:按「建新表 → 拷数据 → 删旧表 → 改名」搬迁,索引随后由脚本重建 */
+    private static void rebuildSqliteParticipant(Connection connection, String createDdl) throws SQLException {
+        String tmp = PARTICIPANT_TABLE + "__slot_rebuild";
+        Set<String> existing = existingColumns(connection, PARTICIPANT_TABLE, true);
+        List<String> copyCols = new ArrayList<>();
+        for (String col : parseColumnDefinitions(createDdl).keySet()) {
+            if (existing.contains(col)) {
+                copyCols.add("`" + col + "`");
+            }
+        }
+        String columnList = String.join(", ", copyCols);
+        executeDdl(connection, "DROP TABLE IF EXISTS `" + tmp + "`");
+        executeDdl(connection, renameCreateTable(createDdl, tmp));
+        if (!copyCols.isEmpty()) {
+            executeDdl(connection, "INSERT INTO `" + tmp + "` (" + columnList + ") SELECT " + columnList
+                + " FROM `" + PARTICIPANT_TABLE + "`");
+        }
+        executeDdl(connection, "DROP TABLE `" + PARTICIPANT_TABLE + "`");
+        executeDdl(connection, "ALTER TABLE `" + tmp + "` RENAME TO `" + PARTICIPANT_TABLE + "`");
+    }
+
+    /** 把 CREATE TABLE 语句里的表名替换成新名(用于 SQLite 重建搬迁) */
+    private static String renameCreateTable(String ddl, String newName) {
+        Matcher matcher = CREATE_TABLE_PATTERN.matcher(ddl);
+        if (matcher.find()) {
+            return ddl.substring(0, matcher.start(1)) + newName + ddl.substring(matcher.end(1));
+        }
+        return ddl;
     }
 
     private static void executeDdl(Connection connection, String ddl) throws SQLException {
@@ -472,7 +554,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
      */
     static List<String> parseCreateTableStatements(String script) {
         List<String> ddlList = new ArrayList<>();
-        for (String part : script.split(";")) {
+        for (String part : splitStatements(script)) {
             String statement = part.trim();
             if (statement.isEmpty()) {
                 continue;
@@ -491,7 +573,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
      */
     static List<String> parseCreateIndexStatements(String script) {
         List<String> indexList = new ArrayList<>();
-        for (String part : script.split(";")) {
+        for (String part : splitStatements(script)) {
             String statement = part.trim();
             if (statement.isEmpty()) {
                 continue;
@@ -502,6 +584,42 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
             }
         }
         return indexList;
+    }
+
+    /**
+     * 按分号切分 SQL 脚本,但忽略单引号/双引号/反引号内部的分号。
+     *
+     * <p>此前直接 {@code script.split(";")}:注释里出现分号(如
+     * {@code COMMENT '参赛方ID;轮空占位为 NULL'})会把整条 CREATE TABLE 截断,
+     * 该表后面的列就再也补不出来。</p>
+     */
+    static List<String> splitStatements(String script) {
+        List<String> statements = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+        for (int i = 0; i < script.length(); i++) {
+            char c = script.charAt(i);
+            if (quote != 0) {
+                current.append(c);
+                if (c == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (c == '\'' || c == '"' || c == '`') {
+                quote = c;
+                current.append(c);
+                continue;
+            }
+            if (c == ';') {
+                statements.add(current.toString());
+                current.setLength(0);
+                continue;
+            }
+            current.append(c);
+        }
+        statements.add(current.toString());
+        return statements;
     }
 
     static String extractTableName(String ddl) {

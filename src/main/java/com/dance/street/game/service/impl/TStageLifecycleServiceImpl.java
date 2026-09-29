@@ -171,11 +171,32 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         } else {
             comps.sort(Comparator.comparing(c -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank()));
         }
-        // 种子顺位批量写:此前逐个 updateById(100 人 = 100 条 SQL)
+        // 淘汰赛座位是"位置"而不是"出场次序":中间态允许把选手拖到轮空位互换、位置留空即轮空,
+        // 因此开赛初始化不再把座位压成 1..n——否则中间态摆好的位置会被整体重排,生成的对阵与中间态对不上。
+        // 其余赛制保持原语义(压成 1..n)。种子顺位批量写:此前逐个 updateById(100 人 = 100 条 SQL)
+        boolean keepSeats = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode());
+        Set<Long> usedSeats = new HashSet<>();
+        comps.forEach(c -> {
+            if (c.getSeedRank() != null) {
+                usedSeats.add(c.getSeedRank());
+            }
+        });
+        long nextSeat = 1L;
         List<Map<String, Object>> seedItems = new ArrayList<>(comps.size());
         for (int i = 0; i < comps.size(); i++) {
             TCompetitor c = comps.get(i);
-            c.setSeedRank((long) (i + 1));
+            if (keepSeats) {
+                if (c.getSeedRank() != null) {
+                    continue; // 保留中间态排好的座位
+                }
+                while (usedSeats.contains(nextSeat)) {
+                    nextSeat++;
+                }
+                c.setSeedRank(nextSeat);
+                usedSeats.add(nextSeat);
+            } else {
+                c.setSeedRank((long) (i + 1));
+            }
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", c.getId());
             item.put("seedRank", c.getSeedRank());
@@ -420,16 +441,17 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
 
             for (SlotPlan slot : mp.getSlots()) {
-                // 轮空位(无参赛方):不落 participant 行,由 settleByeMatches 按真实人数判断单/双边轮空
-                // (t_match_participant.competitor_id 为 NOT NULL,不能插入 null 占位)
-                if (slot.getCompetitorId() == null) {
-                    continue;
-                }
+                // 每个座位都落一行:真人=PLAYER,轮空=BYE,待上游填入=PENDING。
+                // 轮空不再"跳过"——否则参赛方数组下标 ≠ 座位下标,前端与下游按 slot 还原位置时会错位
+                // (典型:「左轮空、右有人」时把右边的人画到左边)。
                 TMatchParticipant p = new TMatchParticipant();
                 p.setTournamentId(stage.getTournamentId());
                 p.setMatchId(m.getId());
                 p.setCompetitorId(slot.getCompetitorId());
                 p.setDisplaySlotIndex((long) slot.getSlotIndex());
+                p.setSlotKind(slot.getCompetitorId() != null
+                    ? StageConstants.SLOT_PLAYER
+                    : (slot.isBye() ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING));
                 p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
                 participantMapper.insert(p);
             }

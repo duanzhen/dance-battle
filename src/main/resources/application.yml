@@ -20,12 +20,12 @@ spring:
     # (SQLite 连接会自动补上 date_class=text,与建表脚本 TEXT 日期列一致,时间字段才能正常读写)
     url: ${DB_URL:jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:game_db}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:${MYSQL_USER:root}}
-    password: ${DB_PASSWORD:${MYSQL_PASSWORD:password}}
+    password: ${DB_PASSWORD:${MYSQL_PASSWORD:cNvMM0BgN7URLbxfFCUUjneP}}
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
+      password: ${REDIS_PASSWORD:t6gF11pyrRXh6z0q08ChhpOx}
       database: 0
 
 mybatis-plus:

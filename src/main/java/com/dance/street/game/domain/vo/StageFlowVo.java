@@ -63,6 +63,8 @@ public class StageFlowVo implements Serializable {
         /** 参赛方首位成员的选手照片 */
         private String avatar;
         private Long displaySlotIndex;
+        /** 座位类型:PLAYER/BYE/PENDING */
+        private String slotKind;
         private BigDecimal scoreValue;
         private Long rankInMatch;
         private String outcomeStatus;

@@ -49,6 +49,12 @@ public class TMatchParticipant extends TenantEntity {
     private Long displaySlotIndex;
 
     /**
+     * 座位类型:PLAYER=真人参赛方 / BYE=轮空 / PENDING=待上游填入的占位。
+     * 轮空/待定行的 competitorId 为 null,座位仍然实体化,保证位置可还原。
+     */
+    private String slotKind;
+
+    /**
      * 总分/票数
      */
     private BigDecimal scoreValue;

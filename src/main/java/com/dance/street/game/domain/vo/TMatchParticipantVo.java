@@ -59,6 +59,12 @@ public class TMatchParticipantVo implements Serializable {
     private Long displaySlotIndex;
 
     /**
+     * 座位类型:PLAYER / BYE / PENDING
+     */
+    @ExcelProperty(value = "座位类型")
+    private String slotKind;
+
+    /**
      * 总分/票数
      */
     @ExcelProperty(value = "总分/票数")

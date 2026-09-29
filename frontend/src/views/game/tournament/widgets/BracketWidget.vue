@@ -249,6 +249,8 @@ const prevStageId = ref<string | number | null>(null);
 const prevZoneMap = ref<Record<string, string>>({});
 const stagePairingMode = ref('');
 const stageTeamCountStart = ref(0);
+/** 上一赛段赛制:配对模式未落库时按后端同一口径推导(海选/排名赛 → 种子摆位) */
+const prevStageMode = ref('');
 /** 赛事级红蓝配色(所有下属淘汰赛共享) */
 const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
 
@@ -301,10 +303,19 @@ const loadData = async () => {
       prevStageId.value = stageInfo?.data?.prevStageId ?? null;
       stagePairingMode.value = JSON.parse(stageInfo?.data?.ruleConfig || '{}')?.knockout?.pairingMode || '';
       stageTeamCountStart.value = Number(stageInfo?.data?.teamCountStart) || 0;
+      prevStageMode.value = '';
+      if (prevStageId.value) {
+        try {
+          prevStageMode.value = (await getStage(prevStageId.value))?.data?.stageMode || '';
+        } catch (e) {
+          prevStageMode.value = '';
+        }
+      }
     } catch (e) {
       prevStageId.value = null;
       stagePairingMode.value = '';
       stageTeamCountStart.value = 0;
+      prevStageMode.value = '';
     }
     // 赛事级红蓝配色:从 tournament.themeConfig 读取(所有淘汰赛共享)
     colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
@@ -463,6 +474,26 @@ const onAvatarError = (e: Event) => {
 
 const isWinner = (p: any) => p?.outcomeStatus === 'WIN' || (p?.rankInMatch === 1 && p?.scoreValue != null);
 
+/**
+ * 按槽位取场次左右两名参赛方。
+ *
+ * <p>轮空位不落 t_match_participant 行(competitor_id NOT NULL),因此参赛方数组的
+ * 下标 ≠ 槽位下标:直接用 ss[0]/ss[1] 当左右,会把「左槽轮空、右槽有人」的选手
+ * 画到左边,与中间态预排(按种子位显示)不一致。这里严格用 displaySlotIndex 定位。</p>
+ */
+const participantsBySlot = (matchId: any): { left: any; right: any } => {
+  const list = participantsByMatch.value[matchId] || [];
+  const at = (slot: number) => list.find((p: any) => Number(p.displaySlotIndex) === slot) ?? null;
+  const left = at(0);
+  const right = at(1);
+  // 兜底:历史/异常数据没有 displaySlotIndex(全为 null)时退回原顺序
+  if (left == null && right == null && list.length > 0) {
+    const sorted = [...list].sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+    return { left: sorted[0] ?? null, right: sorted[1] ?? null };
+  }
+  return { left, right };
+};
+
 // 擂台赛段展示:8 强参赛者按标准种子摆位排成 4 对(左 2 右 2),仅供展示,不对应对决场次
 const arenaSlots = computed<BracketSlot[]>(() => {
   const count = competitors.value.length;
@@ -531,17 +562,17 @@ const bracketSlots = computed<BracketSlot[]>(() => {
   }
   if (matches.value.length > 0) {
     return matches.value.map((m: any) => {
-      const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
-      const left = ss[0];
-      const right = ss[1];
+      const { left, right } = participantsBySlot(m.id);
+      // 座位已实体化:competitorId 为空时按 slotKind 区分轮空/待定(老数据缺 slotKind 时按轮空显示)
+      const slotLabel = (s: any) => (s?.slotKind === 'PENDING' ? '待定' : '轮空');
       return {
         matchId: String(m.id),
         zone: m.displayZone || 'LEFT',
         order: m.displayRow ?? 0,
         name: m.name || '',
         status: m.status || 'PENDING',
-        leftName: left?.competitorId == null ? '轮空' : nameOf(left.competitorId) || '',
-        rightName: right?.competitorId == null ? '轮空' : nameOf(right.competitorId) || '',
+        leftName: left?.competitorId == null ? slotLabel(left) : nameOf(left.competitorId) || '',
+        rightName: right?.competitorId == null ? slotLabel(right) : nameOf(right.competitorId) || '',
         leftAvatar: avatarOf(left?.competitorId),
         rightAvatar: avatarOf(right?.competitorId),
         leftScore: left?.scoreValue == null ? '' : String(left.scoreValue),
@@ -615,43 +646,27 @@ const bracketSlots = computed<BracketSlot[]>(() => {
     }
     return [];
   }
-  if (stagePairingMode.value === 'SEED') {
-    // SEED:标准种子对位(1-16、2-15…),与后端生成一致
-    const bracketSize = Math.max(2, nextPow2(count));
-    const layout = seedLayout(bracketSize);
-    const pairCount = Math.max(1, bracketSize / 2);
-    const half = Math.ceil(pairCount / 2);
-    return Array.from({ length: pairCount }, (_, i) => {
-      const leftIdx = layout[2 * i] - 1;
-      const rightIdx = layout[2 * i + 1] - 1;
-      const left = leftIdx < count ? competitors.value[leftIdx] : null;
-      const right = rightIdx < count ? competitors.value[rightIdx] : null;
-      return {
-        zone: i < half ? 'LEFT' : 'RIGHT',
-        order: i % half,
-        name: '待对阵',
-        status: 'PENDING',
-        leftName: left?.name || '轮空',
-        rightName: right?.name || '轮空',
-        leftAvatar: avatarOf(left?.id),
-        rightAvatar: avatarOf(right?.id),
-        leftScore: '',
-        rightScore: '',
-        leftWin: false,
-        rightWin: false,
-        leftBye: !left,
-        rightBye: !right,
-        leftSrc: '',
-        rightSrc: ''
-      } as BracketSlot;
-    });
-  }
-  // 默认 SEQUENTIAL:1-2、3-4…
-  const pairs = Math.max(1, Math.ceil(count / 2));
-  const half = Math.ceil(pairs / 2);
-  return Array.from({ length: pairs }, (_, i) => {
-    const left = competitors.value[i * 2];
-    const right = competitors.value[i * 2 + 1];
+  // 尚未生成对阵:按「座位」预排,与中间态、后端生成同一口径。
+  // 座位空着就是轮空——绝不能用数组下标占位(那等于把名单整体压到 1..n,和中间态对不上)。
+  const plan = Math.max(count, stageTeamCountStart.value || 0);
+  const bySeat = new Map<number, any>();
+  competitors.value.forEach((c: any, idx: number) => {
+    const seat = Number(c.seedRank);
+    bySeat.set(Number.isFinite(seat) && seat > 0 ? seat : idx + 1, c);
+  });
+  const atSeat = (seatNo: number) => bySeat.get(seatNo) ?? null;
+  const seedMode =
+    (stagePairingMode.value ? String(stagePairingMode.value).toUpperCase() === 'SEED' : false)
+    || (!stagePairingMode.value && (prevStageMode.value === 'AUDITION' || prevStageMode.value === 'RANK'));
+  const bracketSize = Math.max(2, nextPow2(plan));
+  const layout = seedMode ? seedLayout(bracketSize) : null;
+  const pairCount = Math.max(1, bracketSize / 2);
+  const half = Math.ceil(pairCount / 2);
+  const seatNoOf = (i: number, side: 'left' | 'right') =>
+    seedMode ? layout![2 * i + (side === 'left' ? 0 : 1)] : 2 * i + (side === 'left' ? 1 : 2);
+  return Array.from({ length: pairCount }, (_, i) => {
+    const left = atSeat(seatNoOf(i, 'left'));
+    const right = atSeat(seatNoOf(i, 'right'));
     return {
       zone: i < half ? 'LEFT' : 'RIGHT',
       order: i % half,
@@ -711,7 +726,6 @@ const finalists = computed(() => {
     }
     return out;
   }
-  const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
   const sourceOf: Record<string, string> = {};
   competitors.value.forEach((c: any) => {
     if (c.sourceCompetitorId) {
@@ -724,8 +738,8 @@ const finalists = computed(() => {
     avatar: avatarOf(p.competitorId),
     score: p.scoreValue == null ? '' : String(p.scoreValue)
   });
-  const a = ss[0];
-  const b = ss[1];
+  // 按槽位定位:轮空一侧不落 participant 行,不能用数组下标代替左右槽
+  const { left: a, right: b } = participantsBySlot(m.id);
   if (a) {
     const side = prevZoneMap.value[sourceOf[a.competitorId]] || 'LEFT';
     out[side === 'RIGHT' ? 'right' : 'left'] = toCard(a);
@@ -763,13 +777,13 @@ const semi = computed(() => {
     return out;
   }
   const build = (m: any) => {
-    const ss = (participantsByMatch.value[m.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+    const { left, right } = participantsBySlot(m.id);
     return {
-      top: ss[0]
-        ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), avatar: avatarOf(ss[0].competitorId), win: isWinner(ss[0]) }
+      top: left
+        ? { competitorId: left.competitorId, name: nameOf(left.competitorId), avatar: avatarOf(left.competitorId), win: isWinner(left) }
         : null,
-      bottom: ss[1]
-        ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), avatar: avatarOf(ss[1].competitorId), win: isWinner(ss[1]) }
+      bottom: right
+        ? { competitorId: right.competitorId, name: nameOf(right.competitorId), avatar: avatarOf(right.competitorId), win: isWinner(right) }
         : null
     };
   };
@@ -785,11 +799,11 @@ const semi = computed(() => {
     // 季军赛:底部中间框展示对阵与胜者
     const third = matches.value.find((m: any) => m.name === '季军赛') || null;
     if (third) {
-      const ss = (participantsByMatch.value[third.id] || []).slice().sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
-      const winner = ss.find((p: any) => isWinner(p)) || null;
+      const { left, right } = participantsBySlot(third.id);
+      const winner = [left, right].find((p: any) => isWinner(p)) || null;
       out.third = {
-        left: ss[0] ? { competitorId: ss[0].competitorId, name: nameOf(ss[0].competitorId), avatar: avatarOf(ss[0].competitorId) } : null,
-        right: ss[1] ? { competitorId: ss[1].competitorId, name: nameOf(ss[1].competitorId), avatar: avatarOf(ss[1].competitorId) } : null,
+        left: left ? { competitorId: left.competitorId, name: nameOf(left.competitorId), avatar: avatarOf(left.competitorId) } : null,
+        right: right ? { competitorId: right.competitorId, name: nameOf(right.competitorId), avatar: avatarOf(right.competitorId) } : null,
         winner: winner ? { competitorId: winner.competitorId, name: nameOf(winner.competitorId), avatar: avatarOf(winner.competitorId) } : null,
         status: third.status || 'PENDING'
       };

@@ -509,7 +509,7 @@ public class RefereeMatchController {
                 pi.setCompetitorName(comp != null ? comp.getName() : ("选手 " + p.getCompetitorId()));
                 pi.setNumber(comp != null ? comp.getNumber() : null);
             } else {
-                pi.setCompetitorName("待定");
+                pi.setCompetitorName(StageConstants.SLOT_BYE.equals(p.getSlotKind()) ? "轮空" : "待定");
             }
             partInfos.add(pi);
         }

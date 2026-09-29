@@ -92,6 +92,8 @@ public class DownstreamRouter {
     public void fillDownstreamSlot(TMatch sourceMatch, Long targetMatchId, Long targetSlot, Long competitorId) {
         TMatchParticipant upd = new TMatchParticipant();
         upd.setCompetitorId(competitorId);
+        // 座位行已由生成阶段实体化:填入真人后类型从 PENDING/BYE 变为 PLAYER
+        upd.setSlotKind(StageConstants.SLOT_PLAYER);
         int affected = participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
             .eq(TMatchParticipant::getMatchId, targetMatchId)
             .eq(TMatchParticipant::getDisplaySlotIndex, targetSlot));
@@ -104,6 +106,7 @@ public class DownstreamRouter {
         np.setMatchId(targetMatchId);
         np.setCompetitorId(competitorId);
         np.setDisplaySlotIndex(targetSlot);
+        np.setSlotKind(StageConstants.SLOT_PLAYER);
         np.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
         participantMapper.insert(np);
         log.info("参赛方[{}]补插到下游场次[{}]占位(slot={})", competitorId, targetMatchId, targetSlot);

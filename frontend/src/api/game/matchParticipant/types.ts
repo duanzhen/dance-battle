@@ -23,6 +23,8 @@ export interface MatchParticipantVO {
    *
    */
   displaySlotIndex: number;
+  /** 座位类型:PLAYER=真人 / BYE=轮空 / PENDING=待上游填入 */
+  slotKind?: 'PLAYER' | 'BYE' | 'PENDING' | string;
 
   /**
    * 总分/票数

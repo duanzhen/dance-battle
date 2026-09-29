@@ -422,8 +422,11 @@ const handleTournamentEvent = (data: any) => {
   }
 };
 
-const leftP = computed(() => participants.value[0]);
-const rightP = computed(() => participants.value[1]);
+// 按槽位取左右:轮空一侧不落 participant 行,数组下标不能当左右槽(否则轮空时选手会串位)
+const hasSlotInfo = computed(() => participants.value.some((p: any) => p.displaySlotIndex != null));
+const slotOf = (slot: number) => participants.value.find((p: any) => Number(p.displaySlotIndex) === slot) ?? null;
+const leftP = computed(() => slotOf(0) ?? (hasSlotInfo.value ? null : (participants.value[0] ?? null)));
+const rightP = computed(() => slotOf(1) ?? (hasSlotInfo.value ? null : (participants.value[1] ?? null)));
 
 const leftName = computed(() => leftP.value?.competitorName || 'TBD');
 const rightName = computed(() => rightP.value?.competitorName || 'TBD');

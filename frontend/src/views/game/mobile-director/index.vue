@@ -182,6 +182,9 @@
               <p v-if="currentStage.stageMode === 'ARENA'" class="text-[10px] text-blue-400/70">
                 点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，胜者守擂、败者排到队尾，平局时擂主与挑战者均排到队尾。
               </p>
+              <p v-if="isDirectorJudge" class="text-[10px] text-amber-400/80">
+                本赛段为「导播台直接判定」：每场在下方场次卡片点「左胜 / 平 / 右胜」即可，裁判端不显示场次。
+              </p>
               <p v-if="isFreeMatchStage" class="text-[10px] text-blue-400/70">
                 自由对抗:名单确定后点「开始赛段」即可;比赛中点「添加对战」选两名选手生成一场,裁判正常判罚,系统只记录对战与结果;结束前点「选择晋级」手动勾选晋级者(人数不限)。
               </p>
@@ -197,6 +200,9 @@
             <div v-if="currentStage.status === 'GAMING'" class="mt-3 p-3 rounded-lg bg-green-500/5 border border-green-500/10">
               <p v-if="isFreeMatchStage" class="text-[10px] text-green-400/70">
                 赛段进行中:点「添加对战」选两名选手开新场;逐场判完后点「选择晋级」勾选晋级者,再点"完成赛段"。
+              </p>
+              <p v-else-if="isDirectorJudge" class="text-[10px] text-amber-400/80">
+                赛段进行中：每场由你在场次卡片点「左胜 / 平 / 右胜」判定；判完点「开始下一场」，胜者守擂、败者队尾。
               </p>
               <p v-else class="text-[10px] text-green-400/70">赛段正在进行中，裁判可录入比分。完成后点击"完成赛段"结算排名。</p>
             </div>
@@ -882,6 +888,8 @@ const canComplete = computed(() => {
   return currentStage.value.status === 'GAMING';
 });
 const hasGamingMatch = computed(() => matches.value.some((m) => m.status === 'GAMING'));
+/** 当前赛段是否由导播台直接判定(淘汰赛/擂台赛共用 publishMode=DIRECTOR) */
+const isDirectorJudge = computed(() => matches.value.some((m) => m.publishMode === 'DIRECTOR'));
 /** 临时弃权(擂台赛):按钮唤起弹窗,选择哪位选手本轮跳过(排到队尾,后续仍参与排名) */
 // 自由对抗:本赛段选手(选人对战 / 勾选晋级)
 const isFreeMatchStage = computed(() => currentStage.value?.stageMode === 'FREE_MATCH');

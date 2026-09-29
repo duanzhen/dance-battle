@@ -99,8 +99,10 @@ export interface RankingConfig {
 export interface ArenaConfig {
   scale: number; // 进入擂台赛总人数(擂主1人 + 攻擂N人)
   format: MatchFormat;
-  /** 平局双方各加1分(双方下场时;默认关闭,只有胜场记1分) */
+  /** 平局双方各加1分(双方下场时);默认开启,显式设 false 时平局都不加分、只按胜场记分 */
   drawBothScore?: boolean;
+  /** 判罚方式:AUTO=裁判判罚 / DIRECTOR=导播台直接判定(与淘汰赛同一套 publishMode) */
+  publishMode?: 'AUTO' | 'DIRECTOR';
 }
 
 export interface FreeMatchConfig {

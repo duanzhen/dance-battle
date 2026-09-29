@@ -427,6 +427,10 @@ public class TMatchServiceImpl implements ITMatchService {
         if (rc != null && rc.getKnockout() != null && StringUtils.isNotBlank(rc.getKnockout().getPublishMode())) {
             return rc.getKnockout().getPublishMode();
         }
+        // 擂台赛等没有 knockout 段的赛制:公布/判定模式写在 ruleConfig 顶层
+        if (rc != null && StringUtils.isNotBlank(rc.getPublishMode())) {
+            return rc.getPublishMode();
+        }
         return "AUTO";
     }
 

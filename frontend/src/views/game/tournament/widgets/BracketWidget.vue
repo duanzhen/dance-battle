@@ -494,59 +494,55 @@ const participantsBySlot = (matchId: any): { left: any; right: any } => {
   return { left, right };
 };
 
-// 擂台赛段展示:8 强参赛者按标准种子摆位排成 4 对(左 2 右 2),仅供展示,不对应对决场次
+/**
+ * 擂台赛段展示:按「座位」列出进入擂台赛的人,在标准 8 强摆位上排成 4 对(左 2 右 2),仅供展示。
+ *
+ * <p>· 名单已写入(上一赛段结算并确认晋级):按 seedRank 坐回座位,空位显示「待定」。
+ *   绝不能用数组下标占位——那等于把名单压到 1..n,和中间态看到的出场顺序对不上。
+ * · 名单还没写入(上一赛段未结算/未确认晋级):用预排晋级者占位,开赛前就能看到谁要进擂台赛。</p>
+ */
 const arenaSlots = computed<BracketSlot[]>(() => {
-  const count = competitors.value.length;
-  // 名单尚未生成(16 强未结算/未开始擂台赛段):只搭空骨架,不显示"轮空"
-  // (轮空只对真实对阵有意义,开赛前不可能预知轮空)
-  if (count === 0) {
-    const bracketSize = Math.max(2, nextPow2(stageTeamCountStart.value || 8));
-    const pairCount = Math.max(1, bracketSize / 2);
-    const half = Math.ceil(pairCount / 2);
-    return Array.from(
-      { length: pairCount },
-      (_, i) =>
-        ({
-          zone: i < half ? 'LEFT' : 'RIGHT',
-          order: i % half,
-          name: '8强',
-          status: 'PENDING',
-          leftName: '',
-          rightName: '',
-          leftAvatar: '',
-          rightAvatar: '',
-          leftScore: '',
-          rightScore: '',
-          leftWin: false,
-          rightWin: false,
-          rightBye: false,
-          leftSrc: '',
-          rightSrc: ''
-        }) as BracketSlot
-    );
-  }
-  const bracketSize = Math.max(2, nextPow2(count || stageTeamCountStart.value || 8));
+  const plan = Math.max(competitors.value.length, stageTeamCountStart.value || 0, 2);
+  const bracketSize = Math.max(2, nextPow2(plan));
   const pairCount = Math.max(1, bracketSize / 2);
   const half = Math.ceil(pairCount / 2);
   const layout = seedLayout(bracketSize);
+  const bySeat = new Map<number, any>();
+  const put = (seat: number, v: any) => {
+    if (seat >= 1 && seat <= bracketSize && !bySeat.has(seat)) {
+      bySeat.set(seat, v);
+    }
+  };
+  competitors.value.forEach((c: any, idx: number) => {
+    const seat = Number(c.seedRank);
+    put(Number.isFinite(seat) && seat > 0 ? seat : idx + 1, c);
+  });
+  if (bySeat.size === 0) {
+    // 擂台赛名单还没写入:用上一赛段的预排晋级者占位(开赛前就能看到谁要进来)
+    preSeeds.value.forEach((p: any, idx: number) => {
+      const seat = Number(p?.seedRank);
+      put(Number.isFinite(seat) && seat > 0 ? seat : idx + 1, p);
+    });
+  }
+  const atSeat = (seatNo: number) => bySeat.get(seatNo) ?? null;
+  const idOf = (v: any) => (v == null ? null : (v.competitorId ?? v.id ?? null));
   return Array.from({ length: pairCount }, (_, i) => {
-    const leftIdx = layout[2 * i] - 1;
-    const rightIdx = layout[2 * i + 1] - 1;
-    const left = leftIdx < count ? competitors.value[leftIdx] : null;
-    const right = rightIdx < count ? competitors.value[rightIdx] : null;
+    const left = atSeat(layout[2 * i]);
+    const right = atSeat(layout[2 * i + 1]);
     return {
       zone: i < half ? 'LEFT' : 'RIGHT',
       order: i % half,
       name: '8强',
       status: 'PENDING',
-      leftName: left?.name || '',
-      rightName: right?.name || '',
-      leftAvatar: avatarOf(left?.id),
-      rightAvatar: avatarOf(right?.id),
+      leftName: left?.name || '待定',
+      rightName: right?.name || '待定',
+      leftAvatar: avatarOf(idOf(left)),
+      rightAvatar: avatarOf(idOf(right)),
       leftScore: '',
       rightScore: '',
       leftWin: false,
       rightWin: false,
+      leftBye: false,
       rightBye: false,
       leftSrc: '',
       rightSrc: ''

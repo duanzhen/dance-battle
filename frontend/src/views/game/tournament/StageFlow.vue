@@ -524,7 +524,7 @@ const defaultConfigs: Record<StageMode, any> = {
   [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
   [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
   [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
-  [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
+  [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: true, publishMode: 'AUTO' },
   [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },
   [StageMode.RANK]: {
     mode: 'RANK',
@@ -782,7 +782,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
       [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
       [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
-      [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: false },
+      [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: true, publishMode: 'AUTO' },
       [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },
       [StageMode.RANK]: {
         mode: 'RANK',

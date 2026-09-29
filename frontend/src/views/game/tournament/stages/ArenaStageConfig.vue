@@ -26,6 +26,26 @@
             <div class="text-lg font-medium text-white mb-1">{{ config.format }}</div>
           </div>
 
+          <!-- 判罚方式 -->
+          <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+            <div class="text-xs text-neutral-500 mb-2">判罚方式</div>
+            <div class="text-sm text-neutral-200">
+              {{
+                config.publishMode === 'DIRECTOR'
+                  ? '导播台直接判定（裁判端不显示场次，MC 在手机导播台选胜负/平局）'
+                  : '裁判判罚（裁判端录入，判完即结算）'
+              }}
+            </div>
+          </div>
+
+          <!-- 平局计分 -->
+          <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+            <div class="text-xs text-neutral-500 mb-2">平局计分</div>
+            <div class="text-sm text-neutral-200">
+              {{ config.drawBothScore === false ? '平局不加分（只有胜场记 1 分）' : '平局双方各 +1 分' }}
+            </div>
+          </div>
+
           <!-- 赛制概览 -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">赛制概览</div>
@@ -88,16 +108,37 @@
               </select>
             </div>
 
+            <!-- 判罚方式:与淘汰赛同一套 publishMode 机制 -->
+            <div>
+              <label class="text-xs text-neutral-500 mb-2 block">判罚方式</label>
+              <select
+                v-model="config.publishMode"
+                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                @change="handleUpdate"
+              >
+                <option value="AUTO">裁判判罚（裁判端录入，判完即结算）</option>
+                <option value="DIRECTOR">导播台直接判定（MC 在导播台选胜负/平局）</option>
+              </select>
+              <p class="text-[11px] text-neutral-500 mt-2">
+                导播台判定：擂台赛裁判端不再显示场次，每场由 MC 在手机导播台点「左胜 / 平 / 右胜」直接判定；判完再点「开始下一场」，
+                胜者守擂、败者排到队尾。
+              </p>
+            </div>
+
             <!-- 积分规则 -->
             <div>
-              <label class="text-xs text-neutral-500 mb-2 block">积分规则</label>
-              <div class="bg-black border border-neutral-700 rounded-lg p-4">
-                <label class="flex items-center justify-between">
-                  <span class="text-sm text-neutral-300">平局双方各加 1 分（双方下场时）</span>
-                  <input type="checkbox" v-model="config.drawBothScore" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
-                </label>
-                <p class="text-[11px] text-neutral-500 mt-2">默认关闭：只有胜场记 1 分；开启后平局双方各记 1 分</p>
-              </div>
+              <label class="text-xs text-neutral-500 mb-2 block">平局计分</label>
+              <select
+                v-model="config.drawBothScore"
+                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
+                @change="handleUpdate"
+              >
+                <option :value="true">平局双方各 +1 分（默认）</option>
+                <option :value="false">平局不加分（只有胜场记 1 分）</option>
+              </select>
+              <p class="text-[11px] text-neutral-500 mt-2">
+                平局时擂主与挑战者都要下场排队尾,本项只决定是否给双方各记 1 分
+              </p>
             </div>
 
             <!-- 预览 -->
@@ -140,7 +181,10 @@ const currentMode = computed(() => props.mode || ConfigMode.INIT);
 const config = ref<any>({
   scale: 8,
   format: 'BO1',
-  drawBothScore: false
+  // 平局计分:默认「双方各 +1 分」;显式设 false 才回到"平局都不加分"
+  drawBothScore: true,
+  // 判罚方式:AUTO=裁判判罚 / DIRECTOR=导播台直接判定(与淘汰赛同一套 publishMode)
+  publishMode: 'AUTO'
 });
 
 // 攻擂人数 = 进入总人数 - 1(擂主)

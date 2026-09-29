@@ -709,10 +709,14 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (OutcomeStatusEnum.WITHDRAWN.getCode().equals(comp.getOutcomeStatus())) {
             throw new ServiceException("该选手已永久弃权,无法临时弃权");
         }
-        // 临时弃权 = 排到队尾:记录跳过标记(固定排在队列末尾,后续仍参与排队/对阵/排名)
+        // 临时弃权 = 跳过本轮:记录跳过标记(排到队尾一次),之后按正常轮转继续参与排队/对阵/排名。
+        // 标记里带上"当时的场次数",队列回放时才能把这次挪位放回它在时间线上的位置——
+        // 否则每次重算都把他追加到末尾,人就再也上不了场了。
+        long matchCount = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId));
         TCompetitor upd = new TCompetitor();
         upd.setId(competitorId);
-        upd.setRemark(arenaQueueSupport.appendArenaSkipMark(comp.getRemark()));
+        upd.setRemark(arenaQueueSupport.appendArenaSkipMark(comp.getRemark(), matchCount));
         competitorMapper.updateById(upd);
         // 补位:同一场次内把临时弃权选手替换为队列下一位(不开新场)
         replaceArenaMatchParticipant(stageId, competitorId);

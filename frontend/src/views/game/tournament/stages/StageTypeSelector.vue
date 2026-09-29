@@ -301,7 +301,8 @@ const initConfig = () => {
       config.value = {
         scale: 8,
         format: 'BO1',
-        drawBothScore: false
+        drawBothScore: true,
+        publishMode: 'AUTO'
       } as ArenaConfig;
       break;
     case StageMode.FREE_MATCH:

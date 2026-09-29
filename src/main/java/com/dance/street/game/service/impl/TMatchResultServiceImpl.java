@@ -254,7 +254,9 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         boolean isKnockoutStandard = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())
             && MatchModeEnum.STANDARD.equals(mode);
         String publishMode = readPublishMode(stage);
-        if (isKnockoutStandard && bo.getRefereeId() != null
+        // 擂台赛同样是"单场判胜负"(STANDARD),导播台判定模式下裁判端不显示场次,这里再兜一道
+        boolean isArenaStandard = isArena && MatchModeEnum.STANDARD.equals(mode);
+        if ((isKnockoutStandard || isArenaStandard) && bo.getRefereeId() != null
             && "DIRECTOR".equalsIgnoreCase(publishMode)) {
             throw new ServiceException("本场由导播台判定,裁判无需判罚");
         }
@@ -680,12 +682,17 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     }
 
     /**
-     * 结果公布模式:读淘汰赛 ruleConfig.knockout.publishMode,默认 AUTO。
+     * 结果公布模式:淘汰赛读 ruleConfig.knockout.publishMode;擂台赛等没有 knockout 段的赛制
+     * 读 ruleConfig 顶层的 publishMode(擂台赛配置里选「导播台直接判定」即写在这里)。
+     * 都未配置时默认 AUTO。
      */
     private String readPublishMode(TStage stage) {
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
         if (rc != null && rc.getKnockout() != null && StringUtils.isNotBlank(rc.getKnockout().getPublishMode())) {
             return rc.getKnockout().getPublishMode();
+        }
+        if (rc != null && StringUtils.isNotBlank(rc.getPublishMode())) {
+            return rc.getPublishMode();
         }
         return "AUTO";
     }

@@ -738,7 +738,15 @@ public class TStageServiceImpl implements ITStageService {
         boolean hasConfirmedAdvancer = own.stream().anyMatch(c -> c.getSourceCompetitorId() != null);
         if (!own.isEmpty() && (initialized || hasConfirmedAdvancer)) {
             vo.setStatus("GENERATED");
-            vo.setSeededCompetitors(own.stream().map(c -> toPreSeed(c, (long) own.indexOf(c) + 1, null)).toList());
+            // 座位 = seedRank(座位号),不能用数组下标占位:中间态移出/轮空会在座位上留空洞,
+            // 按下标压紧后,对战树(含擂台赛名单)显示的位置会和中间态看到的不一致
+            List<PreBracketVo.PreSeed> generated = new ArrayList<>(own.size());
+            for (int i = 0; i < own.size(); i++) {
+                TCompetitor c = own.get(i);
+                Long seat = c.getSeedRank() != null && c.getSeedRank() > 0 ? c.getSeedRank() : (long) i + 1;
+                generated.add(toPreSeed(c, seat, null));
+            }
+            vo.setSeededCompetitors(generated);
             return vo;
         }
 
@@ -747,11 +755,15 @@ public class TStageServiceImpl implements ITStageService {
             vo.setStatus("NO_PREV");
             return vo;
         }
-        // 预排用于 淘汰赛/海选/排名赛 → 淘汰赛;小组等其他赛段间不做预排
-        if (!StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())
-            || (!StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())
-                && !StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
-                && !StageModeEnum.RANK.getCode().equals(prev.getStageMode()))) {
+        // 预排用于 淘汰赛/海选/排名赛 → 淘汰赛;擂台赛段也要预排——对战树控件绑定擂台赛段后,
+        // 要在还没进入擂台赛时就显示"目前谁进来了"(名单写入前显示预排晋级者)。
+        // 小组等其他赛段间不做预排。
+        boolean targetKnockout = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode());
+        boolean targetArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
+        boolean prevSupportsPreview = StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())
+            || StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
+            || StageModeEnum.RANK.getCode().equals(prev.getStageMode());
+        if ((!targetKnockout && !targetArena) || (targetKnockout && !prevSupportsPreview)) {
             vo.setStatus("UNSUPPORTED");
             return vo;
         }
@@ -854,6 +866,11 @@ public class TStageServiceImpl implements ITStageService {
         }
     vo.setSeededCompetitors(seeds);
         vo.setStatus("PREVIEW");
+
+        // 擂台赛段没有对阵树:只返回"谁进来了"的座位名单,不生成预排配对
+        if (targetArena) {
+            return vo;
+        }
 
         List<PreBracketVo.PrePair> pairList = new ArrayList<>();
         // 配对模式:与生成对阵同一口径(显式配置优先;种子来自名次则默认种子摆位)

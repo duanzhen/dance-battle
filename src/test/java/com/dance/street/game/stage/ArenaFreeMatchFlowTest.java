@@ -233,6 +233,201 @@ class ArenaFreeMatchFlowTest {
             "弃权者不应出现在队列中");
     }
 
+    /**
+     * 临时弃权只跳过一轮:该选手排到队尾后仍会回到轮转队列上场比赛。
+     *
+     * <p>回归:旧实现每次重算队列都把弃权者摘出队列、再追加到末尾,而标记永不过期,
+     * 导致被临时弃权的人永远排在队尾、再也上不了场。</p>
+     */
+    @Test
+    void arenaTempWithdrawSkipsOneRoundThenReturns() {
+        Long tid = newTournament("擂台临时弃权回归");
+        TStageVo stage = newStage(tid, "擂台赛", "ARENA", 4, 1, arenaRule());
+        List<Long> ids = new java.util.ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            ids.add(insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i));
+        }
+        Long skipped = ids.get(1);
+
+        lifecycleService.startStage(stage.getId());
+        TMatch first = matchesOf(stage.getId()).get(0);
+        assertEquals(skipped, realParticipants(first.getId()).get(1).getCompetitorId(),
+            "被临时弃权的应是队次(挑战者)");
+
+        lifecycleService.tempWithdrawArenaCompetitor(stage.getId(), skipped);
+
+        ArenaOverviewVo now = lifecycleService.getArenaOverview(stage.getId());
+        assertEquals(skipped, now.getQueue().get(now.getQueue().size() - 1).getCompetitorId(),
+            "临时弃权当下应排到队尾");
+
+        boolean playedAgain = false;
+        for (int round = 0; round < 6 && !playedAgain; round++) {
+            TMatch gaming = matchesOf(stage.getId()).stream()
+                .filter(m -> StageConstants.MATCH_GAMING.equals(m.getStatus()))
+                .findFirst()
+                .orElse(null);
+            if (gaming == null) {
+                lifecycleService.startNextArenaMatch(stage.getId());
+                gaming = matchesOf(stage.getId()).stream()
+                    .filter(m -> StageConstants.MATCH_GAMING.equals(m.getStatus()))
+                    .findFirst()
+                    .orElseThrow();
+            }
+            playedAgain = realParticipants(gaming.getId()).stream()
+                .anyMatch(p -> skipped.equals(p.getCompetitorId()));
+            if (!playedAgain) {
+                finishInPlace(gaming.getId());
+            }
+        }
+        assertTrue(playedAgain, "临时弃权的选手应在若干场后重新上场,不能被永久钉在队尾");
+    }
+
+    /**
+     * 原定 8 人擂台、实到 7 人:擂台赛不生成对阵树,也就没有"第 8 个位置"要填,
+     * 直接按实际签到人数轮转即可正常进行(与淘汰赛不同,不会产生轮空场次)。
+     *
+     * <p>断言:队伍始终 7 人、6 场之内 7 人全部上过场、结算落 1..7 名(1 冠军 + 6 淘汰)。</p>
+     */
+    @Test
+    void arenaWithSevenOfPlannedEightRunsFullRotation() {
+        Long tid = newTournament("擂台8缺1");
+        TStageVo stage = newStage(tid, "擂台赛", "ARENA", 8, 1, arenaRule());
+        List<Long> ids = new java.util.ArrayList<>();
+        for (int i = 1; i <= 7; i++) {
+            ids.add(insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i));
+        }
+
+        lifecycleService.startStage(stage.getId());
+        assertEquals(7, lifecycleService.getArenaOverview(stage.getId()).getQueue().size(),
+            "队列应为实际签到的 7 人");
+
+        java.util.Set<Long> played = new java.util.HashSet<>();
+        // 每场都让挑战者胜,队列整体前移一位,6 场可让 7 人各上一次场
+        for (int round = 0; round < 6; round++) {
+            TMatch gaming = matchesOf(stage.getId()).stream()
+                .filter(m -> StageConstants.MATCH_GAMING.equals(m.getStatus()))
+                .findFirst()
+                .orElse(null);
+            if (gaming == null) {
+                lifecycleService.startNextArenaMatch(stage.getId());
+                gaming = matchesOf(stage.getId()).stream()
+                    .filter(m -> StageConstants.MATCH_GAMING.equals(m.getStatus()))
+                    .findFirst()
+                    .orElseThrow();
+            }
+            List<TMatchParticipant> parts = realParticipants(gaming.getId());
+            assertEquals(2, parts.size(), "擂台赛每场都是 2 人对决,不存在轮空");
+            played.add(parts.get(0).getCompetitorId());
+            played.add(parts.get(1).getCompetitorId());
+
+            SubmitResultBo bo = new SubmitResultBo();
+            bo.setMatchId(gaming.getId());
+            Map<Long, String> outcomes = new HashMap<>();
+            outcomes.put(parts.get(0).getCompetitorId(), "LOSS");
+            outcomes.put(parts.get(1).getCompetitorId(), "WIN");
+            bo.setOutcomes(outcomes);
+            matchResultService.submitResult(bo);
+
+            assertEquals(7, lifecycleService.getArenaOverview(stage.getId()).getQueue().size(),
+                "每场之后队列都不应丢人");
+        }
+        assertEquals(7, played.size(), "6 场之内 7 个人都应上过场");
+
+        lifecycleService.completeStage(stage.getId());
+        assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(stage.getId()).getStatus());
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
+            "擂台赛只产生 1 名冠军晋级");
+        assertEquals(6, countOutcome(stage.getId(), OutcomeStatusEnum.ELIMINATED.getCode()));
+
+        java.util.Set<Long> ranks = new java.util.TreeSet<>();
+        for (TCompetitor c : competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stage.getId()))) {
+            ranks.add(c.getFinalRank());
+        }
+        assertEquals(new java.util.TreeSet<>(java.util.List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L)), ranks,
+            "7 人应落 1..7 名且不重不漏");
+    }
+
+    /**
+     * 平局计分:默认「双方各 +1 分」;赛段配置显式 drawBothScore=false 时才回到"平局都不加分"。
+     *
+     * <p>回归:此前默认不加分,赛段配置里没写 drawBothScore 的赛事会被静默判成"平局白打"。</p>
+     */
+    @Test
+    void arenaDrawScoresBothByDefaultAndCanBeDisabled() {
+        // 默认:ruleConfig 里不写 drawBothScore → 平局双方各 +1
+        Long tid = newTournament("擂台平局默认加分");
+        TStageVo stage = newStage(tid, "擂台赛", "ARENA", 4, 1,
+            "{\"mode\":\"ARENA\",\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+        List<Long> ids = new java.util.ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            ids.add(insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i));
+        }
+        lifecycleService.startStage(stage.getId());
+        drawCurrentMatch(stage.getId());
+
+        ArenaOverviewVo byDefault = lifecycleService.getArenaOverview(stage.getId());
+        List<Long> firstPair = List.of(ids.get(0), ids.get(1));
+        for (ArenaOverviewVo.CompetitorInfo c : byDefault.getQueue()) {
+            int expected = firstPair.contains(c.getCompetitorId()) ? 1 : 0;
+            assertEquals(expected, c.getPoints(),
+                "默认平局双方各 +1 分,未上场的人 0 分(选手" + c.getCompetitorId() + ")");
+        }
+
+        // 显式关闭:drawBothScore=false → 平局都不加分
+        Long tid2 = newTournament("擂台平局不加分");
+        TStageVo stage2 = newStage(tid2, "擂台赛", "ARENA", 4, 1,
+            "{\"mode\":\"ARENA\",\"drawBothScore\":false,\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+        for (int i = 1; i <= 4; i++) {
+            insertPending(tid2, stage2.getId(), "选手" + i, String.valueOf(i), i);
+        }
+        lifecycleService.startStage(stage2.getId());
+        drawCurrentMatch(stage2.getId());
+
+        ArenaOverviewVo disabled = lifecycleService.getArenaOverview(stage2.getId());
+        assertTrue(disabled.getQueue().stream().allMatch(c -> c.getPoints() == null || c.getPoints() == 0),
+            "关闭平局加分后,平局双方都不得分");
+    }
+
+    /** 把当前进行中的对决判成平局(擂台赛不重赛,双方排队尾)。 */
+    private void drawCurrentMatch(Long stageId) {
+        TMatch gaming = matchesOf(stageId).stream()
+            .filter(m -> StageConstants.MATCH_GAMING.equals(m.getStatus()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("没有进行中的对决"));
+        SubmitResultBo bo = new SubmitResultBo();
+        bo.setMatchId(gaming.getId());
+        Map<Long, String> outcomes = new HashMap<>();
+        for (TMatchParticipant p : realParticipants(gaming.getId())) {
+            outcomes.put(p.getCompetitorId(), "DRAW");
+        }
+        bo.setOutcomes(outcomes);
+        matchResultService.submitResult(bo);
+    }
+
+    /** 原定 8 人名单全部到位、开赛前 1 人弃权:应按实到 7 人正常开赛。 */
+    @Test
+    void arenaWithOneWithdrawnBeforeStartRunsWithSeven() {
+        Long tid = newTournament("擂台8缺1弃权");
+        TStageVo stage = newStage(tid, "擂台赛", "ARENA", 8, 1, arenaRule());
+        List<Long> ids = new java.util.ArrayList<>();
+        for (int i = 1; i <= 8; i++) {
+            ids.add(insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i));
+        }
+        Long absent = ids.get(7);
+        lifecycleService.withdrawArenaCompetitor(stage.getId(), absent);
+
+        lifecycleService.startStage(stage.getId());
+        ArenaOverviewVo overview = lifecycleService.getArenaOverview(stage.getId());
+        assertEquals(7, overview.getQueue().size(), "1 人弃权后队列应为 7 人");
+        assertTrue(overview.getQueue().stream().noneMatch(q -> absent.equals(q.getCompetitorId())),
+            "弃权者不应出现在队列里");
+
+        TMatch first = matchesOf(stage.getId()).get(0);
+        assertEquals(StageConstants.MATCH_GAMING, first.getStatus());
+        assertEquals(2, realParticipants(first.getId()).size(), "开赛后应正常开出第一场 2 人对决");
+    }
+
     /** 自由对抗:开赛不生成对阵,由导播手动加场/删场,最后手动指定晋级者。 */
     @Test
     void freeMatchManualFlow() {

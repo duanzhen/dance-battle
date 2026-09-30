@@ -23,6 +23,8 @@ import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.domain.vo.TVisSceneVo;
 import com.dance.street.game.domain.vo.TVisWidgetVo;
 import com.dance.street.game.service.ITCompetitorService;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import com.dance.street.game.service.ITMatchParticipantService;
 import com.dance.street.game.service.ITMatchRefereeService;
 import com.dance.street.game.service.ITMatchService;
@@ -46,6 +48,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 大屏(投射页)公开数据接口。
@@ -55,8 +58,9 @@ import java.util.List;
  * 的读取接口({@code @SaCheckPermission}),在没有管理员 JWT 的机器上全部 401,而管理端
  * 响应拦截器见到 401 就弹「登录状态已过期」,把大屏整个挡住。</p>
  *
- * <p>这里把这批"本来就是给观众看"的数据单独收拢成一组 {@code @SaIgnore} 的只读接口:
- * 全部为查询、无写入,返回结构与对应的管理端接口一致(直接委托同一批 service),
+ * <p>这里把这批"本来就是给观众看"的数据单独收拢成一组 {@code @SaIgnore} 接口:
+ * 除倒计时状态回写({@code POST /widget/{id}/timer-state},只改 dataConfig 的
+ * endAt/remainMs 两个键)外全部为查询,返回结构与对应的管理端接口一致(直接委托同一批 service),
  * 前端大屏只依赖本控制器,和鉴权体系彻底解耦。赛事凭证(authKey)不在任何返回的 VO 里,
  * 因此开放这批只读数据不会泄露入台凭证。</p>
  *
@@ -88,6 +92,23 @@ public class ScreenController {
     @GetMapping("/scene/{id}")
     public R<TVisSceneVo> scene(@PathVariable("id") Long id) {
         return R.ok(visSceneService.queryById(id));
+    }
+
+    /**
+     * 倒计时状态回写(本控制器唯一的写入接口):请求体就是一段 JSON 补丁,合并进组件 dataConfig。
+     *
+     * <p>大屏是公开播放端、不带管理员 JWT,但现场的「开始/暂停」必须落库:否则刷新页面后
+     * 倒计时从头开始,现场对不上表。写入只允许 TIMER 组件、且只认 {@code endAt}/{@code remainMs}
+     * 两个键(组件配置本身就是 JSON,计划时长仍归组件属性),
+     * 因此开放这个窄接口不会让大屏拿到改动布局/内容的能力。</p>
+     *
+     * <p>示例:开始 {@code {"endAt":1699999999999,"remainMs":null}};暂停 {@code {"endAt":null,"remainMs":125000}}。</p>
+     */
+    @PostMapping("/widget/{id}/timer-state")
+    public R<Void> updateTimerState(@PathVariable("id") Long id,
+                                   @RequestBody(required = false) Map<String, Object> patch) {
+        visWidgetService.updateTimerState(id, patch);
+        return R.ok();
     }
 
     /** 场景下的控件列表 */

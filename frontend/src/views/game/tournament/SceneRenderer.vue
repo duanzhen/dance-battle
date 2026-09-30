@@ -34,6 +34,9 @@
           :is="componentMap[widgets.type]"
           :ref="(el: any) => setWidgetRef(el, widgets.id)"
           v-bind="widgetProps(widgets)"
+          :widget-id="widgets.type === 'TIMER' ? String(widgets.id) : undefined"
+          @update:endAt="(v: number | null) => persistWidgetConfig(widgets, { endAt: v })"
+          @update:remainMs="(v: number | null) => persistWidgetConfig(widgets, { remainMs: v })"
           class="w-full h-full"
         />
 
@@ -91,6 +94,7 @@ import ScoreboardWidget from './widgets/ScoreboardWidget.vue';
 import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
 import AuditionWidget from './widgets/AuditionWidget.vue';
+import { updateWidgetTimerState } from '@/api/game/screen';
 import html2canvas from 'html2canvas';
 
 const componentMap: Record<string, any> = {
@@ -159,6 +163,46 @@ const widgetProps = (widget: SceneElement) => {
     };
   } catch {
     return { tournamentId: props.tournamentId ?? route.query.id ?? route.query.tournamentId ?? undefined };
+  }
+};
+
+/**
+ * 组件在查看模式里改写自己的配置(目前只有倒计时:开始/暂停把 endAt / remainMs 写回配置)。
+ *
+ * <p>两条路径:</p>
+ * <ul>
+ *   <li>编辑器画布:有 store,走 store 更新,顺带把本地缓存改掉——否则之后在属性面板改别的属性时
+ *       会用旧的 dataConfig 覆盖,把 endAt 冲掉;</li>
+ *   <li>大屏投射页:公开播放端没有管理员 JWT、也没有 store,直接调大屏唯一的写接口
+ *       {@code /tournament/screen/widget/{id}/timer-state}(只允许改这两个键)。</li>
+ * </ul>
+ *
+ * <p>本地先改一份:同一帧内后续读取(以及组件重新挂载)能立刻看到新配置。</p>
+ */
+const persistWidgetConfig = async (widget: SceneElement, patch: Record<string, unknown>) => {
+  let config: Record<string, unknown> = {};
+  try {
+    config = JSON.parse(widget.dataConfig || '{}');
+  } catch {
+    config = {};
+  }
+  const next = { ...config, ...patch };
+  widget.dataConfig = JSON.stringify(next);
+  const inStore = !!store.scenes?.some((s: any) =>
+    (s.widgets || []).some((w: any) => String(w.id) === String(widget.id))
+  );
+  try {
+    if (inStore) {
+      await store.updateWidget(String(widget.id), { dataConfig: next });
+      return;
+    }
+    await updateWidgetTimerState(widget.id, {
+      endAt: (patch.endAt as number | null) ?? null,
+      remainMs: (patch.remainMs as number | null) ?? null
+    });
+  } catch (e) {
+    // 落库失败不回滚本地状态:现场优先"屏幕上是对的",下一次开始/暂停会再写一次
+    console.warn('[SceneRenderer] 组件配置回写失败', e);
   }
 };
 

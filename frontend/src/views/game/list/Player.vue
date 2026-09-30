@@ -18,6 +18,18 @@
           @change="handleFilterMode"
         />
 
+        <!-- 排序:默认顺序 / 按签到拿到的号码升序 -->
+        <el-segmented
+          v-model="sortMode"
+          :options="[
+            { label: '默认顺序', value: 'DEFAULT' },
+            { label: '按号码', value: 'NUMBER' }
+          ]"
+          size="small"
+          class="amber-segmented flex-shrink-0"
+          title="按签到拿到的号码升序排列(没号码的排在最后)"
+        />
+
         <el-input
           v-model="searchKeyword"
           :placeholder="displayMode === 'player' ? '搜索选手姓名' : '搜索参赛选手'"
@@ -342,6 +354,8 @@ const displayModeOptions = [
 ];
 const searchKeyword = ref('');
 const filterUncheckInOnly = ref(false);
+/** 排序方式:DEFAULT=后端顺序 / NUMBER=按签到拿到的号码升序 */
+const sortMode = ref<'DEFAULT' | 'NUMBER'>('NUMBER');
 const players = ref<PlayerVO[]>([]);
 const competitors = ref<CompetitorVO[]>([]);
 const loading = ref(false);
@@ -397,6 +411,14 @@ const dragOver = ref(false);
 let dragDepth = 0;
 
 // 过滤后的选手列表
+/**
+ * 号码排序键:签到拿到的号码按数值升序(9 在 10 前面);没签到/号码非数字的排最后。
+ */
+const numberKeyOf = (number?: string | number | null): number => {
+  const n = parseInt(String(number ?? '').trim(), 10);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+};
+
 const filteredPlayers = computed(() => {
   let result = players.value;
 
@@ -409,6 +431,13 @@ const filteredPlayers = computed(() => {
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase().trim();
     result = result.filter((player) => player.name?.toLowerCase().includes(keyword));
+  }
+
+  // 按号码排序(号码来自签到结果 competitorVo.number);不改动源数组
+  if (sortMode.value === 'NUMBER') {
+    result = [...result].sort(
+      (a, b) => numberKeyOf(a.competitorVo?.number) - numberKeyOf(b.competitorVo?.number)
+    );
   }
 
   return result;
@@ -426,12 +455,12 @@ const filteredCompetitors = computed(() => {
     );
   }
 
-  // 按号码排序（转为数字）
-  return result.sort((a, b) => {
-    const numA = parseInt(a.number) || 0;
-    const numB = parseInt(b.number) || 0;
-    return numA - numB;
-  });
+  // 按号码排序(签到拿到的号码,数值升序);默认顺序时保持后端返回顺序
+  const list = [...result];
+  if (sortMode.value === 'NUMBER') {
+    list.sort((a, b) => numberKeyOf(a.number) - numberKeyOf(b.number));
+  }
+  return list;
 });
 
 // 加载选手列表

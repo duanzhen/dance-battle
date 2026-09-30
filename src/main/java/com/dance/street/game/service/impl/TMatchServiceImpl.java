@@ -29,9 +29,11 @@ import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITRefereeStageService;
+import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -63,6 +65,8 @@ public class TMatchServiceImpl implements ITMatchService {
     private final TRefereeMapper refereeMapper;
     private final TStageMapper stageMapper;
     private final ITRefereeStageService refereeStageService;
+    /** 海选晋级人数展示口径(与结算同一套) */
+    private final AuditionAdvanceInfoSupport auditionAdvanceInfoSupport;
 
     /**
      * 查询比赛场次
@@ -170,6 +174,8 @@ public class TMatchServiceImpl implements ITMatchService {
 
         // 公布模式 + 实时判罚投票
         fillPublishInfo(matches, byMatch);
+        // 海选:本场(圈/加赛)晋级人数 + 本赛段共晋级人数(导播台展示)
+        fillAuditionAdvanceInfo(matches);
         // 淘汰赛:本场各轮判罚明细(每轮参赛者取自 round_score,保底用场次左右位)
         fillKnockoutRoundVotes(matches, byMatch, nameById);
     }
@@ -424,14 +430,45 @@ public class TMatchServiceImpl implements ITMatchService {
 
     private String readPublishMode(TStage stage) {
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        if (rc != null && rc.getKnockout() != null && StringUtils.isNotBlank(rc.getKnockout().getPublishMode())) {
-            return rc.getKnockout().getPublishMode();
+        // 淘汰赛读 knockout.publishMode,擂台赛等读顶层 publishMode(统一在 RuleConfigHolder)
+        return rc == null ? "AUTO" : rc.resolvePublishMode();
+    }
+
+    /**
+     * 海选:给场次填「本场(本圈/加赛)晋级人数 / 本赛段共晋级人数 / 加赛轮次名」。
+     *
+     * <p>口径与结算一致(见 {@code AuditionAdvanceInfoSupport}):正式圈 = 本圈名额,
+     * 加赛 = 本圈剩余名额。导播台要在圈卡片上直接告诉 MC "这一场晋级几个人"。</p>
+     */
+    private void fillAuditionAdvanceInfo(List<TMatchVo> matches) {
+        if (matches == null || matches.isEmpty()) {
+            return;
         }
-        // 擂台赛等没有 knockout 段的赛制:公布/判定模式写在 ruleConfig 顶层
-        if (rc != null && StringUtils.isNotBlank(rc.getPublishMode())) {
-            return rc.getPublishMode();
+        List<Long> stageIds = matches.stream().map(TMatchVo::getStageId)
+            .filter(Objects::nonNull).distinct().toList();
+        if (stageIds.isEmpty()) {
+            return;
         }
-        return "AUTO";
+        for (TStage stage : stageMapper.selectByIds(stageIds)) {
+            if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+                continue;
+            }
+            List<TMatch> stageMatches = baseMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, stage.getId()));
+            Map<Long, Integer> advanceByMatch = auditionAdvanceInfoSupport.matchAdvanceCounts(stage, stageMatches);
+            int stageTotal = auditionAdvanceInfoSupport.stageAdvanceCount(stage);
+            Map<Long, TMatch> matchById = stageMatches.stream()
+                .collect(Collectors.toMap(TMatch::getId, m -> m, (a, b) -> a));
+            for (TMatchVo vo : matches) {
+                if (!stage.getId().equals(vo.getStageId())) {
+                    continue;
+                }
+                vo.setStageAdvanceCount(stageTotal);
+                vo.setAdvanceCount(advanceByMatch.getOrDefault(vo.getId(), 0));
+                TMatch m = vo.getId() == null ? null : matchById.get(vo.getId());
+                vo.setTiebreakerRound(m == null ? null : auditionAdvanceInfoSupport.tiebreakerRoundName(m));
+            }
+        }
     }
 
     /**

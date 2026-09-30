@@ -1359,6 +1359,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         appendParticipantWithRound(target, competitorId);
         log.info("海选/排名赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
+        // 开赛后的补签到:必须推给该圈裁判,否则裁判端横向选手列表里看不到刚加的人
+        // (前端收到后会重新拉取名单;只推赛事事件通道的话手机端收不到)
+        refereeSseNotifier.notifyMatch(stageId, target.getId(), "competitors");
     }
 
     @Override
@@ -1420,6 +1423,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         removeParticipantWithRound(source, competitorId);
         appendParticipantWithRound(target, competitorId);
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
+        refereeSseNotifier.notifyMatch(stageId, target.getId(), "competitors");
+        if (source.getId() != null && !source.getId().equals(target.getId())) {
+            refereeSseNotifier.notifyMatch(stageId, source.getId(), "competitors");
+        }
         log.info("海选/排名赛段[{}]编辑签到:参赛方[{}]从场次[{}]改入场次[{}]",
             stageId, competitorId, source.getId(), target.getId());
     }
@@ -1455,6 +1462,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         if (removed) {
             tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
+            refereeSseNotifier.notifyStage(stageId, "competitors");
             log.info("海选/排名赛段[{}]解除签到:参赛方[{}]已移出圈场次", stageId, competitorId);
         }
     }

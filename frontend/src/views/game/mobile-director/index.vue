@@ -213,8 +213,14 @@
         </div>
 
         <div v-if="matches.length > 0" class="mt-3">
-          <h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2 px-1">
+         <h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2 px-1">
             {{ currentStage?.stageMode === 'AUDITION' ? '海选评分' : '场次' }}
+            <span
+              v-if="currentStage?.stageMode === 'AUDITION' && auditionStageAdvanceCount > 0"
+              class="ml-2 text-amber-400 normal-case tracking-normal"
+            >
+              本赛段共晋级 {{ auditionStageAdvanceCount }} 人
+            </span>
           </h4>
           <!-- 淘汰赛:左红右蓝指示点,与下方选手名字列对齐 -->
           <div v-if="currentStage?.stageMode !== 'AUDITION'" class="flex items-center gap-2 mb-1.5 px-1">
@@ -230,7 +236,13 @@
           <div v-if="currentStage?.stageMode === 'AUDITION'" class="space-y-2">
             <div v-for="match in matches" :key="match.id" class="bg-neutral-900 rounded-lg border border-neutral-800 p-3">
               <div class="flex items-center justify-between mb-2">
-                <span class="text-[9px] text-neutral-500">{{ match.name }}</span>
+                <span class="text-[9px] text-neutral-500">
+                  {{ match.name }}
+                  <!-- 海选:本圈/本次加赛晋级几人(加赛显示二海/三海…) -->
+                  <span v-if="match.advanceCount > 0" class="text-amber-400 font-bold">
+                    · {{ match.tiebreakerRound ? `${match.tiebreakerRound}晋级 ${match.advanceCount} 人` : `晋级 ${match.advanceCount} 人` }}
+                  </span>
+                </span>
                 <span
                   class="text-[8px] px-1.5 py-0.5 rounded"
                   :class="{
@@ -831,6 +843,10 @@ interface MatchInfo {
   winnerName?: string;
   publishMode?: string;
   pendingPublish?: boolean;
+  /** 海选:本场(本圈/加赛)晋级人数 / 本赛段共晋级人数 / 加赛轮次名(二海/三海…) */
+  advanceCount?: number;
+  stageAdvanceCount?: number;
+  tiebreakerRound?: string;
   leftVotes?: number;
   rightVotes?: number;
   drawVotes?: number;
@@ -890,6 +906,8 @@ const canComplete = computed(() => {
 const hasGamingMatch = computed(() => matches.value.some((m) => m.status === 'GAMING'));
 /** 当前赛段是否由导播台直接判定(淘汰赛/擂台赛共用 publishMode=DIRECTOR) */
 const isDirectorJudge = computed(() => matches.value.some((m) => m.publishMode === 'DIRECTOR'));
+/** 海选:本赛段计划晋级总人数(取自场次上的同口径字段) */
+const auditionStageAdvanceCount = computed(() => Number(matches.value[0]?.stageAdvanceCount) || 0);
 /** 临时弃权(擂台赛):按钮唤起弹窗,选择哪位选手本轮跳过(排到队尾,后续仍参与排名) */
 // 自由对抗:本赛段选手(选人对战 / 勾选晋级)
 const isFreeMatchStage = computed(() => currentStage.value?.stageMode === 'FREE_MATCH');
@@ -1020,6 +1038,9 @@ const loadMatchesForStage = async (stageId: string) => {
       winnerName: m.winnerName || '',
       publishMode: m.publishMode || 'AUTO',
       pendingPublish: !!m.pendingPublish,
+      advanceCount: m.advanceCount ?? 0,
+      stageAdvanceCount: m.stageAdvanceCount ?? 0,
+      tiebreakerRound: m.tiebreakerRound || '',
       leftVotes: m.leftVotes ?? 0,
       rightVotes: m.rightVotes ?? 0,
       drawVotes: m.drawVotes ?? 0,

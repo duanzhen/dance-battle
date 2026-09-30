@@ -32,10 +32,16 @@ import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITPlayerService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
+import com.dance.street.game.service.ITRefereeStageService;
+import com.dance.street.game.service.RefereeSseNotifier;
+import org.dromara.common.sse.core.TournamentEventSseEmitterManager;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -44,6 +50,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -69,6 +76,50 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AuditionLateCheckInTest {
 
     private static final String DB_PATH = "target/audition-late-check-in.db";
+
+    /**
+     * 记录裁判通道推送的通知器替身(与 PlayerProfileSseNotifyTest 同一手法:子类观测,不引 Mockito)。
+     *
+     * <p>断言口径:补签到有没有推给"这一圈"的裁判——手机裁判端只在收到推送时才重新拉名单。</p>
+     */
+    static class RecordingRefereeNotifier extends RefereeSseNotifier {
+
+        final List<String> events = new CopyOnWriteArrayList<>();
+
+        RecordingRefereeNotifier(ITRefereeStageService refereeStageService,
+                                 TournamentEventSseEmitterManager tournamentEventSseEmitterManager,
+                                 TStageMapper stageMapper,
+                                 TMatchMapper matchMapper,
+                                 TMatchRefereeMapper matchRefereeMapper) {
+            super(refereeStageService, tournamentEventSseEmitterManager, stageMapper, matchMapper, matchRefereeMapper);
+        }
+
+        @Override
+        public void notifyStage(Long stageId, String type) {
+            events.add(stageId + "/-/ " + type);
+            super.notifyStage(stageId, type);
+        }
+
+        @Override
+        public void notifyMatch(Long stageId, Long matchId, String type) {
+            events.add(stageId + "/" + matchId + "/ " + type);
+            super.notifyMatch(stageId, matchId, type);
+        }
+    }
+
+    @TestConfiguration
+    static class RefereeNotifierRecorderConfig {
+
+        @Bean
+        @Primary
+        RecordingRefereeNotifier recordingRefereeNotifier(ITRefereeStageService refereeStageService,
+                                                          TournamentEventSseEmitterManager manager,
+                                                          TStageMapper stageMapper,
+                                                          TMatchMapper matchMapper,
+                                                          TMatchRefereeMapper matchRefereeMapper) {
+            return new RecordingRefereeNotifier(refereeStageService, manager, stageMapper, matchMapper, matchRefereeMapper);
+        }
+    }
 
     @DynamicPropertySource
     static void sqliteProperties(DynamicPropertyRegistry registry) {
@@ -110,6 +161,8 @@ class AuditionLateCheckInTest {
     private ITPlayerService playerService;
     @Autowired
     private ITMatchResultService matchResultService;
+    @Autowired
+    private RecordingRefereeNotifier refereeNotifier;
 
     /** 开赛后补签到:落在指定圈、不影响其他圈、并且拿得到轮次(裁判能打分)。 */
     @Test
@@ -141,6 +194,35 @@ class AuditionLateCheckInTest {
         assertEquals(1, participantCount(circle2, c4));
         assertEquals("1", number(c1));
         assertEquals(3, competitorCount(stage.getId()), "赛段内应有 3 名参赛方(2 名既有 + 1 名迟到)");
+    }
+
+    /**
+     * 开赛后补签到要推给该圈裁判(SSE),裁判端收到后重新拉取名单才能看到刚签到的人。
+     *
+     * <p>回归:补签到此前只广播"赛事事件"通道(管理端/大屏订阅),手机裁判端订阅的是
+     * 裁判通道,于是新签到的人在裁判端横向列表里一直不出现,只能手动刷新。</p>
+     */
+    @Test
+    void lateCheckInNotifiesCircleReferee() {
+        Long tid = newTournament("补签到推送裁判端");
+        TStageVo stage = startAudition(tid, new int[]{1, 1});
+        List<TMatch> circles = circlesOf(stage.getId());
+        Long circle1 = circles.get(0).getId();
+        Long circle2 = circles.get(1).getId();
+        putCompetitor(tid, stage, circle1, "老选手1", "1");
+        putCompetitor(tid, stage, circle2, "老选手4", "4");
+        bindRefereeToAllCircles(tid, stage.getId());
+        lifecycleService.startStage(stage.getId());
+
+        refereeNotifier.events.clear();
+        Long latePlayer = newPlayer(tid, "迟到者");
+        TPlayerVo vo = playerService.checkIn(checkInBo(latePlayer, "5", circle2));
+
+        assertNotNull(vo.getCompetitorId(), "补签到应成功");
+        assertTrue(refereeNotifier.events.contains(stage.getId() + "/" + circle2 + "/ competitors"),
+            "补签到应推给该圈裁判(带圈场次ID),实际: " + refereeNotifier.events);
+        assertFalse(refereeNotifier.events.contains(stage.getId() + "/" + circle1 + "/ competitors"),
+            "不该把其他圈也一起推,实际: " + refereeNotifier.events);
     }
 
     /** 迟到者与老选手同池竞争:分数高就能拿到晋级名额。 */

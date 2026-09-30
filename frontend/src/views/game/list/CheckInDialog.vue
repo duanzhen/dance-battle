@@ -100,7 +100,17 @@
 
       <!-- 号码选择 -->
       <div>
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">参赛号码</label>
+        <div class="flex items-center justify-between gap-2 mb-1.5">
+          <label class="block text-sm font-medium text-neutral-400">参赛号码</label>
+          <!-- 随机取号范围:默认就近(最小的 10 个空号内),取消勾选则在选手数量以内的全部空号里随机 -->
+          <label
+            class="flex items-center gap-1.5 text-[11px] text-neutral-400 cursor-pointer select-none"
+            title="勾选：只在当前最小的 10 个空号里随机（号码更连续）；不勾选：在选手数量以内的全部空号中随机"
+          >
+            <input type="checkbox" v-model="randomNearbyOnly" class="accent-amber-500 w-3.5 h-3.5" />
+            就近取号（最小 10 个空号）
+          </label>
+        </div>
         <div ref="slotListRef" class="space-y-1.5 max-h-64 overflow-y-auto pr-2 scrollbar-hide">
           <div
             v-for="slot in numberSlots"
@@ -239,6 +249,8 @@ const editing = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
 const playerCount = ref(0);
 const selectedSlot = ref<{ number: number; competitor: CompetitorVO | null } | null>(null);
+/** 随机取号范围(默认勾选):true=只在最小的 10 个空号里随机;false=选手数量以内的全部空号随机 */
+const randomNearbyOnly = ref(true);
 const playerName = ref('');
 const playerAvatar = ref('');
 const currentPlayer = ref<PlayerVO | null>(null);
@@ -547,15 +559,24 @@ const handleRandomSelect = () => {
     ElMessage.warning('没有可用的空闲号码');
     return;
   }
-  // 只在"已添加选手数量以内"的空闲号码里随机(最多随机到该数字);保留最小的 10 个号机制
-  let candidates = availableSlots.filter((slot) => slot.number <= playerCount.value);
-  if (candidates.length === 0) {
-    candidates = availableSlots;
+  let candidates: typeof availableSlots;
+  if (randomNearbyOnly.value) {
+    // 默认「就近」:号码列表已按号升序,取最小的 10 个空号随机,号码更连续(空号不足 10 个就全用)
+    let withinPlayerCount = availableSlots.filter((slot) => slot.number <= playerCount.value);
+    if (withinPlayerCount.length === 0) {
+      withinPlayerCount = availableSlots;
+    }
+    candidates = withinPlayerCount.slice(0, 10);
+  } else {
+    // 不勾选:在"已添加选手数量以内"的全部空闲号码里随机(没有符合条件的退回全部空号)
+    candidates = availableSlots.filter((slot) => slot.number <= playerCount.value);
+    if (candidates.length === 0) {
+      candidates = availableSlots;
+    }
   }
-  candidates = candidates.slice(0, 10);
-  const randomIndex = Math.floor(Math.random() * candidates.length);
-  selectedSlot.value = candidates[randomIndex];
-  ElMessage.success(`已随机抽取号码 ${candidates[randomIndex].number}`);
+  const picked = candidates[Math.floor(Math.random() * candidates.length)];
+  selectedSlot.value = picked;
+  ElMessage.success(`已随机抽取号码 ${picked.number}`);
 };
 
 const startEdit = () => {

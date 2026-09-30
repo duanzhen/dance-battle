@@ -688,13 +688,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
      */
     private String readPublishMode(TStage stage) {
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        if (rc != null && rc.getKnockout() != null && StringUtils.isNotBlank(rc.getKnockout().getPublishMode())) {
-            return rc.getKnockout().getPublishMode();
-        }
-        if (rc != null && StringUtils.isNotBlank(rc.getPublishMode())) {
-            return rc.getPublishMode();
-        }
-        return "AUTO";
+        // 淘汰赛读 knockout.publishMode,擂台赛等读顶层 publishMode(统一在 RuleConfigHolder)
+        return rc == null ? "AUTO" : rc.resolvePublishMode();
     }
 
     private String toResultJson(Map<Long, String> outcomes) {

@@ -37,6 +37,7 @@ import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.engine.common.PairingModeResolver;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
+import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.engine.generator.KnockoutGenerator;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
@@ -82,6 +83,8 @@ public class TStageServiceImpl implements ITStageService {
     private final ITStageRosterService rosterService;
     /** 赛段链遍历的唯一入口(以 next 链为事实源) */
     private final StageChain stageChain;
+    /** 赛段配置变化要推裁判端:判罚方式在「裁判判罚 ↔ 导播台判定」之间切换会改变裁判端界面 */
+    private final RefereeSseNotifier refereeSseNotifier;
 
     /**
      * 查询赛段流程
@@ -308,8 +311,35 @@ public class TStageServiceImpl implements ITStageService {
 
         baseMapper.updateById(patch);
 
+        // 判罚方式/打分口径等"裁判端界面相关"配置变了:推一次裁判通道,让已打开的裁判页
+        // 重新拉取 —— 否则「裁判判罚 ↔ 导播台判定」切换后,裁判页还停在原来的判罚界面上。
+        TStage updated = baseMapper.selectById(patch.getId());
+        if (refereeFacingConfigChanged(oldStage, updated)) {
+            refereeSseNotifier.notifyStage(patch.getId(), "config");
+        }
+
         // 返回库中整行:prev/next 是展示列,链由 StageChain 维护,回读才是最新口径
-        return MapstructUtils.convert(baseMapper.selectById(patch.getId()), TStageVo.class);
+        return MapstructUtils.convert(updated, TStageVo.class);
+    }
+
+    /**
+     * 影响裁判端界面的配置是否变化:判罚方式(裁判/导播台)、满分、打分口径。
+     *
+     * <p>只看这几项而不是整段 JSON:配置保存会做归一化(补字段、调顺序),
+     * 按字符串比较会对每次保存都推一次无意义的刷新。</p>
+     */
+    private boolean refereeFacingConfigChanged(TStage oldStage, TStage updated) {
+        if (oldStage == null || updated == null) {
+            return false;
+        }
+        RuleConfigHolder oldRc = RuleConfigParser.parse(oldStage.getRuleConfig());
+        RuleConfigHolder newRc = RuleConfigParser.parse(updated.getRuleConfig());
+        if (oldRc == null || newRc == null) {
+            return oldRc != newRc && !Objects.equals(oldStage.getRuleConfig(), updated.getRuleConfig());
+        }
+        return !Objects.equals(oldRc.resolvePublishMode(), newRc.resolvePublishMode())
+            || !Objects.equals(oldRc.getMaxScore(), newRc.getMaxScore())
+            || !Objects.equals(oldRc.getScoring(), newRc.getScoring());
     }
 
     /**

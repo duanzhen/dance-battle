@@ -75,4 +75,19 @@ public class RuleConfigHolder implements Serializable {
 
     /** 打分配置(决定每局如何判定胜负) */
     private ScoringConfig scoring;
+
+    /**
+     * 判罚/公布方式解析:淘汰赛写在 {@code knockout.publishMode},擂台赛等没有 knockout 段的赛制
+     * 写在顶层 {@code publishMode};都没配置时 AUTO。
+     *
+     * <p>裁判端"显示判罚界面 / 由导播台判定"、结算时是否走手动公布都按这个口径判断,
+     * 统一到一处避免各调用方读的位置不一致(此前擂台赛只读 knockout 段,永远拿到 AUTO)。</p>
+     */
+    public String resolvePublishMode() {
+        String nested = knockout == null ? null : knockout.getPublishMode();
+        if (nested != null && !nested.isBlank()) {
+            return nested;
+        }
+        return publishMode != null && !publishMode.isBlank() ? publishMode : "AUTO";
+    }
 }

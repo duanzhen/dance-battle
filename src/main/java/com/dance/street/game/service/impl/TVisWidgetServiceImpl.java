@@ -20,6 +20,10 @@ import org.dromara.common.sse.utils.TournamentSseMessageUtils;
 import org.dromara.common.core.exception.ServiceException;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import tools.jackson.databind.ObjectMapper;
+import com.dance.street.game.engine.common.SnowflakeJson;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.Objects;
@@ -57,6 +61,56 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
     @Override
     public TVisWidgetVo queryById(Long id){
         return baseMapper.selectVoById(id);
+    }
+
+    /** 倒计时状态允许回写的键:组件配置是 JSON,但只开放这两个计时键,避免大屏能改内容/布局 */
+    private static final List<String> TIMER_STATE_KEYS = List.of("endAt", "remainMs");
+
+    /**
+     * 按 JSON 补丁合并进倒计时组件的 dataConfig(白名单键:endAt / remainMs)。
+     *
+     * <p>这里绕开 {@link #updateByBo} 的"已锁定控件禁止编辑"保护是有意为之:锁定是防误拖布局,
+     * 而开始/暂停是现场操作,控件锁着也得能计时。</p>
+     */
+    @Override
+    public void updateTimerState(Long widgetId, Map<String, Object> patch) {
+        TVisWidget widget = baseMapper.selectById(widgetId);
+        if (widget == null) {
+            throw new ServiceException("组件不存在");
+        }
+        if (!"TIMER".equals(widget.getType())) {
+            throw new ServiceException("仅倒计时组件支持回写计时状态");
+        }
+        ObjectMapper mapper = SnowflakeJson.mapper();
+        Map<String, Object> config = new LinkedHashMap<>();
+        String raw = widget.getDataConfig();
+        if (StringUtils.isNotBlank(raw)) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parsed = mapper.readValue(raw, Map.class);
+                if (parsed != null) {
+                    config.putAll(parsed);
+                }
+            } catch (Exception e) {
+                // 配置坏了不阻塞计时:按空配置重建,计划时长等字段由组件属性兜底
+                log.warn("倒计时组件[{}]配置解析失败,按空配置重建: {}", widgetId, e.getMessage());
+            }
+        }
+        if (patch != null) {
+            for (String key : TIMER_STATE_KEYS) {
+                if (patch.containsKey(key)) {
+                    config.put(key, patch.get(key));
+                }
+            }
+        }
+        TVisWidget upd = new TVisWidget();
+        upd.setId(widgetId);
+        try {
+            upd.setDataConfig(mapper.writeValueAsString(config));
+        } catch (Exception e) {
+            throw new ServiceException("倒计时状态序列化失败: {}", e.getMessage());
+        }
+        baseMapper.updateById(upd);
     }
 
     /**

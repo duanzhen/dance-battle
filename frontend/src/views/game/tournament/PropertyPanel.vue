@@ -153,6 +153,8 @@
                   @update:milliseconds="handleUpdateProp('milliseconds', $event)"
                   @update:showTitle="handleUpdateProp('showTitle', $event)"
                   @update:showMilliseconds="handleUpdateProp('showMilliseconds', $event)"
+                  @update:endAt="handleUpdateProp('endAt', $event)"
+                  @update:remainMs="handleUpdateProp('remainMs', $event)"
                   @update:stageId="handleUpdateProp('stageId', $event)"
                   @update:matchId="handleUpdateProp('matchId', $event)"
                   @update:showCurrent="handleUpdateProp('showCurrent', $event)"

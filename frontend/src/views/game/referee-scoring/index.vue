@@ -96,7 +96,15 @@
         <div class="p-4">
           <!-- 淘汰赛/擂台赛:中部判罚区,按选中场次状态展示(参考海选布局) -->
           <div v-if="isKnockoutMode || isArenaMode" class="space-y-4">
-            <template v-if="selectedStageMatch">
+            <!-- 导播台判定:本赛段由 MC 直接判,裁判端不显示判罚界面(改判罚方式后会实时切换) -->
+            <div v-if="isDirectorMode" class="text-center py-16">
+              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+                <span class="text-amber-400 font-bold text-lg">🎤</span>
+              </div>
+              <p class="text-sm text-neutral-200 font-bold mb-1">本赛段由导播台判定</p>
+              <p class="text-xs text-neutral-500">裁判端无需判罚，胜负由 MC 在导播台直接判定</p>
+            </div>
+            <template v-else-if="selectedStageMatch">
               <!-- 进行中:可判罚 -->
               <template v-if="selectedStageMatch.status === 'GAMING'">
                 <div class="flex gap-2 overflow-x-auto no-scrollbar pt-1 pb-2">
@@ -250,6 +258,13 @@
                 {{ matchMode }} / Round {{ roundSeq }}
                 <span v-if="!isPerCompetitor && roundSeq > 1" class="text-amber-400 font-bold">· 平局加赛轮</span>
               </p>
+              <!-- 海选:本场(本圈/加赛)晋级几人 + 本赛段共晋级几人 -->
+              <p v-if="isAudition && advanceCount > 0" class="text-[10px] mt-1">
+                <span class="text-amber-400 font-bold">
+                  {{ tiebreakerRound ? `${tiebreakerRound}晋级 ${advanceCount} 人` : `本圈晋级 ${advanceCount} 人` }}
+                </span>
+                <span v-if="stageAdvanceCount > 0" class="text-neutral-500"> · 本赛段共晋级 {{ stageAdvanceCount }} 人</span>
+              </p>
             </div>
 
             <div v-if="participants.length === 0" class="text-center py-8">
@@ -258,7 +273,10 @@
 
             <div v-if="isPerCompetitor" class="space-y-4">
               <!-- 顶部横向选手列表 -->
-              <div class="no-scrollbar flex gap-2 overflow-x-auto pt-3 pb-2 pl-[calc(50%-40px)] pr-[calc(50%-40px)]">
+              <div
+                ref="chipStripRef"
+                class="no-scrollbar flex gap-2 overflow-x-auto pt-3 pb-2 pl-[calc(50%-40px)] pr-[calc(50%-40px)]"
+              >
                 <button
                   v-for="p in participants"
                   :key="p.competitorId"
@@ -604,7 +622,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Plus, Minus } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
@@ -693,6 +711,11 @@ const stageMatches = ref<MatchInfo[]>([]);
 const stageOverview = ref<any[]>([]);
 const voteProgress = ref('');
 const publishMode = ref('AUTO');
+/** 海选晋级人数:本场(本圈/加赛)晋级几人、本赛段共晋级几人 */
+const advanceCount = ref(0);
+const stageAdvanceCount = ref(0);
+/** 加赛轮次名(二海/三海…);非加赛场次为空 */
+const tiebreakerRound = ref('');
 const pendingPublish = ref(false);
 const rounds = ref<RoundInfo[]>([]);
 const currentRoundId = ref<number | null>(null);
@@ -712,6 +735,8 @@ const isAudition = computed(() => stageMode.value === 'AUDITION');
 /** 逐选手轮次:海选/排名赛,顶部选手卡片逐个评分 */
 const isPerCompetitor = computed(() => isAudition.value || stageMode.value === 'RANK');
 const isArenaMode = computed(() => stageMode.value === 'ARENA');
+/** 导播台判定模式:本赛段由 MC 直接判胜负/平局,裁判端不显示判罚界面 */
+const isDirectorMode = computed(() => publishMode.value === 'DIRECTOR');
 /** 淘汰赛判罚视图:STANDARD 且恰好两名参赛方(左/右) */
 const isKnockoutJudging = computed(() => {
   return isStandard.value && !isPerCompetitor.value && participants.value.length === 2;
@@ -765,6 +790,8 @@ const keypadDecimals = computed(() => 2);
 
 /** 选手卡片 DOM 引用(用于选中时自动居中滚动) */
 const chipEls = new Map<number, HTMLElement>();
+/** 顶部横向选手列表的滚动容器 */
+const chipStripRef = ref<HTMLElement | null>(null);
 const setChipRef = (cid: number | null) => (el: unknown) => {
   if (cid == null) return;
   if (el) {
@@ -774,14 +801,45 @@ const setChipRef = (cid: number | null) => (el: unknown) => {
   }
 };
 
+/**
+ * 把某位选手的卡片滚到横向列表的正中。
+ *
+ * <p>这里按容器几何显式计算,不用 {@code scrollIntoView({inline:'center'})}:
+ * 后者会把整条祖先滚动链一起滚,再叠加容器左右各 50% 的内边距(为了让首尾卡片也能居中),
+ * 在移动端(微信/Safari)常常只把目标滚到"刚好露出",「提交并下一个」之后下一位并不在屏幕中央。</p>
+ */
+const centerChip = (cid?: number | null) => {
+  if (cid == null) return;
+  const strip = chipStripRef.value;
+  const el = chipEls.get(cid);
+  if (!strip || !el) return;
+  const stripRect = strip.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  // 目标卡片中心与可视区中心的差值 = 还需要向右滚动的距离
+  const delta = elRect.left + elRect.width / 2 - (stripRect.left + stripRect.width / 2);
+  const max = Math.max(0, strip.scrollWidth - strip.clientWidth);
+  strip.scrollTo({ left: Math.max(0, Math.min(strip.scrollLeft + delta, max)), behavior: 'smooth' });
+};
+
+// 当前选手一变化就把他的卡片滚到正中:提交并下一个 / 加载后自动选中 / 选人跳转都覆盖
+watch(
+  () => keypadTarget.value?.competitorId ?? null,
+  (cid) => {
+    if (cid == null) return;
+    nextTick(() => centerChip(cid));
+  }
+);
+
 const selectParticipant = (p: Participant) => {
+  const sameTarget = keypadTarget.value?.competitorId === p.competitorId;
   keypadTarget.value = p;
   const cur = p.competitorId != null ? myTotal(p.competitorId) : 0;
   keypadValue.value = cur > 0 ? String(cur) : '';
   // 自动横向滚动,让当前选手卡片居中
   if (p.competitorId != null) {
     nextTick(() => {
-      chipEls.get(p.competitorId as number)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      // 再次点同一张卡时 watch 不会触发,这里补一次居中
+      if (sameTarget) centerChip(p.competitorId as number);
       // 聚焦分数输入框:桌面端可直接用物理键盘输入,触屏端为 readonly 不会弹出系统键盘
       // (仍可聚焦以便物理键盘输入);已有分数时全选便于覆盖
       scoreInputRef.value?.focus();
@@ -1196,6 +1254,9 @@ const applyData = (data: any) => {
   voteProgress.value = data?.voteProgress || '';
   publishMode.value = data?.publishMode || 'AUTO';
   pendingPublish.value = !!data?.pendingPublish;
+  advanceCount.value = Number(data?.advanceCount) || 0;
+  stageAdvanceCount.value = Number(data?.stageAdvanceCount) || 0;
+  tiebreakerRound.value = data?.tiebreakerRound || '';
   rounds.value = (data?.rounds || []).map((r: any) => ({
     id: r.id,
     roundSequence: r.roundSequence,
@@ -1327,6 +1388,9 @@ const mergeLive = (data: any) => {
   voteProgress.value = data?.voteProgress || '';
   publishMode.value = data?.publishMode || 'AUTO';
   pendingPublish.value = !!data?.pendingPublish;
+  advanceCount.value = Number(data?.advanceCount) || 0;
+  stageAdvanceCount.value = Number(data?.stageAdvanceCount) || 0;
+  tiebreakerRound.value = data?.tiebreakerRound || '';
   const liveParts = new Map<number, any>((data?.participants || []).map((p: any) => [p.competitorId, p]));
   participants.value.forEach((p) => {
     const lp = p.competitorId !== null ? liveParts.get(p.competitorId) : undefined;
@@ -1348,13 +1412,23 @@ const refresh = async () => {
     const nextRoundId = data?.currentRound?.id ?? null;
     const contextChanged =
       !stageId.value || !matchId.value || nextStageId !== stageId.value || nextMatchId !== matchId.value || nextRoundId !== currentRoundId.value;
-    // 上下文变化,或本地为空但服务端已有参赛方时,整页应用(避免残留空态)
+    // 名单是否变化(如开赛后补签到、换圈):mergeLive 只更新已有选手的分数/名次,
+    // 不会把新签到的人加进横向列表,所以名单一变就必须整页应用。
+    const serverIds = (data?.participants || []).map((p: any) => String(p.competitorId)).sort().join(',');
+    const localIds = participants.value.map((p: any) => String(p.competitorId)).sort().join(',');
+    const rosterChanged = serverIds !== localIds;
+    // 上下文变化、名单变化,或本地为空但服务端已有参赛方时,整页应用(避免残留空态)
     const serverHasParticipants = (data?.participants || []).length > 0;
-    if (contextChanged || (participants.value.length === 0 && serverHasParticipants)) {
+    if (contextChanged || rosterChanged || (participants.value.length === 0 && serverHasParticipants)) {
+      // 补签到这类"名单变化"不该把裁判从正在打分的人身上拽走:上下文没变时保留当前选中
+      const keepCid = contextChanged ? null : keypadTarget.value?.competitorId ?? null;
       applyData(data);
-      // 海选逐选手评分:上下文变化(如 一海→二海)后重新选中第一位未评选手,
-      // 与 loadData 口径一致(applyData 已清掉旧选中态,不补选的话页面会停在"未选中")。
-      if (isAudition.value) {
+      const keep = keepCid == null ? null : participants.value.find((p) => p.competitorId === keepCid);
+      if (keep) {
+        selectParticipant(keep);
+      } else if (isAudition.value) {
+        // 海选逐选手评分:上下文变化(如 一海→二海)后重新选中第一位未评选手,
+        // 与 loadData 口径一致(applyData 已清掉旧选中态,不补选的话页面会停在"未选中")。
         autoSelectNext(null);
       }
     } else {

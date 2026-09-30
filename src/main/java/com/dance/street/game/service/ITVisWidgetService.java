@@ -7,6 +7,7 @@ import org.dromara.common.mybatis.core.page.PageQuery;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 场景控件元素Service接口
@@ -23,6 +24,18 @@ public interface ITVisWidgetService {
      * @return 场景控件元素
      */
     TVisWidgetVo queryById(Long id);
+
+    /**
+     * 按 JSON 补丁回写倒计时组件的计时状态:补丁里的键合并进组件的 dataConfig。
+     *
+     * <p>大屏(公开播放端,无管理员 JWT)上按「开始/暂停」也要能落库,刷新后按 endAt 续跑,
+     * 所以单独开一个窄接口。写入白名单只有 {@code endAt}/{@code remainMs} 两个键
+     * (组件配置本身就是 JSON,计划时长 hours/minutes/seconds/milliseconds 仍归组件属性)。</p>
+     *
+     * @param widgetId 组件ID(必须是 TIMER 组件)
+     * @param patch    待合并的 JSON 键值(如 {"endAt":1699999999999,"remainMs":null});缺省键保持原值
+     */
+    void updateTimerState(Long widgetId, Map<String, Object> patch);
 
     /**
      * 分页查询场景控件元素列表

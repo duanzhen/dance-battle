@@ -126,6 +126,7 @@ import ColorInput from './common/ColorInput.vue';
 import SelectInput from './common/SelectInput.vue';
 import ButtonGroup from './common/ButtonGroup.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
+import { cssSize } from '@/utils/cssSize';
 
 const props = defineProps<{
   title?: string;
@@ -140,9 +141,15 @@ const props = defineProps<{
   showTitle?: boolean;
   showMilliseconds?: boolean;
   mode?: 'view' | 'edit';
+  /** 计时中:结束时间戳(ms)。开始计时时写入配置,刷新/换窗口后据此续跑 */
+  endAt?: number | string | null;
+  /** 暂停时保存的剩余毫秒(不改动 hours/minutes/seconds 的计划时长) */
+  remainMs?: number | string | null;
+  /** 组件ID:由 SceneRenderer 下发,用于把计时状态写回配置 */
+  widgetId?: string | number;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   'update:title': [value: string];
   'update:hours': [value: number];
   'update:minutes': [value: number];
@@ -154,6 +161,10 @@ defineEmits<{
   'update:textAlign': [value: 'left' | 'center' | 'right'];
   'update:showTitle': [value: boolean];
   'update:showMilliseconds': [value: boolean];
+  /** 计时状态回写:endAt=结束时间戳(暂停/重置传 null) */
+  'update:endAt': [value: number | null];
+  /** 剩量回写:暂停时保存剩余毫秒(计时中/重置传 null) */
+  'update:remainMs': [value: number | null];
 }>();
 
 // 内部选项状态
@@ -167,7 +178,7 @@ const handleOptionUpdate = (key: string, value: boolean) => {
   emit(`update:${key}` as any, value);
 };
 
-// 计算总倒计时时间(毫秒)
+// 计划时长(毫秒):配置里的 H/M/S/MS,任何计时操作都不改动它
 const totalTime = computed(() => {
   const h = (props.hours || 0) * 3600 * 1000;
   const m = (props.minutes || 0) * 60 * 1000;
@@ -181,6 +192,8 @@ const remainingTime = ref(totalTime.value);
 const isRunning = ref(false);
 
 let timerInterval: number | null = null;
+/** 当前这一轮的绝对结束时间戳(ms):计时中才有值,刷新后仍用它算剩余,不依赖 tick 次数 */
+let tickingEndAt = 0;
 
 // 格式化时间显示
 const formattedTime = computed(() => {
@@ -220,7 +233,8 @@ const formattedTime = computed(() => {
 
 // 计算样式
 const timerStyle = computed(() => ({
-  fontSize: props.fontSize || '48px',
+  // 同文本组件:数字字号必须补单位,否则 font-size 非法被浏览器忽略
+  fontSize: cssSize(props.fontSize, '48px'),
   color: remainingTime.value < 0 ? '#ef4444' : props.color || '#ffffff',
   fontWeight: props.fontWeight || 'bold',
   textAlign: props.textAlign || 'center',
@@ -229,30 +243,8 @@ const timerStyle = computed(() => ({
   overflowWrap: 'break-word' as const
 }));
 
-// 启动倒计时
-const startTimer = () => {
-  if (timerInterval) return;
-
-  isRunning.value = true;
-
-  const endTime = Date.now() + remainingTime.value;
-
-  timerInterval = window.setInterval(() => {
-    const now = Date.now();
-    remainingTime.value = endTime - now;
-
-    // 倒计时结束
-    if (remainingTime.value <= 0) {
-      remainingTime.value = 0;
-      stopTimer();
-      // 可以在这里触发倒计时结束事件
-      console.log('Timer finished!');
-    }
-  }, 10); // 10ms 更新一次以支持毫秒显示
-};
-
-// 停止倒计时
-const stopTimer = () => {
+/** 清掉本地 tick(不落库),用于"从配置重建状态"这类场景 */
+const clearTicking = () => {
   if (timerInterval) {
     clearInterval(timerInterval);
     timerInterval = null;
@@ -260,10 +252,65 @@ const stopTimer = () => {
   isRunning.value = false;
 };
 
-// 重置倒计时
+/** 按绝对结束时间推进:10ms 一跳只是为了显示毫秒,剩余时间始终由 endAt 推出来 */
+const tick = () => {
+  remainingTime.value = Math.max(0, tickingEndAt - Date.now());
+  if (remainingTime.value <= 0) {
+    // 走完:清掉结束时间(否则刷新后又会"续跑"一个已经结束的计时)
+    remainingTime.value = 0;
+    clearTicking();
+    emit('update:endAt', null);
+    emit('update:remainMs', 0);
+    console.log('Timer finished!');
+  }
+};
+
+const runUntil = (endAt: number) => {
+  clearTicking();
+  tickingEndAt = endAt;
+  remainingTime.value = Math.max(0, endAt - Date.now());
+  if (remainingTime.value <= 0) {
+    return;
+  }
+  isRunning.value = true;
+  timerInterval = window.setInterval(tick, 10); // 10ms 更新一次以支持毫秒显示
+};
+
+// 启动倒计时:结束时间写进配置,刷新/换设备后据此续跑
+const startTimer = () => {
+  if (isRunning.value) {
+    return;
+  }
+  // 剩余为 0(已走完/从配置恢复成 0)时,从计划时长重新开始
+  const remain = remainingTime.value > 0 ? remainingTime.value : totalTime.value;
+  if (remain <= 0) {
+    return;
+  }
+  runUntil(Date.now() + remain);
+  emit('update:endAt', tickingEndAt);
+  emit('update:remainMs', null);
+};
+
+/**
+ * 停止/暂停倒计时。
+ *
+ * <p>暂停要落两层配置:清掉 endAt(不再"正在计时"),并把<b>剩余</b>时长写进 remainMs,
+ * 刷新后接着走;计划时长(hours/minutes/seconds/milliseconds)不受影响。</p>
+ */
+const stopTimer = (persist = true) => {
+  clearTicking();
+  if (persist) {
+    emit('update:endAt', null);
+    emit('update:remainMs', Math.max(0, Math.round(remainingTime.value)));
+  }
+};
+
+// 重置倒计时:回到计划时长,并清掉计时/暂停状态
 const resetTimer = () => {
-  stopTimer();
+  stopTimer(false);
   remainingTime.value = totalTime.value;
+  emit('update:endAt', null);
+  emit('update:remainMs', null);
 };
 
 // 切换倒计时状态
@@ -274,6 +321,42 @@ const toggleTimer = () => {
     startTimer();
   }
 };
+
+/**
+ * 从配置恢复现场状态:
+ * 有未到期的 endAt = 正在计时 → 直接续跑;否则用暂停剩余时长;都没有则用计划时长。
+ */
+const restoreFromConfig = () => {
+  const end = Number(props.endAt);
+  if (props.endAt != null && Number.isFinite(end) && end > Date.now()) {
+    runUntil(end);
+    return;
+  }
+  const paused = Number(props.remainMs);
+  remainingTime.value = props.remainMs != null && Number.isFinite(paused)
+    ? Math.max(0, paused)
+    : totalTime.value;
+  clearTicking();
+};
+
+/** 配置里 endAt/remainMs 被外部改写(其它窗口开始/暂停):跟着同步,不回写避免回环 */
+watch(
+  () => [props.endAt, props.remainMs],
+  () => {
+    const end = Number(props.endAt);
+    if (props.endAt != null && Number.isFinite(end) && end > Date.now()) {
+      if (!isRunning.value || tickingEndAt !== end) {
+        runUntil(end);
+      }
+      return;
+    }
+    if (isRunning.value) {
+      const paused = Number(props.remainMs);
+      clearTicking();
+      remainingTime.value = Number.isFinite(paused) ? Math.max(0, paused) : remainingTime.value;
+    }
+  }
+);
 
 // 暴露方法
 defineExpose({
@@ -287,16 +370,25 @@ defineExpose({
 watch(
   () => [props.hours, props.minutes, props.seconds, props.milliseconds],
   () => {
+    const wasRunning = isRunning.value;
+    clearTicking();
     remainingTime.value = totalTime.value;
-    if (isRunning.value) {
-      stopTimer();
+    // 计划时长改了:计时状态一并复位(旧 endAt/暂停剩余都不能再留着),
+    // 原本在跑的就按新时长重新开始
+    emit('update:endAt', null);
+    emit('update:remainMs', null);
+    if (wasRunning) {
       startTimer();
     }
   }
 );
 
+// 挂载时按配置恢复:配置里有未到期的 endAt 说明本来就在计时,直接续跑
+onMounted(restoreFromConfig);
+
 onUnmounted(() => {
-  stopTimer();
+  // 卸载只清本地 tick,不回写:页面刷新本来就不会走这里,而切场景再回来要按 endAt 继续走
+  clearTicking();
 });
 </script>
 

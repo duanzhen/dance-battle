@@ -50,6 +50,21 @@ export const listVisWidget = (query?: VisWidgetQuery): AxiosPromise<VisWidgetVO[
   });
 };
 
+/**
+ * 回写倒计时组件状态(大屏唯一的写接口)。
+ * 大屏没有管理员 JWT,但现场「开始/暂停」必须落库,刷新后靠 endAt 续跑。
+ */
+export const updateWidgetTimerState = (
+  id: string | number,
+  data: { endAt: number | null; remainMs: number | null }
+): AxiosPromise<void> => {
+  return screenRequest({
+    url: `/tournament/screen/widget/${id}/timer-state`,
+    method: 'post',
+    data
+  });
+};
+
 // ==================== 赛事 / 赛段 ====================
 
 /** 赛事信息(名称、主题配色等) */

@@ -28,6 +28,7 @@ import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
+import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
 import com.dance.street.game.service.impl.settle.SettlementSupport;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -46,6 +47,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -103,6 +105,8 @@ class TiebreakerMatchTypeTest {
     private ITMatchResultService matchResultService;
     @Autowired
     private SettlementSupport settlementSupport;
+    @Autowired
+    private AuditionAdvanceInfoSupport auditionAdvanceInfoSupport;
 
     @Test
     void tiebreakerIsMarkedExplicitlyByMatchType() {
@@ -144,6 +148,53 @@ class TiebreakerMatchTypeTest {
             .set(TMatch::getRemark, "同分加赛,晋级名额,3人"));
         assertFalse(settlementSupport.isTiebreaker(matchMapper.selectById(circle.getId())),
             "加赛判定只看 match_type,不看备注文本");
+    }
+
+    /**
+     * 裁判端 / MC 导播台要显示的「晋级人数」必须与结算一致:
+     * 正式圈 = 本圈晋级名额;加赛(二海/三海…) = 本圈<b>剩余</b>名额。
+     *
+     * <p>回归:此前两端都没有这个数,MC 只能靠嘴问"这一圈进几个"。</p>
+     */
+    @Test
+    void advanceCountMatchesSettlementSemantics() {
+        Long tid = newTournament("晋级人数展示");
+        TStageVo stage = newAuditionStage(tid, "海选", 3);
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        Long refereeId = insertReferee(tid, "裁判A");
+        TMatch circle = circlesOf(stage.getId()).get(0);
+        bindRefereeToCircle(circle.getId(), refereeId, tid);
+        for (int i = 1; i <= 5; i++) {
+            putPlayerInCircle(tid, stage, "选手" + i, String.valueOf(i));
+        }
+        lifecycleService.startStage(stage.getId());
+
+        TStage fresh = stageMapper.selectById(stage.getId());
+        assertEquals(3, auditionAdvanceInfoSupport.stageAdvanceCount(fresh), "赛段共晋级 3 人");
+        assertEquals(3, auditionAdvanceInfoSupport.matchAdvanceCount(fresh, circle),
+            "正式圈 = 本圈晋级名额(3)");
+
+        // 3 个名额:9、8 分直接晋级,后三名 7 分同分争最后 1 个名额
+        List<TMatchParticipant> parts = participantsOf(circle.getId());
+        score(circle.getId(), parts.get(0).getCompetitorId(), new BigDecimal("9"));
+        score(circle.getId(), parts.get(1).getCompetitorId(), new BigDecimal("8"));
+        for (int i = 2; i < 5; i++) {
+            score(circle.getId(), parts.get(i).getCompetitorId(), new BigDecimal("7"));
+        }
+        lifecycleService.completeStage(stage.getId());
+
+        List<TMatch> tiebreakers = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId())
+            .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER));
+        assertEquals(1, tiebreakers.size(), "应创建 1 场二海");
+        TMatch tb = tiebreakers.get(0);
+        TStage settled = stageMapper.selectById(stage.getId());
+        assertEquals(1, auditionAdvanceInfoSupport.matchAdvanceCount(settled, tb),
+            "加赛只争本圈剩余名额(3-2=1)");
+        assertEquals("二海", auditionAdvanceInfoSupport.tiebreakerRoundName(tb),
+            "加赛轮次名应为人话标签");
+        assertNull(auditionAdvanceInfoSupport.tiebreakerRoundName(circle),
+            "正式圈不是加赛,轮次名为空");
     }
 
     /**

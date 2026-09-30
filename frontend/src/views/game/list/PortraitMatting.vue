@@ -32,6 +32,25 @@
         @touchend="handleTouchEnd"
       ></canvas>
 
+      <!-- 半透明人形轮廓:辅助把人物摆到统一位置(头/肩对齐),不挡拖拽缩放 -->
+      <svg
+        v-if="hasProcessedImg && showPoseGuide"
+        class="pose-guide"
+        viewBox="0 0 500 500"
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden="true"
+      >
+        <!-- 中轴虚线:辅助水平居中 -->
+        <line class="pose-guide-axis" x1="250" y1="24" x2="250" y2="476" />
+        <!-- 头:占画面上方约 1/3,统一各选手的头部位置 -->
+        <ellipse class="pose-guide-shape" cx="250" cy="128" rx="64" ry="76" />
+        <!-- 颈 + 肩 + 胸部:头底接脖子,肩线落在画面中部,到胸部收住(不铺到底) -->
+        <path
+          class="pose-guide-shape"
+          d="M250 196 C268 196 280 208 282 226 L286 286 C340 312 386 350 398 390 C360 404 140 404 102 390 C114 350 160 312 214 286 L218 226 C220 208 232 196 250 196 Z"
+        />
+      </svg>
+
       <div v-if="!hasProcessedImg" class="placeholder">
         <div class="placeholder-icon"><Upload :size="48" /></div>
         <div class="placeholder-text">选择图片</div>
@@ -47,13 +66,25 @@
       <button v-if="hasProcessedImg" type="button" class="clear-btn" title="移除照片" @click.stop="clearImage">
         <X :size="16" />
       </button>
+
+      <!-- 左上角:对齐轮廓显隐开关 -->
+      <button
+        v-if="hasProcessedImg"
+        type="button"
+        class="guide-btn"
+        :class="{ 'is-off': !showPoseGuide }"
+        :title="showPoseGuide ? '隐藏对齐轮廓' : '显示对齐轮廓'"
+        @click.stop="showPoseGuide = !showPoseGuide"
+      >
+        <User :size="16" />
+      </button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, watch, onMounted, getCurrentInstance } from 'vue';
-import { Upload, X } from 'lucide-vue-next';
+import { Upload, User, X } from 'lucide-vue-next';
 import { acquireSelfieSegmentation } from '@/utils/selfieSegmentation';
 import request from '@/utils/request';
 import { globalHeaders } from '@/utils/request';
@@ -81,6 +112,8 @@ const isProcessing = ref(false);
 const isUploading = ref(false);
 const isFileDragging = ref(false);
 const hasProcessedImg = ref(false);
+/** 对齐轮廓(半透明人形)显隐:默认开启,便于把人物摆到统一位置 */
+const showPoseGuide = ref(true);
 const modelSelection = ref(1);
 
 // 图片变换状态
@@ -735,6 +768,61 @@ canvas {
 
 .clear-btn:hover {
   background: rgba(220, 38, 38, 0.85);
+}
+
+/* 半透明人形轮廓:盖在画布之上但不吃事件,拖拽/缩放照常 */
+.pose-guide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.pose-guide-shape {
+  fill: rgba(255, 255, 255, 0.16);
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 3;
+  stroke-dasharray: 12 10;
+  stroke-linejoin: round;
+}
+
+.pose-guide-axis {
+  stroke: rgba(255, 255, 255, 0.26);
+  stroke-width: 2;
+  stroke-dasharray: 8 12;
+}
+
+/* 左上角:对齐轮廓开关 */
+.guide-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  cursor: pointer;
+  color: #e5e5e5;
+  background: rgba(0, 0, 0, 0.55);
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.guide-btn:hover {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.guide-btn.is-off {
+  color: #737373;
 }
 
 .loading-overlay {

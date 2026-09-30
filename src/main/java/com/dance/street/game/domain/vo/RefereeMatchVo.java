@@ -73,6 +73,15 @@ public class RefereeMatchVo implements Serializable {
     /** 手动公布模式:裁判已判完、等待导播台公布 */
     private Boolean pendingPublish;
 
+    /** 海选:本场(本圈/加赛)晋级人数 */
+    private Integer advanceCount;
+
+    /** 海选:本赛段共晋级人数 */
+    private Integer stageAdvanceCount;
+
+    /** 海选加赛轮次名(二海/三海…);非加赛场次为 null */
+    private String tiebreakerRound;
+
     /** 参赛方列表 */
     private List<RefereeParticipantInfo> participants;
 

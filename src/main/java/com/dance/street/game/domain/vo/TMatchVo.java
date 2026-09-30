@@ -132,6 +132,21 @@ public class TMatchVo implements Serializable {
     private Boolean pendingPublish;
 
     /**
+     * 海选:本场(本圈/加赛)晋级人数
+     */
+    private Integer advanceCount;
+
+    /**
+     * 海选:本赛段共晋级人数
+     */
+    private Integer stageAdvanceCount;
+
+    /**
+     * 海选加赛轮次名(二海/三海…);非加赛场次为 null
+     */
+    private String tiebreakerRound;
+
+    /**
      * 手动公布模式暂存结果(competitorId -> WIN/LOSS/DRAW),公布后清空
      */
     private String resultJson;

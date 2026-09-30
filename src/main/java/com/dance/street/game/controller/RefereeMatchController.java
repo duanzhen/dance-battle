@@ -38,6 +38,7 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
+import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -79,6 +80,8 @@ public class RefereeMatchController {
     private final ITStageLifecycleService stageLifecycleService;
     private final TournamentEventSseEmitterManager tournamentEventSseEmitterManager;
     private final TMatchRefereeMapper matchRefereeMapper;
+    /** 海选晋级人数展示口径(与结算同一套) */
+    private final AuditionAdvanceInfoSupport auditionAdvanceInfoSupport;
 
     /**
      * 裁判端 SSE 长连接:赛段/场次/打分变化时实时推送刷新
@@ -131,13 +134,8 @@ public class RefereeMatchController {
         }
         // 结果公布模式:DIRECTOR 由导播台判定,裁判无需判罚
         RuleConfigHolder stageRc = RuleConfigParser.parse(stage.getRuleConfig());
-        String publishMode = "AUTO";
-        if (stageRc != null && stageRc.getKnockout() != null
-            && StringUtils.isNotBlank(stageRc.getKnockout().getPublishMode())) {
-            publishMode = stageRc.getKnockout().getPublishMode();
-        } else if (stageRc != null && StringUtils.isNotBlank(stageRc.getPublishMode())) {
-            publishMode = stageRc.getPublishMode();
-        }
+        // 淘汰赛读 knockout.publishMode,擂台赛等读顶层 publishMode(统一在 RuleConfigHolder)
+        String publishMode = stageRc == null ? "AUTO" : stageRc.resolvePublishMode();
         String publishScope = stageRc != null ? stageRc.getPublishScope() : null;
         boolean isAuditionStage = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
         boolean isRankStage = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
@@ -251,6 +249,14 @@ public class RefereeMatchController {
         vo.setTournamentId(tournamentId);
         vo.setPublishMode(publishMode);
         vo.setPublishScope(publishScope);
+        // 海选:裁判端要显示「本场晋级几人 / 本赛段共晋级几人」(加赛显示本次加赛争几个名额)
+        if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            vo.setStageAdvanceCount(auditionAdvanceInfoSupport.stageAdvanceCount(stage));
+            if (match != null) {
+                vo.setAdvanceCount(auditionAdvanceInfoSupport.matchAdvanceCount(stage, match));
+                vo.setTiebreakerRound(auditionAdvanceInfoSupport.tiebreakerRoundName(match));
+            }
+        }
 
         // 打分配置:决定裁判端界面形态(胜平负 / 总分 / 多维度)
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());

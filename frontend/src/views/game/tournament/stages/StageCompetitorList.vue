@@ -197,8 +197,15 @@
             <!-- 最终排名(淘汰赛不展示);分圈查看时显示该圈的圈内名次 -->
             <div v-if="rankOf(competitor) && !isKnockout" class="flex-shrink-0 w-16 text-center">
               <div class="text-xs text-neutral-500">{{ circleFiltered ? '圈内排名' : '排名' }}</div>
-              <div class="text-lg font-bold" :class="getFinalRankClass(rankOf(competitor) as number)">
+              <div
+                class="text-lg font-bold"
+                :class="isPendingRank(competitor) ? 'text-neutral-500' : getFinalRankClass(rankOf(competitor) as number)"
+                :title="isPendingRank(competitor) ? '名次未定：该名次的同分选手正在加赛，结果出来后回填' : ''"
+              >
                 {{ rankOf(competitor) }}
+              </div>
+              <div v-if="isPendingRank(competitor)" class="text-[9px] text-neutral-600 leading-none">
+                {{ isTiedRank(competitor) ? '并列待定' : '待定' }}
               </div>
             </div>
 
@@ -333,7 +340,41 @@ const pickSort = (mode: 'NUMBER' | 'SCORE') => {
   sortMode.value = mode;
   sortPicked.value = true;
 };
-/** 分圈查看时的圈内名次:优先后端名次;未结算时按圈内分数实时计算(同分看二海分,再按号码牌,与后端一致) */
+/**
+ * 实时名次(并列口径):按「原始分降序 → 二海/三海分降序」数出前面有多少人,再 +1。
+ *
+ * <p>号码牌只用于同分时的稳定排序,<b>不参与名次计算</b>——这点与并列的真实语义一致:
+ * 16 人晋级、前 14 名已定、15~18 名同分时,这 4 个人都算<b>第 15 名</b>(灰色并列待定),
+ * 而不是被号码牌拆成 15/16/17/18,更不会因为"还没有最终名次"被甩到列表最底部。</p>
+ */
+const liveRankOf = (c: CompetitorVO, peers: CompetitorVO[]): number | null => {
+  const mine = scoreOf(c);
+  if (mine == null || peers.length === 0) {
+    return null;
+  }
+  const mineTb = tiebreakScoreOf(c);
+  let ahead = 0;
+  for (const x of peers) {
+    if (x === c) {
+      continue;
+    }
+    const s = scoreOf(x);
+    if (s == null || s < mine) {
+      continue;
+    }
+    if (s > mine) {
+      ahead++;
+      continue;
+    }
+    // 原始分相同:有二海分且高于当前选手的排前面;双方都没二海分视为并列(同为 15 名)
+    const tb = tiebreakScoreOf(x);
+    if (tb != null && (mineTb == null || tb > mineTb)) {
+      ahead++;
+    }
+  }
+  return ahead + 1;
+};
+/** 分圈查看时的圈内名次:优先后端名次;未结算时按圈内分数实时计算(并列同号) */
 const circleRankOf = (c: CompetitorVO): number | null => {
   const id = String(c.id);
   const settled = circleRanks.value[id];
@@ -344,21 +385,35 @@ const circleRankOf = (c: CompetitorVO): number | null => {
   if (!zone) {
     return null;
   }
-  const peers = competitors.value.filter((x) => circleZones.value[String(x.id)] === zone);
-  const mine = scoreOf(c);
-  if (mine == null || peers.length === 0) {
-    return null;
-  }
-  // 原始分降序、同分按二海/三海分降序、再按号码牌升序 → 位次即圈内名次
-  const ahead = peers.filter((x) => scoreOf(x) != null && cmpAuditionRank(x, c) < 0).length;
-  return ahead + 1;
+  return liveRankOf(c, competitors.value.filter((x) => circleZones.value[String(x.id)] === zone));
 };
-/** 排名列取值:分圈看圈内名次,全部圈看赛段名次 */
-const rankOf = (c: CompetitorVO): number | null =>
-  circleFiltered.value ? circleRankOf(c) : (c.finalRank ?? null);
-/** 名次排序键:结算后直接用后端最终名次(已含二海结果);未结算返回最大值排最后,由分数口径兜底 */
+/** 排名列取值:分圈看圈内名次;全部圈优先用后端最终名次,名次未定(加赛未出结果)时用实时并列名次 */
+const rankOf = (c: CompetitorVO): number | null => {
+  if (circleFiltered.value) {
+    return circleRankOf(c);
+  }
+  if (c.finalRank != null) {
+    return Number(c.finalRank);
+  }
+  return isAudition.value ? liveRankOf(c, competitors.value) : null;
+};
+/** 名次还没定(加赛未出结果):界面上灰色显示,避免被当成最终名次 */
+const isPendingRank = (c: CompetitorVO): boolean => c.finalRank == null && rankOf(c) != null;
+/** 该名次是否并列(≥2 人同分同号):并列时行内提示"并列" */
+const isTiedRank = (c: CompetitorVO): boolean => {
+  const r = rankOf(c);
+  if (r == null) {
+    return false;
+  }
+  // 分圈查看时只在同圈内比:不同圈的第 3 名没有并列关系
+  const peers = circleFiltered.value
+    ? competitors.value.filter((x) => circleZones.value[String(x.id)] === circleZones.value[String(c.id)])
+    : competitors.value;
+  return peers.filter((x) => rankOf(x) === r).length > 1;
+};
+/** 名次排序键:未定名次的用实时并列名次,不再一律排到最后 */
 const rankKeyOf = (c: CompetitorVO): number => {
-  const r = c.finalRank;
+  const r = rankOf(c);
   return r == null ? Number.MAX_SAFE_INTEGER : Number(r);
 };
 /** 展示列表:海选赛未初始化时保持种子顺序(供拖拽排位);初始化/结算后按所选方式排序 */

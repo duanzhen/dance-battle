@@ -62,6 +62,7 @@ import TextInput from './common/TextInput.vue';
 import ColorInput from './common/ColorInput.vue';
 import SelectInput from './common/SelectInput.vue';
 import ButtonGroup from './common/ButtonGroup.vue';
+import { cssSize } from '@/utils/cssSize';
 
 const props = defineProps<{
   text: string;
@@ -82,7 +83,8 @@ defineEmits<{
 
 // 计算文本样式 (仅在查看模式使用)
 const textStyle = computed(() => ({
-  fontSize: props.fontSize || '16px',
+  // 字号可能是数字(老数据/新建默认值)或字符串,纯数字必须补单位,否则 CSS 非法被忽略
+  fontSize: cssSize(props.fontSize, '16px'),
   color: props.color || '#ffffff',
   fontWeight: props.fontWeight || 'normal',
   textAlign: props.textAlign || 'center',

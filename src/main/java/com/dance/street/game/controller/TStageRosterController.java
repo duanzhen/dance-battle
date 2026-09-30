@@ -121,6 +121,19 @@ public class TStageRosterController {
         return R.ok(rosterService.previewAssembled(stageId));
     }
 
+    /**
+     * 按来源组规则重建中间层名单:丢弃本赛段名单上全部人工调整,回到"原始顺序"。
+     *
+     * <p>与"上游一变就全部重新来"同一条规则,只是这里由人手动触发。</p>
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "重建名单", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{stageId}/roster/rebuild")
+    public R<Boolean> rebuild(@PathVariable Long stageId) {
+        return R.ok(rosterService.rebuildEntries(stageId));
+    }
+
     /** 名单候选(按来源组返回,手动点选/预览) */
     @SaCheckPermission("game:stage:list")
     @GetMapping("/{stageId}/roster/candidates")

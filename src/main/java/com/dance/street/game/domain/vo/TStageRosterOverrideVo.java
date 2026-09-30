@@ -1,19 +1,16 @@
 package com.dance.street.game.domain.vo;
 
-import com.dance.street.game.domain.TStageRosterOverride;
-import io.github.linpeilie.annotations.AutoMapper;
 import lombok.Data;
 
 import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * 名单人工覆盖视图对象。
+ * 名单人工调整视图对象(中间层行的人工调整投影,id 即 {@code t_stage_roster_entry.id})。
  *
  * @author duane
  */
 @Data
-@AutoMapper(target = TStageRosterOverride.class)
 public class TStageRosterOverrideVo implements Serializable {
 
     @Serial

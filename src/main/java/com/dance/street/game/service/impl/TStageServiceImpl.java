@@ -24,7 +24,7 @@ import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TVisWidget;
-import com.dance.street.game.domain.TStageRosterOverride;
+import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -48,7 +48,6 @@ import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
-import com.dance.street.game.mapper.TStageRosterOverrideMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
@@ -79,7 +78,6 @@ public class TStageServiceImpl implements ITStageService {
     private final TRefereeStageMapper refereeStageMapper;
     private final TPlayerMapper playerMapper;
     private final TVisWidgetMapper visWidgetMapper;
-    private final TStageRosterOverrideMapper overrideMapper;
     private final ITStageRosterService rosterService;
     /** 赛段链遍历的唯一入口(以 next 链为事实源) */
     private final StageChain stageChain;
@@ -489,10 +487,9 @@ public class TStageServiceImpl implements ITStageService {
         }
         // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
         List<Long> stageIds = ids.stream().map(Long::valueOf).toList();
-        // 名单清理:删除以这些赛段为目标的人工覆盖;其余赛段名单摘除引用被删赛段的来源组
+        // 名单清理:清掉以这些赛段为目标的中间层行;其余赛段名单摘除引用被删赛段的来源组
         if (!stageIds.isEmpty()) {
-            overrideMapper.delete(Wrappers.<TStageRosterOverride>lambdaQuery()
-                .in(TStageRosterOverride::getTargetStageId, stageIds));
+            rosterService.removeEntriesOfTargets(stageIds);
             rosterService.removeSourceRefs(stageIds);
         }
         List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
@@ -798,11 +795,14 @@ public class TStageServiceImpl implements ITStageService {
             return vo;
         }
 
-        // 预排候选来自目标名单(来源组):AUTO 组按优先级并集、组配额截断,
-        // 分圈海选整单晋级沿用 apply 的圈内名次轮转排序——不再只读"链上上一赛段 ADVANCE"
-        List<TCompetitor> advancers = rosterService.previewRoster(stage.getId());
-        if (advancers.isEmpty()) {
-            // 上一赛段尚无晋级者:仅返回已提前加入的参赛方(如 GUEST)
+        // 预排来自中间层名单(唯一事实):生成/重建时已经算好并落成行,这里只做"座位 → 对阵"的视图变换。
+        // 空位(BYE/PENDING)照样占号,按 slot 索引落座,绝不把"有人的行"重新编号压紧。
+        List<TStageRosterEntry> entries = rosterService.entriesOf(stage.getId());
+        List<TStageRosterEntry> filled = entries.stream()
+            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+            .toList();
+        if (filled.isEmpty()) {
+            // 来源还没结算/名单还没生成:仅返回已提前加入的参赛方(如已确认过的名单)
             if (!own.isEmpty()) {
                 vo.setSeededCompetitors(own.stream()
                     .map(c -> toPreSeed(c, c.getSeedRank(), null)).toList());
@@ -829,7 +829,13 @@ public class TStageServiceImpl implements ITStageService {
                 }
             }
         }
-        List<Long> sourceStageIds = advancers.stream()
+        List<Long> sourceCompetitorIds = filled.stream()
+            .map(TStageRosterEntry::getSourceCompetitorId)
+            .filter(Objects::nonNull).distinct().toList();
+        Map<Long, TCompetitor> sourceById = sourceCompetitorIds.isEmpty() ? Map.of()
+            : competitorMapper.selectByIds(sourceCompetitorIds).stream()
+                .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+        List<Long> sourceStageIds = sourceById.values().stream()
             .map(TCompetitor::getStageId)
             .filter(Objects::nonNull)
             .distinct()
@@ -849,44 +855,28 @@ public class TStageServiceImpl implements ITStageService {
             }
         }
 
-        // 按预排顺序填充种子空位:跳过场次留空,后续候选不抢占已占位置
+        // 座位直接来自中间层:slot 即座位号,空位(BYE/PENDING)留空但照样占号,后面的人不前移
         int totalSlots = stage.getTeamCountStart() != null && stage.getTeamCountStart() > 0
             ? stage.getTeamCountStart().intValue()
-            : Math.max(advancers.size(), prevMatches.size());
+            : Math.max(entries.size(), prevMatches.size());
         totalSlots = Math.max(1, totalSlots);
         PreBracketVo.PreSeed[] seedArr = new PreBracketVo.PreSeed[totalSlots];
-        // 已提前加入的参赛方(通常为 GUEST)先按种子位占位;晋级者只填充剩余空位,
-        // 超出计划规模的晋级者不进入(GUEST 顶替前几名种子,原晋级者按 finalRank 顺序顺延)
-        for (TCompetitor g : own) {
-            long r = g.getSeedRank() != null ? g.getSeedRank() : 0L;
-            if (r >= 1L && r <= totalSlots) {
-                seedArr[(int) (r - 1L)] = toPreSeed(g, r, null);
+        for (TStageRosterEntry e : filled) {
+            if (e.getSlot() == null || e.getSlot() < 1 || e.getSlot() > totalSlots) {
+                continue; // 超出计划规模的候选不进预排
             }
-        }
-        // 晋级者严格按 finalRank 顺序填充空位:GUEST 占位后顺延,超出计划规模的晋级者不进入
-        // (淘汰赛承接胜者时 finalRank=场次位置,顺序填充与位置保留等价)
-        // 上一赛段也是淘汰赛时:晋级者按来源名次坐回对应座位。名次里的空洞来自"双方都轮空"的场次,
-        // 留空即代表该轮空座位同样晋级到本赛段(与名单装配 assignSeeds 同一口径,保证中间态与生成一致)。
-        boolean rankSeats = StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode());
-        int cursor = 0;
-        for (TCompetitor c : advancers) {
-            int seat = -1;
-            Long rank = c.getFinalRank();
-            if (rankSeats && rank != null && rank >= 1L && rank <= seedArr.length
-                && seedArr[(int) (rank - 1L)] == null) {
-                seat = (int) (rank - 1L);
+            PreBracketVo.PreSeed s;
+            if ("GUEST".equals(e.getRefType())) {
+                s = new PreBracketVo.PreSeed();
+                s.setName(e.getGuestName());
             } else {
-                while (cursor < seedArr.length && seedArr[cursor] != null) {
-                    cursor++;
-                }
-                if (cursor >= seedArr.length) {
-                    break; // 名额已满
-                }
-                seat = cursor;
+                TCompetitor src = sourceById.get(e.getSourceCompetitorId());
+                s = src == null ? new PreBracketVo.PreSeed()
+                    : toPreSeed(src, null, sourceMatch.get(src.getId()));
+                s.setSourceCompetitorId(e.getSourceCompetitorId());
             }
-            PreBracketVo.PreSeed s = toPreSeed(c, null, sourceMatch.get(c.getId()));
-            s.setSeedRank((long) (seat + 1));
-            seedArr[seat] = s;
+            s.setSeedRank(e.getSlot());
+            seedArr[(int) (e.getSlot() - 1)] = s;
         }
         List<PreBracketVo.PreSeed> seeds = new ArrayList<>();
         for (PreBracketVo.PreSeed s : seedArr) {

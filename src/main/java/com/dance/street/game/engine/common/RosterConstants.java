@@ -35,6 +35,14 @@ public final class RosterConstants {
     /** 外部来源(签到/GUEST/手动)的默认优先级:最高,先填充且优先保留 */
     public static final int EXTERNAL_ROSTER_PRIORITY = 0;
 
+    /** 中间层行的来历:规则生成 / 人工调整(仅用于提示与显示,不参与合并) */
+    public static final String ENTRY_ORIGIN_RULE = "RULE";
+    public static final String ENTRY_ORIGIN_MANUAL = "MANUAL";
+
+    /** 中间层行的可用性:来源已结算可用 / 来源未结算占位 */
+    public static final String ENTRY_STATUS_READY = "READY";
+    public static final String ENTRY_STATUS_PENDING = "PENDING";
+
     /** 覆盖操作:把某源行拉进名单(即使规则未选中) */
     public static final String OVERRIDE_ADD_SOURCE = "ADD_SOURCE";
     /** 覆盖操作:无源外卡(可关联选手或纯姓名) */

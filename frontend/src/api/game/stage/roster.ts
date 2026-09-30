@@ -70,6 +70,14 @@ export const getRosterPreview = (stageId: string | number): AxiosPromise<RosterP
   });
 };
 
+/** 按来源组规则重建中间层:丢弃全部人工调整,回到原始顺序 */
+export const rebuildStageRoster = (stageId: string | number): AxiosPromise<boolean> => {
+  return request({
+    url: `/game/stage/${stageId}/roster/rebuild`,
+    method: 'post'
+  });
+};
+
 /** 保存手工名单顺序(中间态两列拖动结果) */
 export const setRosterOrder = (stageId: string | number, items: { sourceCompetitorId?: string | number; overrideId?: string | number }[]) => {
   return request({

@@ -5,11 +5,13 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.vo.RosterPreviewItemVo;
 import com.dance.street.game.domain.vo.RosterPreviewVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -19,9 +21,7 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TStageMapper;
-import com.dance.street.game.mapper.TStageRosterOverrideMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
-import com.dance.street.game.domain.TStageRosterOverride;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageRosterService;
@@ -38,6 +38,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,7 +74,6 @@ class KnockoutByeSlotTest {
     @Autowired private TMatchParticipantMapper participantMapper;
     @Autowired private TCompetitorMapper competitorMapper;
     @Autowired private TStageMapper stageMapper;
-    @Autowired private TStageRosterOverrideMapper rosterOverrideMapper;
     @Autowired private ITStageService stageService;
     @Autowired private ITStageRosterService rosterService;
     @Autowired private ITStageLifecycleService lifecycleService;
@@ -236,36 +236,51 @@ class KnockoutByeSlotTest {
      */
     @Test
     void movingIntoByeSeatSwapsWithoutReflow() {
-        TStageVo stage = newKnockout("swap");
-        insertCompetitors(stage.getId(), 24, 1);
-        List<TCompetitor> comps = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, stage.getId()).orderByAsc(TCompetitor::getSeedRank));
-        TCompetitor moved = comps.get(4); // 原座位 5
-        assertEquals(5L, moved.getSeedRank());
+        Long tid = newTournament("swap");
+        // 来源赛段:24 人全部晋级(名次 1..24)→ 目标赛段中间层 1..24 有人、25..32 轮空
+        TStageVo source = newStage(tid, "swap-source", 32L, 24L, null);
+        insertCompetitors(source.getId(), 24, 1);
+        advanceAll(source.getId());
+        settle(source.getId());
 
-        List<com.dance.street.game.domain.bo.TStageRosterOrderBo.Item> items = new java.util.ArrayList<>();
-        for (TCompetitor c : comps) {
-            com.dance.street.game.domain.bo.TStageRosterOrderBo.Item it =
-                new com.dance.street.game.domain.bo.TStageRosterOrderBo.Item();
-            it.setSourceCompetitorId(c.getId());
-            it.setSeedRank(c.getId().equals(moved.getId()) ? 32L : c.getSeedRank());
+        TStageVo stage = newStage(tid, "swap-target", 32L, 16L, source.getId());
+        List<TStageRosterEntry> before = rosterService.entriesOf(stage.getId());
+        assertEquals(32, before.size(), "32 个座位各一行(空位也是行)");
+        TStageRosterEntry moved = before.stream()
+            .filter(e -> Long.valueOf(5L).equals(e.getSlot())).findFirst().orElseThrow();
+        assertNotNull(moved.getSourceCompetitorId(), "5 号座位应坐着来源赛段的晋级者");
+
+        List<TStageRosterOrderBo.Item> items = new java.util.ArrayList<>();
+        for (TStageRosterEntry e : before) {
+            if (e.getSourceCompetitorId() == null) {
+                continue;
+            }
+            TStageRosterOrderBo.Item it = new TStageRosterOrderBo.Item();
+            it.setSourceCompetitorId(e.getSourceCompetitorId());
+            it.setSeedRank(moved.getSourceCompetitorId().equals(e.getSourceCompetitorId())
+                ? 32L : e.getSlot());
             items.add(it);
         }
         rosterService.reorderRoster(stage.getId(), items);
 
-        List<TStageRosterOverride> overrides = rosterOverrideMapper.selectList(
-            Wrappers.<TStageRosterOverride>lambdaQuery()
-                .eq(TStageRosterOverride::getTargetStageId, stage.getId())
-                .eq(TStageRosterOverride::getOp, "SEED"));
-        long untouched = overrides.stream()
-            .filter(o -> !moved.getId().equals(o.getSourceCompetitorId()))
-            .filter(o -> o.getSeedRank() != null && o.getSeedRank() >= 1 && o.getSeedRank() <= 24)
+        // 座位是中间层的行:其余 23 人原座不动,被拖的人落到轮空座位 32,原座位 5 变成轮空行
+        List<TStageRosterEntry> entries = rosterService.entriesOf(stage.getId());
+        assertEquals(32, entries.size(), "座位数不变(空位照旧占号)");
+        long untouched = entries.stream()
+            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+            .filter(e -> !moved.getSourceCompetitorId().equals(e.getSourceCompetitorId()))
+            .filter(e -> e.getSlot() != null && e.getSlot() >= 1 && e.getSlot() <= 24)
             .count();
         assertEquals(23, untouched, "其余 23 人的座位不得被重排");
-        TStageRosterOverride movedOverride = overrides.stream()
-            .filter(o -> moved.getId().equals(o.getSourceCompetitorId()))
-            .findFirst().orElseThrow();
-        assertEquals(32L, movedOverride.getSeedRank(), "被拖动的选手应落到轮空座位 32");
+        Long movedSlot = entries.stream()
+            .filter(e -> moved.getSourceCompetitorId().equals(e.getSourceCompetitorId()))
+            .map(TStageRosterEntry::getSlot)
+            .findFirst().orElse(null);
+        assertEquals(32L, movedSlot, "被拖动的选手应落到轮空座位 32");
+        TStageRosterEntry hole = entries.stream()
+            .filter(e -> Long.valueOf(5L).equals(e.getSlot())).findFirst().orElseThrow();
+        assertEquals(StageConstants.SLOT_BYE, hole.getSlotKind(), "原座位 5 变成轮空行");
+        assertNull(hole.getSourceCompetitorId());
     }
 
     /** 名单预览如实报出库里的座位号(位置语义),不做压紧。 */
@@ -325,6 +340,25 @@ class KnockoutByeSlotTest {
             c.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
             competitorMapper.insert(c);
         }
+    }
+
+    /** 把某赛段的参赛方全部标成晋级,名次 = 报名座位号(模拟来源赛段已结算) */
+    private void advanceAll(Long stageId) {
+        for (TCompetitor c : competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, stageId))) {
+            TCompetitor upd = new TCompetitor();
+            upd.setId(c.getId());
+            upd.setOutcomeStatus(OutcomeStatusEnum.ADVANCE.getCode());
+            upd.setFinalRank(c.getSeedRank());
+            competitorMapper.updateById(upd);
+        }
+    }
+
+    private void settle(Long stageId) {
+        TStage upd = new TStage();
+        upd.setId(stageId);
+        upd.setStatus(StageConstants.STAGE_SETTLED);
+        stageMapper.updateById(upd);
     }
 
     private void initializeAndGenerate(Long stageId) {

@@ -1847,6 +1847,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         stage.setStatus(StageConstants.STAGE_SETTLED);
         stageMapper.updateById(stage);
+        // 上游结算完成:重建所有引用本赛段的下游中间层名单(上游一变就全部重新来)
+        rosterService.rebuildEntriesOfDownstream(stageId);
         // 名单就绪度由源结算状态推导,结算完成无需推进任何状态;
         // 下游开赛守卫与 apply 都会现场按源状态计算。
         refereeSseNotifier.notifyStage(stageId, "stage");
@@ -2467,6 +2469,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
         log.info("自由对抗赛段[{}]手动选定晋级 {} 人:{}", stageId, advanced, selected);
+        // 手工选定晋级 = 上游重算:下游中间层全量重建
+        rosterService.rebuildEntriesOfDownstream(stageId);
         refereeSseNotifier.notifyStage(stageId, "stage");
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
         return advanced;
@@ -2560,6 +2564,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         }
         log.info("排名赛赛段[{}]手动调整同分晋级:{}人晋级,{}人淘汰",
             stageId, competitorIds.size(), pending.size() - competitorIds.size());
+        // 手工改了晋级结果 = 上游重算:下游中间层全量重建
+        rosterService.rebuildEntriesOfDownstream(stageId);
         refereeSseNotifier.notifyStage(stageId, "stage");
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
         return competitorIds.size();

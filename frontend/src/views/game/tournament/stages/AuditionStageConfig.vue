@@ -1,9 +1,7 @@
 <template>
   <div class="stage-config">
     <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
-      <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-6 flex items-center gap-2">
-        <Mic class="w-4 h-4" /> 海选赛配置
-      </h3>
+      <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-6 flex items-center gap-2"><Mic class="w-4 h-4" /> 海选赛配置</h3>
 
       <div class="space-y-6">
         <!-- 创建模式:海选为入口赛段,创建后再配置圈 -->
@@ -12,7 +10,7 @@
           <p class="text-sm text-neutral-300 leading-relaxed">
             海选为赛事入口赛段，<span class="text-amber-500 font-bold">不限制参赛人数</span>，按实际签到选手参与。
           </p>
-          <p class="text-[11px] text-neutral-500 mt-2">圈配置（裁判/去向，晋级人数由去向名次推导）请在创建完成后新增</p>
+          <p class="text-[11px] text-neutral-500 mt-2">圈配置请在创建完成后新增：每圈填一个晋级人数，它就是该圈「默认晋级出口」的名次止</p>
         </div>
 
         <template v-else>
@@ -24,17 +22,13 @@
               <div class="text-xs text-neutral-600 mt-1">按实际签到为准</div>
             </div>
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-              <div class="text-xs text-neutral-500 mb-1">晋级名额</div>
-              <input
-                v-if="editable"
-                v-model.number="config.advanceCount"
-                type="number"
-                :min="1"
-                class="w-20 bg-black border border-neutral-700 rounded p-1.5 text-lg font-bold text-amber-500 font-mono focus:border-amber-500 outline-none"
-                @input="handleUpdate"
-              />
-              <div v-else class="text-2xl font-bold text-amber-500 font-mono">{{ config.advanceCount }}</div>
-              <div class="text-xs text-neutral-600 mt-1">名晋级</div>
+              <div class="text-xs text-neutral-500 mb-1">合计晋级</div>
+              <div class="text-2xl font-bold text-amber-500 font-mono">
+                {{ circleCount === 0 ? '—' : totalQuota }}
+              </div>
+              <div class="text-xs text-neutral-600 mt-1">
+                {{ circleCount === 0 ? '随各圈晋级人数自动汇总' : '各圈默认晋级出口之和' }}
+              </div>
             </div>
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-1">圈数</div>
@@ -47,7 +41,7 @@
           <div>
             <div class="flex items-center justify-between mb-2">
               <label class="text-xs text-neutral-500">圈配置</label>
-              <span class="text-[11px] text-neutral-600">合计晋级 {{ totalQuota }} / {{ config.advanceCount }}</span>
+              <span class="text-[11px] text-neutral-600">每圈：第 1~N 名 → 默认去向</span>
             </div>
 
             <div v-if="circleCount === 0" class="rounded-lg border border-dashed border-neutral-700 bg-black/30 px-4 py-6 text-center">
@@ -56,17 +50,12 @@
             </div>
 
             <div v-else class="space-y-3">
-              <div
-                v-for="i in circleCount"
-                :key="i"
-                class="rounded-lg border border-neutral-800 bg-black/40 p-4 space-y-2"
-              >
+              <div v-for="i in circleCount" :key="i" class="rounded-lg border border-neutral-800 bg-black/40 p-4 space-y-2">
                 <div class="flex items-center justify-between">
                   <span class="text-sm font-bold text-amber-500">第 {{ i }} 圈</span>
                   <div class="flex items-center gap-2">
                     <span class="text-[11px] text-neutral-500">
-                      晋级 <span class="text-white font-mono">{{ circleQuota(i - 1) }}</span> 人
-                      · 裁判 {{ circleRefereeText(i - 1) }}
+                      晋级 <span class="text-white font-mono">{{ circleQuota(i - 1) }}</span> 人 · 裁判 {{ circleRefereeText(i - 1) }}
                     </span>
                     <button
                       v-if="editable"
@@ -82,12 +71,15 @@
                   <span>参赛人数：{{ circlePlayerText(i - 1) }}</span>
                   <span>出口</span>
                 </div>
-                <div v-if="exitsOfCircle(i - 1).length === 0" class="text-[11px] text-neutral-600">
-                  未配置出口（默认随下一赛段衔接）
-                </div>
-                <div v-else class="space-y-1">
+                <div class="space-y-1">
+                  <!-- 默认晋级出口:名次段由该圈晋级人数决定,不单独配置 -->
+                  <div v-if="circleQuota(i - 1) > 0" class="flex items-center gap-2 rounded bg-neutral-900/70 border border-amber-500/20 px-2 py-1">
+                    <span class="text-[10px] text-amber-500/80 flex-none">默认晋级</span>
+                    <span class="text-[11px] text-amber-500/90 flex-none">{{ defaultExitTargetName(i - 1) }}</span>
+                    <span class="text-[11px] text-neutral-300 flex-1 min-w-0 truncate"> 第 1~{{ defaultExitRankEnd(i - 1) }} 名 </span>
+                  </div>
                   <div
-                    v-for="e in exitsOfCircle(i - 1)"
+                    v-for="e in circleOtherExits(i - 1)"
                     :key="String(e.targetStageId) + '-' + e.groupIndex"
                     class="flex items-center gap-2 rounded bg-neutral-900/70 border border-neutral-800 px-2 py-1"
                   >
@@ -101,6 +93,10 @@
                       移除
                     </button>
                   </div>
+                  <div v-if="circleQuota(i - 1) <= 0 && circleOtherExits(i - 1).length === 0" class="text-[11px] text-neutral-600">尚未配置出口</div>
+                  <div v-else-if="circleOtherExits(i - 1).length === 0" class="text-[11px] text-neutral-600">
+                    其他名次暂无去向（点「编辑」可追加）
+                  </div>
                 </div>
               </div>
             </div>
@@ -113,9 +109,7 @@
             >
               ＋ 新增一圈
             </button>
-            <p v-if="editable" class="text-[11px] text-neutral-600 mt-2">
-              圈只能增加不能减少；新增圈为空场次，已签到选手与已有圈不受影响
-            </p>
+            <p v-if="editable" class="text-[11px] text-neutral-600 mt-2">圈只能增加不能减少；新增圈为空场次，已签到选手与已有圈不受影响</p>
             <p v-if="editable && hasGeneratedMatches" class="text-[11px] text-amber-500/80 mt-1">
               赛段已生成对阵：修改圈配置后请重新点击「开始赛段/生成对阵」以按新配置重排
             </p>
@@ -129,12 +123,7 @@
               <span class="text-xs text-neutral-400">按总分排名，取前 N 名晋级</span>
               <label class="text-xs text-neutral-500 flex items-center gap-2">
                 满分
-                <select
-                  v-if="editable"
-                  v-model.number="config.maxScore"
-                  class="cfg-select w-32"
-                  @change="handleUpdate"
-                >
+                <select v-if="editable" v-model.number="config.maxScore" class="cfg-select w-32" @change="handleUpdate">
                   <option :value="10">10 分制</option>
                   <option :value="100">100 分制</option>
                 </select>
@@ -147,7 +136,7 @@
       </div>
     </div>
 
-    <!-- 新增圈向导:裁判 → 去向(晋级人数由去向名次自动推导) -->
+    <!-- 新增圈向导:裁判 → 去向(每圈一个默认晋级出口,名次段由该圈晋级人数决定) -->
     <Teleport to="body">
       <div
         v-if="wizardVisible"
@@ -179,9 +168,11 @@
                   v-for="r in referees"
                   :key="String(r.id)"
                   class="rounded-lg border px-3 py-2 text-left transition-all"
-                  :class="wizard.referees.includes(String(r.id))
-                    ? 'border-amber-500 bg-amber-500/10'
-                    : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'"
+                  :class="
+                    wizard.referees.includes(String(r.id))
+                      ? 'border-amber-500 bg-amber-500/10'
+                      : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'
+                  "
                   @click="toggleWizardReferee(r.id)"
                 >
                   <div class="text-xs font-bold" :class="wizard.referees.includes(String(r.id)) ? 'text-amber-400' : 'text-neutral-200'">
@@ -194,41 +185,63 @@
             <!-- Step 2 去向 -->
             <template v-else>
               <p class="text-neutral-400 leading-relaxed">
-                {{ editingCircleIndex === null
-                  ? `该圈的出口：默认一条「第 1~${wizard.advance ?? wizard.exits[0]?.rankEnd ?? '?'} 名 → 下一赛段」，可添加更多出口（如第 9~24 名 → 复活赛）。`
-                  : '该圈的出口（可修改名次段，也可追加新出口）。' }}
-                海选只按圈内排名取人，名次决定晋级/落选，不需要单独选择结果。
+                每圈先有一条<span class="text-amber-400">默认晋级出口</span>：该圈第 1~N 名进下一赛段， N
+                就是该圈晋级人数。还有别的名次要去其他赛段（如第 9~24 名 → 复活赛），再加「其他出口」。
               </p>
 
-              <!-- 晋级人数(晋级线):同分加赛的边界之一 -->
-              <div class="flex items-center gap-3 rounded-lg border border-neutral-800 bg-black/40 px-3 py-2.5">
-                <div class="w-28 flex-none">
-                  <label class="text-[11px] text-neutral-500 block mb-1">该圈晋级人数</label>
-                  <input v-model.number="wizard.advance" type="number" min="0" class="cfg-input w-full" placeholder="如 8" />
+              <!-- 默认晋级出口:晋级人数就是它的名次止,不再单独填"去向人数" -->
+              <div class="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] font-bold text-amber-400">默认晋级出口</span>
+                  <span class="text-[11px] text-neutral-600">名次段由晋级人数决定</span>
                 </div>
-                <p class="text-[11px] text-neutral-600 leading-relaxed flex-1">
-                  第 1~{{ wizard.advance ?? '?' }} 名晋级；这条线就是「晋级线」，界上同分会在本赛段内开加赛决出。
-                  「第 1~N 名 → 下一赛段」这条默认出口会跟着这个人数走。
+                <div class="flex items-center gap-2">
+                  <label class="text-[11px] text-neutral-500 flex-none">该圈晋级人数</label>
+                  <input v-model.number="wizard.advance" type="number" min="1" class="cfg-input w-24" placeholder="如 8" />
+                  <span class="text-[11px] text-neutral-500 flex-none">人</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] text-neutral-400 flex-none">第 1~{{ wizard.advance || '?' }} 名 →</span>
+                  <select v-model="wizard.defaultTargetId" class="cfg-select flex-1 min-w-0">
+                    <option :value="null">请选择去向</option>
+                    <option v-for="t in wizardTargetOptions" :key="'d' + String(t.id)" :value="t.id">{{ t.name }}</option>
+                  </select>
+                </div>
+                <p class="text-[11px] text-neutral-600 leading-relaxed">
+                  这条线就是「晋级线」，界上同分会在本赛段内开加赛决出；各圈晋级人数会自动汇总成「合计晋级」。
                 </p>
               </div>
 
-              <div v-if="targetOptions.length === 0" class="text-[11px] text-neutral-600">
-                暂无可承接赛段（下游赛段需处于规划中，且名单尚未确认/跳过）
-              </div>
-              <div v-else class="space-y-2">
-                <div
-                  v-for="(ex, ei) in wizard.exits"
-                  :key="ei"
-                  class="rounded-lg border border-neutral-800 bg-black/40 p-2.5 space-y-2"
-                >
+              <!-- 其他出口:只填默认晋级段之外的名次 -->
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] text-neutral-400">其他出口（可选）</span>
+                  <span class="text-[11px] text-neutral-600">名次从第 {{ (wizard.advance || 0) + 1 }} 名起</span>
+                </div>
+                <div v-if="targetOptions.length === 0" class="text-[11px] text-neutral-600">
+                  暂无可承接赛段（下游赛段需处于规划中，且名单尚未确认/跳过）
+                </div>
+                <div v-for="(ex, ei) in wizard.exits" :key="ei" class="rounded-lg border border-neutral-800 bg-black/40 p-2.5 space-y-2">
                   <select v-model="ex.targetStageId" class="cfg-select w-full">
-                    <option v-for="t in targetOptions" :key="String(t.id)" :value="t.id">{{ t.name }}</option>
+                    <option :value="null">请选择去向</option>
+                    <option v-for="t in wizardTargetOptions" :key="String(t.id)" :value="t.id">{{ t.name }}</option>
                   </select>
                   <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
-                    <input v-model.number="ex.rankStart" type="number" min="1" class="cfg-input w-full" placeholder="名次起" />
-                    <input v-model.number="ex.rankEnd" type="number" min="1" class="cfg-input w-full" placeholder="名次止(空=末)" />
+                    <input
+                      v-model.number="ex.rankStart"
+                      type="number"
+                      :min="(wizard.advance || 0) + 1"
+                      class="cfg-input w-full"
+                      placeholder="名次起"
+                    />
+                    <input
+                      v-model.number="ex.rankEnd"
+                      type="number"
+                      :min="(wizard.advance || 0) + 1"
+                      class="cfg-input w-full"
+                      placeholder="名次止(空=末)"
+                    />
                     <button
-                      v-if="wizard.exits.length > 1"
                       class="px-2.5 py-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors"
                       @click="wizard.exits.splice(ei, 1)"
                     >
@@ -320,10 +333,7 @@ const config = ref<any>({
 });
 
 /** 赛段未开始(DRAFT)前,圈配置可反复调整;开始/结束后锁定 */
-const editable = computed(() =>
-  currentMode.value !== ConfigMode.STARTED
-  && localStage.value.status === 'DRAFT'
-);
+const editable = computed(() => currentMode.value !== ConfigMode.STARTED && localStage.value.status === 'DRAFT');
 
 const referees = ref<{ id: string | number; name: string }[]>([]);
 const actualCircleReferees = ref<string[]>([]);
@@ -341,9 +351,7 @@ const stageOptions = ref<StageData[]>([]);
 
 const circleCount = computed(() => Math.max(0, Number(config.value.circles) || 0));
 const circleQuota = (i: number) => Number(config.value.circleAdvanceCounts?.[i]) || 0;
-const configuredQuota = computed(() =>
-  Array.from({ length: circleCount.value }, (_, i) => circleQuota(i)).reduce((s, n) => s + n, 0)
-);
+const configuredQuota = computed(() => Array.from({ length: circleCount.value }, (_, i) => circleQuota(i)).reduce((s, n) => s + n, 0));
 const totalQuota = computed(() => (circleCount.value === 0 ? 0 : configuredQuota.value));
 const circlePlayerText = (i: number) => {
   const n = actualCirclePlayers.value[i];
@@ -376,8 +384,7 @@ const stageNameOf = (id: string | number | null | undefined): string =>
  * 历史数据里被创建流程提前置 1 的空赛段(它们既无对阵也无参赛方)。
  */
 const rosterLocked = (s: StageData): boolean =>
-  Array.isArray((s as any).incoming)
-  && (s as any).incoming.some((r: any) => r?.state === 'CONFIRMED' || r?.state === 'SKIPPED');
+  Array.isArray((s as any).incoming) && (s as any).incoming.some((r: any) => r?.state === 'CONFIRMED' || r?.state === 'SKIPPED');
 
 /** 可选去向:沿 next 链位于本赛段之后,且仍为规划中、名单未锁定的赛段 */
 const targetOptions = computed(() => {
@@ -399,15 +406,35 @@ const targetOptions = computed(() => {
   return out;
 });
 
-const exitsOfCircle = (i: number): ExitEntry[] =>
-  exits.value.filter((e) => String(e.g?.zone || '') === 'ZONE-' + (i + 1));
+const exitsOfCircle = (i: number): ExitEntry[] => exits.value.filter((e) => String(e.g?.zone || '') === 'ZONE-' + (i + 1));
 
 const exitRuleText = (g: any): string => {
   // 海选出口只按圈内排名表达(名次本身决定晋级/落选)
-  const rank = g.rankStart != null || g.rankEnd != null
-    ? `第${g.rankStart ?? ''}~${g.rankEnd ?? '末'}名`
-    : '全部名次';
+  const rank = g.rankStart != null || g.rankEnd != null ? `第${g.rankStart ?? ''}~${g.rankEnd ?? '末'}名` : '全部名次';
   return rank;
+};
+
+/** 默认晋级出口 = 覆盖第 1 名的那条出口(名次止由该圈晋级人数决定) */
+const circleDefaultExit = (i: number): ExitEntry | null => {
+  const list = exitsOfCircle(i).filter((e) => e.g?.rankStart == null || Number(e.g?.rankStart) <= 1);
+  return list.length > 0 ? list[0] : null;
+};
+
+/** 其他出口 = 该圈除默认晋级出口之外的出口 */
+const circleOtherExits = (i: number): ExitEntry[] => exitsOfCircle(i).filter((e) => e !== circleDefaultExit(i));
+
+/** 默认晋级出口的去向:已写入就显示实际目标,还没写入就显示将要写入的下游 */
+const defaultExitTargetName = (i: number): string => {
+  const def = circleDefaultExit(i);
+  if (def) return stageNameOf(def.targetStageId);
+  const next = targetOptions.value[0];
+  return next ? `${next.name}（保存后写入）` : '未指定去向';
+};
+
+/** 默认晋级出口实际写着的名次止(还没写入时按该圈晋级人数展示) */
+const defaultExitRankEnd = (i: number): number => {
+  const def = circleDefaultExit(i);
+  return def?.g?.rankEnd != null ? Number(def.g.rankEnd) : circleQuota(i);
 };
 
 // ---------------- 新增圈向导 ----------------
@@ -416,19 +443,45 @@ const wizardStep = ref(1);
 const saving = ref(false);
 const wizard = reactive({
   referees: [] as string[],
-  /** 该圈晋级人数(晋级线):显式配置,不再只靠出口名次反推 */
+  /** 该圈晋级人数(晋级线)= 默认晋级出口的名次止,唯一的数字输入 */
   advance: null as number | null,
+  /** 默认晋级出口的去向赛段(默认取链上最近的可写入下游) */
+  defaultTargetId: null as string | number | null,
+  /** 编辑已有圈时,默认出口那条组的组下标(新增为空) */
+  defaultGroupIndex: null as number | null,
+  /** 其他出口:只填默认晋级段之外的名次 */
   exits: [] as {
     targetStageId: string | number | null;
     rankStart: number | null;
     rankEnd: number | null;
     /** 编辑已有出口时携带其组下标(新增出口为空) */
     groupIndex?: number;
-  }[]
+  }[],
+  /** 编辑时该圈现有的全部出口组,用于保存时对账删除 */
+  originalExits: [] as { targetStageId: string | number; groupIndex: number }[]
 });
 const wizardCircleNo = computed(() => circleCount.value + 1);
 /** 编辑中的圈下标(null = 新增圈) */
 const editingCircleIndex = ref<number | null>(null);
+
+/** 向导下拉可选去向:链上可写入的下游 + 已选中的(可能已锁定的)目标,避免下拉显示空白 */
+const wizardTargetOptions = computed<StageData[]>(() => {
+  const out = [...targetOptions.value];
+  const has = new Set(out.map((t) => String(t.id)));
+  const push = (id: string | number | null | undefined) => {
+    if (id == null || has.has(String(id))) return;
+    const found = stageOptions.value.find((s) => String(s.id) === String(id));
+    if (found) {
+      out.push(found);
+      has.add(String(id));
+    }
+  };
+  push(wizard.defaultTargetId);
+  wizard.exits.forEach((e) => push(e.targetStageId));
+  return out;
+});
+
+const nearestTargetId = (): string | number | null => targetOptions.value[0]?.id ?? null;
 
 const openAddCircle = () => {
   const remaining = Math.max(1, (config.value.advanceCount || 0) - configuredQuota.value);
@@ -436,11 +489,10 @@ const openAddCircle = () => {
   wizardStep.value = 1;
   wizard.referees = [];
   wizard.advance = remaining;
-  wizard.exits = [{
-    targetStageId: targetOptions.value[0]?.id ?? null,
-    rankStart: 1,
-    rankEnd: remaining
-  }];
+  wizard.defaultTargetId = nearestTargetId();
+  wizard.defaultGroupIndex = null;
+  wizard.exits = [];
+  wizard.originalExits = [];
   wizardVisible.value = true;
 };
 
@@ -450,20 +502,20 @@ const openEditCircle = (i: number) => {
   wizardStep.value = 1;
   wizard.referees = (config.value.circleRefereeIds?.[i] || []).map((x: any) => String(x));
   const circleExits = exitsOfCircle(i);
-  const derived = deriveCircleQuota(circleExits.map((e) => ({ rankStart: e.g?.rankStart ?? null, rankEnd: e.g?.rankEnd ?? null })));
-  wizard.advance = circleQuota(i) || derived || 1;
-  wizard.exits = circleExits.length > 0
-    ? circleExits.map((e) => ({
-        targetStageId: e.targetStageId,
-        rankStart: e.g?.rankStart ?? null,
-        rankEnd: e.g?.rankEnd ?? null,
-        groupIndex: e.groupIndex
-      }))
-    : [{
-        targetStageId: targetOptions.value[0]?.id ?? null,
-        rankStart: 1,
-        rankEnd: circleQuota(i) || 1
-      }];
+  const def = circleDefaultExit(i);
+  wizard.advance = circleQuota(i) || (def ? Number(def.g?.rankEnd) || null : null) || 1;
+  wizard.defaultTargetId = def?.targetStageId ?? nearestTargetId();
+  wizard.defaultGroupIndex = def ? def.groupIndex : null;
+  // 覆盖第 1 名的那条就是默认晋级出口,其余都是"其他出口"
+  wizard.exits = circleExits
+    .filter((e) => e !== def)
+    .map((e) => ({
+      targetStageId: e.targetStageId,
+      rankStart: e.g?.rankStart ?? null,
+      rankEnd: e.g?.rankEnd ?? null,
+      groupIndex: e.groupIndex
+    }));
+  wizard.originalExits = circleExits.map((e) => ({ targetStageId: e.targetStageId, groupIndex: e.groupIndex }));
   wizardVisible.value = true;
 };
 
@@ -484,31 +536,143 @@ const toggleWizardReferee = (id: string | number) => {
 
 const addWizardExit = () => {
   wizard.exits.push({
-    targetStageId: targetOptions.value[0]?.id ?? null,
-    rankStart: null,
+    targetStageId: nearestTargetId(),
+    rankStart: (Number(wizard.advance) || 1) + 1,
     rankEnd: null
   });
 };
 
+/** 海选出口规则:只按圈内名次取人(结果过滤不限,entry_tag 由源行结算结果决定) */
+const buildExitRule = (idx: number, rankStart: number | null, rankEnd: number | null) => ({
+  sourceStageId: props.stage.id,
+  resultFilter: 'ANY',
+  zone: 'ZONE-' + (idx + 1),
+  rankByZone: true,
+  rankStart,
+  rankEnd,
+  fillMode: 'AUTO',
+  quota: 0
+});
+
 /**
- * 由去向推导该圈晋级人数:
- * 1) 有覆盖第 1 名的出口 → 取其名次止(如 1~8 → 8);
- * 2) 只有"第 N 名之后"的出口 → 取最靠前的名次起减 1(如 9~24 → 8);
- * 3) 无出口/无法推导 → 返回 null(调用方沿用原值或剩余名额)。
+ * 该圈默认晋级出口已精确到名次段,摘掉目标赛段上同源的「整单晋级」默认组,
+ * 避免出口列表里同时出现"全部名次"和"第 1~N 名"两条。
  */
-const deriveCircleQuota = (
-  exits: { rankStart: number | null; rankEnd: number | null }[]
-): number | null => {
-  const covering = exits.filter((e) => e.rankStart == null || Number(e.rankStart) <= 1);
-  const withEnd = covering.filter((e) => e.rankEnd != null);
-  if (withEnd.length > 0) {
-    return Math.max(...withEnd.map((e) => Number(e.rankEnd)));
+const dropGenericAdvanceGroup = async (targetStageId: string | number) => {
+  try {
+    const resp: any = await getStageRoster(targetStageId);
+    const groups: any[] = resp?.data?.groups || [];
+    if (groups.length <= 1) return;
+    const defaultIdx = groups.findIndex(
+      (g) =>
+        String(g.sourceStageId) === String(props.stage.id) &&
+        !g.zone &&
+        (g.resultFilter || 'ADVANCE') === 'ADVANCE' &&
+        (g.fillMode || 'AUTO') === 'AUTO'
+    );
+    if (defaultIdx >= 0) {
+      await removeRosterGroup(targetStageId, defaultIdx);
+    }
+  } catch {
+    // 目标赛段已锁定/无权限时忽略,不阻断出口保存
   }
-  const starts = exits
-    .map((e) => (e.rankStart == null ? null : Number(e.rankStart)))
-    .filter((v): v is number => v != null);
-  if (starts.length > 0) {
-    return Math.max(1, Math.min(...starts) - 1);
+};
+
+/**
+ * 出口对账落库:把该圈在目标赛段上的出口组对齐到「默认晋级出口 + 其他出口」。
+ * 保留的原地更新、缺的新增、多余的删除;删除按同目标内下标倒序,避免下标位移。
+ */
+const syncCircleExits = async (idx: number, advance: number) => {
+  interface Desired {
+    targetStageId: string | number;
+    rankStart: number | null;
+    rankEnd: number | null;
+    /** 对应已有组的原下标(新增为 null) */
+    keepIndex: number | null;
+  }
+  const desired: Desired[] = [];
+  if (wizard.defaultTargetId != null) {
+    desired.push({
+      targetStageId: wizard.defaultTargetId,
+      rankStart: 1,
+      rankEnd: advance,
+      keepIndex: wizard.defaultGroupIndex
+    });
+  }
+  wizard.exits.forEach((ex) => {
+    if (ex.targetStageId == null) return;
+    desired.push({
+      targetStageId: ex.targetStageId,
+      rankStart: ex.rankStart ?? null,
+      rankEnd: ex.rankEnd ?? null,
+      keepIndex: ex.groupIndex ?? null
+    });
+  });
+
+  const origByTarget = new Map<string, number[]>();
+  wizard.originalExits.forEach((o) => {
+    const key = String(o.targetStageId);
+    if (!origByTarget.has(key)) origByTarget.set(key, []);
+    origByTarget.get(key)!.push(o.groupIndex);
+  });
+  const keepByTarget = new Map<string, Set<number>>();
+  desired.forEach((d) => {
+    if (d.keepIndex == null) return;
+    const key = String(d.targetStageId);
+    if (!keepByTarget.has(key)) keepByTarget.set(key, new Set());
+    keepByTarget.get(key)!.add(d.keepIndex);
+  });
+
+  // 1) 删除本圈多余/改到别处的出口(倒序,避免同目标内下标位移)
+  const shiftedIndex = new Map<string, number>();
+  for (const [target, origIdxList] of origByTarget) {
+    const keep = keepByTarget.get(target) || new Set<number>();
+    const drop = origIdxList.filter((i) => !keep.has(i));
+    for (const i of [...drop].sort((a, b) => b - a)) {
+      await removeRosterGroup(target, i);
+    }
+    const dropAsc = [...drop].sort((a, b) => a - b);
+    origIdxList.forEach((old) => {
+      if (!keep.has(old)) return;
+      shiftedIndex.set(target + '|' + old, old - dropAsc.filter((d) => d < old).length);
+    });
+  }
+
+  // 2) 保留的原地更新,缺的新增
+  for (const d of desired) {
+    const target = String(d.targetStageId);
+    const rule = buildExitRule(idx, d.rankStart, d.rankEnd);
+    const newIndex = d.keepIndex == null ? undefined : shiftedIndex.get(target + '|' + d.keepIndex);
+    if (newIndex === undefined) {
+      await addRosterGroups(d.targetStageId, {
+        sourceStageId: props.stage.id,
+        resultFilter: 'ANY',
+        fillMode: 'AUTO',
+        quota: 0,
+        groups: [rule] as any
+      });
+    } else {
+      await updateRosterGroup(d.targetStageId, newIndex, rule as any);
+    }
+  }
+};
+
+/** 其他出口的名次段必须落在默认晋级段之后,且彼此不重叠 */
+const validateCustomExits = (advance: number): string | null => {
+  const seen: { start: number; end: number }[] = [];
+  for (const ex of wizard.exits) {
+    if (ex.targetStageId == null) return '每条「其他出口」都要选择去向赛段';
+    const start = Number(ex.rankStart);
+    if (!Number.isFinite(start) || start < 1) return '其他出口的「名次起」必须是不小于 1 的整数';
+    if (start <= advance) {
+      return `其他出口的第 ${start} 名与默认晋级段（第 1~${advance} 名）重叠，请从第 ${advance + 1} 名起`;
+    }
+    const end = ex.rankEnd == null ? Number.MAX_SAFE_INTEGER : Number(ex.rankEnd);
+    if (!Number.isFinite(end) || end < start) return '其他出口的「名次止」不能小于「名次起」';
+    for (const o of seen) {
+      if (start <= o.end && o.start <= end) return '两条「其他出口」的名次段重叠了，请检查名次范围';
+    }
+    seen.push({ start, end });
   }
   return null;
 };
@@ -516,86 +680,45 @@ const deriveCircleQuota = (
 const confirmAddCircle = async () => {
   const editing = editingCircleIndex.value !== null;
   const idx = editing ? (editingCircleIndex.value as number) : circleCount.value;
-  const zone = 'ZONE-' + (idx + 1);
+  const advance = Number(wizard.advance);
+  if (!Number.isFinite(advance) || advance < 1) {
+    ElMessage.error('请填写该圈晋级人数（至少 1 人）');
+    return;
+  }
+  const invalid = validateCustomExits(advance);
+  if (invalid) {
+    ElMessage.error(invalid);
+    return;
+  }
+  if (wizard.defaultTargetId == null && wizardTargetOptions.value.length > 0) {
+    ElMessage.error('请选择「默认晋级出口」的去向赛段');
+    return;
+  }
+  const canSyncExits = wizard.defaultTargetId != null;
   saving.value = true;
   try {
+    // 1) 规则:每圈晋级人数(= 该圈默认晋级出口的名次止) + 裁判
     const quotas = Array.isArray(config.value.circleAdvanceCounts) ? [...config.value.circleAdvanceCounts] : [];
-    // 优先用显式配置的晋级人数;未填时回退到"由去向名次推导"的旧口径
-    const derived = deriveCircleQuota(wizard.exits);
-    quotas[idx] = wizard.advance != null && Number(wizard.advance) >= 0
-      ? Number(wizard.advance)
-      : derived != null
-        ? derived
-        : Math.max(1, editing ? (circleQuota(idx) || 1) : (config.value.advanceCount || 0) - configuredQuota.value);
+    quotas[idx] = advance;
     const refs = Array.isArray(config.value.circleRefereeIds) ? [...config.value.circleRefereeIds] : [];
     refs[idx] = [...wizard.referees];
     config.value.circleAdvanceCounts = quotas;
     config.value.circleRefereeIds = refs;
-    // 晋级人数即晋级线:覆盖第 1 名的那条出口名次止跟随它,避免两处口径打架
-    const quota = quotas[idx];
-    for (const ex of wizard.exits) {
-      if (ex.rankStart == null || Number(ex.rankStart) <= 1) {
-        ex.rankEnd = quota;
-        break;
-      }
-    }
     if (!editing) {
       config.value.circles = idx + 1;
     }
+    // 总晋级名额不再单独填:各圈晋级人数之和就是它
+    config.value.advanceCount = quotas.slice(0, Math.max(circleCount.value, idx + 1)).reduce((sum: number, n: any) => sum + (Number(n) || 0), 0);
     handleUpdate();
 
-    for (const ex of wizard.exits) {
-      if (!ex.targetStageId) continue;
-      // 海选只按名次取人:结果过滤设为不限,entry_tag 由源行结算结果自动决定
-      const rule = {
-        sourceStageId: props.stage.id,
-        resultFilter: 'ANY',
-        zone,
-        rankByZone: true,
-        rankStart: ex.rankStart ?? null,
-        rankEnd: ex.rankEnd ?? null,
-        fillMode: 'AUTO',
-        quota: 0
-      };
-      if (editing && ex.groupIndex != null) {
-        // 已有出口:更新名次段
-        await updateRosterGroup(ex.targetStageId, ex.groupIndex, rule as any);
-      } else {
-        await addRosterGroups(ex.targetStageId, {
-          sourceStageId: props.stage.id,
-          resultFilter: 'ANY',
-          fillMode: 'AUTO',
-          quota: 0,
-          groups: [rule] as any
-        });
-      }
+    // 2) 出口落库:默认晋级出口 + 其他出口(对账增删改)
+    if (!canSyncExits) {
+      ElMessage.warning('该圈晋级人数已保存；当前没有可承接赛段，默认晋级出口未写入名单');
+    } else {
+      await syncCircleExits(idx, advance);
+      await dropGenericAdvanceGroup(wizard.defaultTargetId as string | number);
+      ElMessage.success(editing ? `第 ${idx + 1} 圈已更新` : `第 ${idx + 1} 圈已新增`);
     }
-
-    // 按圈出口会精确取人;若覆盖到该圈第 1 名,移除目标赛段里同源的"整单晋级"默认组,避免两者并存重复取人
-    const coversTop = wizard.exits.some(
-      (ex) => ex.targetStageId && (ex.rankStart == null || Number(ex.rankStart) <= 1)
-    );
-    if (coversTop) {
-      const targets = [...new Set(wizard.exits.map((ex) => ex.targetStageId).filter((x) => x != null))];
-      for (const targetId of targets) {
-        try {
-          const resp: any = await getStageRoster(targetId as string | number);
-          const groups: any[] = resp?.data?.groups || [];
-          if (groups.length <= 1) continue;
-          const defaultIdx = groups.findIndex((g) =>
-            String(g.sourceStageId) === String(props.stage.id)
-            && !g.zone
-            && (g.resultFilter || 'ADVANCE') === 'ADVANCE'
-            && (g.fillMode || 'AUTO') === 'AUTO');
-          if (defaultIdx >= 0) {
-            await removeRosterGroup(targetId as string | number, defaultIdx);
-          }
-        } catch {
-          // 目标赛段已锁定/无权限时忽略,不阻断出口保存
-        }
-      }
-    }
-    ElMessage.success(editing ? `第 ${idx + 1} 圈已更新` : `第 ${idx + 1} 圈已新增`);
     closeWizard();
     await loadExits();
   } catch (e: any) {
@@ -659,7 +782,9 @@ const loadExits = async () => {
 const removeExit = async (e: ExitEntry) => {
   try {
     await ElMessageBox.confirm(`确认移除「${stageNameOf(e.targetStageId)} · ${exitRuleText(e.g)}」这条出口？`, '移除出口', {
-      type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消'
+      type: 'warning',
+      confirmButtonText: '移除',
+      cancelButtonText: '取消'
     });
   } catch {
     return;
@@ -680,10 +805,7 @@ const loadActualCircleReferees = async () => {
   const sid = props.stage?.id;
   if (sid == null || !/^\d+$/.test(String(sid))) return;
   try {
-    const [mrResp, matchResp]: any = await Promise.all([
-      listMatchReferee(sid),
-      listMatch({ stageId: sid, pageNum: 1, pageSize: 99 } as any)
-    ]);
+    const [mrResp, matchResp]: any = await Promise.all([listMatchReferee(sid), listMatch({ stageId: sid, pageNum: 1, pageSize: 99 } as any)]);
     const rows = mrResp?.data ?? [];
     const matches = (matchResp?.data?.data || matchResp?.data || [])
       .slice()

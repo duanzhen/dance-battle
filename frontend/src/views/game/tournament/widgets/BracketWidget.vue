@@ -7,17 +7,38 @@
       <div v-else-if="isFinal" class="w-full h-full flex flex-col items-center justify-between gap-3 px-2 py-2">
         <!-- 冠军卡:顶部,窄宽度 -->
         <div class="final-card champion-card" :class="{ 'final-win': !!champion }">
-          <img v-if="showAvatar && champion?.avatar" :src="champion?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+          <img
+            v-if="showAvatar && champion?.avatar"
+            :src="champion?.avatar"
+            class="bracket-avatar"
+            :style="avatarStyle"
+            alt=""
+            @error="onAvatarError"
+          />
           <span class="name" :style="fz(1)">{{ champion?.name || '' }}</span>
         </div>
         <!-- 左右半区:下方 -->
         <div class="flex items-center justify-between min-h-0 w-full">
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.left?.competitorId }">
-            <img v-if="showAvatar && finalists.left?.avatar" :src="finalists.left?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+            <img
+              v-if="showAvatar && finalists.left?.avatar"
+              :src="finalists.left?.avatar"
+              class="bracket-avatar"
+              :style="avatarStyle"
+              alt=""
+              @error="onAvatarError"
+            />
             <span class="name" :style="fz(1)" :title="finalists.left?.name || ''">{{ finalists.left?.name || '' }}</span>
           </div>
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.right?.competitorId }">
-            <img v-if="showAvatar && finalists.right?.avatar" :src="finalists.right?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+            <img
+              v-if="showAvatar && finalists.right?.avatar"
+              :src="finalists.right?.avatar"
+              class="bracket-avatar"
+              :style="avatarStyle"
+              alt=""
+              @error="onAvatarError"
+            />
             <span class="name" :style="fz(1)" :title="finalists.right?.name || ''">{{ finalists.right?.name || '' }}</span>
           </div>
         </div>
@@ -27,22 +48,50 @@
         <div class="flex-1 flex items-stretch justify-between gap-2 min-h-0">
           <div class="flex-none flex flex-col justify-between items-center min-h-0">
             <div class="final-card" :class="{ 'final-win': semi.left?.top?.win }">
-              <img v-if="showAvatar && semi.left?.top?.avatar" :src="semi.left?.top?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+              <img
+                v-if="showAvatar && semi.left?.top?.avatar"
+                :src="semi.left?.top?.avatar"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
               <span class="name" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
-              <img v-if="showAvatar && semi.left?.bottom?.avatar" :src="semi.left?.bottom?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+              <img
+                v-if="showAvatar && semi.left?.bottom?.avatar"
+                :src="semi.left?.bottom?.avatar"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
               <span class="name" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
             </div>
           </div>
           <div style="flex: 1; min-width: 0"></div>
           <div class="flex-none flex flex-col justify-between items-center min-h-0">
             <div class="final-card" :class="{ 'final-win': semi.right?.top?.win }">
-              <img v-if="showAvatar && semi.right?.top?.avatar" :src="semi.right?.top?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+              <img
+                v-if="showAvatar && semi.right?.top?.avatar"
+                :src="semi.right?.top?.avatar"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
               <span class="name" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
-              <img v-if="showAvatar && semi.right?.bottom?.avatar" :src="semi.right?.bottom?.avatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+              <img
+                v-if="showAvatar && semi.right?.bottom?.avatar"
+                :src="semi.right?.bottom?.avatar"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
               <span class="name" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
             </div>
           </div>
@@ -76,7 +125,14 @@
               <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <img v-if="showAvatar && s.rightAvatar" :src="s.rightAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+              <img
+                v-if="showAvatar && s.rightAvatar"
+                :src="s.rightAvatar"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
               <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
@@ -94,7 +150,14 @@
               <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
-              <img v-if="showAvatar && s.rightAvatar" :src="s.rightAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
+              <img
+                v-if="showAvatar && s.rightAvatar"
+                :src="s.rightAvatar"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
               <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
@@ -652,14 +715,13 @@ const bracketSlots = computed<BracketSlot[]>(() => {
   });
   const atSeat = (seatNo: number) => bySeat.get(seatNo) ?? null;
   const seedMode =
-    (stagePairingMode.value ? String(stagePairingMode.value).toUpperCase() === 'SEED' : false)
-    || (!stagePairingMode.value && (prevStageMode.value === 'AUDITION' || prevStageMode.value === 'RANK'));
+    (stagePairingMode.value ? String(stagePairingMode.value).toUpperCase() === 'SEED' : false) ||
+    (!stagePairingMode.value && (prevStageMode.value === 'AUDITION' || prevStageMode.value === 'RANK'));
   const bracketSize = Math.max(2, nextPow2(plan));
   const layout = seedMode ? seedLayout(bracketSize) : null;
   const pairCount = Math.max(1, bracketSize / 2);
   const half = Math.ceil(pairCount / 2);
-  const seatNoOf = (i: number, side: 'left' | 'right') =>
-    seedMode ? layout![2 * i + (side === 'left' ? 0 : 1)] : 2 * i + (side === 'left' ? 1 : 2);
+  const seatNoOf = (i: number, side: 'left' | 'right') => (seedMode ? layout![2 * i + (side === 'left' ? 0 : 1)] : 2 * i + (side === 'left' ? 1 : 2));
   return Array.from({ length: pairCount }, (_, i) => {
     const left = atSeat(seatNoOf(i, 'left'));
     const right = atSeat(seatNoOf(i, 'right'));
@@ -810,12 +872,8 @@ const semi = computed(() => {
   const toCard = (name: string, avatar: string, win: boolean) => ({ competitorId: null, name, avatar, win });
   const lp = leftSlots.value[0];
   const rp = rightSlots.value[0];
-  out.left = lp
-    ? { top: toCard(lp.leftName, lp.leftAvatar, lp.leftWin), bottom: toCard(lp.rightName, lp.rightAvatar, lp.rightWin) }
-    : null;
-  out.right = rp
-    ? { top: toCard(rp.leftName, rp.leftAvatar, rp.leftWin), bottom: toCard(rp.rightName, rp.rightAvatar, rp.rightWin) }
-    : null;
+  out.left = lp ? { top: toCard(lp.leftName, lp.leftAvatar, lp.leftWin), bottom: toCard(lp.rightName, lp.rightAvatar, lp.rightWin) } : null;
+  out.right = rp ? { top: toCard(rp.leftName, rp.leftAvatar, rp.leftWin), bottom: toCard(rp.rightName, rp.rightAvatar, rp.rightWin) } : null;
   return out;
 });
 
@@ -855,21 +913,32 @@ watch(
   }
 );
 
-/** 事件回调:重连补偿(null)或事件属于本赛段/上一赛段(预排来源)时才刷新,避免无关事件触发全量拉取 */
+/**
+ * 事件回调:本赛事内任何"赛段级"变化都刷新。
+ *
+ * <p>名单来源可能是多个赛段(如「海选 1~8 名 + 复活赛 9~24 名」),只认直接前驱会漏刷新;
+ * 单纯的分数(scores)不影响名单构成,跳过。300ms 节流,避免中间态连续拖动时把大屏拉爆。</p>
+ */
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+const scheduleReload = () => {
+  if (reloadTimer != null) {
+    return;
+  }
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    loadData();
+  }, 300);
+};
+
 const handleTournamentEvent = (data: any) => {
   if (!data || data.stageId == null) {
-    loadData();
+    scheduleReload(); // 重连补偿:整页重拉
     return;
   }
-  const sid = String(data.stageId);
-  if (sid === String(props.stageId)) {
-    loadData();
-    return;
+  if (data.type === 'scores') {
+    return; // 打分不改变名单构成
   }
-  // 上一赛段事件改变预排结果:结算/重置/赛段推进等;单纯的分数(scores)不影响胜者名单,跳过
-  if (prevStageId.value != null && sid === String(prevStageId.value) && data.type !== 'scores') {
-    loadData();
-  }
+  scheduleReload();
 };
 </script>
 

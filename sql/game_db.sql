@@ -72,35 +72,6 @@ CREATE TABLE `t_competitor_member` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='参赛成员关联表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
--- Table structure for table `t_stage_roster_override`
---
-
-DROP TABLE IF EXISTS `t_stage_roster_override`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `t_stage_roster_override` (
-  `id` bigint NOT NULL,
-  `tenant_id` bigint NOT NULL,
-  `tournament_id` bigint NOT NULL,
-  `target_stage_id` bigint NOT NULL COMMENT '目标赛段(冗余,便于按赛段清理)',
-  `op` varchar(20) NOT NULL COMMENT 'ADD_SOURCE/ADD_GUEST/REMOVE/SEED',
-  `source_competitor_id` bigint DEFAULT NULL COMMENT 'ADD_SOURCE/REMOVE/SEED 引用的源赛段行',
-  `player_id` bigint DEFAULT NULL COMMENT 'ADD_GUEST 关联选手',
-  `guest_name` varchar(100) DEFAULT NULL COMMENT 'ADD_GUEST 无选手时的展示名',
-  `guest_type` tinyint DEFAULT '0' COMMENT '0:个人, 1:队伍',
-  `guest_number` varchar(20) DEFAULT NULL COMMENT '外卡号码(空=快照时自动)',
-  `seed_rank` bigint DEFAULT NULL COMMENT 'SEED/ADD_GUEST 指定种子位(空=自动)',
-  `create_by` bigint DEFAULT NULL COMMENT '创建者',
-  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
-  `update_by` bigint DEFAULT NULL COMMENT '更新者',
-  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
-  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
-  PRIMARY KEY (`id`),
-  KEY `idx_override_target` (`target_stage_id`),
-  KEY `idx_override_tournament` (`tournament_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='名单人工覆盖(规则之外的人工决定)';
-/*!40101 SET character_set_client = @saved_cs_client */;
-
 --
 -- Table structure for table `t_match`
 --
@@ -459,5 +430,39 @@ CREATE TABLE `t_login_account` (
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- ----------------------------
+-- Table structure for table `t_stage_roster_entry`
+-- 赛段中间层名单:一行 = 一个座位(有人=PLAYER / 空位=BYE / 等上游=PENDING),1..N 连续不压紧
+-- ----------------------------
+DROP TABLE IF EXISTS `t_stage_roster_entry`;
+CREATE TABLE `t_stage_roster_entry` (
+  `id` bigint NOT NULL COMMENT '雪花ID',
+  `tenant_id` bigint NOT NULL COMMENT '租户',
+  `tournament_id` bigint NOT NULL COMMENT '赛事ID',
+  `target_stage_id` bigint NOT NULL COMMENT '中间层归属:这条入边指向的赛段',
+  `slot` bigint NOT NULL COMMENT '座位号 1..N,连续不压紧',
+  `slot_kind` varchar(10) NOT NULL COMMENT 'PLAYER=有人 / BYE=轮空空位 / PENDING=等上游填入',
+  `ref_type` varchar(10) DEFAULT NULL COMMENT 'SOURCE=来自来源赛段 / GUEST=外卡;空位为 NULL',
+  `source_competitor_id` bigint DEFAULT NULL COMMENT 'SOURCE 时指向来源赛段参赛方',
+  `source_stage_id` bigint DEFAULT NULL COMMENT '直接来源赛段',
+  `player_id` bigint DEFAULT NULL COMMENT 'GUEST 关联选手',
+  `guest_name` varchar(100) DEFAULT NULL COMMENT 'GUEST 展示名',
+  `guest_type` tinyint NOT NULL DEFAULT '0' COMMENT '0:个人 1:队伍',
+  `guest_number` varchar(20) DEFAULT NULL COMMENT '外卡号码',
+  `entry_tag` varchar(20) DEFAULT NULL COMMENT 'ADVANCE/REVIVE/GUEST/MANUAL/CHECKIN;空位行为空',
+  `origin` varchar(10) NOT NULL COMMENT 'RULE=规则生成 / MANUAL=人工调整(仅提示与显示)',
+  `status` varchar(16) NOT NULL COMMENT 'READY=可用 / PENDING=来源未结算',
+  `competitor_id` bigint DEFAULT NULL COMMENT '物化到目标层后回填',
+  `create_by` bigint DEFAULT NULL COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`),
+  KEY `idx_roster_entry_target` (`target_stage_id`),
+  KEY `idx_roster_entry_tournament` (`tournament_id`),
+  KEY `idx_roster_entry_source` (`source_competitor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='赛段中间层名单(一条入边=一份名单)';
 
 -- Dump completed on 2026-08-10 10:16:42

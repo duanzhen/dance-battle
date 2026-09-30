@@ -363,22 +363,28 @@ CREATE TABLE IF NOT EXISTS `t_login_account` (
 
 CREATE UNIQUE INDEX IF NOT EXISTS `uk_username` ON `t_login_account` (`username`);
 
---
--- Table structure for table `t_stage_roster_override`
---
-
-CREATE TABLE IF NOT EXISTS `t_stage_roster_override` (
+-- ----------------------------
+-- Table structure for table `t_stage_roster_entry`
+-- 赛段中间层名单:一行 = 一个座位(有人=PLAYER / 空位=BYE / 等上游=PENDING),1..N 连续不压紧
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `t_stage_roster_entry` (
   `id` INTEGER NOT NULL,
   `tenant_id` INTEGER NOT NULL,
   `tournament_id` INTEGER NOT NULL,
   `target_stage_id` INTEGER NOT NULL,
-  `op` TEXT NOT NULL,
+  `slot` INTEGER NOT NULL,
+  `slot_kind` TEXT NOT NULL,
+  `ref_type` TEXT,
   `source_competitor_id` INTEGER,
+  `source_stage_id` INTEGER,
   `player_id` INTEGER,
   `guest_name` TEXT,
   `guest_type` INTEGER NOT NULL DEFAULT 0,
   `guest_number` TEXT,
-  `seed_rank` INTEGER,
+  `entry_tag` TEXT,
+  `origin` TEXT NOT NULL,
+  `status` TEXT NOT NULL,
+  `competitor_id` INTEGER,
   `create_by` INTEGER,
   `create_time` TEXT,
   `update_by` INTEGER,
@@ -387,5 +393,6 @@ CREATE TABLE IF NOT EXISTS `t_stage_roster_override` (
   PRIMARY KEY (`id`)
 );
 
-CREATE INDEX IF NOT EXISTS `idx_override_target` ON `t_stage_roster_override` (`target_stage_id`);
-CREATE INDEX IF NOT EXISTS `idx_override_tournament` ON `t_stage_roster_override` (`tournament_id`);
+CREATE INDEX IF NOT EXISTS `idx_roster_entry_target` ON `t_stage_roster_entry` (`target_stage_id`);
+CREATE INDEX IF NOT EXISTS `idx_roster_entry_tournament` ON `t_stage_roster_entry` (`tournament_id`);
+CREATE INDEX IF NOT EXISTS `idx_roster_entry_source` ON `t_stage_roster_entry` (`source_competitor_id`);

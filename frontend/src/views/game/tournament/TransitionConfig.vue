@@ -674,6 +674,7 @@ import {
   addRosterOverride,
   deleteRosterOverride,
   getRosterPreview,
+  rebuildStageRoster,
   setRosterOrder
 } from '@/api/game/stage/roster';
 import { seedLayout } from '@/utils/seedLayout';
@@ -1571,17 +1572,15 @@ const swapRosterSeeds = async (a: any, b: any) => {
   await loadRosters();
 };
 
-/** 恢复:清掉全部手工顺序,回到按来源名次自动排列 */
+/**
+ * 恢复:按来源组规则重建中间层,丢弃本赛段名单上的全部人工调整,
+ * 回到"按来源名次自动排列"的原始顺序(位置就是数据,没有单独的 SEED 记录可删)
+ */
 const clearRosterOrder = async () => {
   const p = firstRoster.value;
   if (!p || rosterSealed.value) return;
-  const seeds = overridesOf(p).filter((o) => o.op === 'SEED');
-  if (seeds.length === 0) {
-    ElMessage.info('当前没有手工调整过的顺序');
-    return;
-  }
   try {
-    await ElMessageBox.confirm('恢复为按来源名次自动排列的原始顺序?', '恢复顺序', {
+    await ElMessageBox.confirm('恢复为按来源名次自动排列的原始顺序?这会丢弃本赛段名单上全部人工调整(换位/加人/外卡/剔除)', '恢复顺序', {
       type: 'warning',
       confirmButtonText: '恢复',
       cancelButtonText: '取消'
@@ -1590,7 +1589,11 @@ const clearRosterOrder = async () => {
     return;
   }
   try {
-    for (const o of seeds) await deleteRosterOverride(p.id, o.id);
+    const res: any = await rebuildStageRoster(p.id);
+    if (res?.data === false || res === false) {
+      ElMessage.warning('当前名单不可重建(赛段已开赛或来源未结算)');
+      return;
+    }
     ElMessage.success('已恢复自动顺序');
     await loadRosters();
   } catch (e: any) {

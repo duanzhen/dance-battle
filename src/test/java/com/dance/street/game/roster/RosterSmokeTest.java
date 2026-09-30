@@ -6,7 +6,7 @@ import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TStage;
-import com.dance.street.game.domain.TStageRosterOverride;
+import com.dance.street.game.domain.vo.TStageRosterOverrideVo;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
@@ -27,7 +27,6 @@ import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TStageMapper;
-import com.dance.street.game.mapper.TStageRosterOverrideMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
@@ -103,8 +102,6 @@ class RosterSmokeTest {
     private TMatchParticipantMapper participantMapper;
     @Autowired
     private TMatchRefereeMapper matchRefereeMapper;
-    @Autowired
-    private TStageRosterOverrideMapper overrideMapper;
     @Autowired
     private TPlayerMapper playerMapper;
 
@@ -607,7 +604,8 @@ class RosterSmokeTest {
         assertEquals(3L, seedOf.get(a.getId()));
         assertEquals(4L, seedOf.get(b.getId()));
 
-        // 移除 D(快照前,保留 REMOVE E/SEED C)并加外卡 X:4 人内 X 自动队尾,G 号
+        // 移除 D(快照前,保留 REMOVE E/SEED C)并加外卡 X:座位是位置——X 落进 D 让出来的 2 号空位
+        // (不是"队尾";空位必须占号,新人优先填空位,后面的人不前移)
         lifecycleService.resetStageToDraft(round16.getId());
         TStageRosterOverrideBo removeD = new TStageRosterOverrideBo();
         removeD.setOp(RosterConstants.OVERRIDE_REMOVE);
@@ -620,12 +618,12 @@ class RosterSmokeTest {
         rosterService.addOverride(stageId, addX);
         // 只填姓名加外卡:应同步建出一条选手(player)并回填到覆盖上,
         // 使外卡物化时能带上成员行,而不是"有名无人"的裸名字。
-        TStageRosterOverride xOverride = overrideMapper.selectList(
-                com.baomidou.mybatisplus.core.toolkit.Wrappers.<TStageRosterOverride>lambdaQuery()
-                    .eq(TStageRosterOverride::getTargetStageId, stageId)
-                    .eq(TStageRosterOverride::getOp, RosterConstants.OVERRIDE_ADD_GUEST))
-            .stream().filter(o -> "外卡X".equals(o.getGuestName())).findFirst().orElse(null);
-        assertNotNull(xOverride, "应写入外卡覆盖");
+        // 人工加人现在就是中间层的一行(origin=MANUAL),listOverrides 从这张表反推
+        TStageRosterOverrideVo xOverride = rosterService.listOverrides(stageId).stream()
+            .filter(o -> RosterConstants.OVERRIDE_ADD_GUEST.equals(o.getOp()))
+            .filter(o -> "外卡X".equals(o.getGuestName()))
+            .findFirst().orElse(null);
+        assertNotNull(xOverride, "应写入外卡行");
         assertNotNull(xOverride.getPlayerId(), "按姓名加外卡应回填 playerId");
         TPlayer xPlayer = playerMapper.selectById(xOverride.getPlayerId());
         assertNotNull(xPlayer, "应自动创建对应选手");
@@ -643,7 +641,7 @@ class RosterSmokeTest {
         assertNotNull(xRow);
         assertEquals(RosterConstants.ENTRY_GUEST, xRow.getEntryTag());
         assertEquals("GUEST", xRow.getRemark());
-        assertEquals(4L, xRow.getSeedRank().longValue());
+        assertEquals(2L, xRow.getSeedRank().longValue());
         assertNotNull(xRow.getNumber());
         assertTrue(xRow.getNumber().startsWith("G"));
 

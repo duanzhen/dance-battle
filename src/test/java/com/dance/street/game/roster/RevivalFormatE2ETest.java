@@ -359,9 +359,13 @@ class RevivalFormatE2ETest {
         assertEquals(15, countOutcome(audition.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
         assertEquals(2, countOutcome(audition.getId(), OutcomeStatusEnum.PENDING.getCode()));
 
-        // 二海又同分 → 裁判判完即自动结算并再开一轮(三海):
-        // 验证"同一边界最多 4 轮"的计数没被误拦,也验证二海是自动结算的
+        // 二海又同分:加赛不自动结算,由导播台点「完成赛段」触发再开一轮(三海),
+        // 验证"同一边界最多 4 轮"的计数没被误拦
         scoreMatchByOrder(tiebreaks.get(0), zone1Judge.getId(), i -> BigDecimal.valueOf(80));
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(tiebreaks.get(0).getId()).getStatus(),
+            "加赛判完最后一人不得自动结算");
+        assertTrue(lifecycleService.completeStage(audition.getId()).getTiebreaker(),
+            "二海再次同分:点完成赛段应生成三海并标记需要加赛");
         List<TMatch> chain = tiebreakerMatches(audition.getId());
         assertEquals(2, chain.size());
         assertEquals("ZONE-1", chain.get(1).getDisplayZone());
@@ -424,6 +428,8 @@ class RevivalFormatE2ETest {
         // 二海:B 第一直接晋级,C/D 再次并列 → 三海
         BigDecimal[] tiebreakScores = {new BigDecimal("8"), new BigDecimal("7"), new BigDecimal("7")};
         scoreMatchByOrder(tiebreaks.get(0), judge.getId(), i -> tiebreakScores[i]);
+        assertTrue(lifecycleService.completeStage(audition.getId()).getTiebreaker(),
+            "二海再次并列:点完成赛段应开三海");
         List<TMatch> chain = tiebreakerMatches(audition.getId());
         assertEquals(2, chain.size(), "二海再次并列应开三海");
 

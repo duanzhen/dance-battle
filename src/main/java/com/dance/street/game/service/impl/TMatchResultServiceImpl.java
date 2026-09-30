@@ -210,15 +210,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             List<MatchScoreResult> accumulated = loadAuditionResults(match, competitorIds);
             refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
             tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
-            // 二海/三海:全员打分完成后自动结算(若再次同分会自动生成下一级加赛),
-            // 无需裁判判完后手动再点一次完成赛段;结算异常不阻断打分提交(仍可手动完成兜底)
-            if (isAudition) {
-                try {
-                    stageLifecycleService.tryAutoSettleTiebreaker(match.getId());
-                } catch (Exception e) {
-                    log.warn("海选加赛[{}]自动结算失败,可手动完成赛段兜底: {}", match.getId(), e.getMessage());
-                }
-            }
+            // 海选(含二海/三海)不自动结算:打分只是攒分,结算统一由导播台/管理端点「完成赛段」触发。
+            // 这样裁判判完最后一个人不会当场生成下一级加赛,导播可以先确认分数、再决定收尾。
             // 排名赛 BATCH 公布模式:全部裁判对全部选手打分完成后,自动完成赛段一次性公布
             if (isRank) {
                 maybeAutoPublishRankStage(stage);

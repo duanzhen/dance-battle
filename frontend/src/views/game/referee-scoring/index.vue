@@ -273,10 +273,7 @@
 
             <div v-if="isPerCompetitor" class="space-y-4">
               <!-- 顶部横向选手列表 -->
-              <div
-                ref="chipStripRef"
-                class="no-scrollbar flex gap-2 overflow-x-auto pt-3 pb-2 pl-[calc(50%-40px)] pr-[calc(50%-40px)]"
-              >
+              <div ref="chipStripRef" class="no-scrollbar flex gap-2 overflow-x-auto pt-3 pb-2 pl-[calc(50%-40px)] pr-[calc(50%-40px)]">
                 <button
                   v-for="p in participants"
                   :key="p.competitorId"
@@ -306,13 +303,13 @@
                     :class="
                       keypadTarget?.competitorId === p.competitorId
                         ? 'text-neutral-900'
-                        : myTotal(p.competitorId!) > 0
+                        : myScored(p.competitorId!)
                           ? 'text-amber-400'
                           : 'text-neutral-600'
                     "
                   >
                     {{
-                      myTotal(p.competitorId!) > 0
+                      myScored(p.competitorId!)
                         ? myTotal(p.competitorId!).toFixed(2)
                         : keypadTarget?.competitorId === p.competitorId
                           ? '当前'
@@ -332,7 +329,7 @@
                   <div v-if="!isRanking" class="text-right">
                     <div class="text-[10px] text-neutral-600">我的评分</div>
                     <div class="text-2xl font-black font-mono text-amber-400 tabular-nums">
-                      {{ keypadValue || '0' }}<span class="text-sm font-normal text-neutral-500"> / {{ keypadMax }}</span>
+                      {{ keypadValue === '' ? '—' : keypadValue }}<span class="text-sm font-normal text-neutral-500"> / {{ keypadMax }}</span>
                     </div>
                   </div>
                 </div>
@@ -371,10 +368,7 @@
                       </button>
                     </div>
                   </div>
-                  <p
-                    v-if="keypadTarget?.competitorId != null && myTotal(keypadTarget.competitorId) > 0"
-                    class="text-[9px] text-neutral-500 text-center"
-                  >
+                  <p v-if="keypadTarget?.competitorId != null && myScored(keypadTarget.competitorId)" class="text-[9px] text-neutral-500 text-center">
                     我的总分 {{ myTotal(keypadTarget.competitorId).toFixed(2) }}
                   </p>
                   <div class="grid grid-cols-2 gap-2 mt-3">
@@ -437,6 +431,10 @@
                   </div>
                   <p v-if="auditionAllScored" class="text-[9px] font-bold text-amber-400/90 mt-1 text-center">
                     本场选手已全部评完，等待导播台/管理端结束赛段后进入下一轮
+                  </p>
+                  <!-- 0 分是合法分(缺席/弃权):明确写出来,免得裁判以为 0 分不能打 -->
+                  <p v-if="keypadValue !== '' && Number(keypadValue) === 0" class="text-[9px] text-neutral-500 mt-1 text-center">
+                    0 分按缺席/弃权处理，不参与晋级
                   </p>
                 </template>
               </div>
@@ -559,7 +557,7 @@
                       </button>
                     </div>
                   </div>
-                  <p v-if="myTotal(p.competitorId!) > 0" class="text-[9px] text-neutral-500 text-center">
+                  <p v-if="myScored(p.competitorId!)" class="text-[9px] text-neutral-500 text-center">
                     我的总分 {{ myTotal(p.competitorId!).toFixed(2) }} · 当前累计 {{ p.currentScore == null ? 0 : Number(p.currentScore).toFixed(2) }}
                   </p>
                 </div>
@@ -833,8 +831,9 @@ watch(
 const selectParticipant = (p: Participant) => {
   const sameTarget = keypadTarget.value?.competitorId === p.competitorId;
   keypadTarget.value = p;
-  const cur = p.competitorId != null ? myTotal(p.competitorId) : 0;
-  keypadValue.value = cur > 0 ? String(cur) : '';
+  // 已打过分(含 0 分)就把分数回填到输入框,没打过才留空:否则 0 分选手的输入框
+  // 每次都显示空白,裁判无法确认自己那 0 分到底提交上没有
+  keypadValue.value = p.competitorId != null && myScored(p.competitorId) ? String(myTotal(p.competitorId)) : '';
   // 自动横向滚动,让当前选手卡片居中
   if (p.competitorId != null) {
     nextTick(() => {
@@ -848,7 +847,10 @@ const selectParticipant = (p: Participant) => {
   }
 };
 
-/** 自动选中下一位:优先 after 之后第一个未评选手,全部已评时停在当前/第一个 */
+/**
+ * 自动选中下一位:优先 after 之后第一个未评选手,全部已评时停在当前/第一个。
+ * 「已评」看有没有分数记录(0 分也算),不能看总分是否大于 0。
+ */
 const autoSelectNext = (after?: Participant | null) => {
   const list = participants.value;
   if (list.length === 0) {
@@ -859,21 +861,27 @@ const autoSelectNext = (after?: Participant | null) => {
   const startIdx = after ? list.findIndex((p) => p.competitorId === after.competitorId) : -1;
   for (let i = startIdx + 1; i < list.length; i++) {
     const p = list[i];
-    if (p.competitorId != null && myTotal(p.competitorId) <= 0) {
+    if (p.competitorId != null && !myScored(p.competitorId)) {
       selectParticipant(p);
       return;
     }
   }
   for (let i = 0; i <= startIdx; i++) {
     const p = list[i];
-    if (p.competitorId != null && myTotal(p.competitorId) <= 0) {
+    if (p.competitorId != null && !myScored(p.competitorId)) {
       selectParticipant(p);
       return;
     }
   }
-  // 全部已评:停在当前选手,否则选第一个
-  const stay = after && list.some((p) => p.competitorId === after.competitorId) ? after : list[0];
-  selectParticipant(stay);
+  // 全部已评:停在当前选手。这里必须直接返回、不能再走 selectParticipant——
+  // selectParticipant 会无条件 focus() + select() 分数框,判完最后一个人时那个刚提交的分数
+  // 会被整块"自动选中"(触屏上还会弹选择手柄),看起来像还等着再提交一次。
+  // 要改分自己点选手卡片即可(那条路径仍然 focus + 全选,方便直接覆盖)。
+  if (after && list.some((p) => p.competitorId === after.competitorId)) {
+    return;
+  }
+  // 页面刚加载/上下文切换(没有"刚刚评完的人"):选中第一位,保证界面不停在未选中态
+  selectParticipant(list[0]);
 };
 
 const pressKey = (k: string) => {
@@ -964,6 +972,12 @@ const confirmKeypad = async () => {
   if (keypadSubmitting.value) return;
   const target = keypadTarget.value;
   if (!target || target.competitorId == null) return;
+  // 空输入 ≠ 0 分:空着点提交以前会被 Number('') 悄悄当成 0 分提交(等于误判缺席),
+  // 想打 0 分请显式输入 0,这样才能区分"没填"和"确实给 0 分"
+  if (keypadValue.value === '' || keypadValue.value === '.') {
+    ElMessage.warning('请输入分数(0 分请明确输入 0)');
+    return;
+  }
   const score = Number(keypadValue.value);
   if (Number.isNaN(score) || score < 0 || score > keypadMax.value) {
     ElMessage.warning(`请输入 0-${keypadMax.value} 的有效分数（最多 ${keypadDecimals.value} 位小数）`);
@@ -1002,7 +1016,8 @@ const confirmRankTarget = async () => {
   const dims = edits.value[target.competitorId] || {};
   const scores: any[] = [];
   Object.entries(dims).forEach(([dim, score]) => {
-    if (score > 0) {
+    // 0 分也要提交:总分 0 是合法结果(缺席/弃权),不能因为"看起来是空"就把这一项丢给后端
+    if (score != null && Number.isFinite(Number(score))) {
       scores.push({ competitorId: target.competitorId, dimension: dim, action: 'SCORE', score });
     }
   });
@@ -1099,7 +1114,8 @@ const onDimInput = (competitorId: number, dim: string, event: Event) => {
   const max = dimMaxScore(dim);
   if (max != null && Number.isFinite(parsed) && parsed > max) {
     const fallback = getDimScore(competitorId, dim);
-    el.value = fallback > 0 ? String(fallback) : '';
+    // 回退值就是当前已存的分(含 0),照实显示,别把 0 分显示成空
+    el.value = String(fallback);
     tipOverLimit(`「${dimLabel(dim)}」满分 ${max} 分`);
     return;
   }
@@ -1131,6 +1147,17 @@ const myTotal = (competitorId: number): number => {
 };
 
 /**
+ * 当前裁判是否已经给该选手的这一项打过分(打 0 分也算「已评」)。
+ *
+ * <p>海选允许打 0 分(缺席/弃权,0 分不参与晋级),所以「已评」不能再用「总分 &gt; 0」判断:
+ * 那样 0 分会被当成没填——胶囊一直显示"未评"、"提交并下一个"又会跳回同一个人,
+ * 裁判的体感就是「0 分填不进去」。判定口径必须是"有没有这一行的记录",不是分值大小。</p>
+ */
+const myScored = (competitorId: number, dim = 'MAIN'): boolean => {
+  return myScores.value.some((s) => s.competitorId === competitorId && (s.dimension || 'MAIN') === dim);
+};
+
+/**
  * 本地回显"我的分":提交成功后立即更新,不必等整页 my-match 刷新回来。
  * SSE 的 scores 事件随后会触发一次后台 refresh,用服务端值校正。
  */
@@ -1142,11 +1169,11 @@ const applyLocalScore = (competitorId: number, dimension: string, score: number)
   ];
 };
 
-/** 海选逐选手打分:本场所有选手是否已被当前裁判评完(二海/加赛同样适用) */
+/** 海选逐选手打分:本场所有选手是否已被当前裁判评完(二海/加赛同样适用;0 分也算评完) */
 const auditionAllScored = computed(() => {
   if (!isAudition.value || isRanking.value) return false;
   const list = participants.value;
-  return list.length > 0 && list.every((p) => p.competitorId != null && myTotal(p.competitorId) > 0);
+  return list.length > 0 && list.every((p) => p.competitorId != null && myScored(p.competitorId));
 });
 
 const buildPayload = () => {
@@ -1164,7 +1191,8 @@ const buildPayload = () => {
     if (p.competitorId === null) return;
     const dims = edits.value[p.competitorId] || {};
     Object.entries(dims).forEach(([dim, score]) => {
-      if (touched.value.has(`${p.competitorId}:${dim}`) && score > 0) {
+      // 0 分也要提交(海选 0 分 = 弃权/缺席,是有意义的分数),只按"有没有填"过滤
+      if (touched.value.has(`${p.competitorId}:${dim}`) && score != null && Number.isFinite(Number(score))) {
         scores.push({ competitorId: p.competitorId, dimension: dim, score, action: 'SCORE' });
       }
     });
@@ -1414,14 +1442,20 @@ const refresh = async () => {
       !stageId.value || !matchId.value || nextStageId !== stageId.value || nextMatchId !== matchId.value || nextRoundId !== currentRoundId.value;
     // 名单是否变化(如开赛后补签到、换圈):mergeLive 只更新已有选手的分数/名次,
     // 不会把新签到的人加进横向列表,所以名单一变就必须整页应用。
-    const serverIds = (data?.participants || []).map((p: any) => String(p.competitorId)).sort().join(',');
-    const localIds = participants.value.map((p: any) => String(p.competitorId)).sort().join(',');
+    const serverIds = (data?.participants || [])
+      .map((p: any) => String(p.competitorId))
+      .sort()
+      .join(',');
+    const localIds = participants.value
+      .map((p: any) => String(p.competitorId))
+      .sort()
+      .join(',');
     const rosterChanged = serverIds !== localIds;
     // 上下文变化、名单变化,或本地为空但服务端已有参赛方时,整页应用(避免残留空态)
     const serverHasParticipants = (data?.participants || []).length > 0;
     if (contextChanged || rosterChanged || (participants.value.length === 0 && serverHasParticipants)) {
       // 补签到这类"名单变化"不该把裁判从正在打分的人身上拽走:上下文没变时保留当前选中
-      const keepCid = contextChanged ? null : keypadTarget.value?.competitorId ?? null;
+      const keepCid = contextChanged ? null : (keypadTarget.value?.competitorId ?? null);
       applyData(data);
       const keep = keepCid == null ? null : participants.value.find((p) => p.competitorId === keepCid);
       if (keep) {

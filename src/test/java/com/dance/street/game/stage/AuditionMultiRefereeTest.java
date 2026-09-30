@@ -99,8 +99,8 @@ class AuditionMultiRefereeTest {
     private ITMatchResultService matchResultService;
 
     /**
-     * 核心回归:一圈两名裁判。第一名裁判把同分选手都判完,加赛不得自动结算;
-     * 第二名裁判补齐后,分数才完整(跨裁判求和),此时才自动结算。
+     * 核心回归:一圈两名裁判。加赛不打分自动结算——只有第一名裁判判完不许结算,
+     * 第二名裁判补齐后也不结算,必须由导播台点「完成赛段」;此时分数已跨裁判求和完整。
      */
     @Test
     void tiebreakerDoesNotAutoSettleUntilEveryBoundRefereeScores() {
@@ -124,23 +124,31 @@ class AuditionMultiRefereeTest {
         assertEquals("ZONE-1", tiebreak.getDisplayZone());
         assertEquals(2, participantsOf(tiebreak.getId()).size(), "二海应只有同分的两位选手");
 
-        // 1) 先到的裁判A判完全部同分选手:不得自动结算(旧实现在这里就会结束)
+        // 1) 先到的裁判A判完全部同分选手:不得结算
         scoreAll(tiebreak.getId(), refereeA.getId(), List.of(bd("9"), bd("8")));
         assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(tiebreak.getId()).getStatus(),
-            "只有一名裁判打分不得自动结算加赛");
+            "只有一名裁判打分不得结算加赛");
         assertEquals(StageConstants.STAGE_GAMING, stageMapper.selectById(stage.getId()).getStatus(),
             "加赛未判完赛段应保持进行中");
+        // 此时点完成赛段也不许结算(还缺裁判B的分)
+        assertFalse(lifecycleService.completeStage(stage.getId()).getCompleted(),
+            "缺一名裁判的分,点完成赛段不得结束赛段");
         List<TMatchParticipant> halfScored = participantsOf(tiebreak.getId());
         assertEquals(0, bd("9").compareTo(halfScored.get(0).getScoreValue()),
             "此时只应累计到裁判A一个人的分");
 
-        // 2) 裁判B补齐:分数跨裁判求和后完整,自动结算
+        // 2) 裁判B补齐:分数跨裁判求和后完整,但结算仍要等导播台点「完成赛段」
         scoreAll(tiebreak.getId(), refereeB.getId(), List.of(bd("9"), bd("8")));
-        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(tiebreak.getId()).getStatus(),
-            "全部绑定裁判判完后加赛应自动结算");
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(tiebreak.getId()).getStatus(),
+            "加赛不自动结算:最后一名裁判打完也要保持进行中");
         List<TMatchParticipant> fullyScored = participantsOf(tiebreak.getId());
         assertEquals(0, bd("18").compareTo(fullyScored.get(0).getScoreValue()),
             "总分应包含两名裁判的分");
+
+        assertTrue(lifecycleService.completeStage(stage.getId()).getCompleted(),
+            "全部绑定裁判判完后,导播台点完成赛段应结算并结束赛段");
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(tiebreak.getId()).getStatus(),
+            "加赛应已结算");
     }
 
     /**
@@ -185,12 +193,16 @@ class AuditionMultiRefereeTest {
         // 只有圈2的一名裁判判完:不得结算(要求的裁判数按本圈算,且别圈裁判的分不算数)
         scoreAll(tiebreak.getId(), z2a.getId(), List.of(bd("9"), bd("7")));
         assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(tiebreak.getId()).getStatus(),
-            "本圈还有裁判没判,不得自动结算");
+            "本圈还有裁判没判,不得结算");
 
-        // 圈2第二名裁判补齐 → 结算
+        // 圈2第二名裁判补齐 → 仍不自动结算(等导播台点完成赛段)
         scoreAll(tiebreak.getId(), z2b.getId(), List.of(bd("9"), bd("7")));
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(tiebreak.getId()).getStatus(),
+            "加赛不自动结算:本圈裁判判完也要等导播台点完成赛段");
+        assertTrue(lifecycleService.completeStage(stage.getId()).getCompleted(),
+            "本圈裁判判完后点完成赛段应结算并结束赛段");
         assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(tiebreak.getId()).getStatus(),
-            "本圈两名裁判判完后应自动结算");
+            "本圈两名裁判判完后点完成赛段应结算");
 
         // 全程没有要求圈1裁判参与,证明要求是按本圈解析的
         assertTrue(StageConstants.MATCH_SETTLED.equals(matchMapper.selectById(circle1.getId()).getStatus()));

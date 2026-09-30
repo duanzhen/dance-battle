@@ -2336,13 +2336,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    public boolean tryAutoSettleTiebreaker(Long matchId) {
-        // 加赛「全员打分后自动结算」的判定与落库都在海选结算策略里,本类只做事务边界与转发
-        return auditionStageSettler.tryAutoSettleTiebreaker(matchId);
-    }
-
-    @Override
     public void setMatchCurrentCompetitor(Long matchId, Long competitorId) {
         TMatch match = matchMapper.selectById(matchId);
         if (match == null) {

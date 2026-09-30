@@ -175,13 +175,6 @@ public interface ITStageLifecycleService {
     AuditionResultVo queryAuditionResult(Long stageId);
 
     /**
-     * 海选加赛(二海/三海…)本场绑定的每名裁判都打完后自动结算:
-     * 幂等,仅处理进行中的加赛场次;若再次同分会自动生成下一级加赛。
-     * 返回是否执行了结算。
-     */
-    boolean tryAutoSettleTiebreaker(Long matchId);
-
-    /**
      * 标记场次当前上场选手(海选大屏 widget 用):仅标记与广播,不参与结算;
      * competitorId 传 null 表示清除。
      */

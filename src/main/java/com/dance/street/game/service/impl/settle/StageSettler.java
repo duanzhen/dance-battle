@@ -15,7 +15,7 @@ import com.dance.street.game.domain.TStage;
  * 避免每种赛制各写一份状态推进。</p>
  *
  * <p><b>事务边界由调用方提供:</b>实现类不加 {@code @Transactional},它们依赖
- * 编排层({@code completeStage} / {@code tryAutoSettleTiebreaker})的事务。
+ * 编排层({@code completeStage},海选二海/三海也走这个入口)的事务。
  * 从没有事务的上下文直接调用策略,写入将不再是原子的——新增调用点时请连事务一起考虑。</p>
  *
  * <p><b>失败语义:</b>"还不能结束"(场次未打完、有选手没打分…)一律返回

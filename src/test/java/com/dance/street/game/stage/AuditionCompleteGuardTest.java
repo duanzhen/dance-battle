@@ -174,7 +174,7 @@ class AuditionCompleteGuardTest {
         assertTrue(again.getMessage().contains("需要加赛"),
             "原因应继续指向加赛,实际: " + again.getMessage());
 
-        // 3) 裁判打完加赛(全员有分即自动结算)后再点:正常结束
+        // 3) 裁判打完加赛(加赛不自动结算,仍由这次点击触发)后再点:正常结束
         List<TMatch> tiebreakers = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stage.getId())
             .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER));

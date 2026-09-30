@@ -11,7 +11,9 @@
       @drop.prevent="handleFileDrop"
       @wheel.prevent="handleWheel"
     >
-      <img ref="sourceImg" :src="imgSrc" @load="onImageLoad" style="display: none" />
+      <!-- v-if 而不是直接绑 src:清空 src 时浏览器会当成一次加载失败(触发 error),
+           而且卸载元素能让浏览器回收那张全分辨率位图 -->
+      <img v-if="imgSrc" ref="sourceImg" :src="imgSrc" @load="onImageLoad" @error="onImageError" style="display: none" />
 
       <div v-if="isProcessing" class="loading-overlay">
         <span>AI 正在处理中...</span>
@@ -33,13 +35,7 @@
       ></canvas>
 
       <!-- 半透明人形轮廓:辅助把人物摆到统一位置(头/肩对齐),不挡拖拽缩放 -->
-      <svg
-        v-if="hasProcessedImg && showPoseGuide"
-        class="pose-guide"
-        viewBox="0 0 500 500"
-        preserveAspectRatio="xMidYMid meet"
-        aria-hidden="true"
-      >
+      <svg v-if="hasProcessedImg && showPoseGuide" class="pose-guide" viewBox="0 0 500 500" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         <!-- 中轴虚线:辅助水平居中 -->
         <line class="pose-guide-axis" x1="250" y1="24" x2="250" y2="476" />
         <!-- 头:占画面上方约 1/3,统一各选手的头部位置 -->
@@ -82,10 +78,10 @@
   </div>
 </template>
 
-<script setup>
-import { ref, watch, onMounted, getCurrentInstance } from 'vue';
+<script setup lang="ts">
+import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue';
 import { Upload, User, X } from 'lucide-vue-next';
-import { acquireSelfieSegmentation } from '@/utils/selfieSegmentation';
+import { acquireSelfieSegmentation, releaseSelfieSegmentation } from '@/utils/selfieSegmentation';
 import request from '@/utils/request';
 import { globalHeaders } from '@/utils/request';
 
@@ -102,6 +98,22 @@ const { proxy } = getCurrentInstance();
 
 // 常量
 const CANVAS_SIZE = 500;
+/**
+ * 送进 MediaPipe 的图片尺寸上限(最长边 / 总像素)。
+ *
+ * <p>手机原图动辄 4000x3000 甚至上亿像素,MediaPipe 会按原图尺寸建 WebGL 纹理;
+ * 超过 GPU 纹理上限(常见 4096/8192)或显存不够时,wasm 会直接 abort、GL 上下文丢失,
+ * 表现就是「某些图片一选就闪退 / 标签页重载」。模型内部本来就只吃 256x256,
+ * 所以先等比缩到安全尺寸再送进去,画质不影响,崩溃面直接消掉。</p>
+ */
+const MAX_WORK_EDGE = 1600;
+const MAX_WORK_PIXELS = 1600 * 1600;
+/** send 之后迟迟不回调(运行时被 abort / 上下文丢失)时的兜底时长 */
+const PROCESS_TIMEOUT_MS = 20000;
+/** 冷启动还要等 wasm + 模型下载(5MB 多的 wasm),弱网下会更久,单独给更长的兜底 */
+const COLD_START_TIMEOUT_MS = 60000;
+/** 单张原图大小上限:几十 MB 的图解码后内存要翻好几倍,移动端很容易 OOM */
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 // --- 响应式状态 ---
 const imgSrc = ref('');
@@ -114,7 +126,11 @@ const isFileDragging = ref(false);
 const hasProcessedImg = ref(false);
 /** 对齐轮廓(半透明人形)显隐:默认开启,便于把人物摆到统一位置 */
 const showPoseGuide = ref(true);
-const modelSelection = ref(1);
+/**
+ * 0 = 通用模型(256x256),1 = 横向模型(256x144)。
+ * 这里处理的是竖构图人像,通用模型的人像边缘明显更稳,所以用 0。
+ */
+const modelSelection = ref(0);
 
 // 图片变换状态
 const scale = ref(1);
@@ -135,25 +151,108 @@ const dragStartOffsetY = ref(0);
 const pinchStartDist = ref(0);
 const pinchStartScale = ref(1);
 
-// --- MediaPipe 句柄(真正实例缓存在模块级单例里,见文件顶部 acquireSelfieSegmentation) ---
+// --- MediaPipe 句柄(真正实例缓存在模块级单例里,见 utils/selfieSegmentation) ---
 let selfieSegmentation = null;
 let processedCanvas = null; // 存储抠图后的原始图片
 let processedCtx = null;
+// MediaPipe 的工作画布:原图等比缩小后的副本,检测/抠图/导出都基于它
+let workCanvas = null;
+let workCtx = null;
+// 当前选中文件的 objectURL,需要主动释放,避免大图一直占着内存
+let sourceObjectUrl = null;
+let processTimer = null;
+// 模型是否已加载完成:决定抠图超时用冷启动时长还是常规时长
+let modelReady = false;
 
 // --- 初始化/复用 MediaPipe(整页唯一实例,后续挂载只重绑回调) ---
 const initMediaPipe = () => {
-  selfieSegmentation = acquireSelfieSegmentation(
-    // 本地加载模型/运行时(public/mediapipe),避免 CDN 被墙
-    (file) => `${import.meta.env.BASE_URL}mediapipe/${file}`,
-    { modelSelection: modelSelection.value },
-    onResults
-  );
+  selfieSegmentation = acquireSelfieSegmentation({ modelSelection: modelSelection.value }, onResults);
   return selfieSegmentation;
+};
+
+const clearProcessTimer = () => {
+  if (processTimer) {
+    clearTimeout(processTimer);
+    processTimer = null;
+  }
+};
+
+const revokeSourceObjectUrl = () => {
+  if (sourceObjectUrl) {
+    URL.revokeObjectURL(sourceObjectUrl);
+    sourceObjectUrl = null;
+  }
+};
+
+/** 置 0 尺寸才会真正把画布的像素缓冲还给浏览器(只清 rect 是不够的) */
+const destroyCanvas = (canvas) => {
+  if (canvas) {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+};
+
+/**
+ * 释放这一轮抠图/编辑占下的大块内存:全分辨率原图位图、工作画布、objectURL。
+ * 抠图结果保存成功后调用;500x500 预览画布保留(保存后组件可能还挂在页面上,马上会被保存结果替换)。
+ * 注意只清组件自己的东西,MediaPipe 实例和已加载的模型保持常驻,不重新加载。
+ */
+const releaseMattingMemory = () => {
+  revokeSourceObjectUrl();
+  // imgSrc 清空 → v-if 卸载隐藏 img → 全分辨率位图可被回收(12MP 大概 48MB)
+  imgSrc.value = '';
+
+  destroyCanvas(workCanvas);
+  workCanvas = null;
+  workCtx = null;
+};
+
+/** 连预览一起清掉(移除照片 / 组件卸载时用) */
+const disposeMattingMemory = () => {
+  releaseMattingMemory();
+  destroyCanvas(processedCanvas);
+  processedCanvas = null;
+  processedCtx = null;
+};
+
+/**
+ * 把原图等比缩到 MediaPipe 的安全尺寸,生成/复用一张离屏工作画布。
+ * 超限的图不再进模型,也就不会出现「大图必崩」。
+ */
+const buildWorkCanvas = (img) => {
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  if (!width || !height) return null;
+
+  const edgeScale = Math.min(1, MAX_WORK_EDGE / Math.max(width, height));
+  let targetW = Math.max(1, Math.round(width * edgeScale));
+  let targetH = Math.max(1, Math.round(height * edgeScale));
+
+  // 极端长图(如全景细长图)按边长缩完像素量仍可能偏大,再按总面积兜一次底
+  const pixelScale = Math.min(1, Math.sqrt(MAX_WORK_PIXELS / (targetW * targetH)));
+  if (pixelScale < 1) {
+    targetW = Math.max(1, Math.round(targetW * pixelScale));
+    targetH = Math.max(1, Math.round(targetH * pixelScale));
+  }
+
+  if (!workCanvas) {
+    workCanvas = document.createElement('canvas');
+    workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+  }
+
+  workCanvas.width = targetW;
+  workCanvas.height = targetH;
+  workCtx.clearRect(0, 0, targetW, targetH);
+  workCtx.imageSmoothingEnabled = true;
+  workCtx.imageSmoothingQuality = 'high';
+  workCtx.drawImage(img, 0, 0, targetW, targetH);
+
+  return workCanvas;
 };
 
 // --- 加载编辑图片 ---
 const loadEditImage = async (url) => {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
 
@@ -195,7 +294,7 @@ const loadEditImage = async (url) => {
 
 // --- 重置位置和缩放 ---
 const resetPosition = () => {
-  if (!processedCanvas) return;
+  if (!processedCanvas?.width || !processedCanvas?.height) return;
 
   // 计算合适的缩放比例，使图片占据约 85% 画布高度
   const targetHeight = CANVAS_SIZE * 0.85;
@@ -224,7 +323,8 @@ const render = () => {
   // 清空画布
   ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-  if (!hasProcessedImg.value) {
+  // processedCanvas 可能刚被回收掉(置 0 尺寸),这种情况只清屏不画
+  if (!hasProcessedImg.value || !processedCanvas?.width || !processedCanvas?.height) {
     return;
   }
 
@@ -252,9 +352,7 @@ watch(
     } else if (!newUrl) {
       // 清空状态
       hasProcessedImg.value = false;
-      if (processedCanvas) {
-        processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
-      }
+      disposeMattingMemory();
       render();
     }
   },
@@ -274,14 +372,19 @@ const triggerFileSelect = () => {
  */
 const clearImage = () => {
   if (isProcessing.value || isUploading.value) return;
+  clearProcessTimer();
   hasProcessedImg.value = false;
   hasChanges.value = false;
-  imgSrc.value = '';
-  if (processedCanvas && processedCtx) {
-    processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
-  }
+  disposeMattingMemory();
   render();
   emit('update:modelValue', '');
+};
+
+/** 隐藏 img 加载失败(坏文件、浏览器不支持的格式如 HEIC):给个明确提示,别让界面卡在空态 */
+const onImageError = () => {
+  isProcessing.value = false;
+  clearProcessTimer();
+  proxy.$modal.msgError('图片加载失败,请更换为 JPG/PNG 图片');
 };
 
 // --- 文件上传处理 ---
@@ -294,16 +397,26 @@ const handleFileUpload = (event) => {
 
 // --- 处理单个文件 ---
 const handleFile = (file) => {
-  if (!file || !file.type.startsWith('image/')) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
     proxy.$modal.msgError('请选择有效的图片文件！');
     return;
   }
+  if (file.size > MAX_FILE_SIZE) {
+    proxy.$modal.msgError('图片太大了(超过 20MB),请压缩后再选择');
+    return;
+  }
+  // 上一张还在跑:换图会让 send 的运行状态错乱,直接挡住
+  if (isProcessing.value) {
+    proxy.$modal.msgWarning('正在处理上一张图片，请稍候');
+    return;
+  }
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    imgSrc.value = e.target.result;
-  };
-  reader.readAsDataURL(file);
+  // 用 objectURL 而不是 FileReader 转 base64:后者要整张图多存一份 1.33 倍的字符串,
+  // 大图在移动端很容易顶到内存上限。每次重新生成 URL 也顺带解决「清空后再选同一张图不触发 load」
+  revokeSourceObjectUrl();
+  sourceObjectUrl = URL.createObjectURL(file);
+  imgSrc.value = sourceObjectUrl;
 };
 
 // --- 文件拖拽事件处理 ---
@@ -322,63 +435,95 @@ const handleFileDrop = (event) => {
 };
 
 // --- 检测图片是否已经是透明背景 ---
-const checkTransparentBackground = (img) => {
+// source 传的是已经缩过的 workCanvas,避免在全分辨率原图上 getImageData(大图会瞬间吃掉几百 MB)
+const checkTransparentBackground = (source) => {
   return new Promise((resolve) => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = img.width;
-    canvas.height = img.height;
+    try {
+      const width = source?.naturalWidth || source?.width || 0;
+      const height = source?.naturalHeight || source?.height || 0;
+      if (!width || !height) {
+        resolve(false);
+        return;
+      }
 
-    ctx.drawImage(img, 0, 0);
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      canvas.width = width;
+      canvas.height = height;
 
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const pixels = imageData.data;
+      ctx.drawImage(source, 0, 0, width, height);
 
-    // 检查边缘区域的透明度（边缘通常更容易有背景）
-    const edgeWidth = Math.min(50, Math.floor(canvas.width / 4));
-    const edgeHeight = Math.min(50, Math.floor(canvas.height / 4));
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const pixels = imageData.data;
 
-    let transparentPixels = 0;
-    let totalEdgePixels = 0;
+      // 检查边缘区域的透明度（边缘通常更容易有背景）
+      const edgeWidth = Math.min(50, Math.floor(width / 4));
+      const edgeHeight = Math.min(50, Math.floor(height / 4));
 
-    // 遍历边缘像素
-    for (let y = 0; y < canvas.height; y++) {
-      for (let x = 0; x < canvas.width; x++) {
-        const isEdge = x < edgeWidth || x >= canvas.width - edgeWidth || y < edgeHeight || y >= canvas.height - edgeHeight;
+      let transparentPixels = 0;
+      let totalEdgePixels = 0;
 
-        if (isEdge) {
-          const alphaIndex = (y * canvas.width + x) * 4 + 3;
-          totalEdgePixels++;
-          if (pixels[alphaIndex] < 128) {
-            transparentPixels++;
+      const countPixel = (x, y) => {
+        totalEdgePixels++;
+        if (pixels[(y * width + x) * 4 + 3] < 128) {
+          transparentPixels++;
+        }
+      };
+
+      // 只扫四条边缘带,不遍历整图(原实现 1600x1600 要跑 250 万次,纯浪费)
+      for (let y = 0; y < height; y++) {
+        if (y < edgeHeight || y >= height - edgeHeight) {
+          for (let x = 0; x < width; x++) {
+            countPixel(x, y);
+          }
+        } else {
+          for (let x = 0; x < edgeWidth; x++) {
+            countPixel(x, y);
+          }
+          for (let x = Math.max(edgeWidth, width - edgeWidth); x < width; x++) {
+            countPixel(x, y);
           }
         }
       }
-    }
 
-    // 如果边缘透明像素超过 30%，认为是透明背景图
-    const transparentRatio = transparentPixels / totalEdgePixels;
-    resolve(transparentRatio > 0.3);
+      // 如果边缘透明像素超过 30%，认为是透明背景图
+      const transparentRatio = totalEdgePixels > 0 ? transparentPixels / totalEdgePixels : 0;
+      resolve(transparentRatio > 0.3);
+    } catch (e) {
+      // 跨域图会因 canvas 被污染而抛 SecurityError;这种情况退回「按需要抠图」的路径
+      console.warn('透明背景检测失败,按普通图片处理:', e);
+      resolve(false);
+    }
   });
 };
 
 // --- 图片加载完毕，开始处理 ---
 const onImageLoad = async () => {
+  const img = sourceImg.value;
+  if (!img) return;
+
+  // 原图先缩到工作尺寸,后面的检测/抠图/合成全部基于它
+  const work = buildWorkCanvas(img);
+  if (!work) {
+    proxy.$modal.msgError('图片尺寸异常,请更换图片');
+    return;
+  }
+
   // 先检测是否已经是透明背景
-  const isTransparent = await checkTransparentBackground(sourceImg.value);
+  const isTransparent = await checkTransparentBackground(work);
 
   if (isTransparent) {
     // 已经是透明背景，直接使用原图
     loadOriginalImage();
   } else {
     // 需要抠图处理
-    processImage();
+    await processImage();
   }
 };
 
 // --- 直接加载原图（跳过 AI 处理） ---
 const loadOriginalImage = () => {
-  if (!sourceImg.value) return;
+  if (!workCanvas) return;
 
   // 创建离屏 canvas
   if (!processedCanvas) {
@@ -386,12 +531,12 @@ const loadOriginalImage = () => {
     processedCtx = processedCanvas.getContext('2d');
   }
 
-  processedCanvas.width = sourceImg.value.width;
-  processedCanvas.height = sourceImg.value.height;
+  processedCanvas.width = workCanvas.width;
+  processedCanvas.height = workCanvas.height;
 
   // 直接绘制原图
   processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
-  processedCtx.drawImage(sourceImg.value, 0, 0);
+  processedCtx.drawImage(workCanvas, 0, 0);
 
   // 重置位置和缩放
   resetPosition();
@@ -404,18 +549,32 @@ const loadOriginalImage = () => {
 
 // --- 执行抠图逻辑 ---
 const processImage = async () => {
-  if (!sourceImg.value || !selfieSegmentation || isProcessing.value) return;
+  if (!workCanvas || !selfieSegmentation || isProcessing.value) return;
 
   isProcessing.value = true;
+  clearProcessTimer();
+  // send 在运行时被 abort / GL 上下文丢失时可能既不 resolve 也不回调,
+  // 没有兜底就会出现「AI 正在处理中...」永久卡死,再点几次只会把运行时彻底打死
+  processTimer = setTimeout(
+    () => {
+      if (isProcessing.value) {
+        isProcessing.value = false;
+        proxy.$modal.msgError('自动抠图超时,请重试或更换图片');
+      }
+    },
+    modelReady ? PROCESS_TIMEOUT_MS : COLD_START_TIMEOUT_MS
+  );
 
   try {
     selfieSegmentation.setOptions({
       modelSelection: modelSelection.value
     });
-    await selfieSegmentation.send({ image: sourceImg.value });
+    // 送缩过的画布,不送原图:大图直接进模型是之前闪退的主因
+    await selfieSegmentation.send({ image: workCanvas });
   } catch (e) {
     // 之前没有兜底:send 抛错会留下"AI 正在处理中..."卡死,再点一次更容易把运行时打死
     console.error('自动抠图失败:', e);
+    clearProcessTimer();
     isProcessing.value = false;
     proxy.$modal.msgError('自动抠图失败,请重试或更换图片');
   }
@@ -423,37 +582,51 @@ const processImage = async () => {
 
 // --- AI 处理回调 ---
 const onResults = (results) => {
-  // 创建离屏 canvas 保存抠图结果
-  if (!processedCanvas) {
-    processedCanvas = document.createElement('canvas');
-    processedCtx = processedCanvas.getContext('2d');
+  clearProcessTimer();
+  try {
+    if (!results?.image || !results?.segmentationMask) {
+      throw new Error('抠图结果为空');
+    }
+    // 能出结果就说明模型确实跑起来了(预加载失败过也能在这里补上)
+    modelReady = true;
+
+    // 创建离屏 canvas 保存抠图结果
+    if (!processedCanvas) {
+      processedCanvas = document.createElement('canvas');
+      processedCtx = processedCanvas.getContext('2d');
+    }
+
+    processedCanvas.width = results.image.width;
+    processedCanvas.height = results.image.height;
+
+    processedCtx.save();
+    processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+
+    // 1. 绘制分割掩码
+    processedCtx.drawImage(results.segmentationMask, 0, 0, processedCanvas.width, processedCanvas.height);
+
+    // 2. 使用 source-in 混合模式
+    processedCtx.globalCompositeOperation = 'source-in';
+
+    // 3. 绘制原始图片
+    processedCtx.drawImage(results.image, 0, 0, processedCanvas.width, processedCanvas.height);
+
+    processedCtx.restore();
+
+    // 重置位置和缩放
+    resetPosition();
+    hasProcessedImg.value = true;
+    hasChanges.value = true; // 新上传的图片，有改动
+
+    // 初始渲染
+    render();
+  } catch (e) {
+    // 回调里抛错会顺着 MediaPipe 调用栈把运行时带崩,这里必须自己兜住
+    console.error('抠图结果处理失败:', e);
+    proxy.$modal.msgError('抠图失败,请重试或更换图片');
+  } finally {
+    isProcessing.value = false;
   }
-
-  processedCanvas.width = results.image.width;
-  processedCanvas.height = results.image.height;
-
-  processedCtx.save();
-  processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
-
-  // 1. 绘制分割掩码
-  processedCtx.drawImage(results.segmentationMask, 0, 0, processedCanvas.width, processedCanvas.height);
-
-  // 2. 使用 source-in 混合模式
-  processedCtx.globalCompositeOperation = 'source-in';
-
-  // 3. 绘制原始图片
-  processedCtx.drawImage(results.image, 0, 0, processedCanvas.width, processedCanvas.height);
-
-  processedCtx.restore();
-
-  // 重置位置和缩放
-  resetPosition();
-  hasProcessedImg.value = true;
-  hasChanges.value = true; // 新上传的图片，有改动
-  isProcessing.value = false;
-
-  // 初始渲染
-  render();
 };
 
 // --- 鼠标拖拽事件 ---
@@ -603,9 +776,12 @@ const exportImage = async () => {
     emit('update:modelValue', result.url);
     hasChanges.value = false; // 上传后重置改动标记
 
+    // 保存完成:这一轮的原图位图和工作画布立刻还回去(模型保持常驻,不动)
+    releaseMattingMemory();
+
     return result.url;
   } catch (error) {
-    proxy.$modal.msgError(error.message || '上传失败');
+    proxy.$modal.msgError((error as Error).message || '上传失败');
     return null;
   } finally {
     isUploading.value = false;
@@ -621,6 +797,23 @@ defineExpose({
 // --- 生命周期 ---
 onMounted(() => {
   initMediaPipe();
+  // 提前把 wasm + 模型拉起来:用户选图的这段时间正好用来加载,第一次抠图不用再等,
+  // 也不会因为冷启动太慢被上面的超时误判成失败
+  selfieSegmentation
+    ?.initialize()
+    .then(() => {
+      modelReady = true;
+    })
+    .catch((e) => {
+      console.warn('MediaPipe 预加载失败,首次抠图时会自动重试:', e);
+    });
+});
+
+onBeforeUnmount(() => {
+  // 只退订回调、释放本地内存;MediaPipe 实例整页复用,不能 close
+  clearProcessTimer();
+  releaseSelfieSegmentation(onResults);
+  disposeMattingMemory();
 });
 </script>
 

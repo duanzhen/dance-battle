@@ -6,6 +6,8 @@ declare module '*.vue' {
 
 // 环境变量
 interface ImportMetaEnv {
+  // Vite 内置:应用部署的基础路径(子路径部署时非 '/' ,public 资源要拼在它后面)
+  BASE_URL: string;
   VITE_APP_TITLE: string;
   VITE_APP_PORT: number;
   VITE_APP_BASE_API: string;

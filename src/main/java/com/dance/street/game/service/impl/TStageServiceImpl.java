@@ -22,6 +22,7 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TRefereeStage;
+import com.dance.street.game.domain.bo.StageRefereeBo;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TVisWidget;
 import com.dance.street.game.domain.TStageRosterEntry;
@@ -51,6 +52,7 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
+import com.dance.street.game.service.ITRefereeStageService;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -76,6 +78,7 @@ public class TStageServiceImpl implements ITStageService {
     private final TCompetitorMemberMapper competitorMemberMapper;
     private final TRoundScoreMapper roundScoreMapper;
     private final TRefereeStageMapper refereeStageMapper;
+    private final ITRefereeStageService refereeStageService;
     private final TPlayerMapper playerMapper;
     private final TVisWidgetMapper visWidgetMapper;
     private final ITStageRosterService rosterService;
@@ -309,6 +312,9 @@ public class TStageServiceImpl implements ITStageService {
 
         baseMapper.updateById(patch);
 
+        // 海选:裁判到底是谁由「圈配置」决定 —— 赛段级绑定跟着圈裁判同步一份
+        syncAuditionCircleReferees(baseMapper.selectById(patch.getId()));
+
         // 判罚方式/打分口径等"裁判端界面相关"配置变了:推一次裁判通道,让已打开的裁判页
         // 重新拉取 —— 否则「裁判判罚 ↔ 导播台判定」切换后,裁判页还停在原来的判罚界面上。
         TStage updated = baseMapper.selectById(patch.getId());
@@ -318,6 +324,50 @@ public class TStageServiceImpl implements ITStageService {
 
         // 返回库中整行:prev/next 是展示列,链由 StageChain 维护,回读才是最新口径
         return MapstructUtils.convert(updated, TStageVo.class);
+    }
+
+    /**
+     * 海选赛段的裁判按「圈配置」同步到赛段级绑定({@code t_referee_stage})。
+     *
+     * <p>海选的裁判在圈配置里逐圈指定({@code ruleConfig.circleRefereeIds}),赛段级「裁判组」
+     * 不再单独配置;但裁判端的赛段列表、大屏记分板的裁判名、SSE 推送受众都读赛段级绑定,
+     * 所以这里按圈裁判的并集同步一份,保证"圈上配了谁"与"谁能看到这个赛段"是同一批人。</p>
+     *
+     * <p>非海选赛段、以及从未配过圈裁判(null)的赛段不动——后者可能是模板/手工分配的赛段级裁判。</p>
+     */
+    private void syncAuditionCircleReferees(TStage stage) {
+        if (stage == null || stage.getId() == null
+            || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            return;
+        }
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        List<List<Long>> circleRefs = rc == null ? null : rc.getCircleRefereeIds();
+        if (circleRefs == null) {
+            return;
+        }
+        LinkedHashSet<Long> wanted = new LinkedHashSet<>();
+        for (List<Long> circle : circleRefs) {
+            if (circle == null) {
+                continue;
+            }
+            circle.stream().filter(Objects::nonNull).forEach(wanted::add);
+        }
+        List<Long> current = refereeStageMapper.selectList(Wrappers.<TRefereeStage>lambdaQuery()
+                .eq(TRefereeStage::getStageId, stage.getId()))
+            .stream()
+            .map(TRefereeStage::getRefereeId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        if (new LinkedHashSet<>(current).equals(wanted)) {
+            return;
+        }
+        StageRefereeBo bo = new StageRefereeBo();
+        bo.setStageId(stage.getId());
+        bo.setTournamentId(stage.getTournamentId());
+        bo.setRefereeIds(new ArrayList<>(wanted));
+        refereeStageService.assignReferees(bo);
+        log.info("海选赛段[{}]裁判按圈配置同步:{} 人", stage.getId(), wanted.size());
     }
 
     /**

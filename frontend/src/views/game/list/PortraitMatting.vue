@@ -34,17 +34,18 @@
         @touchend="handleTouchEnd"
       ></canvas>
 
-      <!-- 半透明人形轮廓:辅助把人物摆到统一位置(头/肩对齐),不挡拖拽缩放 -->
-      <svg v-if="hasProcessedImg && showPoseGuide" class="pose-guide" viewBox="0 0 500 500" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-        <!-- 中轴虚线:辅助水平居中 -->
-        <line class="pose-guide-axis" x1="250" y1="24" x2="250" y2="476" />
-        <!-- 头:占画面上方约 1/3,统一各选手的头部位置 -->
-        <ellipse class="pose-guide-shape" cx="250" cy="128" rx="64" ry="76" />
-        <!-- 颈 + 肩 + 胸部:头底接脖子,肩线落在画面中部,到胸部收住(不铺到底) -->
-        <path
-          class="pose-guide-shape"
-          d="M250 196 C268 196 280 208 282 226 L286 286 C340 312 386 350 398 390 C360 404 140 404 102 390 C114 350 160 312 214 286 L218 226 C220 208 232 196 250 196 Z"
-        />
+      <!-- 人像单线轮廓:辅助把人物摆到统一位置(头/肩对齐,人靠画布底部),不挡拖拽缩放 -->
+      <svg v-if="hasProcessedImg && showPoseGuide" class="pose-guide" viewBox="0 0 1024 1024" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <!--
+          头 + 肩单线轮廓:以"肩线中点"为锚点等比放大后,把该锚点落在画布底边中点 ——
+          人靠底、只放大不拉伸。改 scale 的倍数即可整体放大/缩小。
+        -->
+        <g transform="translate(501.333333 1024) scale(1.2) translate(-501.333333 -882.773333)">
+          <!-- 头:一个圆,一根线 -->
+          <circle class="pose-guide-shape" cx="501.333333" cy="320" r="192" />
+          <!-- 肩:一条开口弧线,两端贴底边,不闭合 -->
+          <path class="pose-guide-shape" d="M170.666667 882.773333c0-229.546667 149.333333-416 330.666666-416S832 653.226667 832 882.773333" />
+        </g>
       </svg>
 
       <div v-if="!hasProcessedImg" class="placeholder">
@@ -974,17 +975,12 @@ canvas {
 }
 
 .pose-guide-shape {
-  fill: rgba(255, 255, 255, 0.16);
+  /* 单线轮廓:只描边不填充,线细一点但看得清 */
+  fill: none;
   stroke: rgba(255, 255, 255, 0.55);
   stroke-width: 3;
-  stroke-dasharray: 12 10;
-  stroke-linejoin: round;
-}
-
-.pose-guide-axis {
-  stroke: rgba(255, 255, 255, 0.26);
-  stroke-width: 2;
-  stroke-dasharray: 8 12;
+  stroke-dasharray: 14 12;
+  stroke-linecap: round;
 }
 
 /* 左上角:对齐轮廓开关 */

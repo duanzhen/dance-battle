@@ -158,28 +158,51 @@
           <div class="p-5 space-y-4 text-xs text-neutral-300">
             <!-- Step 1 裁判 -->
             <template v-if="wizardStep === 1">
-              <p class="text-neutral-400 leading-relaxed">选择该圈裁判（可多选；也可留空稍后补充）。</p>
+              <p class="text-neutral-400 leading-relaxed">
+                选择该圈裁判（可多选；也可留空稍后补充）。海选的裁判只看这里——没有「赛段通用裁判组」一说， 下面列出的是本赛事全部裁判。
+              </p>
               <div v-if="referees.length === 0" class="rounded-lg border border-neutral-800 bg-black/40 px-3 py-4 text-center">
                 <p class="text-neutral-500">暂无裁判可选</p>
-                <p class="text-[11px] text-neutral-600 mt-1">可先跳过，稍后在赛事裁判组中添加</p>
+                <p class="text-[11px] text-neutral-600 mt-1">可先跳过，稍后在「裁判组」里添加裁判</p>
               </div>
-              <div v-else class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                <button
-                  v-for="r in referees"
-                  :key="String(r.id)"
-                  class="rounded-lg border px-3 py-2 text-left transition-all"
-                  :class="
-                    wizard.referees.includes(String(r.id))
-                      ? 'border-amber-500 bg-amber-500/10'
-                      : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'
-                  "
-                  @click="toggleWizardReferee(r.id)"
-                >
-                  <div class="text-xs font-bold" :class="wizard.referees.includes(String(r.id)) ? 'text-amber-400' : 'text-neutral-200'">
-                    {{ r.name }}
+              <template v-else>
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] text-neutral-500">
+                    全部裁判 {{ referees.length }} 人 · 已选 <span class="text-white font-mono">{{ wizard.referees.length }}</span> 人
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      class="px-2 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors"
+                      @click="selectAllWizardReferees"
+                    >
+                      全选
+                    </button>
+                    <button
+                      class="px-2 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors"
+                      @click="clearWizardReferees"
+                    >
+                      清空
+                    </button>
                   </div>
-                </button>
-              </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                  <button
+                    v-for="r in referees"
+                    :key="String(r.id)"
+                    class="rounded-lg border px-3 py-2 text-left transition-all"
+                    :class="
+                      wizard.referees.includes(String(r.id))
+                        ? 'border-amber-500 bg-amber-500/10'
+                        : 'border-neutral-700 bg-neutral-900/40 hover:border-neutral-500'
+                    "
+                    @click="toggleWizardReferee(r.id)"
+                  >
+                    <div class="text-xs font-bold" :class="wizard.referees.includes(String(r.id)) ? 'text-amber-400' : 'text-neutral-200'">
+                      {{ r.name }}
+                    </div>
+                  </button>
+                </div>
+              </template>
             </template>
 
             <!-- Step 2 去向 -->
@@ -532,6 +555,15 @@ const toggleWizardReferee = (id: string | number) => {
   } else {
     wizard.referees.push(key);
   }
+};
+
+/** 全选本赛事全部裁判 / 清空(海选裁判只看圈配置,常用一键全上) */
+const selectAllWizardReferees = () => {
+  wizard.referees = referees.value.map((r) => String(r.id));
+};
+
+const clearWizardReferees = () => {
+  wizard.referees = [];
 };
 
 const addWizardExit = () => {

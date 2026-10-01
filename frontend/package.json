@@ -49,7 +49,8 @@
     "vue-json-pretty": "2.6.0",
     "vue-router": "4.6.3",
     "vue-types": "6.0.0",
-    "vxe-table": "4.17.7"
+    "vxe-table": "4.17.7",
+    "web-haptics": "^0.0.6"
   },
   "devDependencies": {
     "@iconify/json": "^2.2.403",

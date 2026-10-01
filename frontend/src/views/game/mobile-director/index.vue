@@ -1,30 +1,38 @@
 <template>
   <div class="fixed inset-0 bg-neutral-950 text-neutral-200 font-sans flex flex-col overflow-hidden select-none">
-    <header class="h-12 bg-neutral-900 border-b border-neutral-800 flex items-center px-4 shrink-0 z-20">
-      <div class="flex-1 flex items-center gap-2 min-w-0">
+    <!--
+      三列网格:左右两列等宽(1fr),中间列按计时器宽度自适应 —— 计时器永远在正中间;
+      状态点与重置按钮各自装在同宽的 32px 方盒里、与中间列间距相同,所以两侧到计时器的距离一致。
+    -->
+    <header
+      class="h-[58px] bg-neutral-900 border-b border-neutral-800 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-4 shrink-0 z-20"
+    >
+      <div class="flex items-center gap-2 min-w-0">
         <img :src="logo" class="w-6 h-6 rounded object-contain shrink-0" alt="logo" />
         <span class="font-bold text-xs text-neutral-300 truncate">{{ tournamentName || '手机导播台' }}</span>
-      </div>
-      <!-- 中间秒表 -->
-      <div class="flex-none flex items-center gap-0.5">
-        <button
-          @click="toggleStopwatch"
-          class="flex items-center gap-1.5 font-mono text-base font-black text-amber-400 tabular-nums leading-none bg-transparent border-0 cursor-pointer active:opacity-60 transition-opacity"
-        >
+        <!-- 计时状态点:装在与重置按钮同宽的盒子里居中,保证左右对称 -->
+        <span class="ml-auto w-8 h-8 flex items-center justify-center shrink-0">
           <span class="w-1.5 h-1.5 rounded-full" :class="stopwatchRunning ? 'bg-red-500 animate-pulse' : 'bg-neutral-600'"></span>
-          {{ stopwatchText }}
-        </button>
+        </span>
+      </div>
+      <!-- 中:大号计时器(绝对居中) -->
+      <button
+        @click="toggleStopwatch"
+        title="开始 / 暂停计时"
+        class="font-mono text-[36px] font-black leading-none text-amber-400 tabular-nums bg-transparent border-0 cursor-pointer active:opacity-60 transition-opacity"
+      >
+        {{ stopwatchText }}
+      </button>
+      <div class="flex items-center gap-2 min-w-0">
         <button
           @click="resetStopwatch"
           title="清空计时"
-          class="w-8 h-8 flex items-center justify-center rounded text-neutral-600 hover:text-neutral-400 hover:bg-neutral-800/70 active:opacity-50 transition-colors bg-transparent border-0 cursor-pointer"
+          class="w-8 h-8 flex items-center justify-center rounded text-neutral-600 hover:text-neutral-400 hover:bg-neutral-800/70 active:opacity-50 transition-colors bg-transparent border-0 cursor-pointer shrink-0"
         >
           <el-icon :size="16"><TimerReset /></el-icon>
         </button>
-      </div>
-      <div class="flex-1 flex items-center justify-end gap-3">
         <!-- 右上角连接标识:绿=已连上(20s 内有心跳)/ 黄呼吸=连接中 / 红=连接失败 -->
-        <SseLiveBadge :status="sseStatus" />
+        <SseLiveBadge class="ml-auto shrink-0" :status="sseStatus" />
       </div>
     </header>
 
@@ -165,20 +173,14 @@
               </button>
             </div>
 
-            <p
-              v-if="currentStage && !canStart && currentStage.status === 'DRAFT'"
-              class="mt-3 text-[10px] text-neutral-500 leading-relaxed"
-            >
+            <p v-if="currentStage && !canStart && currentStage.status === 'DRAFT'" class="mt-3 text-[10px] text-neutral-500 leading-relaxed">
               <template v-if="currentStage.awaitingAdvancement">
                 上一赛段已结束，晋级者尚未确认。请先在管理端「中间态」确认晋级，确认后「开始赛段」将自动可用。
               </template>
               <template v-else> 上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。 </template>
             </p>
 
-            <div
-              v-if="currentStage.status === 'DRAFT'"
-              class="mt-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/10"
-            >
+            <div v-if="currentStage.status === 'DRAFT'" class="mt-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/10">
               <p v-if="currentStage.stageMode === 'ARENA'" class="text-[10px] text-blue-400/70">
                 点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，胜者守擂、败者排到队尾，平局时擂主与挑战者均排到队尾。
               </p>
@@ -213,7 +215,7 @@
         </div>
 
         <div v-if="matches.length > 0" class="mt-3">
-         <h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2 px-1">
+          <h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2 px-1">
             {{ currentStage?.stageMode === 'AUDITION' ? '海选评分' : '场次' }}
             <span
               v-if="currentStage?.stageMode === 'AUDITION' && auditionStageAdvanceCount > 0"
@@ -669,7 +671,12 @@
       <h4 class="text-sm font-bold text-neutral-200 mb-1">选择晋级者</h4>
       <p class="text-[10px] text-neutral-500 mb-2">人数不限;未勾选的选手将被标记为淘汰</p>
       <div class="flex items-center gap-2 mb-2">
-        <button class="px-2 py-1 rounded text-[10px] bg-neutral-800 text-neutral-300" @click="advanceSelected = freeMatchCompetitors.map((c) => String(c.id))">全选</button>
+        <button
+          class="px-2 py-1 rounded text-[10px] bg-neutral-800 text-neutral-300"
+          @click="advanceSelected = freeMatchCompetitors.map((c) => String(c.id))"
+        >
+          全选
+        </button>
         <button class="px-2 py-1 rounded text-[10px] bg-neutral-800 text-neutral-300" @click="advanceSelected = []">清空</button>
         <span class="ml-auto text-[10px] text-neutral-500">已选 {{ advanceSelected.length }} / {{ freeMatchCompetitors.length }}</span>
       </div>
@@ -739,6 +746,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Layers, Play, CircleCheck, ChevronRight, TimerReset, Swords } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useWebHaptics } from 'web-haptics/vue';
 import logo from '@/assets/logo/logo.png';
 import {
   setDirectorAuthKey,
@@ -1065,8 +1073,7 @@ const loadMatchesForStage = async (stageId: string) => {
           const cc: any = await directorGetCurrentCompetitor(m.id);
           // 统一拆包:当前选手是 R<Long>,信封 data 即选手 ID
           const cur = payloadOf(cc);
-          currentCompetitorByMatch.value[String(m.id)] =
-            cur == null || typeof cur === 'object' ? null : String(cur);
+          currentCompetitorByMatch.value[String(m.id)] = cur == null || typeof cur === 'object' ? null : String(cur);
         } catch {
           currentCompetitorByMatch.value[String(m.id)] = null;
         }
@@ -1148,11 +1155,10 @@ const handleComplete = async () => {
       if (result.tiebreaker) {
         // 同分加赛必须弹窗:加赛场次刚生成,导播要立刻安排裁判打分;
         // toast 一闪而过,容易被当成"赛段已完成"而漏掉加赛。
-        ElMessageBox.alert(
-          result.message || '海选出现同分,需要加赛,请裁判完成加赛打分后再点「完成赛段」。',
-          '需要加赛',
-          { type: 'warning', confirmButtonText: '知道了' }
-        ).catch(() => {});
+        ElMessageBox.alert(result.message || '海选出现同分,需要加赛,请裁判完成加赛打分后再点「完成赛段」。', '需要加赛', {
+          type: 'warning',
+          confirmButtonText: '知道了'
+        }).catch(() => {});
       } else {
         // 后端统一返回可直接展示的原因(如「海选还有 3 位选手未打分」);
         // 只有旧响应没有 message 时才回退到通用提示
@@ -1304,9 +1310,7 @@ const openAdvancePicker = async () => {
   if (!stageId) return;
   await loadFreeMatchCompetitors(String(stageId));
   // 默认沿用当前已标记的晋级者,便于微调
-  advanceSelected.value = freeMatchCompetitors.value
-    .filter((c: any) => c.outcomeStatus === 'ADVANCE')
-    .map((c: any) => String(c.id));
+  advanceSelected.value = freeMatchCompetitors.value.filter((c: any) => c.outcomeStatus === 'ADVANCE').map((c: any) => String(c.id));
   advanceVisible.value = true;
 };
 
@@ -1425,6 +1429,9 @@ const toggleExpand = (id: string) => {
 };
 
 // --- 顶部秒表 ---
+/** 触感反馈(WebHaptics):开始/停止/重置各给一次不同的震动 */
+const { trigger: haptic } = useWebHaptics();
+
 const stopwatchMs = ref(0);
 const stopwatchRunning = ref(false);
 let stopwatchTimer: ReturnType<typeof setInterval> | null = null;
@@ -1439,6 +1446,7 @@ const stopwatchText = computed(() => {
 const toggleStopwatch = () => {
   if (stopwatchRunning.value) {
     stopwatchRunning.value = false;
+    haptic('light');
     if (stopwatchTimer) {
       clearInterval(stopwatchTimer);
       stopwatchTimer = null;
@@ -1446,6 +1454,7 @@ const toggleStopwatch = () => {
     return;
   }
   stopwatchRunning.value = true;
+  haptic('medium');
   const startAt = Date.now() - stopwatchMs.value;
   stopwatchTimer = setInterval(() => {
     stopwatchMs.value = Date.now() - startAt;
@@ -1453,6 +1462,7 @@ const toggleStopwatch = () => {
 };
 
 const resetStopwatch = () => {
+  haptic('success');
   stopwatchMs.value = 0;
   // 计时中清空:从 0 秒继续计时,不暂停
   if (stopwatchRunning.value) {

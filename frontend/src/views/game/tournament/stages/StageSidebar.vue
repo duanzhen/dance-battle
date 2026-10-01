@@ -65,15 +65,10 @@
         >
           开始赛段
         </button>
-        <p
-          v-if="localStage.status === 'DRAFT' && !canStartStage"
-          class="text-[10px] text-neutral-500 leading-relaxed"
-        >
+        <p v-if="localStage.status === 'DRAFT' && !canStartStage" class="text-[10px] text-neutral-500 leading-relaxed">
           上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
         </p>
-        <p v-else-if="localStage.status === 'DRAFT'" class="text-[10px] text-neutral-500 leading-relaxed">
-          点击「开始赛段」将自动初始化并生成对阵。
-        </p>
+        <p v-else-if="localStage.status === 'DRAFT'" class="text-[10px] text-neutral-500 leading-relaxed">点击「开始赛段」将自动初始化并生成对阵。</p>
         <button
           v-if="localStage.status === 'GAMING'"
           @click="doComplete"
@@ -84,8 +79,19 @@
         </button>
       </div>
 
-      <!-- 裁判组 -->
-      <div v-if="localStage.id" class="pt-4 border-t border-neutral-800 space-y-2">
+      <!-- 海选:裁判由「圈配置」按圈指定,这里不再单独配置裁判组(避免两处口径) -->
+      <div v-if="localStage.id && isAudition" class="pt-4 border-t border-neutral-800 space-y-1">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-neutral-500">裁判</span>
+          <span class="text-[10px] text-neutral-600">由圈配置决定</span>
+        </div>
+        <p class="text-[10px] text-neutral-600 leading-relaxed">
+          海选的裁判按圈指定：在左侧配置面板点该圈的「编辑」，在向导第 1 步勾选本圈裁判（可多选）。
+        </p>
+      </div>
+
+      <!-- 裁判组(非海选:整段共用一套裁判) -->
+      <div v-else-if="localStage.id" class="pt-4 border-t border-neutral-800 space-y-2">
         <div class="flex items-center justify-between">
           <span class="text-xs text-neutral-500">裁判组</span>
           <span class="text-[10px] text-neutral-600">{{ selectedRefereeIds.length }} 人</span>
@@ -140,7 +146,6 @@
           {{ getDeleteDisabledReason() }}
         </p>
       </div>
-
     </div>
   </div>
 </template>
@@ -294,11 +299,10 @@ const doComplete = async () => {
     } else if (result?.tiebreaker) {
       // 同分加赛必须弹窗:加赛场次是刚生成的,导播要立刻安排裁判打分,
       // 一闪而过的 toast 会让人以为赛段已经结束了。
-      ElMessageBox.alert(
-        result?.message || '海选出现同分,需要加赛,请裁判完成加赛打分后再点「完成赛段」。',
-        '需要加赛',
-        { type: 'warning', confirmButtonText: '知道了' }
-      ).catch(() => {});
+      ElMessageBox.alert(result?.message || '海选出现同分,需要加赛,请裁判完成加赛打分后再点「完成赛段」。', '需要加赛', {
+        type: 'warning',
+        confirmButtonText: '知道了'
+      }).catch(() => {});
     } else {
       // 结算未完成不是错误:后端统一返回 completed=false + 可直接展示的原因
       // (如「海选还有 3 位选手未打分(…),判完才能结束赛段」)
@@ -327,6 +331,8 @@ const savingReferees = ref(false);
  * 与后端一致——开赛前必须每圈配好裁判,开赛后增减会让同场选手由不同数量的裁判打分,分数不可比。
  */
 const refereesLocked = computed(() => localStage.value.status !== 'DRAFT');
+/** 海选:裁判在圈配置里逐圈指定,通用配置不提供裁判组 */
+const isAudition = computed(() => localStage.value.stageMode === 'AUDITION');
 
 const loadRefereeList = async (tournamentId: string | number) => {
   try {

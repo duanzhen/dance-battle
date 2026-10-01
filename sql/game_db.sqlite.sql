@@ -372,7 +372,7 @@ CREATE TABLE IF NOT EXISTS `t_stage_roster_entry` (
   `tenant_id` INTEGER NOT NULL,
   `tournament_id` INTEGER NOT NULL,
   `target_stage_id` INTEGER NOT NULL,
-  `slot` INTEGER NOT NULL,
+  `slot` INTEGER,
   `slot_kind` TEXT NOT NULL,
   `ref_type` TEXT,
   `source_competitor_id` INTEGER,

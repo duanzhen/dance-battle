@@ -13,6 +13,7 @@ import com.dance.street.game.domain.vo.MatchRefereeVo;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
+import com.dance.street.game.domain.vo.StageParticipantsVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TMatchParticipantVo;
 import com.dance.street.game.domain.vo.TMatchVo;
@@ -32,6 +33,7 @@ import com.dance.street.game.service.ITPlayerService;
 import com.dance.street.game.service.ITRefereeService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
+import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITVisSceneService;
@@ -78,6 +80,7 @@ public class ScreenController {
     private final ITTournamentService tournamentService;
     private final ITStageService stageService;
     private final ITStageLifecycleService stageLifecycleService;
+    private final ITStageRosterService stageRosterService;
     private final ITMatchService matchService;
     private final ITMatchParticipantService matchParticipantService;
     private final ITCompetitorService competitorService;
@@ -147,6 +150,15 @@ public class ScreenController {
     @GetMapping("/stage/{id}/audition-result")
     public R<AuditionResultVo> auditionResult(@PathVariable("id") Long stageId) {
         return R.ok(stageLifecycleService.queryAuditionResult(stageId));
+    }
+
+    /**
+     * 赛段参赛选手(「参赛选手」控件):名单未确认时读中间态名单(含未落位的人),
+     * 确认后自动切换成真实参赛方。
+     */
+    @GetMapping("/stage/{id}/participants")
+    public R<StageParticipantsVo> stageParticipants(@PathVariable("id") Long stageId) {
+        return R.ok(stageRosterService.listStageParticipants(stageId));
     }
 
     /** 擂台赛总览:轮转队列与当前对决 */

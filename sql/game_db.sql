@@ -441,7 +441,7 @@ CREATE TABLE `t_stage_roster_entry` (
   `tenant_id` bigint NOT NULL COMMENT '租户',
   `tournament_id` bigint NOT NULL COMMENT '赛事ID',
   `target_stage_id` bigint NOT NULL COMMENT '中间层归属:这条入边指向的赛段',
-  `slot` bigint NOT NULL COMMENT '座位号 1..N,连续不压紧',
+  `slot` bigint DEFAULT NULL COMMENT '座位号 1..N;NULL=待落位(多入口汇合时由导播拖到座位上)',
   `slot_kind` varchar(10) NOT NULL COMMENT 'PLAYER=有人 / BYE=轮空空位 / PENDING=等上游填入',
   `ref_type` varchar(10) DEFAULT NULL COMMENT 'SOURCE=来自来源赛段 / GUEST=外卡;空位为 NULL',
   `source_competitor_id` bigint DEFAULT NULL COMMENT 'SOURCE 时指向来源赛段参赛方',

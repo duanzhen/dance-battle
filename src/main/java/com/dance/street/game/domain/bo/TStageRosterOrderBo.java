@@ -13,7 +13,8 @@ import java.util.List;
  * 要么引用一条人工调整(overrideId,如外卡/补入)。</p>
  *
  * <p>每项可显式带 seedRank(拖拽/移出留空位时用,允许出现空位);
- * 未带 seedRank 的按数组顺序补到最小空闲位。</p>
+ * 未带 seedRank 的按数组顺序补到最小空闲位;{@code holding=true} 表示拖回"待落位区"
+ * (多入口汇合的赛段先落人不落座,由导播再拖到真实座位)。</p>
  *
  * @author duane
  */
@@ -39,5 +40,8 @@ public class TStageRosterOrderBo implements Serializable {
 
         /** 目标种子位(第几位);空 = 按数组顺序自动补最小空闲位 */
         private Long seedRank;
+
+        /** true = 拖回待落位区(没有座位号),此时忽略 seedRank */
+        private Boolean holding;
     }
 }

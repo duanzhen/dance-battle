@@ -73,6 +73,8 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
     private static final String SQLITE_SQL_RESOURCE_FILESYSTEM = "sql/game_db.sqlite.sql";
     /** 需要额外放宽 competitor_id 可空性(轮空/待定占位行)的表 */
     private static final String PARTICIPANT_TABLE = "t_match_participant";
+    /** 需要额外放宽 slot 可空性(多入口汇合时"待落位"行没有座位号)的表 */
+    private static final String ROSTER_ENTRY_TABLE = "t_stage_roster_entry";
 
     private final DataSource dataSource;
     private final String jdbcUrl;
@@ -139,6 +141,9 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                         if (PARTICIPANT_TABLE.equals(table)) {
                             relaxParticipantCompetitorNullable(connection, false, ddl);
                         }
+                        if (ROSTER_ENTRY_TABLE.equals(table)) {
+                            relaxRosterEntrySlotNullable(connection, false, ddl);
+                        }
                     } else {
                         executeDdl(connection, withIfNotExists(ddl));
                         created++;
@@ -187,6 +192,9 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                         added += addMissingColumns(connection, table, ddl, true);
                         if (PARTICIPANT_TABLE.equals(table)) {
                             relaxParticipantCompetitorNullable(connection, true, ddl);
+                        }
+                        if (ROSTER_ENTRY_TABLE.equals(table)) {
+                            relaxRosterEntrySlotNullable(connection, true, ddl);
                         }
                     } else {
                         executeDdl(connection, withIfNotExists(ddl));
@@ -333,8 +341,57 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
 
     /** SQLite 不支持 ALTER 去掉 NOT NULL:按「建新表 → 拷数据 → 删旧表 → 改名」搬迁,索引随后由脚本重建 */
     private static void rebuildSqliteParticipant(Connection connection, String createDdl) throws SQLException {
-        String tmp = PARTICIPANT_TABLE + "__slot_rebuild";
-        Set<String> existing = existingColumns(connection, PARTICIPANT_TABLE, true);
+        rebuildSqliteTable(connection, PARTICIPANT_TABLE, createDdl, "__slot_rebuild");
+    }
+
+    /**
+     * 老库的 {@code t_stage_roster_entry.slot} 是 NOT NULL;多入口汇合时"待落位"行没有座位号,
+     * 这里做一次性放宽(只放宽可空性,不动数据):MySQL 用 {@code MODIFY COLUMN},SQLite 重建表搬迁。
+     */
+    private static void relaxRosterEntrySlotNullable(Connection connection, boolean sqlite, String ddl)
+        throws SQLException {
+        if (sqlite) {
+            Boolean notNull = null;
+            try (Statement statement = connection.createStatement();
+                 ResultSet rs = statement.executeQuery("PRAGMA table_info(`" + ROSTER_ENTRY_TABLE + "`)")) {
+                while (rs.next()) {
+                    if ("slot".equalsIgnoreCase(rs.getString("name"))) {
+                        notNull = rs.getInt("notnull") == 1;
+                        break;
+                    }
+                }
+            }
+            if (notNull == null || !notNull) {
+                return;
+            }
+            rebuildSqliteTable(connection, ROSTER_ENTRY_TABLE, ddl, "__holding_rebuild");
+            log.info("schema 自检: 已放宽 {}.slot 为可空(支持多入口汇合的待落位行)", ROSTER_ENTRY_TABLE);
+            return;
+        }
+        String nullable = null;
+        try (PreparedStatement ps = connection.prepareStatement(
+            "SELECT is_nullable FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = 'slot'")) {
+            ps.setString(1, connection.getCatalog());
+            ps.setString(2, ROSTER_ENTRY_TABLE);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    nullable = rs.getString(1);
+                }
+            }
+        }
+        if (nullable == null || "YES".equalsIgnoreCase(nullable)) {
+            return;
+        }
+        executeDdl(connection, "ALTER TABLE `" + ROSTER_ENTRY_TABLE
+            + "` MODIFY COLUMN `slot` bigint NULL COMMENT '座位号 1..N;NULL=待落位(多入口汇合时由导播拖到座位上)'");
+        log.info("schema 自检: 已放宽 {}.slot 为可空(支持多入口汇合的待落位行)", ROSTER_ENTRY_TABLE);
+    }
+
+    /** SQLite 改列(去 NOT NULL)的唯一做法:按建表脚本重建同构新表并搬迁数据,索引随后由脚本重建 */
+    private static void rebuildSqliteTable(Connection connection, String table, String createDdl, String tmpSuffix)
+        throws SQLException {
+        String tmp = table + tmpSuffix;
+        Set<String> existing = existingColumns(connection, table, true);
         List<String> copyCols = new ArrayList<>();
         for (String col : parseColumnDefinitions(createDdl).keySet()) {
             if (existing.contains(col)) {
@@ -346,10 +403,10 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         executeDdl(connection, renameCreateTable(createDdl, tmp));
         if (!copyCols.isEmpty()) {
             executeDdl(connection, "INSERT INTO `" + tmp + "` (" + columnList + ") SELECT " + columnList
-                + " FROM `" + PARTICIPANT_TABLE + "`");
+                + " FROM `" + table + "`");
         }
-        executeDdl(connection, "DROP TABLE `" + PARTICIPANT_TABLE + "`");
-        executeDdl(connection, "ALTER TABLE `" + tmp + "` RENAME TO `" + PARTICIPANT_TABLE + "`");
+        executeDdl(connection, "DROP TABLE `" + table + "`");
+        executeDdl(connection, "ALTER TABLE `" + tmp + "` RENAME TO `" + table + "`");
     }
 
     /** 把 CREATE TABLE 语句里的表名替换成新名(用于 SQLite 重建搬迁) */

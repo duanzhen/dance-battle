@@ -6,6 +6,7 @@ import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.vo.TStageRosterOverrideVo;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
@@ -43,8 +44,11 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -348,6 +352,8 @@ class RosterSmokeTest {
         assertEquals(1, countOutcome(revive.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
 
         // 决赛:默认名单(复活赛胜者) + 跨级直入来源(预选胜者)整单汇入
+        // 决赛是多入口汇合:人先进待落位区,按新规则要先由导播拖到座位上才能确认
+        placeAllHolding(finals.getId());
         assertEquals(2, rosterService.applyRoster(finals.getId(), null), "决赛应汇入 2 名选手");
         List<TCompetitor> finalRows = competitorMapper.selectList(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
@@ -1148,5 +1154,34 @@ class RosterSmokeTest {
         assertEquals(1, rosterService.applyRoster(target.getId(), null),
             "空赛段(仅 is_initialized 误标)仍应能装配晋级名单");
         assertEquals(1, countOutcome(target.getId(), OutcomeStatusEnum.PENDING.getCode()));
+    }
+
+    /** 模拟导播在中间态把"待落位"的人拖到座位上(多入口汇合必须先落位才能确认名单) */
+    private void placeAllHolding(Long targetStageId) {
+        List<TStageRosterEntry> rows = rosterService.entriesOf(targetStageId);
+        Set<Long> used = new HashSet<>();
+        for (TStageRosterEntry row : rows) {
+            if (row.getSlot() != null) {
+                used.add(row.getSlot());
+            }
+        }
+        List<TStageRosterOrderBo.Item> items = new ArrayList<>();
+        long next = 1L;
+        for (TStageRosterEntry row : rows) {
+            if (!StageConstants.SLOT_PLAYER.equals(row.getSlotKind()) || row.getSlot() != null) {
+                continue;
+            }
+            while (used.contains(next)) {
+                next++;
+            }
+            TStageRosterOrderBo.Item it = new TStageRosterOrderBo.Item();
+            it.setOverrideId(row.getId());
+            it.setSeedRank(next);
+            items.add(it);
+            used.add(next);
+        }
+        if (!items.isEmpty()) {
+            rosterService.reorderRoster(targetStageId, items);
+        }
     }
 }

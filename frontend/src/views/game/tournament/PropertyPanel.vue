@@ -167,6 +167,9 @@
                   @update:borderColor="handleUpdateProp('borderColor', $event)"
                   @update:bgColor="handleUpdateProp('bgColor', $event)"
                   @update:showAvatar="handleUpdateProp('showAvatar', $event)"
+                  @update:showSeat="handleUpdateProp('showSeat', $event)"
+                  @update:showNumber="handleUpdateProp('showNumber', $event)"
+                  @update:columns="handleUpdateProp('columns', $event)"
                 />
               </div>
             </section>
@@ -303,7 +306,12 @@
                 class="w-full py-2 border border-red-900/50 text-red-500 bg-red-500/5 hover:bg-red-500/10 rounded text-xs font-bold transition-colors flex items-center justify-center gap-2"
               >
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
                 </svg>
                 删除场景
               </button>
@@ -329,12 +337,7 @@
 
       <!-- 图层面板 -->
       <div v-show="activeTab === 'layers'" class="p-2">
-        <div
-          ref="layerListRef"
-          class="relative"
-          @dragover.prevent="onListDragOver"
-          @drop.stop.prevent="onDrop"
-        >
+        <div ref="layerListRef" class="relative" @dragover.prevent="onListDragOver" @drop.stop.prevent="onDrop">
           <!-- 图层行:独立容器承载 space-y,指示线作为绝对定位兄弟,不会挤动行布局 -->
           <div class="space-y-1">
             <template v-for="layer in reversedWidgets" :key="layer.id">
@@ -347,11 +350,21 @@
                 @dragend="onDragEnd"
                 class="flex items-center gap-2 p-2 rounded group select-none transition-colors border"
                 :class="[
-                  dragId === layer.id ? 'opacity-40 border-amber-500/50' : store.selectedWidgetId === layer.id ? 'bg-amber-500/10 border-amber-500/30' : 'border-transparent hover:bg-neutral-800'
+                  dragId === layer.id
+                    ? 'opacity-40 border-amber-500/50'
+                    : store.selectedWidgetId === layer.id
+                      ? 'bg-amber-500/10 border-amber-500/30'
+                      : 'border-transparent hover:bg-neutral-800'
                 ]"
               >
                 <button @click.stop="toggleVisible(layer)" class="bg-transparent text-neutral-600 hover:text-neutral-300 p-1">
-                  <svg v-if="layer.visible !== 0 && layer.visible !== false" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    v-if="layer.visible !== 0 && layer.visible !== false"
+                    class="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     <path
                       stroke-linecap="round"
@@ -370,7 +383,9 @@
                   </svg>
                 </button>
 
-                <div class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-neutral-500 bg-transparent border border-neutral-700">
+                <div
+                  class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-neutral-500 bg-transparent border border-neutral-700"
+                >
                   {{ layer.type.charAt(0) }}
                 </div>
 
@@ -396,9 +411,25 @@
                     />
                   </svg>
                 </button>
-                <div class="flex flex-col opacity-0 group-hover:opacity-100 cursor-move" @mousedown.stop="dragHandleId = layer.id" @mouseup="dragHandleId = null">
-                  <button @click.stop="moveLayer(layer, 'up')" class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none" title="上移图层">▲</button>
-                  <button @click.stop="moveLayer(layer, 'down')" class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none" title="下移图层">▼</button>
+                <div
+                  class="flex flex-col opacity-0 group-hover:opacity-100 cursor-move"
+                  @mousedown.stop="dragHandleId = layer.id"
+                  @mouseup="dragHandleId = null"
+                >
+                  <button
+                    @click.stop="moveLayer(layer, 'up')"
+                    class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none"
+                    title="上移图层"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    @click.stop="moveLayer(layer, 'down')"
+                    class="bg-transparent text-neutral-600 hover:text-amber-500 text-[10px] leading-none"
+                    title="下移图层"
+                  >
+                    ▼
+                  </button>
                 </div>
               </div>
             </template>
@@ -407,11 +438,7 @@
           </div>
 
           <!-- 拖拽放置指示线:绝对定位覆盖,出现/消失不影响其他图层位置 -->
-          <div
-            v-if="dragId && dropLineTop != null"
-            class="absolute left-0 right-0 z-10 pointer-events-none"
-            :style="{ top: dropLineTop + 'px' }"
-          >
+          <div v-if="dragId && dropLineTop != null" class="absolute left-0 right-0 z-10 pointer-events-none" :style="{ top: dropLineTop + 'px' }">
             <div class="h-0.5 bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.8)]"></div>
           </div>
         </div>
@@ -435,6 +462,7 @@ import ScoreboardWidget from './widgets/ScoreboardWidget.vue';
 import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
 import AuditionWidget from './widgets/AuditionWidget.vue';
+import ParticipantWidget from './widgets/ParticipantWidget.vue';
 
 const emit = defineEmits(['widgetUpdated']);
 
@@ -452,7 +480,8 @@ const widgetComponentMap = {
   'SCOREBOARD': ScoreboardWidget,
   'ARENA_SCORE': ArenaWidget,
   'AUDITION': AuditionWidget,
-  'RANKING': RankingWidget
+  'RANKING': RankingWidget,
+  'PARTICIPANTS': ParticipantWidget
 };
 
 const widget = computed(() => store.selectedWidget);

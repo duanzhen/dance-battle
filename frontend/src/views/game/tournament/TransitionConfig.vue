@@ -209,15 +209,60 @@
 
         <!-- 其他赛段模式:上下拖动即排序,× 移出;加人走右上角弹窗 -->
         <div v-else class="space-y-2">
+          <!-- 待落位区:多入口汇合的人先到这里(没有座位号),拖到下面座位才算落位 -->
+          <div
+            v-if="holdingItems.length > 0"
+            class="rounded border border-dashed p-1.5 transition-colors"
+            :class="holdingHover ? 'border-amber-500/60 bg-amber-500/10' : 'border-amber-600/40 bg-amber-500/5'"
+            @dragover.prevent="holdingHover = true"
+            @dragleave="holdingHover = false"
+            @drop.stop.prevent="onDropToHolding"
+          >
+            <div class="flex items-center justify-between gap-2 px-1 pb-1">
+              <span class="text-[11px] font-bold text-amber-400/90">待落位 · {{ holdingItems.length }} 人</span>
+              <button
+                v-if="!rosterReadonly"
+                @click="autoPlaceHolding"
+                class="px-2 py-0.5 rounded text-[10px] border border-amber-600/40 text-amber-400 hover:bg-amber-500/10 transition-colors"
+              >
+                按顺序自动落位
+              </button>
+            </div>
+            <div class="flex flex-wrap gap-1 px-1 pb-0.5">
+              <div
+                v-for="(it, idx) in holdingItems"
+                :key="itemKeyOf(it)"
+                :draggable="!rosterReadonly"
+                @dragstart="onHoldingDragStart(idx)"
+                @dragend="onDragEnd"
+                class="px-2 py-1 rounded bg-neutral-900 border border-neutral-700 text-[11px] text-neutral-300"
+                :class="rosterReadonly ? '' : 'cursor-grab hover:border-amber-600/50'"
+              >
+                {{ it.name || '未命名' }}
+                <span v-if="it.finalRank" class="text-[10px] text-neutral-600 ml-1">#{{ it.finalRank }}</span>
+                <button
+                  v-if="!rosterReadonly"
+                  @click.stop="askRemoveItem(it)"
+                  class="ml-1.5 px-1 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            <p class="px-1 text-[10px] text-neutral-500">
+              多入口汇合不自动排座:把每个人拖到下面座位(或点「按顺序自动落位」再微调);全部落位后才能确认名单。
+            </p>
+          </div>
+
           <div
             v-if="targetMode !== 'ARENA' && targetMode !== 'FREE_MATCH'"
             class="rounded bg-neutral-900/70 border border-neutral-800 overflow-y-auto custom-scrollbar max-h-96 p-1 pt-1 space-y-0.5"
           >
-            <div v-if="listItems.length === 0 && emptySlots.length === 0" class="text-[11px] text-neutral-600 text-center py-6">
+            <div v-if="seatItems.length === 0 && emptySlots.length === 0" class="text-[11px] text-neutral-600 text-center py-6">
               还没有人进来;点右上角「＋ 加人」添加
             </div>
             <div
-              v-for="(it, idx) in listItems"
+              v-for="(it, idx) in seatItems"
               :key="'r' + idx"
               draggable="true"
               @dragstart="onDragStartItem(idx)"
@@ -546,10 +591,11 @@
           <button
             v-if="sourceStage?.status === 'SETTLED' && !advancementConfirmed"
             @click="handleConfirmAdvancement"
-            :disabled="confirmingAdvancement || targetLocked"
+            :disabled="confirmingAdvancement || targetLocked || holdingItems.length > 0"
+            :title="holdingItems.length > 0 ? `还有 ${holdingItems.length} 人没落位` : ''"
             class="flex-none px-4 py-2 rounded-lg bg-amber-500 text-neutral-900 text-xs font-bold hover:bg-amber-400 disabled:opacity-40 transition-colors"
           >
-            {{ confirmingAdvancement ? '提交中...' : '确认晋级' }}
+            {{ confirmingAdvancement ? '提交中...' : holdingItems.length > 0 ? `待落位 ${holdingItems.length} 人` : '确认晋级' }}
           </button>
           <span v-else-if="advancementConfirmed" class="flex-none text-[10px] px-2 py-1 rounded bg-green-500/10 text-green-500">已确认</span>
         </div>
@@ -881,6 +927,9 @@ const overridePreview = ref<any>(null);
 const listItems = ref<any[]>([]);
 const dragIndex = ref<number | null>(null);
 const hoverIndex = ref<number | null>(null);
+/** 待落位区拖动:index 是 holdingItems 里的下标 */
+const dragHoldingIndex = ref<number | null>(null);
+const holdingHover = ref(false);
 /** 擂台赛出场队列的拖动状态(1 号位=擂主) */
 const arenaDragIndex = ref<number | null>(null);
 const arenaHoverIndex = ref<number | null>(null);
@@ -899,12 +948,22 @@ const rosterWaitingSource = computed(() => !rosterSealed.value && overridePrevie
 /** 中间态是否只读(已确认/已跳过、赛段已开赛、上一赛段还没结束) */
 const rosterReadonly = computed(() => rosterSealed.value || targetLocked.value || rosterWaitingSource.value);
 
+/**
+ * 已落位的人(有座位号)。
+ * 多入口汇合时人不自动排座,全部先落在「待落位区」(没有座位号),
+ * 由导播拖到座位;单入口仍然是自动排座,不会有待落位的人。
+ */
+const seatItems = computed<any[]>(() => listItems.value.filter((i) => Number(i.seedRank) > 0));
+
+/** 待落位的人(没有座位号):确认名单前必须全部拖到座位上 */
+const holdingItems = computed<any[]>(() => listItems.value.filter((i) => !(Number(i.seedRank) > 0)));
+
 /** 名单还差多少人到计划规模:多出来的位置显示为空位 */
 const emptySlots = computed(() => {
   const cap = Number(overridePreview.value?.capacity || 0);
   if (cap <= 0) return [];
   // 空位 = 计划范围内没有任何人占用的种子位(删人后原来的位置保持空白)
-  const used = new Set(listItems.value.map((i) => Number(i.seedRank)).filter((n) => Number.isFinite(n) && n > 0));
+  const used = new Set(seatItems.value.map((i) => Number(i.seedRank)).filter((n) => Number.isFinite(n) && n > 0));
   const out: number[] = [];
   for (let n = 1; n <= cap; n++) {
     if (!used.has(n)) out.push(n);
@@ -912,18 +971,22 @@ const emptySlots = computed(() => {
   return out;
 });
 
-/** 名单按出场次序排列(落位预览与对战树共用) */
-const rosterRows = computed<any[]>(() =>
-  [...listItems.value].sort((a, b) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER))
-);
+/** 名单按出场次序排列(只含已落位的人;落位预览、分组预览、对战树共用) */
+const rosterRows = computed<any[]>(() => [...seatItems.value].sort((a, b) => Number(a.seedRank ?? 0) - Number(b.seedRank ?? 0)));
 
 const onDragStartItem = (idx: number) => {
   dragIndex.value = idx;
 };
 
+const onHoldingDragStart = (idx: number) => {
+  dragHoldingIndex.value = idx;
+};
+
 const onDragEnd = () => {
   dragIndex.value = null;
   hoverIndex.value = null;
+  dragHoldingIndex.value = null;
+  holdingHover.value = false;
   arenaDragIndex.value = null;
   arenaHoverIndex.value = null;
 };
@@ -939,7 +1002,9 @@ const persistOrder = async () => {
         sourceCompetitorId: i.sourceCompetitorId ?? undefined,
         overrideId: i.overrideId ?? undefined,
         // 显式带种子位:删掉的人原来的位置留空,后面的不顶上
-        seedRank: i.seedRank ?? undefined
+        seedRank: i.seedRank ?? undefined,
+        // 待落位的人没有座位号:必须显式告诉后端"留在待落位区",否则会被补到最小空闲位
+        holding: Number(i.seedRank) > 0 ? undefined : true
       }))
     );
   } catch (e: any) {
@@ -998,20 +1063,74 @@ const confirmRemoveItem = async (fillGap: boolean) => {
   }
 };
 
-/** 列表内拖动 = 调整顺序 */
+/** 落到座位列表:既支持列表内排序,也支持从待落位区拖进来(插到该位置) */
 const onDropToRoster = async (idx: number) => {
+  if (rosterReadonly.value) return;
+  if (dragHoldingIndex.value != null) {
+    await dropHoldingIntoSeat(idx);
+    return;
+  }
   if (dragIndex.value != null) {
     const from = dragIndex.value;
     onDragEnd();
     if (from === idx) return;
-    const arr = [...listItems.value];
+    const arr = [...seatItems.value];
     const [moved] = arr.splice(from, 1);
     arr.splice(idx > from ? idx - 1 : idx, 0, moved);
     // 列表拖动 = 重新排序:按新的行序重新编号(1..N)
-    listItems.value = arr.map((it, i) => ({ ...it, seedRank: i + 1 }));
+    listItems.value = [...arr.map((it, i) => ({ ...it, seedRank: i + 1 })), ...holdingItems.value.map((it) => ({ ...it, seedRank: null }))];
     await persistOrder();
     await loadRosters();
   }
+};
+
+/** 待落位的人拖到座位列表的第 idx 个位置 → 落位并重排 */
+const dropHoldingIntoSeat = async (idx: number) => {
+  const from = dragHoldingIndex.value;
+  const moved = from == null ? null : holdingItems.value[from];
+  onDragEnd();
+  if (!moved) return;
+  const rest = holdingItems.value.filter((_, i) => i !== from);
+  const seats = [...seatItems.value];
+  seats.splice(Math.max(0, Math.min(idx, seats.length)), 0, moved);
+  listItems.value = [...seats.map((it, i) => ({ ...it, seedRank: i + 1 })), ...rest.map((it) => ({ ...it, seedRank: null }))];
+  await persistOrder();
+  await loadRosters();
+};
+
+/** 座位列表里的人拖回待落位区(没有座位号) */
+const onDropToHolding = async () => {
+  holdingHover.value = false;
+  if (rosterReadonly.value || dragIndex.value == null) return;
+  const from = dragIndex.value;
+  const moved = seatItems.value[from];
+  onDragEnd();
+  if (!moved) return;
+  const rest = [...seatItems.value].filter((it) => it !== moved);
+  listItems.value = [
+    ...rest.map((it, i) => ({ ...it, seedRank: i + 1 })),
+    ...holdingItems.value.filter((it) => it !== moved).map((it) => ({ ...it, seedRank: null })),
+    { ...moved, seedRank: null }
+  ];
+  await persistOrder();
+  await loadRosters();
+};
+
+/**
+ * 一键把待落位的人按「来源赛段顺序 + 来源名次」依次填到已有名单之后。
+ * 这是显式的人工动作(不是系统自动排座):导播点一下得到一版可用的顺序,再按现场需要微调。
+ */
+const autoPlaceHolding = async () => {
+  if (rosterReadonly.value || holdingItems.value.length === 0) return;
+  const ordered = [...holdingItems.value].sort((a, b) => {
+    const sa = Number(a.sourceStageId ?? 0);
+    const sb = Number(b.sourceStageId ?? 0);
+    if (sa !== sb) return sa - sb;
+    return Number(a.finalRank ?? 0) - Number(b.finalRank ?? 0);
+  });
+  listItems.value = [...seatItems.value, ...ordered].map((it, i) => ({ ...it, seedRank: i + 1 }));
+  await persistOrder();
+  await loadRosters();
 };
 
 // ---- 擂台赛出场队列:拖动调整出场顺序(1 号位=擂主) ----
@@ -1030,7 +1149,7 @@ const onDropToArena = async (idx: number) => {
   const arr = [...rosterRows.value];
   const [moved] = arr.splice(from, 1);
   arr.splice(idx > from ? idx - 1 : idx, 0, moved);
-  listItems.value = arr.map((it, i) => ({ ...it, seedRank: i + 1 }));
+  listItems.value = [...arr.map((it, i) => ({ ...it, seedRank: i + 1 })), ...holdingItems.value.map((it) => ({ ...it, seedRank: null }))];
   await persistOrder();
   await loadRosters();
 };
@@ -1421,7 +1540,8 @@ const BRACKET_ZONES = [
 const BRACKET_SIDES = ['left', 'right'] as const;
 
 const bracketPairs = computed<any[]>(() =>
-  computePairs(listItems.value, directPairingMode.value, Number(overridePreview.value?.capacity || targetStage.value?.teamCountStart) || 0)
+  // 只按已落位的人排对战树:待落位的人还没座位,不能硬塞进签表
+  computePairs(seatItems.value, directPairingMode.value, Number(overridePreview.value?.capacity || targetStage.value?.teamCountStart) || 0)
 );
 
 const bracketPairsOf = (zone: string) => bracketPairs.value.filter((p) => p.zone === zone);
@@ -1600,6 +1720,10 @@ const advancementConfirmed = computed(() => !!overridePreview.value?.applied || 
 const handleConfirmAdvancement = async () => {
   if (!rostersReadyForApply.value) {
     ElMessage.error('仍有来源未就绪(等待来源赛段结算),暂不能确认名单');
+    return;
+  }
+  if (holdingItems.value.length > 0) {
+    ElMessage.error(`还有 ${holdingItems.value.length} 人没落位,请先在中间态把人拖到座位上`);
     return;
   }
   const selections = buildManualSelections();

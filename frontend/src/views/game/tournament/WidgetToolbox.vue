@@ -72,7 +72,8 @@ const categories = [
       { label: '擂台积分', type: 'ARENA_SCORE', icon: Coins },
       { label: '对战树', type: 'BRACKET', icon: Network },
       { label: '当前场次', type: 'MATCH_DETAIL', icon: Swords },
-      { label: '排名展示', type: 'RANKING', icon: ListOrdered }
+      { label: '排名展示', type: 'RANKING', icon: ListOrdered },
+      { label: '参赛选手', type: 'PARTICIPANTS', icon: Users }
     ]
   }
 ];

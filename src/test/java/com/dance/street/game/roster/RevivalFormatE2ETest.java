@@ -5,6 +5,7 @@ import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
@@ -12,6 +13,7 @@ import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageConfigBo;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.vo.RosterCandidatesVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
@@ -41,8 +43,10 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -174,6 +178,8 @@ class RevivalFormatE2ETest {
             .sum();
         assertEquals(3, round32Candidates.getGroups().size());
         assertEquals(16, directCandidateCount);
+        // 32 强是多入口汇合(海选直入 + 复活赛):人先进待落位区,要先落位才能确认名单
+        placeAllHolding(round32.getId());
         assertEquals(32, rosterService.applyRoster(round32.getId(), null));
         assertEquals(32, competitorCount(round32.getId()));
         long directEntered = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
@@ -738,5 +744,34 @@ class RevivalFormatE2ETest {
         return competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
             .eq(TCompetitor::getStageId, stageId)
             .eq(TCompetitor::getOutcomeStatus, outcome));
+    }
+
+    /** 模拟导播在中间态把"待落位"的人拖到座位上(多入口汇合必须先落位才能确认名单) */
+    private void placeAllHolding(Long targetStageId) {
+        List<TStageRosterEntry> rows = rosterService.entriesOf(targetStageId);
+        Set<Long> used = new HashSet<>();
+        for (TStageRosterEntry row : rows) {
+            if (row.getSlot() != null) {
+                used.add(row.getSlot());
+            }
+        }
+        List<TStageRosterOrderBo.Item> items = new ArrayList<>();
+        long next = 1L;
+        for (TStageRosterEntry row : rows) {
+            if (!StageConstants.SLOT_PLAYER.equals(row.getSlotKind()) || row.getSlot() != null) {
+                continue;
+            }
+            while (used.contains(next)) {
+                next++;
+            }
+            TStageRosterOrderBo.Item it = new TStageRosterOrderBo.Item();
+            it.setOverrideId(row.getId());
+            it.setSeedRank(next);
+            items.add(it);
+            used.add(next);
+        }
+        if (!items.isEmpty()) {
+            rosterService.reorderRoster(targetStageId, items);
+        }
     }
 }

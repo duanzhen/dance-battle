@@ -1067,6 +1067,15 @@ export const useDirectorStore = defineStore('director', () => {
       defaultHeight = 600;
     }
 
+    if (type === 'PARTICIPANTS') {
+      defaultName = `参赛选手 ${currentScene.value.widgets.length + 1}`;
+      // 绑定任意赛段:未确认名单读中间态(含未落位的人),确认后自动切成真实参赛选手
+      // showSeat 默认关:座位号是排位信息,大屏一般只关心"这个赛段有哪些人"
+      dataConfig = { stageId: null, opacity: 85, showSeat: false, showNumber: true, showAvatar: false, columns: 2 };
+      defaultWidth = 800;
+      defaultHeight = 600;
+    }
+
     const newWidget = {
       tournamentId: currentTournamentId,
       sceneId: currentScene.value?.id, // 直接使用 id，应该已经是字符串或数字

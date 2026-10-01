@@ -16,7 +16,8 @@
       </div> -->
 
       <div
-        v-for="widgets in sceneConfig.widgets" v-show="widgets.visible !== 0 && widgets.visible !== false"
+        v-for="widgets in sceneConfig.widgets"
+        v-show="widgets.visible !== 0 && widgets.visible !== false"
         :key="widgets.id"
         class="absolute group"
         :style="{
@@ -94,6 +95,7 @@ import ScoreboardWidget from './widgets/ScoreboardWidget.vue';
 import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
 import AuditionWidget from './widgets/AuditionWidget.vue';
+import ParticipantWidget from './widgets/ParticipantWidget.vue';
 import { updateWidgetTimerState } from '@/api/game/screen';
 import html2canvas from 'html2canvas';
 
@@ -107,7 +109,8 @@ const componentMap: Record<string, any> = {
   'SCOREBOARD': ScoreboardWidget,
   'ARENA_SCORE': ArenaWidget,
   'AUDITION': AuditionWidget,
-  'RANKING': RankingWidget
+  'RANKING': RankingWidget,
+  'PARTICIPANTS': ParticipantWidget
 };
 
 export interface SceneElement {
@@ -188,9 +191,7 @@ const persistWidgetConfig = async (widget: SceneElement, patch: Record<string, u
   }
   const next = { ...config, ...patch };
   widget.dataConfig = JSON.stringify(next);
-  const inStore = !!store.scenes?.some((s: any) =>
-    (s.widgets || []).some((w: any) => String(w.id) === String(widget.id))
-  );
+  const inStore = !!store.scenes?.some((s: any) => (s.widgets || []).some((w: any) => String(w.id) === String(widget.id)));
   try {
     if (inStore) {
       await store.updateWidget(String(widget.id), { dataConfig: next });

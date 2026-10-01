@@ -54,10 +54,7 @@ export const listVisWidget = (query?: VisWidgetQuery): AxiosPromise<VisWidgetVO[
  * 回写倒计时组件状态(大屏唯一的写接口)。
  * 大屏没有管理员 JWT,但现场「开始/暂停」必须落库,刷新后靠 endAt 续跑。
  */
-export const updateWidgetTimerState = (
-  id: string | number,
-  data: { endAt: number | null; remainMs: number | null }
-): AxiosPromise<void> => {
+export const updateWidgetTimerState = (id: string | number, data: { endAt: number | null; remainMs: number | null }): AxiosPromise<void> => {
   return screenRequest({
     url: `/tournament/screen/widget/${id}/timer-state`,
     method: 'post',
@@ -115,6 +112,16 @@ export const getArenaOverview = (stageId: string | number) => {
   });
 };
 
+/**
+ * 赛段参赛选手:名单未确认时读中间态名单(含未落位的人),确认后自动切成真实参赛方。
+ */
+export const getStageParticipants = (stageId: string | number) => {
+  return screenRequest({
+    url: '/tournament/screen/stage/' + stageId + '/participants',
+    method: 'get'
+  });
+};
+
 /** 全赛事赛段流程 */
 export const getStageFlow = (tournamentId: string | number) => {
   return screenRequest({
@@ -160,9 +167,7 @@ export const listMatchParticipant = (query?: MatchParticipantQuery): AxiosPromis
 };
 
 /** 按赛段取出各场次参赛明细(按 matchId 分组) */
-export const listParticipantsByStage = async (
-  stageId: string | number
-): Promise<Record<string, MatchParticipantVO[]>> => {
+export const listParticipantsByStage = async (stageId: string | number): Promise<Record<string, MatchParticipantVO[]>> => {
   const grouped: Record<string, MatchParticipantVO[]> = {};
   const res: any = await listMatchParticipant({ stageId, pageNum: 1, pageSize: 999 } as MatchParticipantQuery);
   const rows: MatchParticipantVO[] = res?.data?.data || res?.data || [];

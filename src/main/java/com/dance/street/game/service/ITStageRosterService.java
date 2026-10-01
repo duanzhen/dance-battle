@@ -9,6 +9,7 @@ import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.bo.TStageRosterOverrideBo;
 import com.dance.street.game.domain.vo.RosterCandidatesVo;
 import com.dance.street.game.domain.vo.RosterPreviewVo;
+import com.dance.street.game.domain.vo.StageParticipantsVo;
 import com.dance.street.game.domain.vo.TStageRosterOverrideVo;
 import com.dance.street.game.domain.vo.TStageRosterVo;
 
@@ -169,4 +170,13 @@ public interface ITStageRosterService {
      * @return 归一化的座位行数
      */
     int settlePendingSeatsOfDownstream(Long sourceStageId);
+
+    /**
+     * 赛段参赛选手(大屏「参赛选手」控件用)。
+     *
+     * <p>名单已物化(确认晋级)读目标层的 {@code t_competitor};尚未物化读中间层名单,
+     * 未落位的人也在返回里({@code seedRank=null, holding=true})——大屏任何时刻都能看到
+     * "这个赛段目前有哪些人",不会因为名单没确认就整块空白。</p>
+     */
+    StageParticipantsVo listStageParticipants(Long stageId);
 }

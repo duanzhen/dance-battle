@@ -1,6 +1,5 @@
 package com.dance.street.game.chain;
 
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.TStageBo;
@@ -10,7 +9,6 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
-import com.dance.street.game.service.impl.StageChain;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,15 +22,14 @@ import java.util.stream.Collectors;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 赛段指针一致性:prev 列的对称校正(两个方向都以 next 链为准)。
+ * 赛段指针口径:库里只有 next 链这一份事实,前驱一律推导。
  *
- * <p>开赛守卫此前只拦「prev 列有值、链上无人指向」,反向(链上有前驱、列为空)
- * 没人管,导播台会把「上一赛段」显示成「未知」。</p>
+ * <p>原 {@code prev_stage_id} 列已删除,"上一赛段"不再落库,因此也不存在
+ * 「列与链不同步」这类需要双向校正的状态——这里守住的是展示字段按链推导、
+ * 以及遗留 transition 配置不再参与解析。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -64,43 +61,6 @@ class StagePointerConsistencyTest {
     private ITStageService stageService;
     @Autowired
     private ITStageLifecycleService lifecycleService;
-    @Autowired
-    private StageChain stageChain;
-
-    @Test
-    void prevColumnIsReconciledInBothDirections() {
-        Long tid = newTournament("指针校正");
-        TStageVo a = newStage(tid, "海选", null);
-        TStageVo b = newStage(tid, "4强", a.getId());
-        TStageVo c = newStage(tid, "决赛", b.getId());
-
-        // 1) 反向缺口:链上有前驱,但 prev 列为空(前端会显示「上一赛段未知」)
-        setPrevColumn(b.getId(), null);
-        assertNull(reload(b.getId()).getPrevStageId(), "前置条件:B.prev 已清空");
-        assertTrue(stageChain.reconcilePrevColumn(reload(b.getId())), "反向缺口应被修正");
-        assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "B.prev 应回填为链上前驱 A");
-
-        // 2) 正向缺口:prev 列指向了链外赛段
-        setPrevColumn(c.getId(), a.getId());
-        assertTrue(stageChain.reconcilePrevColumn(reload(c.getId())), "正向缺口应被修正");
-        assertEquals(b.getId(), reload(c.getId()).getPrevStageId(), "C.prev 应改为链上前驱 B");
-
-        // 3) 已经一致时不动(幂等)
-        assertFalse(stageChain.reconcilePrevColumn(reload(c.getId())), "一致时不应产生写入");
-    }
-
-    /** 链头被清空 prev 后,链上本就没有前驱 → 校正为 null,而不是报错拦住开赛。 */
-    @Test
-    void entryStageKeepsNullPrevInsteadOfBlockingStart() {
-        Long tid = newTournament("入口赛段");
-        TStageVo a = newStage(tid, "海选", null);
-
-        setPrevColumn(a.getId(), 999999L);
-        assertEquals(999999L, reload(a.getId()).getPrevStageId(), "前置条件:prev 列有脏值");
-
-        assertTrue(stageChain.reconcilePrevColumn(reload(a.getId())));
-        assertNull(reload(a.getId()).getPrevStageId(), "链头的 prev 应被清空");
-    }
 
     /**
      * ruleConfig 里残留的 {@code transition.targetStageId} 不再参与解析:
@@ -127,28 +87,27 @@ class StagePointerConsistencyTest {
     }
 
     /**
-     * 管理端赛段列表的 prev 必须按链推导:流程图用 prevStageId 找头节点并排序整条链,
-     * 库里那一列一旦过期(历史脏数据、指针写失败)整张图都会排错。
+     * 管理端赛段列表(以及单段详情)的 prev 必须按链推导:流程图用 prevStageId 找头节点
+     * 并排序整条链,库里已经没有这一列,它只能是推导值。
      */
     @Test
-    void stageListDerivesPrevFromChainNotFromColumn() {
+    void stageListDerivesPrevFromChain() {
         Long tid = newTournament("列表prev推导");
         TStageVo a = newStage(tid, "海选", null);
         TStageVo b = newStage(tid, "4强", a.getId());
         TStageVo c = newStage(tid, "决赛", b.getId());
-
-        // 模拟两种脏法:链头列上有垃圾值、中间列被写空
-        setPrevColumn(a.getId(), 999999L);
-        setPrevColumn(b.getId(), null);
 
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tid);
         Map<Long, TStageVo> byId = stageService.queryList(bo).stream()
             .collect(Collectors.toMap(TStageVo::getId, s -> s));
 
-        assertNull(byId.get(a.getId()).getPrevStageId(), "入口赛段的 prev 应为 null,不受列脏值影响");
+        assertNull(byId.get(a.getId()).getPrevStageId(), "入口赛段的 prev 应为 null");
         assertEquals(a.getId(), byId.get(b.getId()).getPrevStageId(), "B 的 prev 应按链回填为 A");
         assertEquals(b.getId(), byId.get(c.getId()).getPrevStageId(), "C 的 prev 应为 B");
+        // 单段详情同一口径(大屏对战树、导播台都走它)
+        assertEquals(b.getId(), stageService.queryById(c.getId()).getPrevStageId(),
+            "单段详情的 prev 也应按链推导");
     }
 
     private Long newTournament(String name) {
@@ -171,13 +130,4 @@ class StagePointerConsistencyTest {
         return stageService.insertByBo(bo);
     }
 
-    private TStage reload(Long stageId) {
-        return stageMapper.selectById(stageId);
-    }
-
-    private void setPrevColumn(Long stageId, Long prevStageId) {
-        stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-            .eq(TStage::getId, stageId)
-            .set(TStage::getPrevStageId, prevStageId));
-    }
 }

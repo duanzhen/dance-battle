@@ -247,7 +247,6 @@ CREATE TABLE IF NOT EXISTS `t_stage` (
   `id` INTEGER NOT NULL,
   `tenant_id` INTEGER NOT NULL,
   `tournament_id` INTEGER NOT NULL,
-  `prev_stage_id` INTEGER,
   `next_stage_id` INTEGER,
   `parent_stage_id` INTEGER,
   `name` TEXT,

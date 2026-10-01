@@ -152,9 +152,9 @@ class StageDeleteGuardTest {
         assertTrue(ex.getMessage().contains("请先重置该赛段后再删除"),
             "错误信息应给出可执行的动作,实际: " + ex.getMessage());
         assertNotNull(stageMapper.selectById(upstream.getId()), "被拒后上游应仍然存在");
-        // 被拒时整个删除事务必须回滚:链表指针不能被 reconnectChainBeforeDelete 改坏
-        assertEquals(upstream.getId(), stageMapper.selectById(downstream.getId()).getPrevStageId(),
-            "被拒后下游的 prev 指针应保持不变");
+        // 被拒时整个删除事务必须回滚:链不能被改坏(前驱按 next 链推导)
+        assertEquals(upstream.getId(), stageService.queryById(downstream.getId()).getPrevStageId(),
+            "被拒后下游的前驱应保持不变");
 
         // 解锁后可正常删除:拦截是可恢复的,不是死路
         rosterService.resetByTarget(downstream.getId());

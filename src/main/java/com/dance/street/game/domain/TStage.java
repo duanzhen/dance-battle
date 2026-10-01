@@ -33,12 +33,10 @@ public class TStage extends TenantEntity {
     private Long tournamentId;
 
     /**
-     * 上一赛段ID
-     */
-    private Long prevStageId;
-
-    /**
-     * 下一赛段ID (可修改以实现途中变轨)
+     * 下一赛段ID:赛段链的<b>唯一事实源</b>。
+     *
+     * <p>"上一赛段"不再单独存一列(原 {@code prev_stage_id} 已删除),一律由「谁的 next 指向我」
+     * 推导(见 {@code StageChain#prevOf});两个方向只保留一份事实,就不会出现指针不同步。</p>
      */
     private Long nextStageId;
 

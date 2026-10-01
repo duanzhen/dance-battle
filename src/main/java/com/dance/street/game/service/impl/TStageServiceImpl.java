@@ -95,7 +95,25 @@ public class TStageServiceImpl implements ITStageService {
      */
     @Override
     public TStageVo queryById(Long id){
-        return baseMapper.selectVoById(id);
+        TStageVo vo = baseMapper.selectVoById(id);
+        fillChainPrev(vo);
+        return vo;
+    }
+
+    /**
+     * 给单个 VO 填"上一赛段"(展示字段):库里已不再有 prev 列,一律按 next 链推导。
+     * 前端(流程图找头节点、导播台"上一赛段"提示、对战树取上游场次)都读这个字段。
+     */
+    private void fillChainPrev(TStageVo vo) {
+        if (vo == null || vo.getId() == null) {
+            return;
+        }
+        TStage self = baseMapper.selectById(vo.getId());
+        if (self == null) {
+            return;
+        }
+        TStage prev = stageChain.prevOf(self);
+        vo.setPrevStageId(prev == null ? null : prev.getId());
     }
 
     /**
@@ -128,11 +146,11 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /**
-     * 补入名单摘要,并把 prev 展示字段按赛段链覆盖。
+     * 补入名单摘要,并填充"上一赛段"展示字段。
      *
-     * <p>prev 只是展示字段,事实源只有 next 链。管理端流程图用它找头节点并排序整条链,
-     * 一旦库里那一列过期(历史脏数据、指针写失败)整张图就会排错;
-     * 这里统一按链推导覆盖,列只作为兜底写回,不再参与读取。</p>
+     * <p>库里已没有 prev 列,这一字段只能是链上推导值({@code 谁的 next 指向我})。
+     * 管理端流程图用它找头节点并排序整条链,导播台用它显示"上一赛段",
+     * 所以这里统一一次性推导,避免逐段回查。</p>
      */
     private void enrichIncoming(List<TStageVo> stages) {
         if (stages == null || stages.isEmpty()) {
@@ -152,7 +170,7 @@ public class TStageServiceImpl implements ITStageService {
         for (TStageVo stage : stages) {
             if (stage.getId() != null) {
                 if (stage.getTournamentId() != null && tournamentIds.contains(stage.getTournamentId())) {
-                    // 链上没有前驱即入口赛段:显式置 null,避免透出列里的脏值
+                    // 链上没有前驱即入口赛段:显式置 null
                     stage.setPrevStageId(prevByStageId.get(stage.getId()));
                 }
                 List<TStageRosterVo> rosters = rostersByStage.getOrDefault(stage.getId(), List.of());
@@ -196,7 +214,6 @@ public class TStageServiceImpl implements ITStageService {
         Long afterStageId = bo.getAfterStageId();
 
         // 指针列一律由 StageChain 写:先落一行不带指针的记录,再按链顺序接入
-        add.setPrevStageId(null);
         add.setNextStageId(null);
         baseMapper.insert(add);
         bo.setId(add.getId());
@@ -210,7 +227,9 @@ public class TStageServiceImpl implements ITStageService {
             rosterService.reconcileAfterLinkChange(add.getNextStageId());
         }
 
-        return MapstructUtils.convert(add, TStageVo.class);
+        TStageVo vo = MapstructUtils.convert(add, TStageVo.class);
+        fillChainPrev(vo);
+        return vo;
     }
 
     /**
@@ -266,7 +285,7 @@ public class TStageServiceImpl implements ITStageService {
     @Transactional(rollbackFor = Exception.class)
     public void moveStageAfter(Long stageId, Long afterStageId) {
         List<Long> changed = stageChain.moveAfter(stageId, afterStageId);
-        // prev 变了的赛段:入口↔非入口会切换,默认名单来源(签到流/上游晋级)要跟着迁
+        // 链上位置变了的赛段:入口↔非入口会切换,默认名单来源(签到流/上游晋级)要跟着迁
         for (Long changedStageId : changed) {
             rosterService.reconcileAfterLinkChange(changedStageId);
         }
@@ -289,7 +308,8 @@ public class TStageServiceImpl implements ITStageService {
         }
         // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
         // 避免后续有人往 patch 里塞指针又把链写歪
-        patch.setPrevStageId(null);
+        // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
+        // 避免后续有人往 patch 里塞指针又把链写歪
         patch.setNextStageId(null);
 
         // 归一化 ruleConfig:补齐与 teamCountStart/teamCountEnd 对应的配置字段
@@ -323,7 +343,9 @@ public class TStageServiceImpl implements ITStageService {
         }
 
         // 返回库中整行:prev/next 是展示列,链由 StageChain 维护,回读才是最新口径
-        return MapstructUtils.convert(updated, TStageVo.class);
+        TStageVo vo = MapstructUtils.convert(updated, TStageVo.class);
+        fillChainPrev(vo);
+        return vo;
     }
 
     /**
@@ -675,7 +697,7 @@ public class TStageServiceImpl implements ITStageService {
         }
         log.debug("赛事[{}]找到{}个赛段:{}", tournamentId, all.size(),
             all.stream().map(s -> s.getId() + "(" + s.getStatus() + ",prev=" + s.getPrevStageId() + ")").toList());
-        // 链头以 next 链推导(StageChain),prev 列仅作展示字段
+        // 链头以 next 链推导(StageChain);prev 只存在于 VO 展示字段,库里没有这一列
         TStage head = stageChain.headOf(tournamentId);
         if (head != null) {
             TStageVo chainHead = all.stream()

@@ -294,7 +294,6 @@ CREATE TABLE `t_stage` (
   `id` bigint NOT NULL,
   `tenant_id` bigint NOT NULL,
   `tournament_id` bigint NOT NULL,
-  `prev_stage_id` bigint DEFAULT NULL COMMENT '上一赛段ID',
   `next_stage_id` bigint DEFAULT NULL COMMENT '下一赛段ID (可修改以实现途中变轨)',
   `parent_stage_id` bigint DEFAULT NULL COMMENT '父ID (用于同分加赛)',
   `name` varchar(50) DEFAULT NULL COMMENT '32进16 / 复活赛',

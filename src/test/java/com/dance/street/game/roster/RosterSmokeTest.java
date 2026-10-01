@@ -802,12 +802,12 @@ class RosterSmokeTest {
         TStageBo inserted = baseStage(tournament.getId(), "复活赛", "KNOCKOUT", 8L, 4L, audition.getId());
         stageService.insertByBo(inserted);
 
-        TStage round16After = stageMapper.selectById(round16.getId());
-        assertNotNull(round16After.getPrevStageId());
-        assertEquals("复活赛", stageMapper.selectById(round16After.getPrevStageId()).getName());
+        // 前驱按 next 链推导(库里不再有 prev 列)
+        Long prevId = stageService.queryById(round16.getId()).getPrevStageId();
+        assertNotNull(prevId);
+        assertEquals("复活赛", stageMapper.selectById(prevId).getName());
         List<TStageRosterGroupBo> groups = rosterService.listByTarget(round16.getId()).get(0).getGroups();
-        assertTrue(groups.stream().anyMatch(g -> stageMapper.selectById(round16After.getPrevStageId()).getId()
-            .equals(g.getSourceStageId())));
+        assertTrue(groups.stream().anyMatch(g -> prevId.equals(g.getSourceStageId())));
         assertTrue(groups.stream().noneMatch(g -> audition.getId().equals(g.getSourceStageId())));
     }
 
@@ -1046,13 +1046,13 @@ class RosterSmokeTest {
         TStageBo stalePointers = baseStage(tournament.getId(), "决赛", "KNOCKOUT", 2L, 1L, anotherAudition.getId());
         stalePointers.setId(fin.getId());
         assertDoesNotThrow(() -> stageService.updateByBo(stalePointers));
-        assertEquals(audition.getId(), stageMapper.selectById(fin.getId()).getPrevStageId(),
+        assertEquals(audition.getId(), stageService.queryById(fin.getId()).getPrevStageId(),
             "配置入口不得按客户端指针改链");
 
         // 真的改链走意图接口(移到另一个入口之后):名单已装配时才要求先重置该赛段
         assertThrows(ServiceException.class, () -> stageService.moveStageAfter(fin.getId(), anotherAudition.getId()));
         // 拦截必须整单回滚:链路保持原样,不能出现「报错了但链已改」的中间状态
-        assertEquals(audition.getId(), stageMapper.selectById(fin.getId()).getPrevStageId());
+        assertEquals(audition.getId(), stageService.queryById(fin.getId()).getPrevStageId());
     }
 
     /** 入口赛段(仅签到 STREAM 组)也接受显式外卡:覆盖是人工决定,不依赖来源组 */

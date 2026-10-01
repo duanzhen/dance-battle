@@ -20,13 +20,11 @@ import java.util.Set;
 /**
  * 赛段链遍历的唯一入口。
  *
- * <p>赛段链以 <b>next 链为唯一事实源</b>:谁是「上一赛段」由「谁的 next 指向我」推导,
- * 而不是读 t_stage.prev_stage_id。prev 列仍由链维护逻辑照常写入(前端/VO 展示继续可用),
- * 但所有正确性判断都走本类——两个指针万一不同步,一律以 next 为准。</p>
- *
- * <p>反向链之所以不再是事实源,是因为它可由 next 完全推导,却额外引入
- * 「A.next=B 但 B.prev≠A」这类不同步状态;此前系统为此散落了三处兜底补丁
- * (resolvePrevStage 悬空反查、删除后的指针清扫、过期指针回退)。</p>
+ * <p>赛段链以 <b>next 链为唯一事实源</b>:谁是「上一赛段」由「谁的 next 指向我」推导。
+ * {@code t_stage} 上不再有 {@code prev_stage_id} 列——反向链能由 next 完全推导,
+ * 单独存一列只会引入「A.next=B 但 B.prev≠A」这类不同步状态;此前系统为此散落了三处兜底补丁
+ * (resolvePrevStage 悬空反查、删除后的指针清扫、过期指针回退),现在整类问题从数据模型上消失。
+ * 前端/VO 需要"上一赛段"时,由本类推导后填充({@link #prevIdsFromChain})。</p>
  *
  * <p><b>指针列只在本类里写。</b>业务代码不再自己拼 prev/next:接入新赛段用
  * {@link #insertAfter}、移动已有赛段用 {@link #moveAfter},两者都按「期望的链顺序」
@@ -111,9 +109,8 @@ public class StageChain {
      * <p>口径与 {@link #prevOf} 一致:被任一非 DISCARD 赛段的 next 指向即视为有前驱;
      * 多个赛段指向同一目标时取 id 最小者,保证结果稳定。</p>
      *
-     * <p>供列表接口一次性把 prev 展示字段按链覆盖:既避免逐个 {@code prevOf} 的 N+1,
-     * 也让 prev 列彻底退出读取路径——管理端流程图用 prevStageId 找头节点并排序,
-     * 列一旦过期整条链都会排错。</p>
+     * <p>供列表接口一次性填充"上一赛段"展示字段:既避免逐个 {@code prevOf} 的 N+1,
+     * 也让前端拿到的一定是链上推导值(库里不再有 prev 列可读)。</p>
      */
     public Map<Long, Long> prevIdsFromChain(Long tournamentId) {
         List<TStage> all = aliveStages(tournamentId);
@@ -128,34 +125,6 @@ public class StageChain {
             }
         }
         return prev;
-    }
-
-    /**
-     * 用 next 链校正 prev 展示列(两个方向都修)。
-     *
-     * <p>prev 是纯展示字段,事实源只有 next。此前只在开赛守卫里拦了
-     * 「列上有值、链上无人指向」这一个方向,反向(链上有前驱、列为空)没人管,
-     * 前端「上一赛段」就会显示成「未知」。既然链是事实源,两个方向都以链为准
-     * 直接修正,并记一条 warn 便于追查是哪个入口把列写歪的。</p>
-     *
-     * @return true 表示列确实被修正过
-     */
-    public boolean reconcilePrevColumn(TStage stage) {
-        if (stage == null || stage.getId() == null) {
-            return false;
-        }
-        TStage chainPrev = prevOf(stage);
-        Long expected = chainPrev == null ? null : chainPrev.getId();
-        if (Objects.equals(expected, stage.getPrevStageId())) {
-            return false;
-        }
-        log.warn("赛段[{}]的 prev 展示列与赛段链不一致(列={}, 链={}),已按链修正",
-            stage.getId(), stage.getPrevStageId(), expected);
-        stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-            .eq(TStage::getId, stage.getId())
-            .set(TStage::getPrevStageId, expected));
-        stage.setPrevStageId(expected);
-        return true;
     }
 
     /**
@@ -238,10 +207,11 @@ public class StageChain {
     }
 
     /**
-     * 按给定顺序修正 prev/next 列,只写与库中现值不同的节点。
+     * 按给定顺序修正 next 指针,只写与库中现值不同的节点。
      *
-     * <p>这是全项目唯一写指针列的地方:任何一次改链都让「期望顺序」和「库中链」在
-     * 同一个事务里重合,不依赖调用方传来的指针,也就没有过期副本写歪链的窗口。</p>
+     * <p>这是全项目唯一写链指针的地方:任何一次改链都让「期望顺序」和「库中链」在
+     * 同一个事务里重合,不依赖调用方传来的指针,也就没有过期副本写歪链的窗口。
+     * 反向的"上一赛段"由 next 推导,不落库。</p>
      *
      * @param chain 期望的链顺序(已按 next 链推导,含首尾)
      * @return 指针被实际改写的赛段ID
@@ -250,17 +220,13 @@ public class StageChain {
         List<Long> changed = new ArrayList<>();
         for (int i = 0; i < chain.size(); i++) {
             TStage node = chain.get(i);
-            Long expectedPrev = i == 0 ? null : chain.get(i - 1).getId();
             Long expectedNext = i == chain.size() - 1 ? null : chain.get(i + 1).getId();
-            if (Objects.equals(node.getPrevStageId(), expectedPrev)
-                && Objects.equals(node.getNextStageId(), expectedNext)) {
+            if (Objects.equals(node.getNextStageId(), expectedNext)) {
                 continue;
             }
             stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
                 .eq(TStage::getId, node.getId())
-                .set(TStage::getPrevStageId, expectedPrev)
                 .set(TStage::getNextStageId, expectedNext));
-            node.setPrevStageId(expectedPrev);
             node.setNextStageId(expectedNext);
             changed.add(node.getId());
         }

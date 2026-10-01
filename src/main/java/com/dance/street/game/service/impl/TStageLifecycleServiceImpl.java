@@ -301,8 +301,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 从海选赛进入的淘汰赛,未显式配置时默认标准种子对位(1-16、2-15)
         if (StageModeEnum.KNOCKOUT.equals(mode)
             && rc != null && rc.getKnockout() != null) {
-            // 与预排(getPreBracket)口径一致:prev_stage_id 缺失时按 next 指针反查上一赛段,
-            // 避免链表指针正常但 prev_stage_id 为空时误走 SEED 头尾交叉
+            // 与预排(getPreBracket)口径一致:上一赛段由 next 链推导(库里没有 prev 列),
+            // 不存在"指针正常但上一赛段为空"导致误走 SEED 头尾交叉的情况
             TStage prev = stageService.resolvePrevStage(stage);
             if (prev != null && StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())) {
                 rc.getKnockout().setPairingMode("SEQUENTIAL");
@@ -1242,11 +1242,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             throw new ServiceException("海选尚未配置圈,请先在赛段配置中新增至少一圈(人数/裁判/去向)");
         }
         // 流程规范:上一赛段必须已结束(SETTLED),否则不允许开始本赛段。
-        // 前驱由 next 链推导(见 StageChain);prev 列只是展示字段,与链不一致时
-        // 按链修正(两个方向),不当作致命错误拦下开赛——拦截一件只影响展示的
-        // 不一致,代价是主办方开不了赛。
+        // 前驱由 next 链推导(见 StageChain)——库里不再有 prev 列,不存在"列与链不一致"。
         TStage prev = stageService.resolvePrevStage(stage);
-        stageChain.reconcilePrevColumn(stage);
         if (prev == null) {
             // 链表头(入口赛段)没有上游,名单守卫由名单服务按"无内部来源组"自动放行
             return;

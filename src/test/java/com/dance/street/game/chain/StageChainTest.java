@@ -27,10 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 赛段链口径测试:next 链是唯一事实源,prev 列仅作展示字段。
+ * 赛段链口径测试:next 链是唯一事实源。
  *
- * <p>覆盖三件事:正常链上 head/prev/顺序推导正确且 prev 列照常写入;
- * 两个指针不同步时以 next 链为准;next 链断开时该赛段按入口处理。</p>
+ * <p>库里已不再有 {@code prev_stage_id} 列,「上一赛段」一律由「谁的 next 指向我」推导。
+ * 覆盖面:正常链上 head/prev/顺序推导正确;next 链断开时该赛段按入口处理;
+ * 前端展示用的 prev 字段由链推导填充。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -80,12 +81,6 @@ class StageChainTest {
         return stageMapper.selectById(stageId);
     }
 
-    private void setPrevColumn(Long stageId, Long prevStageId) {
-        stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
-            .eq(TStage::getId, stageId)
-            .set(TStage::getPrevStageId, prevStageId));
-    }
-
     private void clearNextColumn(Long stageId) {
         stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
             .eq(TStage::getId, stageId)
@@ -113,22 +108,18 @@ class StageChainTest {
             stageChain.orderedChain(tournament.getId()).stream().map(TStage::getId).toList(),
             "链顺序应为 A→B→C");
 
-        // 2) prev 列仍照常写入(第 1、2 步不停写,前端与 VO 契约不变)
-        assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "B.prev 列应写入 A");
-        assertEquals(b.getId(), reload(c.getId()).getPrevStageId(), "C.prev 列应写入 B");
+        // 2) 前端展示用的 prev 由链推导填充(库里没有这一列)
+        assertNull(stageService.queryById(a.getId()).getPrevStageId(), "A 是链头,prev 应为 null");
+        assertEquals(a.getId(), stageService.queryById(b.getId()).getPrevStageId(), "B 的 prev 应为 A");
+        assertEquals(b.getId(), stageService.queryById(c.getId()).getPrevStageId(), "C 的 prev 应为 B");
 
-        // 3) prev 列被改错时:以 next 链为准,C 的前驱仍是 B
-        setPrevColumn(c.getId(), a.getId());
-        assertEquals(a.getId(), reload(c.getId()).getPrevStageId(), "前置条件:prev 列已改错为 A");
-        assertEquals(b.getId(), stageChain.prevOf(reload(c.getId())).getId(),
-            "prev 列与 next 链冲突时应以 next 链为准");
-
-        // 4) next 链断开时:该赛段按入口处理,不再信任 prev 列
+        // 3) next 链断开时:该赛段按入口处理
         clearNextColumn(a.getId());
         assertNull(reload(a.getId()).getNextStageId(), "前置条件:A.next 已断开");
-        assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "前置条件:B.prev 仍指向 A");
         assertNull(stageChain.prevOf(reload(b.getId())), "next 链断开后 B 应被当作入口");
         assertTrue(stageChain.isEntry(reload(b.getId())), "B 此时是入口赛段");
+        assertNull(stageService.queryById(b.getId()).getPrevStageId(),
+            "链断开后展示字段也应回落到 null(不看历史列)");
     }
 
     /** 建链只动指针:插入新赛段不得改前驱的参赛规模/晋级名额(名额由来源组与赛段配置决定)。 */
@@ -143,6 +134,6 @@ class StageChainTest {
 
         assertEquals(32L, reload(a.getId()).getTeamCountStart(), "前驱参赛规模不应被动过");
         assertEquals(8L, reload(a.getId()).getTeamCountEnd(), "前驱晋级名额不应被下游容量顶掉");
-        assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "新赛段应接在前驱之后");
+        assertEquals(a.getId(), stageService.queryById(b.getId()).getPrevStageId(), "新赛段应接在前驱之后");
     }
 }

@@ -130,12 +130,12 @@ class StageConfigSaveIsolationTest {
 
         assertEquals("海选(改)", reload(a.getId()).getName(), "配置字段应写入");
         assertEquals(a.getId(), updated.getId());
-        assertEquals(aBefore.getPrevStageId(), reload(a.getId()).getPrevStageId(), "本赛段 prev 不应被配置保存改动");
         assertEquals(aBefore.getNextStageId(), reload(a.getId()).getNextStageId(), "本赛段 next 不应被配置保存改动");
+        assertNull(updated.getPrevStageId(), "海选是链头,前驱(链推导)应保持 null");
 
         TStage bAfter = reload(b.getId());
-        assertEquals(bBefore.getPrevStageId(), bAfter.getPrevStageId(), "下游 prev 不应被改写");
         assertEquals(bBefore.getNextStageId(), bAfter.getNextStageId(), "下游 next 不应被改写");
+        assertEquals(a.getId(), stageService.queryById(b.getId()).getPrevStageId(), "下游前驱不应被改写");
         assertEquals(SENTINEL, bAfter.getUpdateTime(), "纯配置保存不应写下游赛段行(此前先置空下游 prev、再写回)");
     }
 
@@ -154,10 +154,11 @@ class StageConfigSaveIsolationTest {
         stageService.updateByBo(stale);
 
         assertEquals("32强(改)", reload(b.getId()).getName(), "配置字段仍应写入");
-        assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "过期指针不得写回:改链只走意图接口");
         assertEquals(b.getId(), reload(a.getId()).getNextStageId(), "上游 next 不应被动过");
         assertEquals(c.getId(), reload(b.getId()).getNextStageId(), "本赛段 next 不应被动过");
-        assertEquals(b.getId(), reload(c.getId()).getPrevStageId(), "下游 prev 不应被动过");
+        assertEquals(a.getId(), stageService.queryById(b.getId()).getPrevStageId(),
+            "过期指针不得写回:改链只走意图接口");
+        assertEquals(b.getId(), stageService.queryById(c.getId()).getPrevStageId(), "下游前驱不应被动过");
     }
 
     @Test
@@ -169,18 +170,18 @@ class StageConfigSaveIsolationTest {
         // 中间插入:插到 A 之后 → A→Z→B
         TStageVo z = newStage(tid, "32强", "KNOCKOUT", a.getId());
         assertEquals(List.of(a.getId(), z.getId(), b.getId()), chainIds(tid), "应插在 A 与 B 之间");
-        assertEquals(z.getId(), reload(b.getId()).getPrevStageId(), "B 的前驱应为新插入的 Z");
-        assertEquals(a.getId(), reload(z.getId()).getPrevStageId(), "Z 的前驱应为 A");
+        assertEquals(z.getId(), stageService.queryById(b.getId()).getPrevStageId(), "B 的前驱应为新插入的 Z");
+        assertEquals(a.getId(), stageService.queryById(z.getId()).getPrevStageId(), "Z 的前驱应为 A");
         assertEquals(b.getId(), reload(z.getId()).getNextStageId(), "Z 的后继应为 B");
         assertEquals(z.getId(), reload(a.getId()).getNextStageId(), "A 的后继应为 Z");
-        assertEquals(a.getId(), stageChain.prevOf(reload(z.getId())).getId(), "链推导应与 prev 列一致");
+        assertEquals(a.getId(), stageChain.prevOf(reload(z.getId())).getId(), "链推导前驱应为 A");
 
         // 移动:B 移到链头 → B→A→Z
         stageService.moveStageAfter(b.getId(), null);
         assertEquals(List.of(b.getId(), a.getId(), z.getId()), chainIds(tid), "B 应被移到链头");
-        assertNull(reload(b.getId()).getPrevStageId(), "链头的 prev 应为空");
-        assertEquals(b.getId(), reload(a.getId()).getPrevStageId(), "A 的前驱应变成 B");
-        assertEquals(a.getId(), reload(z.getId()).getPrevStageId(), "Z 的前驱应仍是 A");
+        assertNull(stageService.queryById(b.getId()).getPrevStageId(), "链头的前驱应为空");
+        assertEquals(b.getId(), stageService.queryById(a.getId()).getPrevStageId(), "A 的前驱应变成 B");
+        assertEquals(a.getId(), stageService.queryById(z.getId()).getPrevStageId(), "Z 的前驱应仍是 A");
         assertEquals(z.getId(), reload(a.getId()).getNextStageId(), "A 的后继应仍是 Z");
 
         // 移到自己后面:直接拒绝,不产生半条链
@@ -199,7 +200,7 @@ class StageConfigSaveIsolationTest {
 
         assertEquals(List.of(a.getId(), b.getId()), chainIds(tid), "删除中间赛段后链应被前后邻居跨过");
         assertEquals(b.getId(), reload(a.getId()).getNextStageId(), "上游 next 应直接指向下游");
-        assertEquals(a.getId(), reload(b.getId()).getPrevStageId(), "下游 prev 应直接指向上游");
+        assertEquals(a.getId(), stageService.queryById(b.getId()).getPrevStageId(), "下游前驱应直接指向上游");
     }
 
 }

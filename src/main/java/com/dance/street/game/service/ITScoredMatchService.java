@@ -30,4 +30,15 @@ public interface ITScoredMatchService {
      * 用全部裁判分计算最终排名 → 按赛制处理后(淘汰填下游/小组写胜负)→ 场次 SETTLED。
      */
     void settleScoredMatches(Long stageId);
+
+    /**
+     * 本赛段累计打分类(VOTING/RANKING)未结算场次里,尚未判完的选手姓名(去重)。
+     *
+     * <p>「判完」= 每名选手都被本场应到的每一名裁判打过,口径见 {@code JudgeCompletenessChecker}。
+     * 结算前必须先过这一关:只到一个裁判的分就结算,会把其余裁判的分整段丢掉、名次判错。
+     * 只统计累计打分类场次——判定制(STANDARD)场次由提交结果当刻定胜负,不在此列。</p>
+     *
+     * @return 未判完的选手姓名;空表示可以结算
+     */
+    List<String> unjudgedNames(Long stageId);
 }

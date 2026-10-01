@@ -10,6 +10,8 @@ import com.dance.street.game.service.ITScoredMatchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /**
  * 多裁判累计打分赛制的结算:淘汰赛与自由对抗。
  *
@@ -39,6 +41,14 @@ public class ScoredStageSettler implements StageSettler {
 
     @Override
     public StageSettleOutcome settle(TStage stage) {
+        // 「裁判没到齐」与"场次未结算"同类:返回 pending 让导播台按提示补齐,
+        // 而不是用只有一半裁判到场的分数算出名次。判定制(STANDARD)场次已在提交时定胜负,
+        // 不在这个口径里(见 ITScoredMatchService#unjudgedNames)。
+        List<String> unjudged = scoredMatchService.unjudgedNames(stage.getId());
+        if (!unjudged.isEmpty()) {
+            return StageSettleOutcome.pending("赛段仍有 " + unjudged.size() + " 名选手未打分或未打满本场裁判数"
+                + "(未标记退赛): " + String.join("、", unjudged) + ",请先完成打分或标记退赛后再结算");
+        }
         scoredMatchService.settleScoredMatches(stage.getId());
         long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stage.getId())

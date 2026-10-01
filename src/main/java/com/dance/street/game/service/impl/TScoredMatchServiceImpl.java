@@ -29,6 +29,7 @@ import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.DownstreamRouter;
+import com.dance.street.game.service.impl.flow.JudgeCompletenessChecker;
 import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
@@ -64,6 +65,8 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     private final DownstreamRouter downstreamRouter;
     /** 参赛方成绩批量写入口(整场一条 SQL) */
     private final ParticipantScoreWriter scoreWriter;
+    /** 「判完了吗」的唯一口径(与海选/排名赛/小组赛结算共用) */
+    private final JudgeCompletenessChecker judgeCompletenessChecker;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -115,7 +118,9 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     public void settleScoredMatches(Long stageId) {
         List<TMatch> pending = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId)
-            .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
+            .eq(TMatch::getStatus, StageConstants.MATCH_GAMING)
+            // 按 id 固定加锁顺序:多场次一起结算时避免与其他写事务形成环路等待
+            .orderByAsc(TMatch::getId));
         if (pending.isEmpty()) {
             return;
         }
@@ -139,6 +144,22 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
             tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
             log.info("多裁判场次[{}]已结算:{}人参与,模式={}", match.getId(), results.size(), mode.getCode());
         }
+    }
+
+    @Override
+    public List<String> unjudgedNames(Long stageId) {
+        if (stageId == null) {
+            return List.of();
+        }
+        // 只看"已开始(GAMING)且未结算"的累计打分类场次:STANDARD 由提交结果当刻定胜负,
+        // 不存在"裁判没到齐";还没开始的场次属于"这场还没打完",不在此判定
+        List<TMatch> pending = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .eq(TMatch::getStatus, StageConstants.MATCH_GAMING)
+            .in(TMatch::getMatchMode, MatchModeEnum.VOTING.getCode(), MatchModeEnum.RANKING.getCode())
+            .orderByAsc(TMatch::getDisplayRow)
+            .orderByAsc(TMatch::getId));
+        return judgeCompletenessChecker.unjudgedNames(pending);
     }
 
     /** 用全部裁判分计算本场最终总分/排名 */
@@ -192,6 +213,16 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
         }
         // 胜者去向:决赛标晋级,其余填下游占位(占位缺失时由路由补插——此前这条路径只 update,会静默丢人)
         downstreamRouter.routeWinner(match, winner.getCompetitorId());
+
+        // 季军赛:本场第 2 名(败者)路由到败者组场次(半决赛败者互争季军)。
+        // 与 TMatchResultServiceImpl 的同名方法保持同一口径——少了这一步,季军赛两个座位
+        // 永远是空的,会在导播点「开始」时被按空场静默结算,直接没有季军。
+        MatchScoreResult loser = results.stream()
+            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
+            .findFirst().orElse(null);
+        if (loser != null && loser.getCompetitorId() != null) {
+            downstreamRouter.routeLoser(match, loser.getCompetitorId());
+        }
     }
 
     /** 小组赛:按本场排名写胜负(同分并列第一记平),供小组积分结算使用 */

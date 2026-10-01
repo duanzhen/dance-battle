@@ -225,6 +225,13 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         List<TRoundScore> rawScores = new ArrayList<>();
         if (bo.getScores() != null && !bo.getScores().isEmpty()) {
             TMatchRound round = matchRoundLocator.current(match);
+            // 重复提交以最新为准:先删本裁判本轮旧分再写。
+            // t_round_score 上有唯一键 (round_id, referee_id, competitor_id, dimension),
+            // 只 insert 不删的话,同一裁判改分第二次提交会直接撞唯一键报错。
+            Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
+            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaUpdate()
+                .eq(TRoundScore::getRoundId, round.getId())
+                .eq(TRoundScore::getRefereeId, refId));
             for (ScoreEntryBo se : bo.getScores()) {
                 // 越界校验:只能给本场参赛方提交打分,避免向不相关选手写入脏数据
                 if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
@@ -236,7 +243,9 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 // 裁判端无登录租户上下文,需显式带租户,否则 tenant_id 插入报错
                 rs.setTenantId(match.getTenantId());
                 rs.setCompetitorId(se.getCompetitorId());
-                rs.setRefereeId(bo.getRefereeId());
+                // 与累计打分类路径统一:未带裁判ID(管理端录入)记为 0,避免 referee_id 为 null
+                // 时唯一键判重失效、重复提交各自留下多行
+                rs.setRefereeId(refId);
                 rs.setScore(se.getScore());
                 rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
                 rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
@@ -332,8 +341,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             return createReplayRound(match, results);
         }
 
-        // 结果公布模式 MANUAL:裁判判完仅暂存结果,场次保持进行中,待导播台确认公布
-        if (isKnockoutStandard && bo.getRefereeId() != null
+        // 结果公布模式 MANUAL:裁判判完仅暂存结果,场次保持进行中,待导播台确认公布。
+        // 擂台赛与淘汰赛一样是"单场判胜负",同样要支持 MANUAL——此前只判 isKnockoutStandard,
+        // 擂台赛配了 MANUAL 也会当场结算,配置形同虚设。
+        if ((isKnockoutStandard || isArenaStandard) && bo.getRefereeId() != null
             && "MANUAL".equalsIgnoreCase(publishMode)) {
             TMatch pending = new TMatch();
             pending.setId(match.getId());
@@ -789,6 +800,13 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         replay.setStatus(StageConstants.MATCH_GAMING);
         matchRoundMapper.insert(replay);
 
+        // 后置条件:进入加赛轮后不得残留上一轮的待公布结果。
+        // 「等待公布」到「加赛轮」之间必然跨过一次 reset/改判,状态清理不能指望上游都做全——
+        // 残留的旧结果会让导播在新一轮还没判时就「公布」出上一轮的结果。
+        matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
+            .eq(TMatch::getId, match.getId())
+            .set(TMatch::getResultJson, null));
+
         log.info("场次[{}]判定平局,新增第{}轮加赛,等待再次判罚", match.getId(), replay.getRoundSequence());
         refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "draw");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "draw");
@@ -921,7 +939,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
 
     /**
      * 排名赛 BATCH 公布模式:当全部裁判对全部选手都已打分时,自动完成赛段一次性公布结果。
-     * 判定口径:每名选手的被评裁判数 ≥ 本赛段已分配裁判数(未分配裁判时退化为至少一名裁判评过)。
+     *
+     * <p>判定口径与结算守卫共用 {@link com.dance.street.game.service.impl.flow.JudgeCompletenessChecker}:
+     * 每名选手都要被本场应到的每一名裁判打过。此前这里单独算了一遍(用赛段级裁判数),
+     * 与海选、排名结算的口径又不一样——三处口径不同,谁改一处就会分叉。</p>
      */
     private void maybeAutoPublishRankStage(TStage stage) {
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
@@ -931,53 +952,15 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
             return;
         }
-        List<Long> refereeIds = refereeStageService.getRefereeIdsByStageId(stage.getId());
-        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+        long unsettled = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stage.getId())
             .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-        if (matches.isEmpty()) {
+        if (unsettled == 0) {
             return;
         }
-        List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds)
-                .isNotNull(TMatchParticipant::getCompetitorId));
-        if (parts.isEmpty()) {
-            return;
-        }
-        // 退赛选手不参与"全部打分完成"判定,否则 BATCH 模式会因退赛者从未打分而永远不自动公布
-        List<Long> partIds = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
-        java.util.Set<Long> withdrawn = partIds.isEmpty() ? java.util.Set.of()
-            : competitorMapper.selectByIds(partIds).stream()
-                .filter(c -> OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus()))
-                .map(TCompetitor::getId)
-                .collect(java.util.stream.Collectors.toSet());
-        parts = parts.stream()
-            .filter(p -> p.getCompetitorId() == null || !withdrawn.contains(p.getCompetitorId()))
-            .toList();
-        if (parts.isEmpty()) {
-            return;
-        }
-        List<Long> roundIds = matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getMatchId, matchIds).select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        if (roundIds.isEmpty()) {
-            return;
-        }
-        // competitorId -> 已评裁判数(去重)
-        Map<Long, Set<Long>> scoredReferees = new java.util.HashMap<>();
-        roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                .in(TRoundScore::getRoundId, roundIds)
-                .isNotNull(TRoundScore::getRefereeId)
-                .isNotNull(TRoundScore::getCompetitorId))
-            .forEach(rs -> scoredReferees
-                .computeIfAbsent(rs.getCompetitorId(), k -> new java.util.HashSet<>())
-                .add(rs.getRefereeId()));
-        int required = refereeIds.isEmpty() ? 1 : refereeIds.size();
-        boolean allDone = parts.stream()
-            .allMatch(p -> scoredReferees.getOrDefault(p.getCompetitorId(), Set.of()).size() >= required);
-        if (!allDone) {
+        // 未判完就不自动公布(退赛选手不计,口径见 JudgeCompletenessChecker),
+        // 等裁判判完最后一人时再走一次这里。
+        if (!scoredMatchService.unjudgedNames(stage.getId()).isEmpty()) {
             return;
         }
         log.info("排名赛赛段[{}]全部裁判对全部选手打分完成,BATCH 模式自动公布", stage.getId());

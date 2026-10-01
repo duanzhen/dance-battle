@@ -18,11 +18,11 @@ import com.dance.street.game.engine.scoring.MatchScoreInput;
 import com.dance.street.game.engine.scoring.MatchScoreResult;
 import com.dance.street.game.engine.scoring.RankCalculator;
 import com.dance.street.game.engine.scoring.ScoringEngine;
-import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
+import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,7 +35,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -52,11 +51,11 @@ public class RankStageSettler implements StageSettler {
     private final ScoringEngine scoringEngine = new ScoringEngine();
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
-    private final TCompetitorMapper competitorMapper;
     private final TMatchRoundMapper matchRoundMapper;
     private final TRoundScoreMapper roundScoreMapper;
     private final CompetitorOutcomeWriter outcomeWriter;
     private final SettlementSupport settlementSupport;
+    private final ITScoredMatchService scoredMatchService;
 
     @Override
     public String stageMode() {
@@ -65,13 +64,15 @@ public class RankStageSettler implements StageSettler {
 
     @Override
     public StageSettleOutcome settle(TStage stage) {
-        // 「还有选手一条分都没打」属于"还没准备好",与"场次未结算"同类:
-        // 返回 pending 让导播台按提示补齐,而不是抛异常当失败处理。
-        // 必须在结算前统一扫一遍,避免像异常那样中途中断、只结算了一半场次。
-        List<String> unjudged = unjudgedRankNames(stage);
+        // 「还没判完」属于"还没准备好",与"场次未结算"同类:返回 pending 让导播台按提示补齐,
+        // 而不是抛异常当失败处理。必须在结算前统一扫一遍,避免像异常那样中途中断、只结算了一半场次。
+        //
+        // 「判完」的口径与海选一致:每名选手都要被本场应到的每一名裁判打过。此前这里退化成
+        // 「任一裁判打过即可」——3 名裁判只到 1 名时照样结算,名次按 1/3 的分数算出来。
+        List<String> unjudged = scoredMatchService.unjudgedNames(stage.getId());
         if (!unjudged.isEmpty()) {
-            return StageSettleOutcome.pending("圈内仍有 " + unjudged.size() + " 名选手未打分(未标记退赛): "
-                + String.join(", ", unjudged) + ",请先完成打分或标记退赛后再结算");
+            return StageSettleOutcome.pending("圈内仍有 " + unjudged.size() + " 名选手未打分或未打满本场裁判数"
+                + "(未标记退赛): " + String.join("、", unjudged) + ",请先完成打分或标记退赛后再结算");
         }
         settleRankStage(stage);
         long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
@@ -81,63 +82,6 @@ public class RankStageSettler implements StageSettler {
             return StageSettleOutcome.pending("赛段仍有 " + unfinished + " 场未结算,等待全部结算后才能结束");
         }
         return StageSettleOutcome.completed();
-    }
-
-    /**
-     * 尚未结算的排名赛场次里,「从未被任何裁判打分且未退赛」的选手姓名。
-     *
-     * <p>口径与 {@code settleRankMatch} 内的守卫一致:任一裁判打过即可,退赛选手不计。
-     * 返回空表示所有场次都可以结算。</p>
-     */
-    private List<String> unjudgedRankNames(TStage stage) {
-        List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stage.getId())
-                .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED)
-                .select(TMatch::getId))
-            .stream().map(TMatch::getId).toList();
-        if (matchIds.isEmpty()) {
-            return List.of();
-        }
-        List<Long> cids = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchIds)
-                .isNotNull(TMatchParticipant::getCompetitorId)
-                .select(TMatchParticipant::getCompetitorId))
-            .stream()
-            .map(TMatchParticipant::getCompetitorId)
-            .filter(Objects::nonNull)
-            .distinct()
-            .toList();
-        if (cids.isEmpty()) {
-            return List.of();
-        }
-        Map<Long, TCompetitor> compMap = settlementSupport.competitorMap(cids);
-        List<Long> active = cids.stream()
-            .filter(cid -> {
-                TCompetitor c = compMap.get(cid);
-                return c == null || !OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus());
-            })
-            .toList();
-        if (active.isEmpty()) {
-            return List.of();
-        }
-        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                .in(TMatchRound::getMatchId, matchIds)
-                .select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        Set<Long> judged = roundIds.isEmpty() ? Set.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds)
-                    .select(TRoundScore::getCompetitorId))
-                .stream()
-                .map(TRoundScore::getCompetitorId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        return active.stream()
-            .filter(cid -> !judged.contains(cid))
-            .map(compMap::get)
-            .filter(Objects::nonNull)
-            .map(TCompetitor::getName)
-            .toList();
     }
 
     private void settleRankStage(TStage stage) {

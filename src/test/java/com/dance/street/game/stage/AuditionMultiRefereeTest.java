@@ -236,6 +236,52 @@ class AuditionMultiRefereeTest {
         assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(stage.getId()).getStatus());
     }
 
+    /**
+     * 结算只认打分明细({@code t_round_score}),不认回显用的答辩化聚合列。
+     *
+     * <p>{@code t_match_participant.score_value} 由「提交打分」顺带刷新,是给裁判端/大屏
+     * 实时回显用的;两名裁判在不同实例上并发提交时,后写的那个事务可能只看到自己那一半的
+     * 明细,于是把「只含部分裁判」的和写进该列。后续提交会自愈,但若此后没人再提交,
+     * 结算一旦读这一列就会静默判错晋级。这里直接把它改成与明细<b>相反</b>的结果,
+     * 验证赛段仍按明细决出晋级者。</p>
+     */
+    @Test
+    void settlementRanksByScoreDetailNotByStaleAggregateColumn() {
+        Long tid = newTournament("结算只认明细");
+        TReferee refereeA = newReferee(tid, "裁判A");
+        TStageVo stage = newAuditionStage(tid, "海选", 1, new long[]{1}, null);
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        TMatch circle = circlesOf(stage.getId()).get(0);
+        bindRefereeToCircle(circle.getId(), refereeA.getId(), tid);
+        putPlayers(tid, stage, circle.getId(), 2);
+        lifecycleService.startStage(stage.getId());
+
+        // 明细是 9 : 3,按明细应由选手1晋级
+        scoreAll(circle.getId(), refereeA.getId(), List.of(bd("9"), bd("3")));
+        List<TMatchParticipant> parts = participantsOf(circle.getId());
+        Long first = parts.get(0).getCompetitorId();
+        Long second = parts.get(1).getCompetitorId();
+
+        // 模拟"并发提交只累加了部分裁判"的残留:聚合列改成与明细相反的结论
+        TMatchParticipant staleFirst = new TMatchParticipant();
+        staleFirst.setId(parts.get(0).getId());
+        staleFirst.setScoreValue(bd("0"));
+        participantMapper.updateById(staleFirst);
+        TMatchParticipant staleSecond = new TMatchParticipant();
+        staleSecond.setId(parts.get(1).getId());
+        staleSecond.setScoreValue(bd("99"));
+        participantMapper.updateById(staleSecond);
+
+        assertTrue(lifecycleService.completeStage(stage.getId()).getCompleted(),
+            "本场裁判判完后应能结算");
+        assertEquals(OutcomeStatusEnum.ADVANCE.getCode(),
+            competitorMapper.selectById(first).getOutcomeStatus(),
+            "应按打分明细由选手1晋级");
+        assertEquals(OutcomeStatusEnum.ELIMINATED.getCode(),
+            competitorMapper.selectById(second).getOutcomeStatus(),
+            "答辩化聚合列的残留不应影响晋级裁决");
+    }
+
     // ===== 造数据 =====
 
     private BigDecimal bd(String v) {

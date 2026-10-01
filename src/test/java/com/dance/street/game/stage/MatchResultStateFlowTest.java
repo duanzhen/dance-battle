@@ -10,6 +10,7 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.StageRefereeBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
+import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -449,5 +450,126 @@ class MatchResultStateFlowTest {
         assertThrows(ServiceException.class,
             () -> matchResultService.resetMatch(semis.get(0).getId()),
             "赛段已结束不可重启场次");
+    }
+
+    /**
+     * 擂台赛配 MANUAL:裁判判完只暂存,等导播确认公布后才结算场次。
+     *
+     * <p>公布模式的守卫此前只覆盖淘汰赛(DIRECTOR 那条同时覆盖了擂台,MANUAL 那条没有),
+     * 擂台赛选了「手动公布」也会在裁判提交当刻立即结算,配置形同虚设。</p>
+     */
+    @Test
+    void arenaManualPublishModeWaitsForDirector() {
+        Long tid = newTournament("擂台手动公布");
+        TStageBo bo = new TStageBo();
+        bo.setTournamentId(tid);
+        bo.setName("擂台赛");
+        bo.setStageMode("ARENA");
+        bo.setStatus(StageConstants.STAGE_DRAFT);
+        bo.setTeamCountStart(4L);
+        bo.setTeamCountEnd(1L);
+        bo.setIsInitialized(0L);
+        bo.setRuleConfig("{\"mode\":\"ARENA\",\"publishMode\":\"MANUAL\","
+            + "\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+        TStageVo stage = stageService.insertByBo(bo);
+        for (int i = 1; i <= 4; i++) {
+            insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
+        }
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        // 擂台开赛自动创建并开始第一场对决
+        lifecycleService.startStage(stage.getId());
+        TMatch battle = matchesOf(stage.getId()).get(0);
+        assertEquals(StageConstants.MATCH_GAMING, battle.getStatus());
+
+        vote(battle.getId(), judge, true);
+        TMatch afterVote = matchMapper.selectById(battle.getId());
+        assertEquals(StageConstants.MATCH_GAMING, afterVote.getStatus(),
+            "MANUAL 模式下裁判判完不应立即结算擂台场次");
+        assertNotNull(afterVote.getResultJson(), "应暂存待公布结果");
+
+        matchResultService.publishResult(battle.getId());
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(battle.getId()).getStatus(),
+            "导播公布后场次才结算");
+    }
+
+    /**
+     * 进入加赛轮时不得残留上一轮的待公布结果。
+     *
+     * <p>从「等待公布」走到加赛轮,至少要跨过一次 reset/改判,<b>清理待公布结果这件事
+     * 必须由加赛轮自己兜住</b>——否则新加赛轮还没判,导播一点「公布」就会拿旧结果结算,
+     * 又叠一轮加赛。这里直接把残留状态构造出来,验证加赛轮的后置条件。</p>
+     */
+    @Test
+    void drawReplayRoundClearsStalePendingResult() {
+        Long tid = newTournament("平局加赛清暂存");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, "MANUAL");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+        assertEquals(1, roundCount(match.getId()), "淘汰赛一个场次初始一轮");
+
+        // 构造"上一轮残留了待公布结果"的状态,再判平触发加赛轮
+        TMatch stale = new TMatch();
+        stale.setId(match.getId());
+        stale.setResultJson("{\"1\":\"WIN\"}");
+        matchMapper.updateById(stale);
+
+        voteDraw(match.getId(), judge);
+
+        TMatch after = matchMapper.selectById(match.getId());
+        assertEquals(StageConstants.MATCH_GAMING, after.getStatus(), "平局后场次保持进行中等待加赛");
+        assertEquals(2, roundCount(match.getId()), "判平应开下一轮加赛");
+        assertNull(after.getResultJson(), "加赛轮不得残留上一轮的待公布结果,否则可被重复公布");
+    }
+
+    /**
+     * 判定制场次重复提交同一份打分不应撞 {@code uk_round_score} 唯一键。
+     *
+     * <p>非逐选手的打分明细此前只 insert 不先删;唯一键是
+     * {@code (round_id, referee_id, competitor_id, dimension)},同一裁判改分第二次提交会直接报错。</p>
+     */
+    @Test
+    void resubmittingScoresDoesNotViolateUniqueKey() {
+        Long tid = newTournament("重复提交打分");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null);
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long j1 = assignReferee(tid, stage.getId(), "裁判1");
+        addReferee(tid, stage.getId(), "裁判2", j1);
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        // 两位裁判只到一位:提交只记票,场次保持进行中,借这个窗口验证重复提交
+        List<TMatchParticipant> parts = realParticipants(match.getId());
+        SubmitResultBo bo = new SubmitResultBo();
+        bo.setMatchId(match.getId());
+        bo.setRefereeId(j1);
+        Map<Long, String> outcomes = new HashMap<>();
+        outcomes.put(parts.get(0).getCompetitorId(), "WIN");
+        outcomes.put(parts.get(1).getCompetitorId(), "LOSS");
+        bo.setOutcomes(outcomes);
+        ScoreEntryBo score = new ScoreEntryBo();
+        score.setCompetitorId(parts.get(0).getCompetitorId());
+        // 用非 MAIN 维度:投票行固定写 MAIN,同维度下 SCORE 与 VOTE 会撞唯一键
+        // (uk 不含 action),那是另一件事,这里只验证"同一裁判改分重复提交"。
+        score.setDimension("TECH");
+        score.setScore(java.math.BigDecimal.valueOf(10));
+        bo.setScores(List.of(score));
+
+        matchResultService.submitResult(bo);
+        long rowsAfterFirst = scoreRows(match.getId());
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus());
+
+        // 同一裁判同一轮同一维度再提交一次:先删后写,不应抛唯一键异常,也不应多出一行
+        matchResultService.submitResult(bo);
+        assertEquals(rowsAfterFirst, scoreRows(match.getId()),
+            "重复提交应覆盖而不是新增明细行");
     }
 }

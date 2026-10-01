@@ -24,6 +24,7 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.JudgeCompletenessChecker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -38,11 +39,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * 海选赛结算:取赛场所有参赛方的当前总分(多裁判累计提交后写在 participant.scoreValue),
- * 按分数降序排名,前 advanceCount 名标 ADVANCE,其余标 ELIMINATED。
+ * 海选赛结算:按打分明细({@code t_round_score})现算每名参赛方的总分,按分数降序排名,
+ * 前 advanceCount 名标 ADVANCE,其余标 ELIMINATED。
+ *
+ * <p><b>结算只认明细,不读 {@code t_match_participant.score_value}。</b>那一列由「提交打分」
+ * 顺带刷新,是给裁判端/大屏实时回显用的答辩化聚合,并发提交时可能落后于明细;
+ * 拿它裁决晋级会静默判错(详见 {@link #sumScoresFromDetail})。</p>
  *
  * <p>晋级线上同分时创建加赛场次(二海/三海…),此时赛段保持进行中;加赛打分期间<b>不结算</b>,
  * 由导播台/管理端点「完成赛段」触发({@link #settle})——与正式圈同一个入口,裁判判完最后一人
@@ -70,6 +74,8 @@ public class AuditionStageSettler implements StageSettler {
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final SettlementSupport settlementSupport;
+    /** 「判完了吗」的唯一口径(与排名赛/小组赛/淘汰赛上分共用,口径只保留这一份) */
+    private final JudgeCompletenessChecker judgeCompletenessChecker;
 
     @Override
     public String stageMode() {
@@ -187,7 +193,7 @@ public class AuditionStageSettler implements StageSettler {
         if (stage == null || stage.getId() == null) {
             return null;
         }
-        List<String> unjudged = findUnjudgedNames(pending);
+        List<String> unjudged = judgeCompletenessChecker.unjudgedNames(pending);
         if (unjudged.isEmpty()) {
             return null;
         }
@@ -195,91 +201,6 @@ public class AuditionStageSettler implements StageSettler {
         String names = String.join("、", unjudged.subList(0, shown)) + (unjudged.size() > shown ? " 等" : "");
         return "海选还有 " + unjudged.size() + " 位选手未判完(" + names + "),本场裁判需逐人打完分才能结束赛段;"
             + "确实不上场的选手请标记退赛,或由裁判打 0 分(0 分不参与晋级)";
-    }
-
-    /**
-     * 找出尚未判完的选手姓名。
-     *
-     * <p>口径:只看尚未结算的场次——正式圈与二海/加赛都算。一名选手「判完」=
-     * 给他的打分的不同裁判数 ≥ 本场(本圈)绑定的裁判数(未绑定裁判时退化为「至少一名裁判评过」,
-     * 与排名赛 BATCH 公布口径一致)。多圈海选各圈裁判不同,所以这个要求按场次单独算,
-     * 不能拿全赛段的裁判集合来比——否则某圈的选手永远等不到别圈的裁判。</p>
-     *
-     * <p>0 分与「没打分」是两件事:裁判打了 0 分会在 {@code t_round_score} 留下记录,
-     * 算已判;已标记退赛(WITHDRAWN)的选手不参与判罚,不算未判。返回空表示所有人都已判完。</p>
-     */
-    private List<String> findUnjudgedNames(List<TMatch> pending) {
-        if (pending.isEmpty()) {
-            return List.of();
-        }
-        List<Long> pendingIds = pending.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
-        if (pendingIds.isEmpty()) {
-            return List.of();
-        }
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, pendingIds)
-                .isNotNull(TMatchParticipant::getCompetitorId));
-        if (parts.isEmpty()) {
-            return List.of();
-        }
-        List<Long> compIds = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
-        Map<Long, TCompetitor> compMap = settlementSupport.competitorMap(compIds);
-        // 轮次先映射回场次:打分明细要按「场次 + 选手」归属,不能把同圈其他场次的分混进来
-        Map<Long, Long> roundToMatch = new HashMap<>();
-        matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery()
-                    .in(TMatchRound::getMatchId, pendingIds)
-                    .select(TMatchRound::getId, TMatchRound::getMatchId))
-            .forEach(r -> roundToMatch.put(r.getId(), r.getMatchId()));
-        // (场次,选手) -> 已给出分数的裁判集合
-        Map<String, Set<Long>> scoredReferees = new HashMap<>();
-        if (!roundToMatch.isEmpty()) {
-            roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundToMatch.keySet())
-                    .select(TRoundScore::getRoundId, TRoundScore::getCompetitorId, TRoundScore::getRefereeId))
-                .forEach(rs -> {
-                    Long mid = rs.getRoundId() == null ? null : roundToMatch.get(rs.getRoundId());
-                    if (mid == null || rs.getCompetitorId() == null) {
-                        return;
-                    }
-                    scoredReferees.computeIfAbsent(scoredKey(mid, rs.getCompetitorId()), k -> new HashSet<>())
-                        .add(rs.getRefereeId());
-                });
-        }
-        Map<Long, List<TMatchParticipant>> partsByMatch = parts.stream()
-            .filter(p -> p.getMatchId() != null)
-            .collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
-        List<String> unjudged = new ArrayList<>();
-        for (TMatch match : pending) {
-            int required = requiredRefereeCount(match);
-            for (TMatchParticipant p : partsByMatch.getOrDefault(match.getId(), List.of())) {
-                Long cid = p.getCompetitorId();
-                if (cid == null) {
-                    continue;
-                }
-                int scored = scoredReferees.getOrDefault(scoredKey(match.getId(), cid), Set.of()).size();
-                if (scored >= required) {
-                    continue;
-                }
-                TCompetitor c = compMap.get(cid);
-                // 已标记退赛(WITHDRAWN)的选手不参与判罚,不算未判罚
-                if (c != null && OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
-                    continue;
-                }
-                String name = c != null && c.getName() != null ? c.getName() : ("选手" + cid);
-                if (!unjudged.contains(name)) {
-                    unjudged.add(name);
-                }
-            }
-        }
-        return unjudged;
-    }
-
-    /** (场次, 选手) → 打分明细归属键 */
-    private String scoredKey(Long matchId, Long competitorId) {
-        return matchId + ":" + competitorId;
     }
 
     /** 整段结算:逐场结算尚未结算的海选场(圈名额/排名起点统一口径) */
@@ -343,6 +264,44 @@ public class AuditionStageSettler implements StageSettler {
         return result;
     }
 
+    /**
+     * 本场每名参赛方的累计分:从打分明细({@code t_round_score})现算,按参赛方求和。
+     *
+     * <p><b>结算只认这份现算结果,不读 {@code t_match_participant.score_value}。</b>
+     * 那一列是给裁判端/大屏实时回显用的答辩化聚合,由「提交打分」写路径顺带刷新;
+     * 两名裁判在不同实例上并发提交时,后写的那个事务可能只看到自己那一半的明细,
+     * 于是把「只含部分裁判」的和写进该列——后续提交会自愈,但若正好没人再提交,
+     * 拿它做晋级裁决就会静默判错。结算时以明细为准,这条风险从"静默错晋级"降级为
+     * "回显短暂滞后",不再影响谁晋级。</p>
+     *
+     * <p>海选是「逐选手一个轮次」,同一名选手的分可能分散在多个轮次里,因此按本场
+     * 全部轮次跨轮汇总;口径与实时回显的 {@code accumulateAuditionScores} 一致(明细求和)。</p>
+     */
+    private Map<Long, BigDecimal> sumScoresFromDetail(TMatch match) {
+        Map<Long, BigDecimal> totals = new HashMap<>();
+        if (match == null || match.getId() == null) {
+            return totals;
+        }
+        List<Long> roundIds = matchRoundMapper.selectList(
+                Wrappers.<TMatchRound>lambdaQuery()
+                    .eq(TMatchRound::getMatchId, match.getId())
+                    .select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        if (roundIds.isEmpty()) {
+            return totals;
+        }
+        roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                .in(TRoundScore::getRoundId, roundIds)
+                .select(TRoundScore::getCompetitorId, TRoundScore::getScore))
+            .forEach(rs -> {
+                if (rs.getCompetitorId() == null || rs.getScore() == null) {
+                    return;
+                }
+                totals.merge(rs.getCompetitorId(), rs.getScore(), BigDecimal::add);
+            });
+        return totals;
+    }
+
     /** 结算单个海选场次(正式圈或加赛):定晋级/淘汰、必要时创建下一级加赛 */
     private void settleAuditionMatch(TMatch match, int advanceQuota,
                                      int zoneBase,
@@ -375,10 +334,13 @@ public class AuditionStageSettler implements StageSettler {
         int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
         int remaining = Math.max(0, advanceQuota - alreadyAdvanced);
 
+        // 分数一律从打分明细现算,不读 participant.score_value(见 sumScoresFromDetail):
+        // 拿答辩化的聚合列裁决晋级,一旦那个列落后就会静默判错。
+        Map<Long, BigDecimal> detailTotals = sumScoresFromDetail(match);
         Map<Long, BigDecimal> scores = new HashMap<>();
         for (TMatchParticipant p : active) {
             if (p.getCompetitorId() != null) {
-                scores.put(p.getCompetitorId(), p.getScoreValue() != null ? p.getScoreValue() : BigDecimal.ZERO);
+                scores.put(p.getCompetitorId(), detailTotals.getOrDefault(p.getCompetitorId(), BigDecimal.ZERO));
             }
         }
         List<Long> sortedCids = new ArrayList<>(scores.keySet());
@@ -584,9 +546,12 @@ public class AuditionStageSettler implements StageSettler {
             return;
         }
         // 原场竞争性排名(同分并列),用于确定同分小组的基准名次
+        Map<Long, BigDecimal> detailTotals = sumScoresFromDetail(original);
         Map<Long, BigDecimal> scores = new HashMap<>();
         for (TMatchParticipant p : parts) {
-            scores.put(p.getCompetitorId(), p.getScoreValue() != null ? p.getScoreValue() : BigDecimal.ZERO);
+            if (p.getCompetitorId() != null) {
+                scores.put(p.getCompetitorId(), detailTotals.getOrDefault(p.getCompetitorId(), BigDecimal.ZERO));
+            }
         }
         Map<Long, Integer> compRanks = RankCalculator.rank(scores);
         // 同分小组 = 整条加赛链根场次(二海)的参与方,含在上一级就已直接晋级的成员
@@ -741,18 +706,6 @@ public class AuditionStageSettler implements StageSettler {
             }
         }
         return refereeIds;
-    }
-
-    /**
-     * 本场每名选手应被打分的裁判数:绑了几名裁判就要几名裁判各打一次。
-     *
-     * <p>多圈海选各圈裁判不同,所以按场次单独算(不是全赛段的裁判数);
-     * 未配置圈级裁判(单圈历史数据/管理端代打)时退化为 1,即「至少一名裁判评过」,
-     * 与排名赛 BATCH 公布口径一致,不会把这类数据卡死。</p>
-     */
-    private int requiredRefereeCount(TMatch match) {
-        Set<Long> ids = resolvedRefereeIds(match);
-        return ids.isEmpty() ? 1 : ids.size();
     }
 
     /**

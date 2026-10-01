@@ -57,6 +57,14 @@ public class GroupStageSettler implements StageSettler {
 
     @Override
     public StageSettleOutcome settle(TStage stage) {
+        // 「裁判没到齐」与"场次未结算"同类:返回 pending 让导播台按提示补齐,
+        // 而不是用只有一半裁判到场的分数算出组内积分。只覆盖累计打分类(VOTING/RANKING)场次,
+        // 判定制(STANDARD)场次已在提交时定胜负。
+        List<String> unjudged = scoredMatchService.unjudgedNames(stage.getId());
+        if (!unjudged.isEmpty()) {
+            return StageSettleOutcome.pending("小组赛仍有 " + unjudged.size() + " 名选手未打分或未打满本场裁判数"
+                + "(未标记退赛): " + String.join("、", unjudged) + ",请先完成打分或标记退赛后再结算");
+        }
         scoredMatchService.settleScoredMatches(stage.getId());
         long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stage.getId())

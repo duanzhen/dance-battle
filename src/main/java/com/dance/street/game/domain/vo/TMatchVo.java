@@ -96,6 +96,9 @@ public class TMatchVo implements Serializable {
      */
     private Long leftCompetitorId;
 
+    /** 槽位0(左侧)座位类型:PLAYER/BYE(轮空)/PENDING(待定),列表文案用 */
+    private String leftSlotKind;
+
     /**
      * 槽位1(右侧)参赛方名称,列表展示用;无参赛方(轮空)时为 null
      */
@@ -105,6 +108,9 @@ public class TMatchVo implements Serializable {
      * 槽位1(右侧)参赛方ID
      */
     private Long rightCompetitorId;
+
+    /** 槽位1(右侧)座位类型:PLAYER/BYE(轮空)/PENDING(待定),列表文案用 */
+    private String rightSlotKind;
 
     /**
      * 槽位0(左侧)参赛方是否本场胜者

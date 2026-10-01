@@ -150,6 +150,7 @@ public class TMatchServiceImpl implements ITMatchService {
                 Long cid = left.getCompetitorId();
                 vo.setLeftName(cid == null ? null : nameById.get(cid));
                 vo.setLeftCompetitorId(cid);
+                vo.setLeftSlotKind(left.getSlotKind());
                 boolean leftWin = isWinner(left);
                 vo.setLeftWin(leftWin);
                 if (leftWin) {
@@ -160,6 +161,7 @@ public class TMatchServiceImpl implements ITMatchService {
                 Long cid = right.getCompetitorId();
                 vo.setRightName(cid == null ? null : nameById.get(cid));
                 vo.setRightCompetitorId(cid);
+                vo.setRightSlotKind(right.getSlotKind());
                 boolean rightWin = isWinner(right);
                 vo.setRightWin(rightWin);
                 if (rightWin) {

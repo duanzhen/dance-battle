@@ -85,6 +85,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private final MatchStateWriter matchStateWriter;
     /** 淘汰链下游路由的唯一入口(胜者/败者去向) */
     private final DownstreamRouter downstreamRouter;
+    /** 场次结果变化后刷新下游中间层名单(实时看到谁晋级了) */
+    private final com.dance.street.game.service.ITStageRosterService rosterService;
     /** 当前生效轮的唯一口径(多轮场次取最新一轮) */
     private final MatchRoundLocator matchRoundLocator;
     /** 参赛方成绩批量写入口(整场一条 SQL) */
@@ -357,6 +359,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 淘汰特有:填下游占位 / 标决赛胜者晋级下一赛段
         if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
             resolveKnockoutDownstream(match, results);
+            // 本场胜者若已被判为「晋级下一赛段」(名次也写回了),立刻落进下一赛段中间态的对应座位:
+            // 现场就是"判完一场,下一个赛段中间态立刻多一个人",而不是等整个赛段结算才出名单。
+            // 只同步"本场参赛方",写入范围就是本场对应那一行;不整表重建,人工调整不会被冲掉。
+            rosterService.syncPreAdvance(stage.getId(), competitorIds);
         }
 
         // 场次与全部轮次(含平局加赛轮)一并结算
@@ -408,8 +414,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             stageLifecycleService.ensureStageGaming(stage.getId());
             boolean settled = stageLifecycleService.settleByeMatch(matchId);
             if (!settled) {
-                // 0 参赛方的非首轮场次是等待上游胜者填入的占位,不能按轮空结算
-                throw new ServiceException("该场次暂无参赛方,请先完成上一轮场次后再开始");
+                // 座位还是"待定"(本赛段上一轮 / 上一赛段的胜者还没产生):不能按轮空结算
+                throw new ServiceException("该场次还有座位待定(上一轮或上一赛段还没打完),等参赛方到齐后再开始");
             }
             return;
         }
@@ -527,6 +533,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
         }
         clearMatchState(match, StageConstants.MATCH_GAMING);
+        // 本场参赛方的赛段结果已回退待定:之前按旧结果落进下一赛段中间态的座位还原成空位。
+        // 同样只同步"本场参赛方"——重判只改对应那一行。
+        List<Long> affected = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, matchId))
+            .stream().map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
+        rosterService.syncPreAdvance(match.getStageId(), affected);
         refereeSseNotifier.notifyMatch(match.getStageId(), matchId, "reset");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), matchId, "reset");
         log.info("场次[{}]结果已 reset", matchId);

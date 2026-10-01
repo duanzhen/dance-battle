@@ -29,11 +29,7 @@
           <span class="text-[10px] text-neutral-600">来源在「赛段配置 · 出口去向」中维护</span>
         </div>
         <div v-if="rosters.length === 0" class="text-[10px] text-neutral-600">暂无名单来源,刷新后仍为空请检查赛段创建</div>
-        <div
-          v-for="p in rosters"
-          :key="String(p.id)"
-          class="rounded bg-neutral-900/70 border border-neutral-800 px-2 py-1 text-[11px] space-y-1"
-        >
+        <div v-for="p in rosters" :key="String(p.id)" class="rounded bg-neutral-900/70 border border-neutral-800 px-2 py-1 text-[11px] space-y-1">
           <div class="flex items-center gap-2">
             <span class="text-neutral-500 font-mono">名单</span>
             <span class="ml-auto px-1.5 py-0.5 rounded text-[9px]" :class="rosterStateClass(p.state)">
@@ -86,14 +82,10 @@
       <!-- 本赛段名单:拖动排序、× 移出,加人走「＋ 加人」弹窗 -->
       <div v-if="rosters.length > 0" class="rounded-lg border border-neutral-800 bg-black/40 p-3 space-y-2">
         <div class="flex items-center justify-between">
-          <span class="text-[12px] font-bold text-neutral-500 uppercase tracking-wider">
-            本赛段名单 · {{ listItems.length }} 人
-          </span>
+          <span class="text-[12px] font-bold text-neutral-500 uppercase tracking-wider"> 本赛段名单 · {{ listItems.length }} 人 </span>
           <div class="flex items-center gap-2">
-            <span v-if="overridePreview?.capacity" class="text-[11px] text-neutral-600">
-              计划 {{ overridePreview.capacity }} 人
-            </span>
-            <template v-if="targetMode === 'KNOCKOUT' && isSeedKnockoutTransition && !rosterSealed && !targetLocked">
+            <span v-if="overridePreview?.capacity" class="text-[11px] text-neutral-600"> 计划 {{ overridePreview.capacity }} 人 </span>
+            <template v-if="targetMode === 'KNOCKOUT' && isSeedKnockoutTransition && !rosterReadonly">
               <button
                 @click="clearRosterOrder"
                 class="px-2 py-1 text-[12px] rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors flex items-center gap-1"
@@ -103,7 +95,7 @@
               </button>
             </template>
             <button
-              v-if="!rosterSealed && !targetLocked && targetMode !== 'AUDITION'"
+              v-if="!rosterReadonly && targetMode !== 'AUDITION'"
               @click="openAddDialog"
               class="px-2 py-1 text-[12px] rounded border border-amber-500/30 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 transition-colors"
             >
@@ -115,31 +107,30 @@
         <div class="px-1 text-[11px]">
           <span v-if="overridePreview?.applied" class="text-green-500">名单已确认</span>
           <span v-else-if="overridePreview?.skipped" class="text-neutral-500">已跳过(本赛段不带人)</span>
-          <span v-else-if="overridePreview?.ready === false" class="text-orange-400">
-            来源赛段还没结束,以下是预期名单
-          </span>
+          <span v-else-if="overridePreview?.ready === false" class="text-orange-400"> 来源赛段还没结束,以下是预期名单 </span>
           <span v-else class="text-neutral-500">
             {{
               targetMode === 'KNOCKOUT'
                 ? '拖动选手:放到别人身上是交换,放到空位是搬过去(原位留空);× 移出;加人点右上角「＋ 加人」'
                 : targetMode === 'ARENA'
                   ? '拖动可调整出场顺序(1 号位为擂主);× 移出;加人点右上角「＋ 加人」'
-                : targetMode === 'FREE_MATCH'
-                  ? '自由对抗只要名单:不排序,点右上角「＋ 加人」补充,× 移出'
-                : '拖动可调整顺序,× 移出;加人点右上角「＋ 加人」'
+                  : targetMode === 'FREE_MATCH'
+                    ? '自由对抗只要名单:不排序,点右上角「＋ 加人」补充,× 移出'
+                    : '拖动可调整顺序,× 移出;加人点右上角「＋ 加人」'
             }}
           </span>
         </div>
-        <p v-for="(w, wi) in overridePreview?.warnings || []" :key="'w' + wi" class="text-orange-400/90 px-1">
-          ⚠ {{ w }}
-        </p>
+        <p v-for="(w, wi) in overridePreview?.warnings || []" :key="'w' + wi" class="text-orange-400/90 px-1">⚠ {{ w }}</p>
 
-        <!-- 名单已确认/已跳过/赛段已开始:只能看不能改 -->
-        <div
-          v-if="rosterSealed || targetLocked"
-          class="px-2 py-1.5 rounded bg-neutral-900/50 border border-neutral-800 text-[11px] text-neutral-500"
-        >
-          {{ targetLocked ? '赛段已开始,名单已锁定,只能查看;如需调整请先重置赛段。' : '名单已定,如需调整请先在下方「重置赛段」。' }}
+        <!-- 已确认/已跳过/赛段已开始/上一赛段还没结束:只能看不能改 -->
+        <div v-if="rosterReadonly" class="px-2 py-1.5 rounded bg-neutral-900/50 border border-neutral-800 text-[11px] text-neutral-500">
+          {{
+            rosterWaitingSource
+              ? '上一赛段还没结束:名单只读,已晋级的选手会实时出现,等来源赛段结算后再调整。'
+              : targetLocked
+                ? '赛段已开始,名单已锁定,只能查看;如需调整请先重置赛段。'
+                : '名单已定,如需调整请先在下方「重置赛段」。'
+          }}
         </div>
 
         <!-- 淘汰赛:左半区/右半区对战树(名单即对阵框架,空位照常占位) -->
@@ -148,11 +139,7 @@
             <div class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider text-center pb-1 border-b border-neutral-800">
               {{ zone.label }}
             </div>
-            <div
-              v-for="p in bracketPairsOf(zone.key)"
-              :key="zone.key + p.position"
-              class="rounded-lg bg-black border border-neutral-800 p-2"
-            >
+            <div v-for="p in bracketPairsOf(zone.key)" :key="zone.key + p.position" class="rounded-lg bg-black border border-neutral-800 p-2">
               <div class="space-y-1.5">
                 <template v-for="side in BRACKET_SIDES" :key="side">
                   <div
@@ -175,13 +162,11 @@
                       {{ slotSeedAt(p, side) }}
                     </span>
                     <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p[side].name || '未命名' }}</span>
-                    <span
-                      v-if="entryTagLabel(p[side].entryTag)"
-                      class="text-[10px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-400 flex-none"
-                      >{{ entryTagLabel(p[side].entryTag) }}</span
-                    >
+                    <span v-if="entryTagLabel(p[side].entryTag)" class="text-[10px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-400 flex-none">{{
+                      entryTagLabel(p[side].entryTag)
+                    }}</span>
                     <button
-                      v-if="!rosterSealed && !targetLocked"
+                      v-if="!rosterReadonly"
                       @click.stop="askRemoveItem(p[side])"
                       class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 transition-colors flex items-center justify-center flex-none"
                       title="移出名单"
@@ -192,11 +177,7 @@
                   <div
                     v-else
                     class="flex items-center gap-2 px-2 h-9 rounded bg-neutral-900/30 border border-dashed transition-colors"
-                    :class="[
-                      bracketDropKey === slotKeyOf(p, side)
-                        ? 'border-amber-500 ring-1 ring-amber-500/50'
-                        : 'border-neutral-800'
-                    ]"
+                    :class="[bracketDropKey === slotKeyOf(p, side) ? 'border-amber-500 ring-1 ring-amber-500/50' : 'border-neutral-800']"
                     @dragover.prevent="onBracketSlotDragOver(p, side)"
                     @dragleave="onBracketSlotDragLeave(p, side)"
                     @drop.stop.prevent="onBracketSlotDrop(p, side)"
@@ -204,9 +185,7 @@
                     <!-- 结构对齐有人时的格子,保证两种状态高度一致 -->
                     <span
                       class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold flex-none"
-                      :class="bracketDropKey === slotKeyOf(p, side)
-                        ? 'bg-amber-500/20 text-amber-400'
-                        : 'bg-neutral-800 text-neutral-500'"
+                      :class="bracketDropKey === slotKeyOf(p, side) ? 'bg-amber-500/20 text-amber-400' : 'bg-neutral-800 text-neutral-500'"
                     >
                       {{ slotSeedAt(p, side) }}
                     </span>
@@ -214,7 +193,7 @@
                       class="flex-1 min-w-0 text-sm truncate"
                       :class="bracketDropKey === slotKeyOf(p, side) ? 'text-amber-400' : 'text-neutral-600'"
                     >
-                      空位
+                      {{ rosterWaitingSource ? '待定' : '轮空' }}
                     </span>
                     <span class="w-6 h-6 flex-none"></span>
                   </div>
@@ -222,10 +201,7 @@
                 </template>
               </div>
             </div>
-            <div
-              v-if="bracketPairsOf(zone.key).length === 0"
-              class="text-[11px] text-neutral-600 text-center py-4"
-            >
+            <div v-if="bracketPairsOf(zone.key).length === 0" class="text-[11px] text-neutral-600 text-center py-4">
               赛段还没有设置参赛人数,无法预览对阵框架
             </div>
           </div>
@@ -233,45 +209,41 @@
 
         <!-- 其他赛段模式:上下拖动即排序,× 移出;加人走右上角弹窗 -->
         <div v-else class="space-y-2">
-        <div
-          v-if="targetMode !== 'ARENA' && targetMode !== 'FREE_MATCH'"
-          class="rounded bg-neutral-900/70 border border-neutral-800 overflow-y-auto custom-scrollbar max-h-96 p-1 pt-1 space-y-0.5"
-        >
-          <div v-if="listItems.length === 0 && emptySlots.length === 0" class="text-[11px] text-neutral-600 text-center py-6">
-            还没有人进来;点右上角「＋ 加人」添加
-          </div>
           <div
-            v-for="(it, idx) in listItems"
-            :key="'r' + idx"
-            draggable="true"
-            @dragstart="onDragStartItem(idx)"
-            @dragend="onDragEnd"
-            @dragover.prevent="hoverIndex = idx"
-            @drop.stop.prevent="onDropToRoster(idx)"
-            class="flex items-center gap-2 px-1.5 h-7 rounded cursor-grab text-[12px]"
-            :class="dragIndex !== null && hoverIndex === idx ? 'bg-amber-500/10 border-t border-amber-500/50' : 'hover:bg-neutral-800/60'"
+            v-if="targetMode !== 'ARENA' && targetMode !== 'FREE_MATCH'"
+            class="rounded bg-neutral-900/70 border border-neutral-800 overflow-y-auto custom-scrollbar max-h-96 p-1 pt-1 space-y-0.5"
           >
-            <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank ?? idx + 1 }}</span>
-            <span class="flex-1 min-w-0 truncate text-neutral-300">{{ it.name || '未命名' }}</span>
-            <span class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(it.entryTag) }}</span>
-            <button
-              v-if="!rosterSealed && !targetLocked"
-              @click.stop="askRemoveItem(it)"
-              class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
+            <div v-if="listItems.length === 0 && emptySlots.length === 0" class="text-[11px] text-neutral-600 text-center py-6">
+              还没有人进来;点右上角「＋ 加人」添加
+            </div>
+            <div
+              v-for="(it, idx) in listItems"
+              :key="'r' + idx"
+              draggable="true"
+              @dragstart="onDragStartItem(idx)"
+              @dragend="onDragEnd"
+              @dragover.prevent="hoverIndex = idx"
+              @drop.stop.prevent="onDropToRoster(idx)"
+              class="flex items-center gap-2 px-1.5 h-7 rounded cursor-grab text-[12px]"
+              :class="dragIndex !== null && hoverIndex === idx ? 'bg-amber-500/10 border-t border-amber-500/50' : 'hover:bg-neutral-800/60'"
             >
-              ×
-            </button>
+              <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank ?? idx + 1 }}</span>
+              <span class="flex-1 min-w-0 truncate text-neutral-300">{{ it.name || '未命名' }}</span>
+              <span class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(it.entryTag) }}</span>
+              <button
+                v-if="!rosterReadonly"
+                @click.stop="askRemoveItem(it)"
+                class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
+              >
+                ×
+              </button>
+            </div>
+            <!-- 还没到齐时按计划人数补空位,位置和出场次序对得上 -->
+            <div v-for="n in emptySlots" :key="'slot-' + n" class="flex items-center gap-2 px-1.5 h-7 rounded text-[12px] text-neutral-700">
+              <span class="font-mono w-5 flex-none">{{ n }}</span>
+              <span class="flex-1 min-w-0">空位</span>
+            </div>
           </div>
-          <!-- 还没到齐时按计划人数补空位,位置和出场次序对得上 -->
-          <div
-            v-for="n in emptySlots"
-            :key="'slot-' + n"
-            class="flex items-center gap-2 px-1.5 h-7 rounded text-[12px] text-neutral-700"
-          >
-            <span class="font-mono w-5 flex-none">{{ n }}</span>
-            <span class="flex-1 min-w-0">空位</span>
-          </div>
-        </div>
 
           <!-- 小组赛:蛇形分组预览 -->
           <div v-if="targetMode === 'GROUP'" class="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -301,9 +273,7 @@
               class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border cursor-grab"
               :class="[
                 idx === 0 ? 'border-amber-500/40' : 'border-neutral-800',
-                arenaDragIndex !== null && arenaHoverIndex === idx
-                  ? 'border-amber-500 ring-1 ring-amber-500/50'
-                  : ''
+                arenaDragIndex !== null && arenaHoverIndex === idx ? 'border-amber-500 ring-1 ring-amber-500/50' : ''
               ]"
             >
               <span
@@ -312,11 +282,9 @@
                 >{{ idx + 1 }}</span
               >
               <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
-              <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{
-                entryTagLabel(c.entryTag)
-              }}</span>
+              <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(c.entryTag) }}</span>
               <button
-                v-if="!rosterSealed && !targetLocked"
+                v-if="!rosterReadonly"
                 @click.stop="askRemoveItem(c)"
                 class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
                 title="移出擂台赛名单"
@@ -330,12 +298,12 @@
               :key="'arena-slot-' + n"
               class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border border-dashed border-neutral-800 text-[12px] text-neutral-700"
             >
-              <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-500 flex-none">{{ n }}</span>
+              <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-500 flex-none">{{
+                n
+              }}</span>
               <span class="flex-1 min-w-0">空位</span>
             </div>
-            <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">
-              还没有人进来;点右上角「＋ 加人」添加
-            </div>
+            <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">还没有人进来;点右上角「＋ 加人」添加</div>
           </div>
 
           <!-- 自由对抗:纯名单,只加人/减人,不排顺序(对手由现场抽签/指认) -->
@@ -345,16 +313,14 @@
               <span class="text-[10px] text-neutral-600">不排序:对手由现场抽签 / 指认决定</span>
             </div>
             <div
-              v-for="(c, idx) in rosterRows"
+              v-for="c in rosterRows"
               :key="itemKeyOf(c)"
               class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border border-neutral-800"
             >
               <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
-              <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{
-                entryTagLabel(c.entryTag)
-              }}</span>
+              <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(c.entryTag) }}</span>
               <button
-                v-if="!rosterSealed && !targetLocked"
+                v-if="!rosterReadonly"
                 @click.stop="askRemoveItem(c)"
                 class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
                 title="移出名单"
@@ -362,9 +328,7 @@
                 ×
               </button>
             </div>
-            <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">
-              还没有人进来;点右上角「＋ 加人」添加
-            </div>
+            <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">还没有人进来;点右上角「＋ 加人」添加</div>
           </div>
 
           <!-- 排名赛:圈分配预览 -->
@@ -379,9 +343,7 @@
           </div>
         </div>
 
-        <p class="text-[11px] text-neutral-600 leading-relaxed">
-          这里的手工调整只影响本赛段名单,不会改动来源赛段结果;确认名单后名单锁定。
-        </p>
+        <p class="text-[11px] text-neutral-600 leading-relaxed">这里的手工调整只影响本赛段名单,不会改动来源赛段结果;确认名单后名单锁定。</p>
       </div>
 
       <!-- 加人:直接输入姓名(外卡),或从其他赛段选人;落位可选 顶上/替换 -->
@@ -398,7 +360,9 @@
             type="button"
             @click="addMode = 'name'"
             class="flex-1 py-1.5 text-[12px] rounded border transition-colors"
-            :class="addMode === 'name' ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200'"
+            :class="
+              addMode === 'name' ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200'
+            "
           >
             输入姓名
           </button>
@@ -406,7 +370,11 @@
             type="button"
             @click="switchToStageMode"
             class="flex-1 py-1.5 text-[12px] rounded border transition-colors"
-            :class="addMode === 'stage' ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200'"
+            :class="
+              addMode === 'stage'
+                ? 'border-amber-500/60 text-amber-400 bg-amber-500/10'
+                : 'border-neutral-700 text-neutral-400 hover:text-neutral-200'
+            "
           >
             从其他赛段选人
           </button>
@@ -423,20 +391,9 @@
             placeholder="选择赛段"
             @change="loadAddStagePeople"
           >
-            <el-option
-              v-for="s in addStages"
-              :key="String(s.id)"
-              :label="s.name"
-              :value="String(s.id)"
-            />
+            <el-option v-for="s in addStages" :key="String(s.id)" :label="s.name" :value="String(s.id)" />
           </el-select>
-          <el-select
-            v-model="addPersonId"
-            class="w-full add-select"
-            popper-class="add-select-popper"
-            placeholder="选择人员"
-            :disabled="!addStageId"
-          >
+          <el-select v-model="addPersonId" class="w-full add-select" popper-class="add-select-popper" placeholder="选择人员" :disabled="!addStageId">
             <el-option
               v-for="c in addStagePeople"
               :key="String(c.id)"
@@ -444,9 +401,7 @@
               :value="String(c.id)"
             />
           </el-select>
-          <div v-if="addStageId && addStagePeople.length === 0" class="text-[11px] text-neutral-600">
-            该赛段没有可加入的人员。
-          </div>
+          <div v-if="addStageId && addStagePeople.length === 0" class="text-[11px] text-neutral-600">该赛段没有可加入的人员。</div>
         </div>
 
         <!-- 落位方式 -->
@@ -473,8 +428,7 @@
           </div>
           <p class="text-[11px] text-neutral-600 leading-relaxed">
             <template v-if="addPlacement === 'INSERT'">
-              插到选中的人前面:他和他后面的人依次后移一位(插第 1 个之前 = 顶前);
-              名单已满时最后一名会被挤出去。
+              插到选中的人前面:他和他后面的人依次后移一位(插第 1 个之前 = 顶前); 名单已满时最后一名会被挤出去。
             </template>
             <template v-else>选择被替换的人(或一个空位),新人放到那个位置,其他人不动。</template>
           </p>
@@ -486,19 +440,9 @@
             placeholder="选择要替换的人或空位"
             filterable
           >
-            <el-option
-              v-for="it in listItems"
-              :key="itemKeyOf(it)"
-              :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'}`"
-              :value="itemKeyOf(it)"
-            />
+            <el-option v-for="it in listItems" :key="itemKeyOf(it)" :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'}`" :value="itemKeyOf(it)" />
             <!-- 也可以直接落到空位上(空位不占人,只是把新人放到那个位置) -->
-            <el-option
-              v-for="n in emptySlots"
-              :key="'slot-' + n"
-              :label="`#${n} 空位`"
-              :value="'slot:' + n"
-            />
+            <el-option v-for="n in emptySlots" :key="'slot-' + n" :label="`#${n} 空位`" :value="'slot:' + n" />
           </el-select>
           <el-select
             v-else-if="addPlacement === 'INSERT'"
@@ -537,13 +481,7 @@
       </GameDialog>
 
       <!-- 移出确认:顶上 or 留空位 -->
-      <GameDialog
-        v-model="removeDialogVisible"
-        width="440px"
-        title="移出名单"
-        subtitle="选择移出后其他人的位置怎么处理"
-        :icon="UserMinus"
-      >
+      <GameDialog v-model="removeDialogVisible" width="440px" title="移出名单" subtitle="选择移出后其他人的位置怎么处理" :icon="UserMinus">
         <div class="text-[13px] text-neutral-300 leading-relaxed">
           把
           <span class="text-amber-400 font-medium">{{ removeDialogItem?.name || '未命名' }}</span>
@@ -584,7 +522,10 @@
 
       <!-- 目标赛段已开始:整页锁定 -->
       <!-- 名单卡片会在锁定态显示同样的提示,这里只在没有名单卡片时兜底 -->
-      <div v-if="targetLocked && rosters.length === 0" class="flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
+      <div
+        v-if="targetLocked && rosters.length === 0"
+        class="flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm"
+      >
         <Lock class="w-4 h-4 flex-none" />
         <span>{{ targetStageName }} 已开始,中间态调整已锁定,如需调整请先重置该赛段。</span>
       </div>
@@ -654,7 +595,6 @@
           </button>
         </div>
       </div>
-
     </div>
   </div>
 </template>
@@ -777,7 +717,7 @@ const rankTextOf = (g: any): string => {
 /** ZONE-2 → 第2圈 */
 const zoneTextOf = (zone?: string | null): string => {
   const m = /^ZONE-(\d+)$/.exec(zone || '');
-  return m ? `第${m[1]}圈` : (zone || '');
+  return m ? `第${m[1]}圈` : zone || '';
 };
 
 const groupText = (g: any): string => {
@@ -843,8 +783,7 @@ const manualPicks = ref<Record<string, string[]>>({});
 const manualCandidates = ref<Record<string, any[]>>({});
 const manualLoading = ref(false);
 
-const shouldOfferManualPicker = (roster: any): boolean =>
-  roster?.state === 'READY' && groupsOfRoster(roster).some((g) => g.fillMode === 'MANUAL');
+const shouldOfferManualPicker = (roster: any): boolean => roster?.state === 'READY' && groupsOfRoster(roster).some((g) => g.fillMode === 'MANUAL');
 
 const manualCandidateRows = async (roster: any): Promise<any[]> => {
   try {
@@ -949,14 +888,23 @@ const arenaHoverIndex = ref<number | null>(null);
 /** 名单已确认/已跳过:只能看不能改 */
 const rosterSealed = computed(() => !!overridePreview.value?.applied || !!overridePreview.value?.skipped);
 
+/**
+ * 上一赛段还没结束:中间态只读。
+ *
+ * <p>此时列表里是"打到这里为止已晋级的人"(后端每判完一场就实时落座),加人/拖位没有意义 ——
+ * 后面每场都会按上游名次覆盖对应座位。等来源赛段全部结算后才放开调整。</p>
+ */
+const rosterWaitingSource = computed(() => !rosterSealed.value && overridePreview.value != null && overridePreview.value.ready === false);
+
+/** 中间态是否只读(已确认/已跳过、赛段已开赛、上一赛段还没结束) */
+const rosterReadonly = computed(() => rosterSealed.value || targetLocked.value || rosterWaitingSource.value);
+
 /** 名单还差多少人到计划规模:多出来的位置显示为空位 */
 const emptySlots = computed(() => {
   const cap = Number(overridePreview.value?.capacity || 0);
   if (cap <= 0) return [];
   // 空位 = 计划范围内没有任何人占用的种子位(删人后原来的位置保持空白)
-  const used = new Set(
-    listItems.value.map((i) => Number(i.seedRank)).filter((n) => Number.isFinite(n) && n > 0)
-  );
+  const used = new Set(listItems.value.map((i) => Number(i.seedRank)).filter((n) => Number.isFinite(n) && n > 0));
   const out: number[] = [];
   for (let n = 1; n <= cap; n++) {
     if (!used.has(n)) out.push(n);
@@ -966,9 +914,7 @@ const emptySlots = computed(() => {
 
 /** 名单按出场次序排列(落位预览与对战树共用) */
 const rosterRows = computed<any[]>(() =>
-  [...listItems.value].sort(
-    (a, b) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER)
-  )
+  [...listItems.value].sort((a, b) => (a.seedRank ?? Number.MAX_SAFE_INTEGER) - (b.seedRank ?? Number.MAX_SAFE_INTEGER))
 );
 
 const onDragStartItem = (idx: number) => {
@@ -1014,7 +960,7 @@ const removeDialogItem = ref<any>(null);
 const removeDialogSeed = computed(() => Number(removeDialogItem.value?.seedRank) || 0);
 
 const askRemoveItem = (item: any) => {
-  if (!item || rosterSealed.value || targetLocked.value) return;
+  if (!item || rosterReadonly.value) return;
   removeDialogItem.value = item;
   removeDialogVisible.value = true;
 };
@@ -1078,7 +1024,7 @@ const onDropToArena = async (idx: number) => {
   const from = arenaDragIndex.value;
   arenaDragIndex.value = null;
   arenaHoverIndex.value = null;
-  if (from == null || from === idx || rosterSealed.value || targetLocked.value) {
+  if (from == null || from === idx || rosterReadonly.value) {
     return;
   }
   const arr = [...rosterRows.value];
@@ -1103,17 +1049,14 @@ const addPlacement = ref<'INSERT' | 'REPLACE'>('INSERT');
 const addReplaceKey = ref('');
 
 /** 名单项唯一键(源选手或人工新增行) */
-const itemKeyOf = (it: any): string =>
-  it?.overrideId != null ? 'o' + it.overrideId : 'c' + (it?.sourceCompetitorId ?? '');
+const itemKeyOf = (it: any): string => (it?.overrideId != null ? 'o' + it.overrideId : 'c' + (it?.sourceCompetitorId ?? ''));
 /** 名单是否已满(满了则不能直接加到末尾) */
 const rosterFull = computed(() => {
   const cap = Number(overridePreview.value?.capacity || 0);
   return cap > 0 && listItems.value.length >= cap;
 });
 const placementBtnClass = (mode: 'INSERT' | 'REPLACE') =>
-  addPlacement.value === mode
-    ? 'border-amber-500/60 text-amber-400 bg-amber-500/10'
-    : 'border-neutral-700 text-neutral-400 hover:text-neutral-200';
+  addPlacement.value === mode ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200';
 
 const openAddDialog = () => {
   addMode.value = 'name';
@@ -1123,9 +1066,7 @@ const openAddDialog = () => {
   addStagePeople.value = [];
   // 默认:满员时插到第 1 位(等于原「顶前」),未满时插到最后一个之前
   const lastItem = listItems.value[listItems.value.length - 1];
-  addReplaceKey.value = rosterFull.value
-    ? (listItems.value.length > 0 ? itemKeyOf(listItems.value[0]) : '')
-    : (lastItem ? itemKeyOf(lastItem) : '');
+  addReplaceKey.value = rosterFull.value ? (listItems.value.length > 0 ? itemKeyOf(listItems.value[0]) : '') : lastItem ? itemKeyOf(lastItem) : '';
   addPlacement.value = 'INSERT';
   addDialogVisible.value = true;
 };
@@ -1201,15 +1142,13 @@ const submitAdd = async () => {
     //  - 替换:移出被替换的那个人(也可以选空位,那就谁都不动)
     //  - 插入且名单已满:挤出最后一名(插到第 1 位时等价于"顶前,最后一名出去")
     const replaceToSlot = addPlacement.value === 'REPLACE' && addReplaceKey.value.startsWith('slot:');
-    const replacedIndex = replaceToSlot
-      ? -1
-      : listItems.value.findIndex((it) => itemKeyOf(it) === addReplaceKey.value);
-    const bySeedDesc = [...listItems.value].sort(
-      (a, b) => (Number(b.seedRank) || 0) - (Number(a.seedRank) || 0)
-    );
+    const replacedIndex = replaceToSlot ? -1 : listItems.value.findIndex((it) => itemKeyOf(it) === addReplaceKey.value);
+    const bySeedDesc = [...listItems.value].sort((a, b) => (Number(b.seedRank) || 0) - (Number(a.seedRank) || 0));
     const replacedSeed = replaceToSlot
       ? Number(addReplaceKey.value.slice(5)) || 0
-      : (replacedIndex >= 0 ? Number(listItems.value[replacedIndex]?.seedRank) || 0 : 0);
+      : replacedIndex >= 0
+        ? Number(listItems.value[replacedIndex]?.seedRank) || 0
+        : 0;
     // 插入:新人占被选中者的位置,他和后面所有人 +1
     if (addPlacement.value === 'INSERT') {
       if (replacedSeed <= 0) {
@@ -1217,11 +1156,14 @@ const submitAdd = async () => {
         return;
       }
     }
-    const outItem = addPlacement.value === 'REPLACE'
-      ? (replacedIndex >= 0 ? listItems.value[replacedIndex] : null)
-      : (addPlacement.value === 'INSERT' && rosterFull.value)
-        ? bySeedDesc[0]
-        : null;
+    const outItem =
+      addPlacement.value === 'REPLACE'
+        ? replacedIndex >= 0
+          ? listItems.value[replacedIndex]
+          : null
+        : addPlacement.value === 'INSERT' && rosterFull.value
+          ? bySeedDesc[0]
+          : null;
     if (outItem) {
       if (outItem.overrideId) {
         await deleteRosterOverride(p.id, outItem.overrideId);
@@ -1235,20 +1177,22 @@ const submitAdd = async () => {
     if (addMode.value === 'name') {
       const created: any = await addRosterOverride(p.id, {
         // 不再区分个人/选手:选手就是一个参赛方,选手只是多几个成员
-        op: 'ADD_GUEST', guestName: addName.value.trim(), guestType: 0
+        op: 'ADD_GUEST',
+        guestName: addName.value.trim(),
+        guestType: 0
       });
       newOverrideId = created?.data?.id ?? created?.id ?? null;
     } else {
       // 之前被手工移出过的人:加回来 = 撤销那条移出
       const removed = overridesOf(p).filter(
-        (o) => o.op === 'REMOVE' && o.sourceCompetitorId != null
-          && String(o.sourceCompetitorId) === String(addPersonId.value)
+        (o) => o.op === 'REMOVE' && o.sourceCompetitorId != null && String(o.sourceCompetitorId) === String(addPersonId.value)
       );
       if (removed.length > 0) {
         for (const o of removed) await deleteRosterOverride(p.id, o.id);
       } else {
         const created: any = await addRosterOverride(p.id, {
-          op: 'ADD_SOURCE', sourceCompetitorId: addPersonId.value
+          op: 'ADD_SOURCE',
+          sourceCompetitorId: addPersonId.value
         });
         newOverrideId = created?.data?.id ?? created?.id ?? null;
       }
@@ -1258,9 +1202,7 @@ const submitAdd = async () => {
     await loadRosters();
     {
       const arr = [...listItems.value];
-      let idx = newOverrideId != null
-        ? arr.findIndex((it) => String(it.overrideId) === String(newOverrideId))
-        : -1;
+      let idx = newOverrideId != null ? arr.findIndex((it) => String(it.overrideId) === String(newOverrideId)) : -1;
       if (idx < 0) {
         idx = arr.length - 1;
       }
@@ -1278,16 +1220,14 @@ const submitAdd = async () => {
           listItems.value = [...shifted, newItem].sort(bySeed);
         } else {
           // 替换:新人顶替被替换者原来的位置
-          newItem.seedRank = replacedSeed || (Number(newItem.seedRank) || 0);
+          newItem.seedRank = replacedSeed || Number(newItem.seedRank) || 0;
           listItems.value = [...others, newItem].sort(bySeed);
         }
         await persistOrder();
         await loadRosters();
       }
     }
-    ElMessage.success(addPlacement.value === 'INSERT'
-      ? `已插入第 ${replacedSeed} 位,后面的人依次后移`
-      : '已替换入名单');
+    ElMessage.success(addPlacement.value === 'INSERT' ? `已插入第 ${replacedSeed} 位,后面的人依次后移` : '已替换入名单');
     addDialogVisible.value = false;
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.msg || e?.message || '加入名单失败');
@@ -1481,17 +1421,13 @@ const BRACKET_ZONES = [
 const BRACKET_SIDES = ['left', 'right'] as const;
 
 const bracketPairs = computed<any[]>(() =>
-  computePairs(
-    listItems.value,
-    directPairingMode.value,
-    Number(overridePreview.value?.capacity || targetStage.value?.teamCountStart) || 0
-  )
+  computePairs(listItems.value, directPairingMode.value, Number(overridePreview.value?.capacity || targetStage.value?.teamCountStart) || 0)
 );
 
 const bracketPairsOf = (zone: string) => bracketPairs.value.filter((p) => p.zone === zone);
 
 /** 对战树换位:拖一个位置到另一个位置即交换(名单锁定后不可拖) */
-const bracketEditable = computed(() => !rosterSealed.value && !targetLocked.value);
+const bracketEditable = computed(() => !rosterReadonly.value);
 const bracketDragItem = ref<any>(null);
 const bracketDropKey = ref('');
 
@@ -1535,9 +1471,7 @@ const moveRosterSeed = async (item: any, seed: number) => {
     return;
   }
   item.seedRank = seed;
-  listItems.value = [...listItems.value].sort(
-    (x, y) => (Number(x.seedRank) || 0) - (Number(y.seedRank) || 0)
-  );
+  listItems.value = [...listItems.value].sort((x, y) => (Number(x.seedRank) || 0) - (Number(y.seedRank) || 0));
   await persistOrder();
   await loadRosters();
 };
@@ -1565,9 +1499,7 @@ const swapRosterSeeds = async (a: any, b: any) => {
   const t = a.seedRank;
   a.seedRank = b.seedRank;
   b.seedRank = t;
-  listItems.value = [...listItems.value].sort(
-    (x, y) => (x.seedRank ?? Number.MAX_SAFE_INTEGER) - (y.seedRank ?? Number.MAX_SAFE_INTEGER)
-  );
+  listItems.value = [...listItems.value].sort((x, y) => (x.seedRank ?? Number.MAX_SAFE_INTEGER) - (y.seedRank ?? Number.MAX_SAFE_INTEGER));
   await persistOrder();
   await loadRosters();
 };
@@ -1578,7 +1510,7 @@ const swapRosterSeeds = async (a: any, b: any) => {
  */
 const clearRosterOrder = async () => {
   const p = firstRoster.value;
-  if (!p || rosterSealed.value) return;
+  if (!p || rosterReadonly.value) return;
   try {
     await ElMessageBox.confirm('恢复为按来源名次自动排列的原始顺序?这会丢弃本赛段名单上全部人工调整(换位/加人/外卡/剔除)', '恢复顺序', {
       type: 'warning',
@@ -1620,7 +1552,12 @@ const sourceStageIdsOfRoster = computed<string[]>(() => {
   const p = rosters.value[0];
   if (!p) return [];
   return Array.from(
-    new Set(groupsOfRoster(p).map((g) => g.sourceStageId).filter((id) => id != null).map((id) => String(id)))
+    new Set(
+      groupsOfRoster(p)
+        .map((g) => g.sourceStageId)
+        .filter((id) => id != null)
+        .map((id) => String(id))
+    )
   );
 });
 
@@ -1648,9 +1585,7 @@ const directPairingMode = computed(() => {
   if (m && String(m).trim()) {
     return String(m).trim().toUpperCase() === 'SEED' ? 'SEED' : 'SEQUENTIAL';
   }
-  const seedsFromRanking = Object.values(sourceStageModes.value).some(
-    (mode) => mode === 'AUDITION' || mode === 'RANK'
-  );
+  const seedsFromRanking = Object.values(sourceStageModes.value).some((mode) => mode === 'AUDITION' || mode === 'RANK');
   const prevMode = sourceStage.value?.stageMode;
   if (seedsFromRanking || prevMode === 'AUDITION' || prevMode === 'RANK') return 'SEED';
   return 'SEQUENTIAL';
@@ -1659,9 +1594,7 @@ const directGroupCount = computed(() => Number(targetRuleConfig.value?.group?.gr
 const directCircles = computed(() => Number(targetRuleConfig.value?.circles) || 1);
 
 /** 晋级是否已确认:目标赛段名单快照已物化(唯一口径) */
-const advancementConfirmed = computed(
-  () => !!overridePreview.value?.applied || rosters.value.some((p) => p.state === 'CONFIRMED')
-);
+const advancementConfirmed = computed(() => !!overridePreview.value?.applied || rosters.value.some((p) => p.state === 'CONFIRMED'));
 
 /** 确认名单:规则 + 覆盖合并后整单装配为下一赛段参赛行(唯一流转路径) */
 const handleConfirmAdvancement = async () => {

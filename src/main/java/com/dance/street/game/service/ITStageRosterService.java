@@ -141,4 +141,32 @@ public interface ITStageRosterService {
 
     /** 来源赛段变动后,重建所有"来源组引用了它"的下游赛段中间层 */
     int rebuildEntriesOfDownstream(Long sourceStageId);
+
+    /**
+     * 预晋级实时同步:把来源赛段<b>当前</b>已晋级(ADVANCE 且有名次)的人,按名次写进下游中间态;
+     * 已经不再晋级(判错重判 / 重置)的人,座位还原成空位行。
+     *
+     * <p>淘汰赛每场判完就会把胜者标成 ADVANCE 并写回名次({@code DownstreamRouter.markAdvance}),
+     * 所以"谁晋级了"从那一刻起就该在中间态可见。这里<b>只改受影响的座位行</b>,不整表重建 ——
+     * 整表重建会把现场已经做好的加人/外卡/换位一起冲掉;整表重建只留给"来源结算 / 主动重建"
+     * 这些权威时刻。中间层还没铺开时按规则整表物化一次(此时本来也没有人工调整可丢)。</p>
+     *
+     * @param competitorIds 只同步这些参赛方(单场判完/重判时传本场参赛方,写入范围就锁死在这几行);
+     *                      null 或 空 = 该赛段全部
+     * @return 实际改动的座位行数
+     */
+    int syncPreAdvance(Long sourceStageId);
+
+    /** 同上,限定只同步这些人(只改与他们相关的座位行) */
+    int syncPreAdvance(Long sourceStageId, Collection<Long> competitorIds);
+
+    /**
+     * 上游结算完成后,把下游赛段里"等上游填入"的座位({@code slot_kind=PENDING})归一到轮空({@code BYE})。
+     *
+     * <p>赛前抢先生成对阵时,空位先标成"待定"(还有人会来);来源赛段全部结算后还没人来,
+     * 那就是真轮空 —— 不归一的话,现场会一直看到「轮空 / 待定」混在一起。</p>
+     *
+     * @return 归一化的座位行数
+     */
+    int settlePendingSeatsOfDownstream(Long sourceStageId);
 }

@@ -409,6 +409,37 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         return readyByGroups(groups, null);
     }
 
+    /**
+     * 能否把中间层物化出来(展示口径):来源赛段<b>已开赛</b>或已结算即可,不要求全部结算。
+     *
+     * <p>淘汰赛每判完一场就把胜者标成 ADVANCE 并写回名次(见 {@code DownstreamRouter.markAdvance}),
+     * 所以"上一个赛段晋级了谁"在赛段还在进行时就已经有数据了 —— 中间态、大屏预排要实时看到这些人,
+     * 不能等整个赛段结算。未结算期间生成的行 status=PENDING 作为标记。</p>
+     *
+     * <p>注意:这只是<b>展示</b>门槛。"确认名单 / 开赛守卫"仍然要求
+     * {@link #readyByGroups}(全部来源已结算),否则会把人还没打完的半成品名单物化进下一赛段。</p>
+     */
+    private boolean materializableByGroups(List<TStageRosterGroupBo> groups) {
+        if (groups.isEmpty()) {
+            return false;
+        }
+        for (TStageRosterGroupBo g : groups) {
+            if (RosterConstants.FILL_STREAM.equals(g.getFillMode()) || g.getSourceStageId() == null) {
+                continue;
+            }
+            TStage src = stageMapper.selectById(g.getSourceStageId());
+            if (src == null || StageConstants.STAGE_DISCARD.equals(src.getStatus())) {
+                return false;
+            }
+            boolean started = StageConstants.STAGE_GAMING.equals(src.getStatus())
+                || StageConstants.STAGE_SETTLED.equals(src.getStatus());
+            if (!started) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** 同上,来源赛段可预取(批量路径一次取回,避免逐组 selectById) */
     private boolean readyByGroups(List<TStageRosterGroupBo> groups, Map<Long, TStage> sourceStages) {
         if (groups.isEmpty()) {
@@ -559,6 +590,13 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         // 同上:只有已物化出参赛行时,"已初始化"才代表名单真的被锁定过
         if (Long.valueOf(1L).equals(stage.getIsInitialized()) && hasMaterializedCompetitors(stageId)) {
             throw new ServiceException("赛段已初始化,名单已锁定,无法调整人工覆盖");
+        }
+        // 上一赛段还没结束:中间态只读。实时显示的是"打到这里为止已晋级的人",
+        // 此时加人/拖位没有意义——后面每判完一场,名次座位都会按上游结果覆盖一次。
+        List<TStageRosterGroupBo> groups = groupsOf(stage);
+        if (!groups.isEmpty() && !readyByGroups(groups)) {
+            throw new ServiceException("上一赛段还没结束,中间态暂不能调整(能实时看到已晋级的选手,"
+                + "等来源赛段结算完成后再改)");
         }
         return stage;
     }
@@ -1930,7 +1968,15 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         if (targetStageId == null) {
             return List.of();
         }
-        ensureEntriesMaterialized(targetStageId);
+        List<TStageRosterEntry> rows = selectEntries(targetStageId);
+        if (entriesNeedRebuild(targetStageId, rows)) {
+            rebuildEntries(targetStageId);
+            rows = selectEntries(targetStageId);
+        }
+        return rows;
+    }
+
+    private List<TStageRosterEntry> selectEntries(Long targetStageId) {
         return entryMapper.selectList(Wrappers.<TStageRosterEntry>lambdaQuery()
             .eq(TStageRosterEntry::getTargetStageId, targetStageId)
             .orderByAsc(TStageRosterEntry::getSlot)
@@ -1938,25 +1984,30 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     }
 
     /**
-     * 首次生成的兜底:来源已全部结算、但中间层还是空表时补建一次。
+     * 读路径兜底:表空(首次生成)或口径过时(来源结算状态与座位类型对不上)时,按规则重建一次。
      *
      * <p>正常路径由"来源结算 / 来源组变更"事件写入(写时物化);这里只兜"表是空的"这一种情况
-     * ——例如来源赛段的状态是直接改库改出来的(历史数据/工具脚本)。表里一旦有行(含空位行),
-     * 读路径就完全不计算。</p>
+     * ——例如来源赛段的状态是直接改库改出来的(历史数据/工具脚本)。</p>
+     *
+     * <p>口径过时指:来源还没打完却把空座位写成了"轮空"(旧版本写下的行),或来源已结算
+     * 却还留着"待定"。这时重建一次即可自愈,现场不会一直卡在"一半轮空一半待定"。
+     * 有人的行(PLAYER)与空位口径都正常时,读路径完全不计算。</p>
      */
-    private void ensureEntriesMaterialized(Long targetStageId) {
+    private boolean entriesNeedRebuild(Long targetStageId, List<TStageRosterEntry> rows) {
         TStage stage = stageMapper.selectById(targetStageId);
-        if (stage == null || isLocked(stage)) {
-            return;
+        if (stage == null || isLocked(stage) || !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            return false;
         }
-        if (entryMapper.selectCount(Wrappers.<TStageRosterEntry>lambdaQuery()
-            .eq(TStageRosterEntry::getTargetStageId, targetStageId)) > 0) {
-            return;
+        List<TStageRosterGroupBo> groups = groupsOf(stage);
+        if (rows.isEmpty()) {
+            // 来源还没开赛:确实该是空的,等开场事件再物化
+            return materializableByGroups(groups);
         }
-        if (!readyByGroups(groupsOf(stage))) {
-            return; // 来源还没结算:确实该是空的
-        }
-        rebuildEntries(targetStageId);
+        boolean sourceReady = readyByGroups(groups);
+        return rows.stream().anyMatch(e -> !StageConstants.SLOT_PLAYER.equals(e.getSlotKind())
+            && (sourceReady
+                ? !StageConstants.SLOT_BYE.equals(e.getSlotKind())
+                : !StageConstants.SLOT_PENDING.equals(e.getSlotKind())));
     }
 
     /**
@@ -1990,11 +2041,13 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         entryMapper.delete(Wrappers.<TStageRosterEntry>lambdaQuery()
             .eq(TStageRosterEntry::getTargetStageId, targetStageId));
         List<TStageRosterGroupBo> groups = groupsOf(target);
-        if (groups.isEmpty() || !readyByGroups(groups)) {
-            // 来源还没结算:先留空表,等来源结算事件再来重建
+        if (groups.isEmpty() || !materializableByGroups(groups)) {
+            // 来源还没开赛(拿不到任何结果):留空表,等来源开赛/结算事件再来重建
             notifyTarget(targetStageId);
             return false;
         }
+        // 来源已开赛但还没全部结算:行先建出来(status=PENDING),让中间态/大屏实时看到已晋级的人
+        boolean sourceReady = readyByGroups(groups);
         int plan = target.getTeamCountStart() == null || target.getTeamCountStart() <= 0
             ? 0 : target.getTeamCountStart().intValue();
         List<AssembledRow> rows = assembleRows(groups);
@@ -2014,7 +2067,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
             }
         }
         for (long slot = 1; slot <= totalSlots; slot++) {
-            entryMapper.insert(toEntry(target, slot, rowBySlot.get(slot)));
+            entryMapper.insert(toEntry(target, slot, rowBySlot.get(slot), sourceReady));
         }
         notifyTarget(targetStageId);
         log.info("赛段[{}]中间层名单已重建:{} 个座位,有人 {} 个",
@@ -2048,6 +2101,180 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         return rebuilt;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int syncPreAdvance(Long sourceStageId) {
+        return syncPreAdvance(sourceStageId, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int settlePendingSeatsOfDownstream(Long sourceStageId) {
+        if (sourceStageId == null) {
+            return 0;
+        }
+        TStage source = stageMapper.selectById(sourceStageId);
+        if (source == null) {
+            return 0;
+        }
+        int changed = 0;
+        for (TStage target : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
+            .eq(TStage::getTournamentId, source.getTournamentId())
+            .ne(TStage::getStatus, StageConstants.STAGE_DISCARD))) {
+            if (Objects.equals(target.getId(), sourceStageId) || !referencedBy(target, sourceStageId)) {
+                continue;
+            }
+            // 还有来源没结算:那些座位仍是"待定",不能动
+            if (!readyByGroups(groupsOf(target))) {
+                continue;
+            }
+            List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                    .eq(TMatch::getStageId, target.getId())
+                    .select(TMatch::getId))
+                .stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+            if (matchIds.isEmpty()) {
+                continue;
+            }
+            changed += participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                .in(TMatchParticipant::getMatchId, matchIds)
+                .isNull(TMatchParticipant::getCompetitorId)
+                .eq(TMatchParticipant::getSlotKind, StageConstants.SLOT_PENDING)
+                .set(TMatchParticipant::getSlotKind, StageConstants.SLOT_BYE));
+        }
+        if (changed > 0) {
+            log.info("来源赛段[{}]结算后,下游中间/对阵里的 {} 个待定座位归一为轮空", sourceStageId, changed);
+        }
+        return changed;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int syncPreAdvance(Long sourceStageId, Collection<Long> competitorIds) {
+        if (sourceStageId == null) {
+            return 0;
+        }
+        TStage source = stageMapper.selectById(sourceStageId);
+        if (source == null) {
+            return 0;
+        }
+        // 只关注这些人:单场判完/重判时传本场参赛方,写入范围就锁死在这几行,不会碰到别的人
+        Set<Long> only = competitorIds == null || competitorIds.isEmpty()
+            ? null : competitorIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        if (only != null && only.isEmpty()) {
+            return 0;
+        }
+        // 来源赛段"当前"已晋级且有名次的人:淘汰赛每场判完就写一个
+        Map<Long, TCompetitor> advancerById = competitorMapper.selectList(
+                Wrappers.<TCompetitor>lambdaQuery()
+                    .eq(TCompetitor::getStageId, sourceStageId)
+                    .in(only != null, TCompetitor::getId, only == null ? List.of() : only))
+            .stream()
+            .filter(c -> c.getFinalRank() != null && c.getFinalRank() >= 1L
+                && OutcomeStatusEnum.ADVANCE.getCode().equals(c.getOutcomeStatus()))
+            .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
+        int changed = 0;
+        for (TStage target : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
+            .eq(TStage::getTournamentId, source.getTournamentId())
+            .ne(TStage::getStatus, StageConstants.STAGE_DISCARD))) {
+            if (Objects.equals(target.getId(), sourceStageId) || !referencedBy(target, sourceStageId)) {
+                continue;
+            }
+            changed += syncTargetPreAdvance(target, sourceStageId, advancerById, only);
+        }
+        return changed;
+    }
+
+    /**
+     * 把一个目标赛段的中间层与来源赛段当前的晋级结果对齐:
+     * 座位=名次,该有名次的人坐进去;不再晋级的(判错重判/重置)座位还原成空位。
+     * 其它来源的行、以及人工加进来的行原样保留。
+     */
+    private int syncTargetPreAdvance(TStage target, Long sourceStageId,
+                                     Map<Long, TCompetitor> advancerById, Set<Long> only) {
+        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
+            return 0;   // 目标已开赛/已作废:名单锁定
+        }
+        if (matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, target.getId())) > 0) {
+            return 0;   // 目标已生成对阵:名单锁定
+        }
+        // 表还没铺开时会按规则整表物化一次(来源已开赛,已晋级的人本来就在其中)
+        List<TStageRosterEntry> rows = entriesOf(target.getId());
+        if (rows.isEmpty()) {
+            return 0;
+        }
+        Map<Long, TStageRosterEntry> rowBySlot = rows.stream()
+            .filter(e -> e.getSlot() != null)
+            .collect(Collectors.toMap(TStageRosterEntry::getSlot, e -> e, (a, b) -> a));
+        boolean sourceReady = readyByGroups(groupsOf(target));
+        String rowStatus = sourceReady
+            ? RosterConstants.ENTRY_STATUS_READY : RosterConstants.ENTRY_STATUS_PENDING;
+        // 空座位:来源没打完是"待定",来源结算后没人来才是"轮空"(与 toEntry 同一口径)
+        String emptySlotKind = sourceReady
+            ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING;
+        int changed = 0;
+        // 1) 已晋级的人 → 自己的名次座位
+        for (TCompetitor advancer : advancerById.values()) {
+            TStageRosterEntry row = rowBySlot.get(advancer.getFinalRank());
+            if (row == null) {
+                // 中间层还没铺到这个座位(计划规模小于名次):整表重建兜底
+                changed += rebuildEntries(target.getId()) ? 1 : 0;
+                continue;
+            }
+            if (StageConstants.SLOT_PLAYER.equals(row.getSlotKind())
+                && Objects.equals(row.getSourceCompetitorId(), advancer.getId())) {
+                continue;   // 已经在位
+            }
+            if (RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
+                log.info("赛段[{}]座位[{}]原本是人工调整,按上游晋级结果覆盖", target.getId(), row.getSlot());
+            }
+            String tag = RosterConstants.ENTRY_ADVANCE;
+            // 显式 set:该座位原来是外卡/人工行时,外卡字段要一起清掉,否则会留下"有名字的源行"
+            entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                .eq(TStageRosterEntry::getId, row.getId())
+                .set(TStageRosterEntry::getSlotKind, StageConstants.SLOT_PLAYER)
+                .set(TStageRosterEntry::getRefType, "SOURCE")
+                .set(TStageRosterEntry::getSourceCompetitorId, advancer.getId())
+                .set(TStageRosterEntry::getSourceStageId, advancer.getStageId())
+                .set(TStageRosterEntry::getPlayerId, null)
+                .set(TStageRosterEntry::getGuestName, null)
+                .set(TStageRosterEntry::getGuestNumber, null)
+                .set(TStageRosterEntry::getOrigin, RosterConstants.ENTRY_ORIGIN_RULE)
+                .set(TStageRosterEntry::getEntryTag, tag)
+                .set(TStageRosterEntry::getStatus, rowStatus));
+            log.info("赛段[{}]中间层座位[{}]实时写入晋级者[{}](名次 {}),来源赛段[{}]",
+                target.getId(), row.getSlot(), advancer.getName(), advancer.getFinalRank(),
+                sourceStageId);
+            changed++;
+        }
+        // 2) 这条来源已不再晋级的规则行(判错重判/重置)→ 座位还原成空位,绝不压紧
+        for (TStageRosterEntry row : rows) {
+            if (!Objects.equals(row.getSourceStageId(), sourceStageId)
+                || row.getSourceCompetitorId() == null
+                || (only != null && !only.contains(row.getSourceCompetitorId()))
+                || advancerById.containsKey(row.getSourceCompetitorId())
+                || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
+                continue;
+            }
+            entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                .eq(TStageRosterEntry::getId, row.getId())
+                .set(TStageRosterEntry::getSlotKind, emptySlotKind)
+                .set(TStageRosterEntry::getRefType, null)
+                .set(TStageRosterEntry::getSourceCompetitorId, null)
+                .set(TStageRosterEntry::getSourceStageId, null)
+                .set(TStageRosterEntry::getPlayerId, null)
+                .set(TStageRosterEntry::getGuestName, null)
+                .set(TStageRosterEntry::getGuestNumber, null)
+                .set(TStageRosterEntry::getEntryTag, null)
+                .set(TStageRosterEntry::getStatus, rowStatus));
+            changed++;
+        }
+        if (changed > 0) {
+            notifyTarget(target.getId());
+        }
+        return changed;
+    }
+
     /** 该赛段的名单来源组是否引用了指定来源赛段(配置损坏时按"不引用"处理,不拖垮调用方) */
     private boolean referencedBy(TStage target, Long sourceStageId) {
         try {
@@ -2069,15 +2296,18 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     }
 
     /** 组装一行中间层数据:座位有人=PLAYER,空座=BYE(空位也是实体行) */
-    private TStageRosterEntry toEntry(TStage target, long slot, AssembledRow row) {
+    private TStageRosterEntry toEntry(TStage target, long slot, AssembledRow row, boolean sourceReady) {
         TStageRosterEntry e = new TStageRosterEntry();
         e.setTournamentId(target.getTournamentId());
         e.setTargetStageId(target.getId());
         e.setSlot(slot);
         e.setOrigin(RosterConstants.ENTRY_ORIGIN_RULE);
-        e.setStatus(RosterConstants.ENTRY_STATUS_READY);
+        e.setStatus(sourceReady ? RosterConstants.ENTRY_STATUS_READY : RosterConstants.ENTRY_STATUS_PENDING);
         if (row == null) {
-            e.setSlotKind(StageConstants.SLOT_BYE);
+            // 空座位是"待定"还是"轮空":上一赛段没打完 → 还会有人来(待定);
+            // 来源全部结算后还没人来 → 真轮空。中间态与大屏预排必须同一口径,
+            // 否则现场就是"同一场比赛,一边显示轮空、一边显示待定"。
+            e.setSlotKind(sourceReady ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING);
             return e;
         }
         e.setSlotKind(StageConstants.SLOT_PLAYER);

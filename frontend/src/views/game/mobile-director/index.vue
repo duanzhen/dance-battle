@@ -144,13 +144,6 @@
                 <CircleCheck class="w-3.5 h-3.5" /> 完成赛段
               </button>
               <button
-                v-if="currentStage.stageMode === 'ARENA' && currentStage.status === 'GAMING' && !hasGamingMatch"
-                @click="handleArenaNext"
-                class="py-2.5 px-3 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-amber-600/15 text-amber-400 border border-amber-600/30 active:bg-amber-600/30"
-              >
-                <Play class="w-3.5 h-3.5" /> 开始下一场
-              </button>
-              <button
                 v-if="isFreeMatchStage && currentStage.status === 'GAMING'"
                 @click="openAddFreeMatch"
                 class="py-2.5 px-3 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-amber-600/15 text-amber-400 border border-amber-600/30 active:bg-amber-600/30"
@@ -182,7 +175,7 @@
 
             <div v-if="currentStage.status === 'DRAFT'" class="mt-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/10">
               <p v-if="currentStage.stageMode === 'ARENA'" class="text-[10px] text-blue-400/70">
-                点击「开始赛段」将自动创建第一场对决；之后每场判完点「开始下一场」，胜者守擂、败者排到队尾，平局时擂主与挑战者均排到队尾。
+                点击「开始赛段」将自动创建第一场对决；之后每场判完，场次列表底部会自动出现「下一场」卡片，点卡片里的「开始」即开赛。胜者守擂、败者排到队尾，平局时擂主与挑战者均排到队尾。
               </p>
               <p v-if="isDirectorJudge" class="text-[10px] text-amber-400/80">
                 本赛段为「导播台直接判定」：每场在下方场次卡片点「左胜 / 平 / 右胜」即可，裁判端不显示场次。
@@ -204,7 +197,7 @@
                 赛段进行中:点「添加对战」选两名选手开新场;逐场判完后点「选择晋级」勾选晋级者,再点"完成赛段"。
               </p>
               <p v-else-if="isDirectorJudge" class="text-[10px] text-amber-400/80">
-                赛段进行中：每场由你在场次卡片点「左胜 / 平 / 右胜」判定；判完点「开始下一场」，胜者守擂、败者队尾。
+                赛段进行中：每场由你在场次卡片点「左胜 / 平 / 右胜」判定；判完后列表底部会出现「下一场」卡片，点「开始」继续。胜者守擂、败者队尾。
               </p>
               <p v-else class="text-[10px] text-green-400/70">赛段正在进行中，裁判可录入比分。完成后点击"完成赛段"结算排名。</p>
             </div>
@@ -407,7 +400,7 @@
                     </svg>
                   </div>
                   <div class="text-xs font-bold truncate" :class="match.leftWin ? 'text-amber-400' : 'text-neutral-300'">
-                    {{ match.leftName || '待定' }}
+                    {{ match.leftName || slotText(match.leftSlotKind) }}
                   </div>
                 </div>
                 <span class="w-14 text-center text-[10px] text-neutral-600">VS</span>
@@ -431,7 +424,7 @@
                     </svg>
                   </div>
                   <div class="text-xs font-bold truncate" :class="match.rightWin ? 'text-amber-400' : 'text-neutral-300'">
-                    {{ match.rightName || '待定' }}
+                    {{ match.rightName || slotText(match.rightSlotKind) }}
                   </div>
                 </div>
               </div>
@@ -551,9 +544,13 @@
                     </span>
                   </div>
                   <div class="flex items-center gap-2 text-[10px] mb-1.5">
-                    <span class="flex-1 min-w-0 text-center font-bold truncate text-neutral-200">{{ r.leftName || match.leftName || '待定' }}</span>
+                    <span class="flex-1 min-w-0 text-center font-bold truncate text-neutral-200">{{
+                      r.leftName || match.leftName || slotText(match.leftSlotKind)
+                    }}</span>
                     <span class="w-10 flex-none text-center text-neutral-600">VS</span>
-                    <span class="flex-1 min-w-0 text-center font-bold truncate text-neutral-200">{{ r.rightName || match.rightName || '待定' }}</span>
+                    <span class="flex-1 min-w-0 text-center font-bold truncate text-neutral-200">{{
+                      r.rightName || match.rightName || slotText(match.rightSlotKind)
+                    }}</span>
                   </div>
                   <div v-if="r.refereeVotes && r.refereeVotes.length" class="space-y-1">
                     <div v-for="rv in r.refereeVotes" :key="rv.refereeId" class="flex items-center gap-2 text-[9px]">
@@ -594,6 +591,38 @@
                 </div>
               </div>
             </div>
+
+            <!-- 擂台赛:下一场预览卡片(未落库)。判完上一场后自动出现在列表底部,点卡片里的「开始」才创建并开赛 -->
+            <div v-if="arenaNextPair" ref="arenaNextCardRef" class="rounded-lg border border-dashed border-amber-500/40 bg-neutral-900/70 p-3">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[9px] font-bold text-amber-400/80">下一场（未开始）</span>
+                <span class="text-[8px] px-1.5 py-0.5 rounded bg-neutral-700 text-neutral-400">待开始</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="flex-1 min-w-0 text-center">
+                  <div class="text-[9px] text-neutral-500 mb-0.5">
+                    擂主<span v-if="arenaOverviewLoaded"> · {{ arenaNextPair.defender?.points ?? 0 }}分</span>
+                  </div>
+                  <div class="text-xs font-bold truncate text-neutral-200">{{ arenaNextPair.defender?.name || '待定' }}</div>
+                </div>
+                <span class="w-14 text-center text-[10px] text-neutral-600">VS</span>
+                <div class="flex-1 min-w-0 text-center">
+                  <div class="text-[9px] text-neutral-500 mb-0.5">
+                    挑战者<span v-if="arenaOverviewLoaded"> · {{ arenaNextPair.challenger?.points ?? 0 }}分</span>
+                  </div>
+                  <div class="text-xs font-bold truncate text-neutral-200">{{ arenaNextPair.challenger?.name || '待定' }}</div>
+                </div>
+              </div>
+              <div class="flex justify-end mt-2">
+                <button
+                  @click="handleArenaNext"
+                  class="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-green-600/15 text-green-400 border border-green-600/30 active:scale-95 transition-transform"
+                >
+                  开始
+                </button>
+              </div>
+            </div>
+            <p v-if="arenaQueueShort" class="text-[10px] text-neutral-500 text-center py-3">擂台赛可上场的参赛者不足 2 人，无法开始下一场。</p>
           </div>
         </div>
       </div>
@@ -742,7 +771,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { Layers, Play, CircleCheck, ChevronRight, TimerReset, Swords } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -846,6 +875,9 @@ interface MatchInfo {
   rightName: string;
   leftCompetitorId?: string | number | null;
   rightCompetitorId?: string | number | null;
+  /** 座位类型:BYE=轮空 / PENDING=待定(等上游出人);空座位文案按它区分 */
+  leftSlotKind?: string | null;
+  rightSlotKind?: string | null;
   leftWin?: boolean;
   rightWin?: boolean;
   winnerName?: string;
@@ -912,6 +944,47 @@ const canComplete = computed(() => {
   return currentStage.value.status === 'GAMING';
 });
 const hasGamingMatch = computed(() => matches.value.some((m) => m.status === 'GAMING'));
+
+/**
+ * 擂台赛轮转队列(含积分),由 arena-overview 拉取。
+ * 只用于在列表底部预览「下一场」(擂主 vs 下一位挑战者),不落库——
+ * 点卡片里的「开始」才真正创建并开赛场次,和淘汰赛逐场开始的观感保持一致,
+ * 免得导播每次都要滚回页面顶部点「开始下一场」。
+ */
+const arenaQueueList = ref<any[]>([]);
+/** 队列是否已成功拉取(区分「还没拉到」与「确实不足 2 人」) */
+const arenaOverviewLoaded = ref(false);
+/** 下一场预览卡片节点:上一场判完后滚动到可视区,省去手动下滑 */
+const arenaNextCardRef = ref<HTMLElement | null>(null);
+/**
+ * 擂台赛下一场对阵预览(未开始)。
+ * 当前有进行中对决、或非进行中赛段时为 null;队列确实不足 2 人时为 null(提示无法开赛)。
+ * 队列接口没拉到时不返回 null——保留卡片与「开始」入口,名字退化为「待定」,
+ * 免得接口偶发失败时导播台连开赛按钮都没有。
+ */
+const arenaNextPair = computed(() => {
+  const st = currentStage.value;
+  if (!st || st.stageMode !== 'ARENA' || st.status !== 'GAMING') return null;
+  if (hasGamingMatch.value) return null;
+  const q = arenaQueueList.value;
+  if (q.length < 2 && arenaOverviewLoaded.value) return null;
+  return { defender: q[0] ?? null, challenger: q[1] ?? null };
+});
+/** 擂台赛队列已拉到但可上场的人不足 2 人(提示无法开始下一场) */
+const arenaQueueShort = computed(() => {
+  const st = currentStage.value;
+  if (!st || st.stageMode !== 'ARENA' || st.status !== 'GAMING') return false;
+  if (hasGamingMatch.value) return false;
+  return arenaOverviewLoaded.value && arenaQueueList.value.length < 2;
+});
+
+// 上一场判完、「下一场」卡片新出现时自动滚到可视区,省去导播手动下滑
+watch(arenaNextPair, (val, old) => {
+  if (val && !old) {
+    nextTick(() => arenaNextCardRef.value?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }
+});
+
 /** 当前赛段是否由导播台直接判定(淘汰赛/擂台赛共用 publishMode=DIRECTOR) */
 const isDirectorJudge = computed(() => matches.value.some((m) => m.publishMode === 'DIRECTOR'));
 /** 海选:本赛段计划晋级总人数(取自场次上的同口径字段) */
@@ -1041,6 +1114,9 @@ const loadMatchesForStage = async (stageId: string) => {
       rightName: m.rightName || m.teamB || '',
       leftCompetitorId: m.leftCompetitorId ?? null,
       rightCompetitorId: m.rightCompetitorId ?? null,
+      // 座位类型必须带过来:BYE=轮空 / PENDING=待定(等上游出人),否则空位一律被当成待定
+      leftSlotKind: m.leftSlotKind ?? null,
+      rightSlotKind: m.rightSlotKind ?? null,
       leftWin: !!m.leftWin,
       rightWin: !!m.rightWin,
       winnerName: m.winnerName || '',
@@ -1079,6 +1155,23 @@ const loadMatchesForStage = async (stageId: string) => {
         }
       })
     );
+  }
+  // 擂台赛:同步轮转队列(队首=擂主),供列表底部「下一场」预览卡片使用
+  const stageMode = stages.value.find((st) => String(st.id) === String(stageId))?.stageMode;
+  if (stageMode === 'ARENA') {
+    try {
+      const ov: any = await directorArenaOverview(stageId);
+      const data = payloadOf(ov) || {};
+      arenaQueueList.value = Array.isArray(data.queue) ? data.queue : [];
+      arenaOverviewLoaded.value = true;
+    } catch (e) {
+      console.error('加载擂台队列失败:', e);
+      arenaQueueList.value = [];
+      arenaOverviewLoaded.value = false;
+    }
+  } else {
+    arenaQueueList.value = [];
+    arenaOverviewLoaded.value = false;
   }
 };
 
@@ -1212,11 +1305,18 @@ const handleCancelStartMatch = async (match: MatchInfo) => {
   }
 };
 
-/** 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾;平局时擂主与挑战者均排到队尾) */
+/**
+ * 擂台赛:创建并开始下一场对决(胜者守擂、败者排到队尾;平局时擂主与挑战者均排到队尾)。
+ * 由列表底部「下一场」预览卡片里的「开始」触发。
+ */
 const handleArenaNext = async () => {
   const stage = currentStage.value;
   if (!stage) return;
-  if (!(await askConfirm(`确认开始下一场对决？将按轮转队列创建：擂主 vs 下一位挑战者。`))) return;
+  const pair = arenaNextPair.value;
+  const tip = pair
+    ? `确认开始下一场对决？将创建并开始：${pair.defender?.name || '待定'}（擂主） vs ${pair.challenger?.name || '待定'}。`
+    : `确认开始下一场对决？将按轮转队列创建：擂主 vs 下一位挑战者。`;
+  if (!(await askConfirm(tip))) return;
   try {
     await directorArenaNext(stage.id);
     await refreshMatches();
@@ -1427,6 +1527,9 @@ const expandedMatchId = ref<string | null>(null);
 const toggleExpand = (id: string) => {
   expandedMatchId.value = expandedMatchId.value === id ? null : id;
 };
+
+/** 空座位文案:轮空(BYE)/ 待定(PENDING,等上游出人)—— 别把轮空写成待定,现场会以为还要等人 */
+const slotText = (slotKind?: string | null) => (slotKind === 'BYE' ? '轮空' : '待定');
 
 // --- 顶部秒表 ---
 /** 触感反馈(WebHaptics):开始/停止/重置各给一次不同的震动 */

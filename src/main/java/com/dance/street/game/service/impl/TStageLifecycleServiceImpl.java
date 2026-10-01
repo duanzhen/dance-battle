@@ -402,6 +402,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         List<MatchPlan> sorted = new ArrayList<>(plan.getMatches());
         sorted.sort(Comparator.comparingInt(MatchPlan::getRound).thenComparingInt(MatchPlan::getMatchIndex));
 
+        // 本赛段名单来源是否已全部结算:决定空座位是"轮空"还是"待定"(见下方落行处)
+        boolean sourcesReady = rosterService.isRosterReady(stage.getId());
+
         // 第一遍:建 TMatch + TMatchRound + TMatchParticipant,记录 (round,index) -> matchId
         Map<String, Long> matchKeyToId = new HashMap<>();
         for (MatchPlan mp : sorted) {
@@ -444,6 +447,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 // 每个座位都落一行:真人=PLAYER,轮空=BYE,待上游填入=PENDING。
                 // 轮空不再"跳过"——否则参赛方数组下标 ≠ 座位下标,前端与下游按 slot 还原位置时会错位
                 // (典型:「左轮空、右有人」时把右边的人画到左边)。
+                // 空位是"待定"还是"轮空":本赛段名单来源全部结算了,没人来就是真轮空(BYE);
+                // 上一赛段还没打完(抢先生成对阵),空位是待定(PENDING)——这人可能马上就来,
+                // 一旦当成轮空,场上那 1 个人会被直接判晋级。
                 TMatchParticipant p = new TMatchParticipant();
                 p.setTournamentId(stage.getTournamentId());
                 p.setMatchId(m.getId());
@@ -451,7 +457,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 p.setDisplaySlotIndex((long) slot.getSlotIndex());
                 p.setSlotKind(slot.getCompetitorId() != null
                     ? StageConstants.SLOT_PLAYER
-                    : (slot.isBye() ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING));
+                    : (slot.isBye() && sourcesReady ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING));
                 p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
                 participantMapper.insert(p);
             }
@@ -885,11 +891,14 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (real.size() >= 2) {
             return false; // 正常对决,不处理
         }
-        // 空场次能否按轮空结算,取决于"还会不会有人补进来":本赛段内所有会向本场送人的
-        // 上游场次都已结算(胜/败者该来的都来了、该空的就永远空),才能结算为空轮空。
-        // 此前用 displayCol > 1 粗判,导致"半决赛双方都是轮空"时季军赛永远等不到人:
-        // 既开不了(报"暂无参赛方")也结算不了,整个赛段卡死在"仍有 1 场未结算"。
-        if (real.isEmpty() && hasUnsettledUpstream(m)) {
+        // 空场次能否按轮空结算,取决于"还会不会有人补进来",两处都要看:
+        //  · 本赛段内:所有会向本场送人的上游场次是否都已结算(胜/败者该来的都来了、
+        //    该空的就永远空);此前用 displayCol > 1 粗判,导致"半决赛双方都是轮空"时
+        //    季军赛永远等不到人:既开不了也结算不了,整个赛段卡死在"仍有 1 场未结算"。
+        //  · 跨赛段:本赛段的名单来源是否已全部结算 —— 上一赛段没打完时,空位是"待定",
+        //    此时把场上那 1 个人按轮空直接判晋级,就是现场"轮空/待定混在一起"的事故
+        //    (人还没打就晋级了,后面的判罚全乱)。
+        if (hasUnsettledUpstream(m) || !rosterService.isRosterReady(m.getStageId())) {
             return false;
         }
         if (real.size() == 1) {
@@ -901,6 +910,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .eq(TMatchParticipant::getMatchId, m.getId())
                 .eq(TMatchParticipant::getCompetitorId, winner.getCompetitorId()));
             resolveKnockoutByeWinner(m, winner.getCompetitorId());
+            // 轮空判胜同样是"有人晋级了":立刻写进下一赛段中间态的对应座位。
+            // 只走裁判判罚那条路的话,这里晋级的选手不会出现在下一段(现场表现:"点了开始,人却没晋级")。
+            rosterService.syncPreAdvance(m.getStageId(), List.of(winner.getCompetitorId()));
         }
         settlementSupport.markMatchSettled(m);
         return true;
@@ -1849,6 +1861,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         stageMapper.updateById(stage);
         // 上游结算完成:重建所有引用本赛段的下游中间层名单(上游一变就全部重新来)
         rosterService.rebuildEntriesOfDownstream(stageId);
+        // 上游结束了:下游对阵里那些"等上游填入"的座位,此刻没人来就是真轮空(待定→轮空)
+        rosterService.settlePendingSeatsOfDownstream(stageId);
         // 名单就绪度由源结算状态推导,结算完成无需推进任何状态;
         // 下游开赛守卫与 apply 都会现场按源状态计算。
         refereeSseNotifier.notifyStage(stageId, "stage");
@@ -2310,6 +2324,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         upd.setIsInitialized(0L);
         upd.setStatus(StageConstants.STAGE_DRAFT);
         stageMapper.updateById(upd);
+        // 参赛方已回退待定/名次清空:下游中间层里"按旧结果落座的人"必须一起还原成空位,
+        // 否则重置后中间态还挂着已经不算数的人(人工加进来的行保持不动)。
+        rosterService.syncPreAdvance(stageId);
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
         log.info("赛段[{}]已重置为草稿:清除{}场对阵,参赛方回退待定", stageId, matches.size());
     }

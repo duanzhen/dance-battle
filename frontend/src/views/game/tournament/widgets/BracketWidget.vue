@@ -251,6 +251,14 @@ import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, Tournament
 import { seedLayout } from '@/utils/seedLayout';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
+/**
+ * 空位显示用的占位符:不断行空格。
+ *
+ * <p>用空字符串会让名字那一行没有行盒,卡片高度塌下去被压扁(同一排里有人/没人高度不一致);
+ * 用一个不可见的空格既能"什么都不显示",又能把行高撑住。</p>
+ */
+const BLANK_NAME = '\u00A0';
+
 const props = defineProps<{
   stageId?: string | number;
   mode?: 'view' | 'edit';
@@ -558,18 +566,19 @@ const participantsBySlot = (matchId: any): { left: any; right: any } => {
 };
 
 /**
- * 擂台赛段展示:按「座位」列出进入擂台赛的人,在标准 8 强摆位上排成 4 对(左 2 右 2),仅供展示。
+ * 擂台赛段展示:按「座位」列出进入擂台赛的人,按出场顺序两两成对(1-2 / 3-4 …)排成 4 对(左 2 右 2),仅供展示。
  *
- * <p>· 名单已写入(上一赛段结算并确认晋级):按 seedRank 坐回座位,空位显示「待定」。
+ * <p>· 名单已写入(上一赛段结算并确认晋级):按 seedRank 坐回座位,空位不写文案(留空)。
  *   绝不能用数组下标占位——那等于把名单压到 1..n,和中间态看到的出场顺序对不上。
- * · 名单还没写入(上一赛段未结算/未确认晋级):用预排晋级者占位,开赛前就能看到谁要进擂台赛。</p>
+ * · 名单还没写入(上一赛段未结算/未确认晋级):用预排晋级者占位,开赛前就能看到谁要进擂台赛。
+ * · <b>擂台赛是出场队列,不是淘汰签表</b>:席位按顺序配对(1-2/3-4…),不能套淘汰赛的
+ *   头尾交叉摆位(1-8/4-5…),否则大屏上的出场顺序和中间态/实际出场顺序对不上。</p>
  */
 const arenaSlots = computed<BracketSlot[]>(() => {
   const plan = Math.max(competitors.value.length, stageTeamCountStart.value || 0, 2);
   const bracketSize = Math.max(2, nextPow2(plan));
   const pairCount = Math.max(1, bracketSize / 2);
   const half = Math.ceil(pairCount / 2);
-  const layout = seedLayout(bracketSize);
   const bySeat = new Map<number, any>();
   const put = (seat: number, v: any) => {
     if (seat >= 1 && seat <= bracketSize && !bySeat.has(seat)) {
@@ -590,15 +599,18 @@ const arenaSlots = computed<BracketSlot[]>(() => {
   const atSeat = (seatNo: number) => bySeat.get(seatNo) ?? null;
   const idOf = (v: any) => (v == null ? null : (v.competitorId ?? v.id ?? null));
   return Array.from({ length: pairCount }, (_, i) => {
-    const left = atSeat(layout[2 * i]);
-    const right = atSeat(layout[2 * i + 1]);
+    // 顺序模式:第 i 对 = 座位 2i+1 vs 2i+2
+    const left = atSeat(2 * i + 1);
+    const right = atSeat(2 * i + 2);
     return {
       zone: i < half ? 'LEFT' : 'RIGHT',
       order: i % half,
       name: '8强',
       status: 'PENDING',
-      leftName: left?.name || '待定',
-      rightName: right?.name || '待定',
+      // 擂台赛空座位什么都不显示(不写「待定」也不写「轮空」):队列里空着就是个空位。
+      // 用不断行空格而不是空串,否则这一行没有行盒、卡片会被压扁。
+      leftName: left?.name || BLANK_NAME,
+      rightName: right?.name || BLANK_NAME,
       leftAvatar: avatarOf(idOf(left)),
       rightAvatar: avatarOf(idOf(right)),
       leftScore: '',
@@ -630,8 +642,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
         order: m.displayRow ?? 0,
         name: m.name || '',
         status: m.status || 'PENDING',
-        leftName: left?.competitorId == null ? slotLabel(left) : nameOf(left.competitorId) || '',
-        rightName: right?.competitorId == null ? slotLabel(right) : nameOf(right.competitorId) || '',
+        leftName: left?.competitorId == null ? slotLabel(left) : nameOf(left.competitorId) || BLANK_NAME,
+        rightName: right?.competitorId == null ? slotLabel(right) : nameOf(right.competitorId) || BLANK_NAME,
         leftAvatar: avatarOf(left?.competitorId),
         rightAvatar: avatarOf(right?.competitorId),
         leftScore: left?.scoreValue == null ? '' : String(left.scoreValue),
@@ -655,7 +667,7 @@ const bracketSlots = computed<BracketSlot[]>(() => {
           order: p.position - 1,
           name: `预排 ${p.position}`,
           status: 'PENDING',
-          // 对应场次未打完(TBD)留空,模板回退显示「待定」;无对应场次/无参赛方=轮空
+          // 对应场次未打完(TBD)留空不写字;无对应场次/无参赛方=轮空
           leftName: p.left?.name || (p.leftStatus === 'BYE' ? '轮空' : ''),
           rightName: p.right?.name || (p.rightStatus === 'BYE' ? '轮空' : ''),
           leftAvatar: avatarOf(p.left?.competitorId),
@@ -689,8 +701,8 @@ const bracketSlots = computed<BracketSlot[]>(() => {
             order: i % half,
             name: '待对阵',
             status: 'PENDING',
-            leftName: '',
-            rightName: '',
+            leftName: BLANK_NAME,
+            rightName: BLANK_NAME,
             leftAvatar: '',
             rightAvatar: '',
             leftScore: '',
@@ -730,7 +742,7 @@ const bracketSlots = computed<BracketSlot[]>(() => {
       order: i % half,
       name: '待对阵',
       status: 'PENDING',
-      leftName: left?.name || '',
+      leftName: left?.name || BLANK_NAME,
       rightName: right?.name || '轮空',
       leftAvatar: avatarOf(left?.id),
       rightAvatar: avatarOf(right?.id),
@@ -950,6 +962,8 @@ const handleTournamentEvent = (data: any) => {
   padding: 6px 8px;
   width: 9em;
   max-width: 9em;
+  /* 空名字(空位)时那一行没有行盒,不加这个卡片会塌成只有内边距、被压扁 */
+  min-height: calc(1.3em + 12px);
   border: 1px solid #404040;
   border-bottom: none;
   font-size: clamp(9px, 1.1vw, 16px);

@@ -20,6 +20,7 @@ import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
+import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -283,6 +285,59 @@ class KnockoutStateFlowTest {
         lifecycleService.completeStage(stage.getId());
         assertEquals(2, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
             "只有两场半决赛的胜者晋级");
+    }
+
+    /**
+     * 季军赛只到了一名败者(另一场半决赛还没打完):绝不能把到场的这 1 个人按"轮空"直接判成季军。
+     *
+     * <p>回归事故:待定座位当轮空用 —— 人还没打就晋级,现场轮空/待定混在一起,后面判罚全乱。</p>
+     */
+    @Test
+    void thirdPlaceWaitsForSecondLoserInsteadOfSettlingAsBye() {
+        Long tid = newTournament("季军赛等败者");
+        TStageVo stage = newKnockoutStage(tid, "半决赛", 4, 2, true);
+        for (int i = 1; i <= 4; i++) {
+            insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
+        }
+        lifecycleService.startStage(stage.getId());
+        List<TMatch> matches = matchesOf(stage.getId());
+        TMatch third = matches.stream()
+            .filter(m -> "季军赛".equals(m.getName()))
+            .findFirst().orElseThrow(() -> new AssertionError("应生成季军赛场次"));
+        List<TMatch> semis = matches.stream()
+            .filter(m -> !"季军赛".equals(m.getName())).toList();
+
+        // 只判第 1 场半决赛:季军赛 = 1 名真人 + 1 个待定座位
+        finishByDirector(semis.get(0).getId());
+        assertEquals(1, realParticipants(third.getId()).size(), "季军赛先到了 1 名败者");
+        assertTrue(slotKindsOf(third.getId()).contains(StageConstants.SLOT_PENDING),
+            "另一名败者还没产生,那个座位应该是待定");
+
+        // 此时点「开始」:不能把到场的 1 人按轮空判成季军
+        assertThrows(ServiceException.class, () -> matchResultService.startMatch(third.getId()));
+        assertEquals(StageConstants.MATCH_PENDING, matchMapper.selectById(third.getId()).getStatus(),
+            "季军赛还得等另一场半决赛");
+        assertTrue(participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, third.getId()))
+            .stream().noneMatch(p -> "WIN".equals(p.getOutcomeStatus())),
+            "季军赛没打,谁也不该被判胜");
+
+        // 另一场半决赛也判完:两人到齐,季军赛正常可打
+        finishByDirector(semis.get(1).getId());
+        assertEquals(2, realParticipants(third.getId()).size(), "两名败者都到齐");
+        assertEquals(0, slotKindsOf(third.getId()).stream()
+            .filter(k -> StageConstants.SLOT_PENDING.equals(k)).count(),
+            "到齐后不该再有待定座位");
+        finishByDirector(third.getId());
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(third.getId()).getStatus());
+    }
+
+    /** 某场次各座位的 slot_kind */
+    private List<String> slotKindsOf(Long matchId) {
+        return participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, matchId)
+                .orderByAsc(TMatchParticipant::getDisplaySlotIndex))
+            .stream().map(TMatchParticipant::getSlotKind).toList();
     }
 
     /**

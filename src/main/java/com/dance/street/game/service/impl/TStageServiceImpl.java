@@ -861,24 +861,10 @@ public class TStageServiceImpl implements ITStageService {
             return vo;
         }
 
-        // 场次位计数(用于 BYE/TBD 展示)仍按链上上一赛段场次;来源场次名取预排候选的真实来源赛段
+        // 来源场次名取预排候选的真实来源赛段
         Map<Long, String> sourceMatch = new HashMap<>();
-        Map<Integer, Integer> matchPosCount = new HashMap<>();
         List<TMatch> prevMatches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, prev.getId()));
-        if (!prevMatches.isEmpty()) {
-            List<Long> matchIds = prevMatches.stream().map(TMatch::getId).toList();
-            List<TMatchParticipant> parts = participantMapper.selectList(
-                Wrappers.<TMatchParticipant>lambdaQuery().in(TMatchParticipant::getMatchId, matchIds));
-            Map<Long, Long> partCountByMatch = parts.stream()
-                .collect(Collectors.groupingBy(TMatchParticipant::getMatchId, Collectors.counting()));
-            for (TMatch m : prevMatches) {
-                if (m.getDisplayRow() != null) {
-                    matchPosCount.put(m.getDisplayRow().intValue() + 1,
-                        partCountByMatch.getOrDefault(m.getId(), 0L).intValue());
-                }
-            }
-        }
         List<Long> sourceCompetitorIds = filled.stream()
             .map(TStageRosterEntry::getSourceCompetitorId)
             .filter(Objects::nonNull).distinct().toList();
@@ -943,6 +929,8 @@ public class TStageServiceImpl implements ITStageService {
         }
 
         List<PreBracketVo.PrePair> pairList = new ArrayList<>();
+        // 空位显示"待定"还是"轮空":来源赛段没打完才是待定,来源全部结算后空位就是轮空
+        boolean sourcesReady = rosterService.isRosterReady(stage.getId());
         // 配对模式:与生成对阵同一口径(显式配置优先;种子来自名次则默认种子摆位)
         RuleConfigHolder stageRc = RuleConfigParser.parse(stage.getRuleConfig());
         String configuredPairing = stageRc != null && stageRc.getKnockout() != null
@@ -965,8 +953,8 @@ public class TStageServiceImpl implements ITStageService {
                 int rightPos = layout[2 * i + 1];
                 p.setLeft(leftPos <= seedArr.length ? seedArr[leftPos - 1] : null);
                 p.setRight(rightPos <= seedArr.length ? seedArr[rightPos - 1] : null);
-                p.setLeftStatus(sideStatus(p.getLeft(), matchPosCount, leftPos));
-                p.setRightStatus(sideStatus(p.getRight(), matchPosCount, rightPos));
+                p.setLeftStatus(sideStatus(p.getLeft(), sourcesReady));
+                p.setRightStatus(sideStatus(p.getRight(), sourcesReady));
                 pairList.add(p);
             }
         } else {
@@ -980,8 +968,8 @@ public class TStageServiceImpl implements ITStageService {
                 int rightPos = i * 2 + 2;
                 p.setLeft(leftPos <= seedArr.length ? seedArr[leftPos - 1] : null);
                 p.setRight(rightPos <= seedArr.length ? seedArr[rightPos - 1] : null);
-                p.setLeftStatus(sideStatus(p.getLeft(), matchPosCount, leftPos));
-                p.setRightStatus(sideStatus(p.getRight(), matchPosCount, rightPos));
+                p.setLeftStatus(sideStatus(p.getLeft(), sourcesReady));
+                p.setRightStatus(sideStatus(p.getRight(), sourcesReady));
                 pairList.add(p);
             }
         }
@@ -992,12 +980,15 @@ public class TStageServiceImpl implements ITStageService {
     /**
      * 预排空位状态:该位置有胜者=WINNER;对应上一场次存在且有人=待定(TBD);否则轮空(BYE)。
      */
-    private String sideStatus(PreBracketVo.PreSeed seed, Map<Integer, Integer> matchPosCount, int pos) {
+    private String sideStatus(PreBracketVo.PreSeed seed, boolean sourcesReady) {
         if (seed != null) {
             return "WINNER";
         }
-        Integer cnt = matchPosCount.get(pos);
-        return cnt != null && cnt > 0 ? "TBD" : "BYE";
+        // 空座位只有两种可能,必须和中间层(t_stage_roster_entry)同一口径:
+        //  · 来源赛段还没打完 → 待定(TBD):这个位子还会有人来;
+        //  · 来源全部结算后还是空的 → 轮空(BYE)。
+        // 之前按"对应场次有没有人"细分,结果同一场比赛在中间态显示轮空、在大屏显示待定。
+        return sourcesReady ? "BYE" : "TBD";
     }
 
     private static int nextPowerOfTwo(int v) {

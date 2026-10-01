@@ -21,8 +21,10 @@ import java.util.Map;
  * 名单服务:数据所有权 = 来源层(t_competitor) → 中间层(t_stage_roster_entry,一行一个座位)
  * → 目标层(确认名单后物化的 t_competitor)。
  *
- * <p>规则(来源组)留在 {@code t_stage.roster_config_json},只在生成/重建时读一次;
- * 确认与否留在 {@code t_stage.roster_applied / roster_skipped}。中间层是唯一的事实来源,
+ * <p>规则(来源组)存在独立边表 {@code t_stage_roster_group}:一行 = 一条入边
+ * (来源赛段 → 目标赛段)+ 取人规则,按 {@code sort_order} 决定取人先后,
+ * {@code generated=1} 表示系统自动补的链式衔接。确认与否留在
+ * {@code t_stage.roster_applied / roster_skipped}。中间层是唯一的事实来源,
  * 所有读路径(中间态预览 / 大屏预排 / 导播台 / 名单页)都只读它。</p>
  *
  * @author duane
@@ -37,6 +39,14 @@ public interface ITStageRosterService {
 
     /** 目标赛段名单详情(唯一:一赛段一份名单) */
     List<TStageRosterVo> listByTarget(Long targetStageId);
+
+    /**
+     * 某赛段的名单来源组(赛段间依赖的边+取人规则),按取人顺序({@code sort_order})升序。
+     *
+     * <p>供赛段生命周期里"配对模式/预排口径"等只读判断使用——它们此前直接解析
+     * {@code t_stage.roster_config_json},表化后统一走这里。</p>
+     */
+    List<TStageRosterGroupBo> groupsOfStage(Long targetStageId);
 
     /**
      * 批量取多个目标赛段的名单(赛段列表/导播台列表用)。
@@ -57,8 +67,25 @@ public interface ITStageRosterService {
      */
     int applyRoster(Long targetStageId, Map<Long, List<Long>> manualSelections);
 
-    /** 向目标赛段名单追加来源组(幂等按组去重;至少保留一组) */
+    /** 向目标赛段名单追加来源组(幂等按组去重;至少保留一组),返回追加后的名单 */
     TStageRosterVo addGroups(Long stageId, TStageRosterBo bo);
+
+    /**
+     * 删除一条来源组(按行 ID 定位)。
+     *
+     * <p>表化后按 ID 而不是数组下标:删除同目标内的其他组不会让下标位移,编辑不会指错条目。</p>
+     */
+    void removeGroup(Long stageId, Long groupId);
+
+    /** 编辑一条来源组规则(按行 ID 定位) */
+    void updateGroup(Long stageId, Long groupId, TStageRosterGroupBo group);
+
+    /**
+     * 重排某目标赛段的取人顺序:按传入的组 ID 顺序依次写 {@code sort_order}=1..N。
+     *
+     * <p>取人顺序直接决定"先取哪条出口的人",所以它必须是显式且可调的。</p>
+     */
+    void reorderGroups(Long stageId, List<Long> groupIds);
 
     /** 名单候选(按来源组返回,手动点选/预览) */
     RosterCandidatesVo candidates(Long stageId);
@@ -79,12 +106,6 @@ public interface ITStageRosterService {
      * <p>名单语义集中在名单服务内,赛段生命周期只负责在开赛前调用本方法。</p>
      */
     void assertStageStartable(Long targetStageId);
-
-    /** 删除名单中的某一来源组(至少保留一组) */
-    void removeGroup(Long stageId, int groupIndex);
-
-    /** 编辑名单中的某一来源组规则(出口/入口自定义配置共用) */
-    void updateGroup(Long stageId, int groupIndex, TStageRosterGroupBo group);
 
     /**
      * 改链/插段后对账名单:清理引用了旧前驱的自动默认组/入口 STREAM,按当前 prev 补齐。

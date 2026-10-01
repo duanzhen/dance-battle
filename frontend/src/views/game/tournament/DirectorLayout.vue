@@ -722,9 +722,6 @@ const generateAllThumbnails = async () => {
   // 等待 DOM 完全渲染
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  // 保存当前场景ID
-  const originalSceneId = store.currentSceneId;
-
   try {
     // 为每个场景生成缩略图
     for (const scene of store.scenes) {
@@ -772,12 +769,6 @@ const generateAllThumbnails = async () => {
   } finally {
     // 清空缩略图生成器的场景
     thumbnailTargetSceneId.value = null;
-
-    // 恢复到原来的场景
-    if (originalSceneId) {
-      store.switchScene(originalSceneId);
-    }
-
     console.log('[generateAllThumbnails] 所有场景缩略图生成完成');
   }
 };

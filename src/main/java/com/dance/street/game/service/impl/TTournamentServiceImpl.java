@@ -593,11 +593,10 @@ public class TTournamentServiceImpl implements ITTournamentService {
             List<TStageRosterVo> rosters = rosterService.listByTarget(next.getId());
             if (!rosters.isEmpty() && rosters.get(0).getGroups() != null) {
                 List<TStageRosterGroupBo> merged = rosters.get(0).getGroups();
-                for (int i = 0; i < merged.size(); i++) {
-                    TStageRosterGroupBo g = merged.get(i);
+                for (TStageRosterGroupBo g : merged) {
                     if (Objects.equals(g.getSourceStageId(), audition.getId())
                         && g.getZone() == null && g.getRankStart() == null && g.getRankEnd() == null) {
-                        rosterService.removeGroup(next.getId(), i);
+                        rosterService.removeGroup(next.getId(), g.getId());
                         break;
                     }
                 }

@@ -12,7 +12,6 @@ export interface RosterVO {
   resultFilter?: string;
   quota?: number;
   fillMode?: string;
-  priority?: number;
   /** CONFIRMED/SKIPPED/READY/WAIT_SOURCE */
   state?: string;
   remark?: string;
@@ -35,7 +34,6 @@ export interface RosterForm {
   scoreMax?: number | null;
   quota?: number;
   fillMode?: string;
-  priority?: number;
   remark?: string;
   groups?: RosterGroupForm[];
 }
@@ -64,7 +62,6 @@ export interface RosterGroup {
   scoreMax?: number | null;
   fillMode?: string;
   quota?: number;
-  priority?: number;
   orderBy?: string;
 }
 
@@ -80,7 +77,6 @@ export interface RosterGroupRule {
   scoreMax?: number | null;
   fillMode?: string;
   quota?: number;
-  priority?: number;
   orderBy?: string;
 }
 

@@ -4,16 +4,14 @@
       <label class="text-xs text-neutral-500">
         出口去向
         <span class="text-[11px] text-neutral-600 ml-1">
-          {{ knockoutMode ? '(胜者/败者去向;不配置时默认胜者进入下一赛段)'
-            : isAudition ? '(可按圈分别配置)' : '(本赛段结果送入下游名单)' }}
+          {{ knockoutMode ? '(胜者/败者去向;不配置时默认胜者进入下一赛段)' : isAudition ? '(可按圈分别配置)' : '(本赛段结果送入下游名单)' }}
         </span>
       </label>
       <span class="text-[11px] text-neutral-600">{{ entries.length }} 条</span>
     </div>
 
-    <div v-if="!editable" class="text-[11px] text-neutral-600">
-      赛段已开始或已初始化，出口配置已锁定；如需调整请先重置该赛段。
-    </div>
+    <div v-if="!created" class="text-[11px] text-neutral-600">赛段尚未创建，出口配置在赛段创建后可用。</div>
+    <div v-else-if="stageStarted" class="text-[11px] text-neutral-600">赛段已开始或已结束，出口配置只读。</div>
     <div v-else-if="targetOptions.length === 0" class="text-[11px] text-neutral-600">
       暂无可承接的赛段（下游赛段需处于规划中，且名单尚未确认/跳过）
     </div>
@@ -22,25 +20,58 @@
     <div v-if="entries.length > 0" class="space-y-1.5">
       <div
         v-for="e in entries"
-        :key="String(e.targetStageId) + '-' + e.groupIndex"
+        :key="String(e.groupId)"
         class="flex items-center gap-2 rounded bg-neutral-900/70 border border-neutral-800 px-2.5 py-1.5"
       >
         <span class="text-[11px] text-amber-500/90 flex-none">{{ stageNameOf(e.targetStageId) }}</span>
         <span class="text-[11px] text-neutral-300 flex-1 min-w-0 truncate">{{ ruleText(e.g) }}</span>
+        <span
+          v-if="e.g.generated === 1"
+          class="text-[10px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-500 flex-none"
+          title="建段时系统自动补的链式衔接"
+        >
+          默认衔接
+        </span>
+        <!-- 取人顺序:只影响同一个目标赛段内部(先取哪条出口的人) -->
         <button
-          v-if="editable"
+          v-if="editable && exitEditable(e)"
+          :disabled="!canMoveExit(e, -1)"
+          class="px-1 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-amber-400 hover:border-amber-500/40 transition-colors flex-none disabled:opacity-30 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700"
+          title="上移(更先取人)"
+          @click="moveExit(e, -1)"
+        >
+          ↑
+        </button>
+        <button
+          v-if="editable && exitEditable(e)"
+          :disabled="!canMoveExit(e, 1)"
+          class="px-1 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-amber-400 hover:border-amber-500/40 transition-colors flex-none disabled:opacity-30 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700"
+          title="下移(更后取人)"
+          @click="moveExit(e, 1)"
+        >
+          ↓
+        </button>
+        <button
+          v-if="editable && exitEditable(e)"
           class="px-1.5 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-amber-400 hover:border-amber-500/40 transition-colors flex-none"
           @click="openEdit(e)"
         >
           编辑
         </button>
         <button
-          v-if="editable"
+          v-if="editable && exitEditable(e)"
           class="px-1.5 py-1 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
           @click="removeExit(e)"
         >
           移除
         </button>
+        <span
+          v-if="editable && !exitEditable(e)"
+          class="text-[10px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-500 flex-none"
+          title="目标赛段已开赛或名单已确认/跳过,这条出口已锁定"
+        >
+          已锁定
+        </span>
       </div>
     </div>
     <div v-else-if="editable" class="text-[12px] text-neutral-600">
@@ -88,7 +119,10 @@
         海选按「{{ form.zone === '__all__' ? '各圈' : '第' + String(form.zone).replace('ZONE-', '') + '圈' }}内名次」取人
       </p>
       <div class="flex justify-end gap-2">
-        <button class="px-3 py-1.5 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors" @click="closeForm">
+        <button
+          class="px-3 py-1.5 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors"
+          @click="closeForm"
+        >
           取消
         </button>
         <button
@@ -116,7 +150,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { StageData } from './types';
 import { listStage } from '@/api/game/stage';
-import { listRostersBySource, addRosterGroups, removeRosterGroup, updateRosterGroup } from '@/api/game/stage/roster';
+import { listRostersBySource, addRosterGroups, removeRosterGroup, updateRosterGroup, reorderRosterGroups } from '@/api/game/stage/roster';
 
 const props = defineProps<{
   stage: StageData;
@@ -124,7 +158,8 @@ const props = defineProps<{
 
 interface ExitEntry {
   targetStageId: string | number;
-  groupIndex: number;
+  /** 来源组行 ID(表化后按 ID 定位,不再用数组下标) */
+  groupId: string | number;
   g: any;
 }
 
@@ -163,18 +198,25 @@ const circleCount = computed(() => {
  * 圈的编号与单/多圈无关,后端圈场次的分区名也恒为 ZONE-k——出口规则按圈取人时
  * 单圈与多圈走同一套过滤,不再有"单圈没有圈可选"的特例。
  */
-const zoneOptions = computed(() =>
-  Array.from({ length: Math.max(1, circleCount.value) }, (_, i) => 'ZONE-' + (i + 1))
-);
+const zoneOptions = computed(() => Array.from({ length: Math.max(1, circleCount.value) }, (_, i) => 'ZONE-' + (i + 1)));
 
-/** 出口写在"目标赛段"上:来源侧始终可配置,目标侧限制在 targetOptions(规划中未初始化) */
-const editable = computed(() => {
+/** 赛段是否已真正落库(创建向导里的临时赛段还没有 ID) */
+const created = computed(() => {
   const s = props.stage;
   return !!s?.id && String(s.id) !== 'temp';
 });
 
+/** 本赛段是否还在规划中:开赛后(进行中/已结束)出口只能看,不能改 */
+const stageDraft = computed(() => created.value && (!props.stage.status || props.stage.status === 'DRAFT'));
+
+/** 赛段已开赛/已结束:整块出口配置只读(单条出口是否可改还要再看目标赛段,见 exitEditable) */
+const stageStarted = computed(() => created.value && !stageDraft.value);
+
+/** 出口写在"目标赛段"上:来源侧可配置,目标侧限制在 targetOptions(规划中未初始化) */
+const editable = stageDraft;
+
 const stageNameOf = (id: string | number | null | undefined): string =>
-  stageOptions.value.find((s) => String(s.id) === String(id))?.name || ('赛段 #' + id);
+  stageOptions.value.find((s) => String(s.id) === String(id))?.name || '赛段 #' + id;
 
 /**
  * 名单是否已被物化锁定(已确认带入或已跳过)。
@@ -182,8 +224,18 @@ const stageNameOf = (id: string | number | null | undefined): string =>
  * 历史数据里被创建流程提前置 1 的空赛段(它们既无对阵也无参赛方)。
  */
 const rosterLocked = (s: StageData): boolean =>
-  Array.isArray((s as any).incoming)
-  && (s as any).incoming.some((r: any) => r?.state === 'CONFIRMED' || r?.state === 'SKIPPED');
+  Array.isArray((s as any).incoming) && (s as any).incoming.some((r: any) => r?.state === 'CONFIRMED' || r?.state === 'SKIPPED');
+
+/**
+ * 某条出口现在还能不能改。
+ *
+ * <p>表化后出口就是目标赛段的一条入边,能不能动只取决于<b>目标赛段</b>:
+ * 已开赛(非 DRAFT)或名单已确认/已跳过 → 目标锁定,这条出口只能看。</p>
+ */
+const exitEditable = (e: ExitEntry): boolean => {
+  const target = stageOptions.value.find((x) => String(x.id) === String(e.targetStageId));
+  return !!target && target.status === 'DRAFT' && !rosterLocked(target);
+};
 
 /** 可选去向:沿 next 链位于本赛段之后,且仍为规划中、名单未锁定的赛段 */
 const targetOptions = computed(() => {
@@ -212,8 +264,16 @@ const rankText = (g: any): string => {
 
 const ruleText = (g: any): string => {
   const result = knockoutMode.value
-    ? (g.resultFilter === 'ELIMINATED' ? '败者' : g.resultFilter === 'ADVANCE' ? '胜者' : '不限')
-    : (g.resultFilter === 'ELIMINATED' ? '落选' : g.resultFilter === 'ADVANCE' ? '晋级' : '不限');
+    ? g.resultFilter === 'ELIMINATED'
+      ? '败者'
+      : g.resultFilter === 'ADVANCE'
+        ? '胜者'
+        : '不限'
+    : g.resultFilter === 'ELIMINATED'
+      ? '落选'
+      : g.resultFilter === 'ADVANCE'
+        ? '晋级'
+        : '不限';
   // 淘汰赛/晋级赛只分胜负,不展示名次
   if (knockoutMode.value) {
     return result;
@@ -233,11 +293,11 @@ const load = async () => {
       const rosters: any[] = ex?.data || [];
       const list: ExitEntry[] = [];
       for (const r of rosters) {
-        (r.groups || []).forEach((g: any, gi: number) => {
+        (r.groups || []).forEach((g: any) => {
           if (String(g.sourceStageId) === String(props.stage.id)) {
             list.push({
               targetStageId: r.targetStageId ?? r.id,
-              groupIndex: gi,
+              groupId: g.id,
               g
             });
           }
@@ -314,12 +374,10 @@ const save = async () => {
   try {
     if (editing.value && editEntry.value) {
       const group = buildGroup(isAudition.value && form.zone !== '__all__' ? String(form.zone) : null);
-      await updateRosterGroup(editEntry.value.targetStageId, editEntry.value.groupIndex, group);
+      await updateRosterGroup(editEntry.value.targetStageId, editEntry.value.groupId, group);
       ElMessage.success('出口已更新');
     } else {
-      const zones = isAudition.value
-        ? (form.zone === '__all__' ? zoneOptions.value : [String(form.zone)])
-        : [null];
+      const zones = isAudition.value ? (form.zone === '__all__' ? zoneOptions.value : [String(form.zone)]) : [null];
       const groups = zones.map((z) => buildGroup(z as string | null));
       await addRosterGroups(form.targetStageId, {
         sourceStageId: props.stage.id,
@@ -339,6 +397,42 @@ const save = async () => {
   }
 };
 
+/** 同一目标赛段内、与某条出口相邻的位置(顺序只在该目标内部有意义) */
+const siblingExits = (e: ExitEntry) => entries.value.filter((x) => String(x.targetStageId) === String(e.targetStageId));
+
+const canMoveExit = (e: ExitEntry, delta: number): boolean => {
+  const list = siblingExits(e);
+  const idx = list.findIndex((x) => String(x.groupId) === String(e.groupId));
+  const to = idx + delta;
+  return idx >= 0 && to >= 0 && to < list.length;
+};
+
+/**
+ * 调整取人顺序:交换同目标内的相邻两条出口。
+ * 顺序决定"先取哪条出口的人",多出口时直接影响谁先落座。
+ */
+const moveExit = async (e: ExitEntry, delta: number) => {
+  if (!canMoveExit(e, delta) || rosterLockedFor(e.targetStageId)) return;
+  const list = siblingExits(e);
+  const idx = list.findIndex((x) => String(x.groupId) === String(e.groupId));
+  const ids = list.map((x) => x.groupId);
+  const to = idx + delta;
+  [ids[idx], ids[to]] = [ids[to], ids[idx]];
+  try {
+    await reorderRosterGroups(e.targetStageId, ids);
+    ElMessage.success('取人顺序已调整');
+    await load();
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.msg || err?.message || '顺序调整失败');
+  }
+};
+
+/** 目标赛段名单已锁定(已确认/已跳过/已开赛)时不允许调顺序 */
+const rosterLockedFor = (targetStageId: string | number): boolean => {
+  const s = stageOptions.value.find((x) => String(x.id) === String(targetStageId));
+  return !!s && s.status !== 'DRAFT';
+};
+
 const removeExit = async (e: ExitEntry) => {
   try {
     await ElMessageBox.confirm(`确认移除「${stageNameOf(e.targetStageId)} · ${ruleText(e.g)}」这条出口？`, '移除出口', {
@@ -350,7 +444,7 @@ const removeExit = async (e: ExitEntry) => {
     return;
   }
   try {
-    await removeRosterGroup(e.targetStageId, e.groupIndex);
+    await removeRosterGroup(e.targetStageId, e.groupId);
     ElMessage.success('出口已移除');
     await load();
   } catch (err: any) {

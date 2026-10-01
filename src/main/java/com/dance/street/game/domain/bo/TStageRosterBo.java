@@ -42,8 +42,6 @@ public class TStageRosterBo implements Serializable {
     /** AUTO/MANUAL/STREAM */
     private String fillMode;
 
-    private Integer priority;
-
     private String remark;
 
     /** 分组取数规则(多个规则并集;为空时按单一规则字段处理) */

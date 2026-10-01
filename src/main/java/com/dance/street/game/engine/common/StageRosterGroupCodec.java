@@ -5,14 +5,15 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 名单来源组(存于 t_stage.roster_config_json)编解码。
+ * 名单来源组旧 JSON 格式的编解码。
  *
- * <p>多来源以 groups 为唯一事实源,规则即数据,无独立实体/状态机。</p>
+ * <p><b>来源组已表化</b>:运行时事实源是 {@code t_stage_roster_group}(赛段间依赖的边+取人规则),
+ * 详见 {@code TStageRosterServiceImpl}。本类现在只服务一件事——
+ * 启动时把老库里 {@code t_stage.roster_config_json} 的历史规则一次性搬进边表
+ * (见 {@code DatabaseSchemaInitializer#migrateRosterGroups}),新代码不要再用它读写规则。</p>
  *
  * @author duane
  */
@@ -70,9 +71,8 @@ public final class StageRosterGroupCodec {
                 if (n.hasNonNull("quota")) {
                     g.setQuota(n.get("quota").asInt());
                 }
-                if (n.hasNonNull("priority")) {
-                    g.setPriority(n.get("priority").asInt());
-                }
+                // 旧 JSON 里的 priority 已废弃(表化后由 sort_order 决定取人顺序):
+                // 这里读到也不再用,搬迁时按数组顺序写入 sort_order。
                 if (n.hasNonNull("orderBy")) {
                     g.setOrderBy(n.get("orderBy").asText());
                 }
@@ -84,14 +84,4 @@ public final class StageRosterGroupCodec {
         return out;
     }
 
-    /** 序列化来源组列表为 config_json */
-    public static String write(List<TStageRosterGroupBo> groups) {
-        try {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("groups", groups);
-            return MAPPER.writeValueAsString(payload);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("来源组规则序列化失败: " + e.getMessage(), e);
-        }
-    }
 }

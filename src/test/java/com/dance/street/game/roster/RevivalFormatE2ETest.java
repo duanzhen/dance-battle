@@ -123,7 +123,7 @@ class RevivalFormatE2ETest {
         // 复活赛名单 = 海选每圈第 9-24 名(2 组) → 替换掉默认"海选晋级"
         Long revivalRosterId = rosterService.listByTarget(revival.getId()).get(0).getId();
         addCircleRankGroups(revival.getId(), audition.getId(), "ANY", 9, 24); // 海选出口只按圈内名次取人(结果不限)
-        rosterService.removeGroup(revivalRosterId, 0); // 去掉默认 ADVANCE 组
+        rosterService.removeGroup(revivalRosterId, defaultGroupIdOf(revival.getId())); // 去掉默认 ADVANCE 组
 
         // 32 强名单 = 海选每圈前 8(跨级直入,2 组) + 默认复活晋级组
         Long round32RosterId = rosterService.listByTarget(round32.getId()).get(0).getId();
@@ -239,7 +239,7 @@ class RevivalFormatE2ETest {
         group.setQuota(0);
         bo.setGroups(List.of(group));
         rosterService.addGroups(revival.getId(), bo);
-        rosterService.removeGroup(revivalRosterId, 0); // 去掉默认"海选晋级"组
+        rosterService.removeGroup(revivalRosterId, defaultGroupIdOf(revival.getId())); // 去掉默认"海选晋级"组
 
         // 海选:先按配置预建唯一圈,再逐个签到落圈(单圈同样是显式配置的一个圈)
         lifecycleService.ensureAuditionCircles(audition.getId());
@@ -744,6 +744,15 @@ class RevivalFormatE2ETest {
         return competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
             .eq(TCompetitor::getStageId, stageId)
             .eq(TCompetitor::getOutcomeStatus, outcome));
+    }
+
+    /** 建段时自动补的那条默认衔接边的行 ID */
+    private Long defaultGroupIdOf(Long targetStageId) {
+        return rosterService.groupsOfStage(targetStageId).stream()
+            .filter(g -> Integer.valueOf(1).equals(g.getGenerated()))
+            .map(TStageRosterGroupBo::getId)
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("该赛段应有系统生成的默认衔接边"));
     }
 
     /** 模拟导播在中间态把"待落位"的人拖到座位上(多入口汇合必须先落位才能确认名单) */

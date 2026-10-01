@@ -301,7 +301,7 @@ CREATE TABLE `t_stage` (
   `members` int DEFAULT '1' COMMENT '每队选手数量',
   `visual_col_index` int DEFAULT NULL COMMENT '在大图中处于第几列 (X轴)',
   `rule_config` json DEFAULT NULL,
-  `roster_config_json` json DEFAULT NULL COMMENT '名单来源组(groups,唯一事实源)',
+  -- 名单来源组已搬到独立边表 t_stage_roster_group(赛段间依赖的边+取人规则)
   `roster_applied` tinyint DEFAULT '0' COMMENT '名单快照已物化(apply成功置1)',
   `roster_skipped` tinyint DEFAULT '0' COMMENT '名单显式跳过(不带人)',
   `status` enum('DRAFT','GAMING','SETTLED','DISCARD') DEFAULT 'DRAFT' COMMENT '状态(赛段无 PENDING:初始化只锁名单,状态保持 DRAFT)',
@@ -316,6 +316,49 @@ CREATE TABLE `t_stage` (
   `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='赛段流程';
+
+--
+-- Table structure for table `t_stage_roster_group`
+-- 赛段名单来源组:赛段间依赖的"边 + 取人规则"。一条行 = 一条出口/入边
+-- (source→target),图上的分叉=同 source 多行、汇合=同 target 多行、
+-- 平行边=同一对节点之间按圈/名次段切分的多行。
+-- auto_generated=1 表示"建段时系统自动补的链式衔接"(删掉即永久生效,不再补回)。
+-- 列名不叫 generated:MySQL 8 把 GENERATED 当保留字,裸列名会语法报错。
+--
+
+DROP TABLE IF EXISTS `t_stage_roster_group`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `t_stage_roster_group` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `tenant_id` bigint NOT NULL COMMENT '租户ID',
+  `tournament_id` bigint NOT NULL COMMENT '赛事ID(冗余,方便按赛事查询)',
+  `target_stage_id` bigint NOT NULL COMMENT '入边:这条规则把谁带进哪个赛段',
+  `source_stage_id` bigint DEFAULT NULL COMMENT '来源赛段;NULL=外部签到/报名',
+  `result_filter` varchar(16) DEFAULT NULL COMMENT 'ADVANCE/ELIMINATED/ANY/WITHDRAWN/PENDING',
+  `zone` varchar(32) DEFAULT NULL COMMENT '圈过滤,如 ZONE-1',
+  `round_no` int DEFAULT NULL COMMENT '淘汰赛第几轮(display_row)',
+  `rank_start` int DEFAULT NULL COMMENT '名次起',
+  `rank_end` int DEFAULT NULL COMMENT '名次止',
+  `rank_by_zone` tinyint NOT NULL DEFAULT '0' COMMENT '1=名次取圈内名次(rank_in_match),0=赛段全局名次(final_rank)',
+  `score_min` decimal(10,2) DEFAULT NULL COMMENT '分数起',
+  `score_max` decimal(10,2) DEFAULT NULL COMMENT '分数止',
+  `fill_mode` varchar(16) NOT NULL DEFAULT 'AUTO' COMMENT 'AUTO/MANUAL/STREAM',
+  `quota` int NOT NULL DEFAULT '0' COMMENT '本组取人上限,0=不限',
+  `order_by` varchar(24) DEFAULT NULL COMMENT '组内排序键(空=海选源自动按圈名次轮转)',
+  `sort_order` int NOT NULL DEFAULT '1' COMMENT '取人顺序(小者先取)',
+  `auto_generated` tinyint NOT NULL DEFAULT '0' COMMENT '1=建段时系统自动补的链式衔接',
+  `create_by` bigint DEFAULT NULL COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`),
+  KEY `idx_roster_group_target` (`target_stage_id`,`sort_order`),
+  KEY `idx_roster_group_source` (`source_stage_id`),
+  KEY `idx_roster_group_tournament` (`tournament_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='赛段名单来源组(依赖边+取人规则)';
+/*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

@@ -315,13 +315,8 @@ const isSemi = ref(false);
 const thirdPlaceEnabled = ref(false);
 const stageModeError = ref(false);
 const stageMode = ref('');
-/** 上一赛段ID:预排/决赛来源解析依赖上一赛段,收到其事件时也需刷新 */
-const prevStageId = ref<string | number | null>(null);
-const prevZoneMap = ref<Record<string, string>>({});
 const stagePairingMode = ref('');
 const stageTeamCountStart = ref(0);
-/** 上一赛段赛制:配对模式未落库时按后端同一口径推导(海选/排名赛 → 种子摆位) */
-const prevStageMode = ref('');
 /** 赛事级红蓝配色(所有下属淘汰赛共享) */
 const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
 
@@ -360,7 +355,6 @@ const loadData = async () => {
     competitors.value = [];
     matches.value = [];
     stageMode.value = '';
-    prevStageId.value = null;
     return;
   }
   if (!loadedOnce.value) {
@@ -371,22 +365,11 @@ const loadData = async () => {
     let stageInfo: any = null;
     try {
       stageInfo = await getStage(props.stageId);
-      prevStageId.value = stageInfo?.data?.prevStageId ?? null;
       stagePairingMode.value = JSON.parse(stageInfo?.data?.ruleConfig || '{}')?.knockout?.pairingMode || '';
       stageTeamCountStart.value = Number(stageInfo?.data?.teamCountStart) || 0;
-      prevStageMode.value = '';
-      if (prevStageId.value) {
-        try {
-          prevStageMode.value = (await getStage(prevStageId.value))?.data?.stageMode || '';
-        } catch (e) {
-          prevStageMode.value = '';
-        }
-      }
     } catch (e) {
-      prevStageId.value = null;
       stagePairingMode.value = '';
       stageTeamCountStart.value = 0;
-      prevStageMode.value = '';
     }
     // 赛事级红蓝配色:从 tournament.themeConfig 读取(所有淘汰赛共享)
     colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
@@ -464,27 +447,6 @@ const loadData = async () => {
     isFinal.value = isKnockout && endN === 1;
     isSemi.value = isKnockout && startN === 4;
     thirdPlaceEnabled.value = !!ko.thirdPlaceMatch;
-    prevZoneMap.value = {};
-    if (isFinal.value && matches.value.length === 1) {
-      try {
-        // 上一赛段(半决赛)按 displayZone 记录各参赛方来源:LEFT/RIGHT
-        if (prevStageId.value) {
-          const pm: any = await listMatch({ stageId: prevStageId.value, pageNum: 1, pageSize: 999 } as any);
-          const prevMatches = pm?.data?.data || pm?.data || [];
-          // 同上:上一赛段也一次取回(此前是 for + await 串行逐场请求)
-          const prevPartsByMatch = await loadParticipantsByStage(prevStageId.value);
-          for (const m of prevMatches) {
-            (prevPartsByMatch[m.id] || []).forEach((p: any) => {
-              if (p.competitorId != null) {
-                prevZoneMap.value[p.competitorId] = m.displayZone || 'LEFT';
-              }
-            });
-          }
-        }
-      } catch (e) {
-        // 决赛来源解析失败则按槽位兜底
-      }
-    }
     loadedOnce.value = true;
   } catch (e) {
     console.error('BracketWidget 加载失败', e);
@@ -726,9 +688,7 @@ const bracketSlots = computed<BracketSlot[]>(() => {
     bySeat.set(Number.isFinite(seat) && seat > 0 ? seat : idx + 1, c);
   });
   const atSeat = (seatNo: number) => bySeat.get(seatNo) ?? null;
-  const seedMode =
-    (stagePairingMode.value ? String(stagePairingMode.value).toUpperCase() === 'SEED' : false) ||
-    (!stagePairingMode.value && (prevStageMode.value === 'AUDITION' || prevStageMode.value === 'RANK'));
+  const seedMode = stagePairingMode.value ? String(stagePairingMode.value).toUpperCase() === 'SEED' : false;
   const bracketSize = Math.max(2, nextPow2(plan));
   const layout = seedMode ? seedLayout(bracketSize) : null;
   const pairCount = Math.max(1, bracketSize / 2);
@@ -760,13 +720,13 @@ const bracketSlots = computed<BracketSlot[]>(() => {
 
 const emptyHint = computed(() => {
   if (stageMode.value === 'ARENA') {
-    return '等待 16 强结算,晋级 8 强名单生成后展示';
+    return '等待名单来源结算,晋级名单生成后展示';
   }
   if (preStatus.value === 'WAIT_PREV') {
-    return '等待上一赛段结算,胜者产生后自动预排';
+    return '等待名单来源结算,晋级者产生后自动预排';
   }
   if (preStatus.value === 'NO_PREV') {
-    return '未关联上一赛段,暂无可预排对阵';
+    return '暂无可预排对阵';
   }
   if (preStatus.value === 'UNSUPPORTED') {
     return '仅淘汰赛之间支持预排';
@@ -774,7 +734,7 @@ const emptyHint = computed(() => {
   return props.stageId ? '该赛段暂无参赛方' : '未绑定赛段(编辑里选赛段)';
 });
 
-// 决赛三框:左/右半区晋级选手(按来源 displayZone 归位,兜底按槽位)
+// 决赛三框:左/右两位决赛选手按本场槽位(座位号 1/2)归位
 const finalists = computed(() => {
   const out: any = { left: null, right: null };
   if (!isFinal.value) {
@@ -796,12 +756,6 @@ const finalists = computed(() => {
     }
     return out;
   }
-  const sourceOf: Record<string, string> = {};
-  competitors.value.forEach((c: any) => {
-    if (c.sourceCompetitorId) {
-      sourceOf[c.id] = c.sourceCompetitorId;
-    }
-  });
   const toCard = (p: any) => ({
     competitorId: p.competitorId,
     name: nameOf(p.competitorId),
@@ -809,14 +763,14 @@ const finalists = computed(() => {
     score: p.scoreValue == null ? '' : String(p.scoreValue)
   });
   // 按槽位定位:轮空一侧不落 participant 行,不能用数组下标代替左右槽
+  // 左右由决赛自己的槽位(座位号)直接决定:1 号位 = 左,2 号位 = 右。
+  // 不再按"上一赛段那场半决赛在第几半区"去推断 —— 位置号已经把答案写死了。
   const { left: a, right: b } = participantsBySlot(m.id);
   if (a) {
-    const side = prevZoneMap.value[sourceOf[a.competitorId]] || 'LEFT';
-    out[side === 'RIGHT' ? 'right' : 'left'] = toCard(a);
+    out.left = toCard(a);
   }
   if (b) {
-    const side = prevZoneMap.value[sourceOf[b.competitorId]] || 'RIGHT';
-    out[side === 'RIGHT' ? 'right' : 'left'] = toCard(b);
+    out.right = toCard(b);
   }
   return out;
 });

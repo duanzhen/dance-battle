@@ -109,14 +109,6 @@ public interface ITStageService {
     StageFlowVo getFlowByTournamentId(Long tournamentId);
 
     /**
-     * 上一赛段:优先按 prevStageId 直取;prevStageId 悬空(指向已删除赛段)或缺失时,
-     * 按同赛事内 nextStageId == 本赛段反向反查兜底(排除 DISCARD),保证断链可自愈。
-     *
-     * <p>赛段链的遍历口径只此一份:开赛守卫、流程展示等所有调用方共用。</p>
-     */
-    TStage resolvePrevStage(TStage stage);
-
-    /**
      * 下一赛段对战树预排:上一赛段胜者按种子顺位排入本赛段
      */
     PreBracketVo getPreBracket(Long stageId);

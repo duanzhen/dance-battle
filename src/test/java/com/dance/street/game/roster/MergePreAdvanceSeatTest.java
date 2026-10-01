@@ -37,12 +37,15 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -160,6 +163,54 @@ class MergePreAdvanceSeatTest {
         assertTrue(post.getItems().stream()
                 .allMatch(i -> i.getSeedRank() != null && !Boolean.TRUE.equals(i.getHolding())),
             "物化后每个人都应有座位号");
+    }
+
+    /**
+     * 把已落位的人拖回待落位区,必须真的把座位号清掉。
+     *
+     * <p>回归事故:落库走的是 {@code updateById},MyBatis-Plus 默认跳过 null 字段,
+     * {@code slot=null} 根本写不进去 —— 人被拖走后还占着原座位,而其余人被重新编号后
+     * 顶到了同一个座位。现场表现就是"拖进去的那个人当场消失,之后再怎么拖都没反应"。</p>
+     */
+    @Test
+    void draggingSeatedPersonBackToHoldingClearsSeat() {
+        Long tid = newTournament("drag-to-holding");
+        TStageVo semi = newStage(tid, "半决赛", 4L, 2L, null);
+        insertCompetitors(tid, semi.getId(), 4);
+        TStageVo finals = newStage(tid, "决赛", 4L, 2L, semi.getId());
+
+        initializeAndGenerate(semi.getId());
+        for (TMatch m : matchesOf(semi.getId())) {
+            matchResultService.startMatch(m.getId());
+            submitLeftWin(m);
+        }
+        lifecycleService.completeStage(semi.getId());
+
+        List<TStageRosterEntry> seated = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+            .sorted(Comparator.comparing(TStageRosterEntry::getSlot))
+            .toList();
+        assertEquals(2, seated.size(), "半决赛结算后两人落进决赛名单");
+
+        // 把 2 号位的人拖回待落位区(前端会把剩下的人重新编号成 1..N)
+        TStageRosterOrderBo.Item keep = new TStageRosterOrderBo.Item();
+        keep.setOverrideId(seated.get(0).getId());
+        keep.setSeedRank(1L);
+        TStageRosterOrderBo.Item toHolding = new TStageRosterOrderBo.Item();
+        toHolding.setOverrideId(seated.get(1).getId());
+        toHolding.setHolding(true);
+        rosterService.reorderRoster(finals.getId(), List.of(keep, toHolding));
+
+        TStageRosterEntry moved = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> Objects.equals(e.getId(), seated.get(1).getId()))
+            .findFirst().orElseThrow();
+        assertNull(moved.getSlot(), "拖回待落位区的人不能还占着座位号");
+
+        List<Long> slots = seatedSlots(finals.getId());
+        assertEquals(1, slots.size(), "座位上只剩没被拖走的那个人,实际=" + slots);
+        assertEquals(slots.size(), new HashSet<>(slots).size(), "不能出现两个人挤同一个座位");
+        assertEquals(List.of(seated.get(1).getSourceCompetitorId()), holdingCompetitorIds(finals.getId()),
+            "被拖走的人应该在待落位区");
     }
 
     /**

@@ -77,6 +77,19 @@
         >
           完成赛段
         </button>
+
+        <!-- 撤销赛段数据:发现数据出错时重新处理 -->
+        <button
+          v-if="localStage.status !== 'DISCARD'"
+          @click="doUndoStageData"
+          :disabled="lifecycleLoading"
+          class="w-full py-2.5 text-sm font-medium rounded-lg border border-red-900/30 text-red-500 hover:bg-red-900/10 hover:border-red-900/50 transition-colors disabled:opacity-50"
+        >
+          撤销赛段数据
+        </button>
+        <p v-if="localStage.status !== 'DISCARD'" class="text-[10px] text-neutral-500 leading-relaxed">
+          数据出错时用:删除本赛段下属的全部比赛数据,整体退回「中间态还没确认」,可重新调整后再次确认名单。
+        </p>
       </div>
 
       <!-- 海选:裁判由「圈配置」按圈指定,这里不再单独配置裁判组(避免两处口径) -->
@@ -154,7 +167,7 @@
 import { ref, watch, computed, reactive } from 'vue';
 import { Settings } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { startStage, completeStage } from '@/api/game/stage/lifecycle';
+import { startStage, completeStage, resetStageToDraft } from '@/api/game/stage/lifecycle';
 import { listReferee } from '@/api/game/referee';
 import { getStageRefereeIds, assignStageReferees } from '@/api/game/refereeStage';
 import { StageData, StageMode } from './types';
@@ -187,6 +200,8 @@ const prevStage = computed(() => {
   return props.stages?.find((s) => String(s.id) === String(cur.prevStageId)) || null;
 });
 const canStartStage = computed(() => !prevStage.value || prevStage.value.status === 'SETTLED');
+/** 入口赛段(链上第一个):没有中间态,撤销时人不变、只清比赛与判罚数据 */
+const isEntryStage = computed(() => !prevStage.value);
 
 // 赛段类型标签映射
 const stageModeLabels: Record<string, string> = {
@@ -316,6 +331,34 @@ const doComplete = async () => {
     lifecycleLoading.value = false;
   }
 };
+
+/** 撤销赛段数据:删掉本赛段下属全部比赛数据,退回「中间态还没确认」 */
+const doUndoStageData = async () => {
+  if (!localStage.value?.id) {
+    ElMessage.warning('请先保存赛段');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认撤销赛段「${localStage.value.name}」的数据？\n\n` +
+        '将删除本赛段下属的全部比赛数据（场次、轮次、参赛明细、裁判、打分）。\n' +
+        (isEntryStage.value
+          ? '这是入口赛段（没有中间态）：参赛人保持不变，只清掉比赛与判罚数据，可以直接重新开赛。\n'
+          : '本赛段退回「中间态还没确认」，需要重新调整并确认名单后再开赛。\n') +
+        '撤销只能从后往前：后面的赛段如果还在进行中/已结束，需要先撤销后面的赛段。',
+      '撤销赛段数据',
+      { type: 'warning', confirmButtonText: '确认撤销', cancelButtonText: '取消' }
+    );
+  } catch {
+    return;
+  }
+  runLifecycle(
+    () => resetStageToDraft(localStage.value.id),
+    'DRAFT',
+    isEntryStage.value ? '赛段数据已撤销,参赛人保持不变' : '赛段数据已撤销,已退回中间态未确认'
+  );
+};
+
 // ===== 裁判分配 =====
 const refereeList = ref<{ id: string | number; name: string }[]>([]);
 const selectedRefereeIds = ref<string[]>([]);

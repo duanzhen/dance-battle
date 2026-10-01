@@ -75,23 +75,37 @@ public class TStageRosterController {
         return R.ok(rosterService.addGroups(stageId, bo));
     }
 
-    /** 删除某一来源组 */
+    /** 删除某一条来源组(按行 ID 定位,不再用数组下标) */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "删除名单来源组", businessType = BusinessType.UPDATE)
-    @DeleteMapping("/{stageId}/roster/groups/{groupIndex}")
-    public R<Void> removeGroup(@PathVariable Long stageId, @PathVariable int groupIndex) {
-        rosterService.removeGroup(stageId, groupIndex);
+    @DeleteMapping("/{stageId}/roster/groups/{groupId}")
+    public R<Void> removeGroup(@PathVariable Long stageId, @PathVariable Long groupId) {
+        rosterService.removeGroup(stageId, groupId);
         return R.ok();
     }
 
-    /** 编辑某一来源组规则(出口/入口自定义配置共用) */
+    /** 编辑某一条来源组规则(出口/入口自定义配置共用,按行 ID 定位) */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "更新名单来源组", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
-    @PutMapping("/{stageId}/roster/groups/{groupIndex}")
-    public R<Void> updateGroup(@PathVariable Long stageId, @PathVariable int groupIndex,
+    @PutMapping("/{stageId}/roster/groups/{groupId}")
+    public R<Void> updateGroup(@PathVariable Long stageId, @PathVariable Long groupId,
                                @RequestBody TStageRosterGroupBo group) {
-        rosterService.updateGroup(stageId, groupIndex, group);
+        rosterService.updateGroup(stageId, groupId, group);
+        return R.ok();
+    }
+
+    /**
+     * 调整取人顺序:按传入的组 ID 顺序重写 {@code sortOrder}(1..N)。
+     *
+     * <p>取人顺序决定"先取哪条出口的人",多出口时是真正影响落位的配置。</p>
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "调整名单来源顺序", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PutMapping("/{stageId}/roster/groups/order")
+    public R<Void> reorderGroups(@PathVariable Long stageId, @RequestBody List<Long> groupIds) {
+        rosterService.reorderGroups(stageId, groupIds);
         return R.ok();
     }
 

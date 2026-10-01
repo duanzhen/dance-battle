@@ -32,9 +32,6 @@ public final class RosterConstants {
     /** result_filter 取值:ANY 表示不限结果(与 OutcomeStatusEnum 互补) */
     public static final String FILTER_ANY = "ANY";
 
-    /** 外部来源(签到/GUEST/手动)的默认优先级:最高,先填充且优先保留 */
-    public static final int EXTERNAL_ROSTER_PRIORITY = 0;
-
     /** 中间层行的来历:规则生成 / 人工调整(仅用于提示与显示,不参与合并) */
     public static final String ENTRY_ORIGIN_RULE = "RULE";
     public static final String ENTRY_ORIGIN_MANUAL = "MANUAL";

@@ -1,5 +1,8 @@
 package com.dance.street.game.config;
 
+import cn.hutool.core.util.IdUtil;
+import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,7 +21,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import java.sql.Types;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -75,6 +81,8 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
     private static final String PARTICIPANT_TABLE = "t_match_participant";
     /** 需要额外放宽 slot 可空性(多入口汇合时"待落位"行没有座位号)的表 */
     private static final String ROSTER_ENTRY_TABLE = "t_stage_roster_entry";
+    /** 名单来源组(赛段间依赖的边+取人规则)表:老库的 JSON 规则要一次性搬进来 */
+    private static final String ROSTER_GROUP_TABLE = "t_stage_roster_group";
 
     private final DataSource dataSource;
     private final String jdbcUrl;
@@ -154,6 +162,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                     log.error("自动建表失败: {} - {}", table, e.getMessage());
                 }
             }
+            migrateRosterGroups(connection, false);
         } catch (SQLException e) {
             log.error("连接数据库检查表结构失败: {}", e.getMessage());
             return;
@@ -214,6 +223,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                     log.error("自动建索引失败: {} - {}", extractIndexName(index), e.getMessage());
                 }
             }
+            migrateRosterGroups(connection, true);
         } catch (SQLException e) {
             log.error("连接 SQLite 检查表结构失败: {}", e.getMessage());
             return;
@@ -387,6 +397,139 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         log.info("schema 自检: 已放宽 {}.slot 为可空(支持多入口汇合的待落位行)", ROSTER_ENTRY_TABLE);
     }
 
+    /**
+     * 一次性数据搬迁:把老库里 {@code t_stage.roster_config_json} 的来源组搬进
+     * {@code t_stage_roster_group}(新库不再有这一列)。
+     *
+     * <p>只搬"目标赛段在边表里一条组都没有"的赛段,搬完把该赛段的 JSON 置空作为"已搬迁"标记——
+     * 这样只搬一次;否则之后现场手工删掉的组会在下次重启时复活。</p>
+     *
+     * <p>搬迁时按旧代码的"字段长相"补 {@code generated} 标记:旧数据里那批默认衔接本来就是按长相生成的。
+     * 新写入的行一律由业务代码显式给 {@code generated},不再猜。</p>
+     */
+    private void migrateRosterGroups(Connection connection, boolean sqlite) {
+        try {
+            boolean groupTableExists = sqlite
+                ? sqliteTableExists(connection, ROSTER_GROUP_TABLE)
+                : tableExists(connection, ROSTER_GROUP_TABLE);
+            if (!groupTableExists) {
+                return;
+            }
+            if (!existingColumns(connection, "t_stage", sqlite).contains("roster_config_json")) {
+                return;   // 新库没有这一列,无需搬迁
+            }
+            Set<Long> targetsWithGroups = new HashSet<>();
+            try (Statement statement = connection.createStatement();
+                 ResultSet rs = statement.executeQuery(
+                     "SELECT DISTINCT target_stage_id FROM `" + ROSTER_GROUP_TABLE + "`")) {
+                while (rs.next()) {
+                    targetsWithGroups.add(rs.getLong(1));
+                }
+            }
+            List<long[]> stageRows = new ArrayList<>();
+            List<String> jsonRows = new ArrayList<>();
+            try (Statement statement = connection.createStatement();
+                 ResultSet rs = statement.executeQuery("SELECT id, tenant_id, tournament_id, roster_config_json"
+                     + " FROM t_stage WHERE roster_config_json IS NOT NULL")) {
+                while (rs.next()) {
+                    stageRows.add(new long[]{rs.getLong(1), rs.getLong(2), rs.getLong(3)});
+                    jsonRows.add(rs.getString(4));
+                }
+            }
+            int migrated = 0;
+            for (int i = 0; i < stageRows.size(); i++) {
+                long[] stage = stageRows.get(i);
+                if (targetsWithGroups.contains(stage[0])) {
+                    continue;
+                }
+                List<TStageRosterGroupBo> groups;
+                try {
+                    groups = StageRosterGroupCodec.parse(jsonRows.get(i));
+                } catch (RuntimeException e) {
+                    log.warn("来源组搬迁:赛段[{}]的 JSON 无法解析,已跳过({})", stage[0], e.getMessage());
+                    continue;
+                }
+                int order = 1;
+                for (TStageRosterGroupBo g : groups) {
+                    insertGroupRow(connection, stage, g, order++);
+                }
+                clearRosterJson(connection, stage[0]);
+                migrated++;
+            }
+            if (migrated > 0) {
+                log.info("schema 自检: 已把 {} 个赛段的来源组从 roster_config_json 搬迁到 {}",
+                    migrated, ROSTER_GROUP_TABLE);
+            }
+        } catch (Exception e) {
+            // 搬迁失败不影响启动:业务仍能跑,只是老数据没带过来
+            log.warn("来源组一次性搬迁失败(不影响启动): {}", e.getMessage());
+        }
+    }
+
+    private static void insertGroupRow(Connection connection, long[] stage, TStageRosterGroupBo g, int order)
+        throws SQLException {
+        String sql = "INSERT INTO `" + ROSTER_GROUP_TABLE + "` (id, tenant_id, tournament_id, target_stage_id,"
+            + " source_stage_id, result_filter, zone, round_no, rank_start, rank_end, rank_by_zone,"
+            + " score_min, score_max, fill_mode, quota, order_by, sort_order, auto_generated, create_time)"
+            + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            int i = 1;
+            ps.setLong(i++, IdUtil.getSnowflakeNextId());
+            ps.setLong(i++, stage[1]);
+            ps.setLong(i++, stage[2]);
+            ps.setLong(i++, stage[0]);
+            if (g.getSourceStageId() == null) {
+                ps.setNull(i++, Types.BIGINT);
+            } else {
+                ps.setLong(i++, g.getSourceStageId());
+            }
+            ps.setString(i++, g.getResultFilter());
+            ps.setString(i++, g.getZone());
+            if (g.getRound() == null) {
+                ps.setNull(i++, Types.INTEGER);
+            } else {
+                ps.setInt(i++, g.getRound());
+            }
+            if (g.getRankStart() == null) {
+                ps.setNull(i++, Types.INTEGER);
+            } else {
+                ps.setInt(i++, g.getRankStart());
+            }
+            if (g.getRankEnd() == null) {
+                ps.setNull(i++, Types.INTEGER);
+            } else {
+                ps.setInt(i++, g.getRankEnd());
+            }
+            ps.setInt(i++, Boolean.TRUE.equals(g.getRankByZone()) ? 1 : 0);
+            if (g.getScoreMin() == null) {
+                ps.setNull(i++, Types.DECIMAL);
+            } else {
+                ps.setBigDecimal(i++, g.getScoreMin());
+            }
+            if (g.getScoreMax() == null) {
+                ps.setNull(i++, Types.DECIMAL);
+            } else {
+                ps.setBigDecimal(i++, g.getScoreMax());
+            }
+            ps.setString(i++, g.getFillMode() == null ? "AUTO" : g.getFillMode());
+            ps.setInt(i++, g.getQuota() == null ? 0 : g.getQuota());
+            ps.setString(i++, g.getOrderBy());
+            ps.setInt(i++, order);
+            // 旧数据里"长得像默认衔接"的就是当年自动生成的那些,搬进来时补上标记
+            ps.setInt(i++, g.looksLikeGeneratedDefault() ? 1 : 0);
+            ps.setTimestamp(i, new Timestamp(System.currentTimeMillis()));
+            ps.executeUpdate();
+        }
+    }
+
+    private static void clearRosterJson(Connection connection, long stageId) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+            "UPDATE t_stage SET roster_config_json = NULL WHERE id = ?")) {
+            ps.setLong(1, stageId);
+            ps.executeUpdate();
+        }
+    }
+
     /** SQLite 改列(去 NOT NULL)的唯一做法:按建表脚本重建同构新表并搬迁数据,索引随后由脚本重建 */
     private static void rebuildSqliteTable(Connection connection, String table, String createDdl, String tmpSuffix)
         throws SQLException {
@@ -500,6 +643,16 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         Map<String, String> columns = new LinkedHashMap<>();
         for (String raw : splitTopLevel(ddl.substring(open + 1, close))) {
             String definition = raw.trim();
+            // 脚本里允许在列定义之间夹注释行(`-- xxx` / `# xxx`);注释不是列,
+            // 但同一段里紧随其后的列定义要保留下来。
+            while (definition.startsWith("--") || definition.startsWith("#")) {
+                int newline = definition.indexOf('\n');
+                if (newline < 0) {
+                    definition = "";
+                    break;
+                }
+                definition = definition.substring(newline + 1).trim();
+            }
             if (definition.isEmpty()) {
                 continue;
             }

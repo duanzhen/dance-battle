@@ -87,20 +87,32 @@ export const setRosterOrder = (stageId: string | number, items: { sourceCompetit
   });
 };
 
-/** 删除某一来源组 */
-export const removeRosterGroup = (stageId: string | number, groupIndex: number) => {
+/** 删除某一来源组(按行 ID 定位,不再用数组下标) */
+export const removeRosterGroup = (stageId: string | number, groupId: string | number) => {
   return request({
-    url: `/game/stage/${stageId}/roster/groups/${groupIndex}`,
+    url: `/game/stage/${stageId}/roster/groups/${groupId}`,
     method: 'delete'
   });
 };
 
 /** 编辑某一来源组规则(出口/入口自定义配置共用) */
-export const updateRosterGroup = (stageId: string | number, groupIndex: number, data: RosterGroupRule) => {
+export const updateRosterGroup = (stageId: string | number, groupId: string | number, data: RosterGroupRule) => {
   return request({
-    url: `/game/stage/${stageId}/roster/groups/${groupIndex}`,
+    url: `/game/stage/${stageId}/roster/groups/${groupId}`,
     method: 'put',
     data
+  });
+};
+
+/**
+ * 调整取人顺序:按传入的组 ID 顺序重写 sortOrder(1..N)。
+ * 取人顺序决定"先取哪条出口的人",多出口时直接影响落位。
+ */
+export const reorderRosterGroups = (stageId: string | number, groupIds: (string | number)[]) => {
+  return request({
+    url: `/game/stage/${stageId}/roster/groups/order`,
+    method: 'put',
+    data: groupIds
   });
 };
 
@@ -122,11 +134,7 @@ export const addRosterOverride = (stageId: string | number, data: RosterOverride
 };
 
 /** 编辑人工覆盖 */
-export const updateRosterOverride = (
-  stageId: string | number,
-  overrideId: string | number,
-  data: RosterOverrideBody
-) => {
+export const updateRosterOverride = (stageId: string | number, overrideId: string | number, data: RosterOverrideBody) => {
   return request({
     url: `/game/stage/${stageId}/roster/overrides/${overrideId}`,
     method: 'put',

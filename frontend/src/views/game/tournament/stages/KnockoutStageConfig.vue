@@ -60,6 +60,9 @@
             <div class="text-sm text-neutral-300">{{ config.teamsCount }} 名选手 → 单败淘汰 → {{ config.advanceCount }} 名选手晋级</div>
             <div class="text-xs text-neutral-500 mt-1">共需 {{ Math.ceil(Math.log2(config.teamsCount)) }} 轮比赛</div>
           </div>
+
+          <!-- 出口去向:赛段已开始/已结束时只读展示 -->
+          <StageExitConfig :stage="localStage" />
         </template>
 
         <!-- CREATE/INIT 模式: 可编辑 -->
@@ -262,8 +265,6 @@ import StageExitConfig from './StageExitConfig.vue';
 const props = defineProps<{
   stage: StageData;
   mode?: ConfigMode;
-  /** 上一赛段类型(用于默认配对方式:海选/排名后默认 SEED) */
-  prevStageMode?: string;
 }>();
 
 // Emits
@@ -378,8 +379,9 @@ const serializeConfig = () => {
   });
 };
 
-// 默认配对方式:上一赛段为海选/排名时种子交叉(SEED),否则顺序相邻(SEQUENTIAL)
-const defaultPairing = computed(() => (props.prevStageMode === 'AUDITION' || props.prevStageMode === 'RANK' ? 'SEED' : 'SEQUENTIAL'));
+// 默认配对方式:本赛段配置决定,未显式选择时按顺序相邻。
+// 不再根据"上一赛段是不是海选/排名"推断——头尾交叉是这里的显式选择。
+const defaultPairing = computed(() => 'SEQUENTIAL');
 
 // 生效配对方式:显式配置优先,未配置用默认
 const effectivePairingMode = computed(() => config.value.pairingMode || defaultPairing.value);
@@ -387,10 +389,7 @@ const effectivePairingMode = computed(() => config.value.pairingMode || defaultP
 const pairingLabel = computed(() => (effectivePairingMode.value === 'SEED' ? '头尾交叉' : '顺序配对'));
 
 const pairingHint = computed(() => {
-  if (props.prevStageMode === 'AUDITION' || props.prevStageMode === 'RANK') {
-    return `上一赛段为${props.prevStageMode === 'AUDITION' ? '海选赛' : '排名赛'},默认种子交叉(头尾);按抽签顺序相邻则切换为顺序配对`;
-  }
-  return '没有前置海选时按名单/抽签顺序默认顺序配对;需要头尾交叉(如 1 对 16)时请选择种子交叉';
+  return '默认顺序相邻(1-2、3-4…);需要强种子分散(如 1 对 16)时选择种子交叉。' + '注意:这里的选择只属于本赛段,和其他赛段的配置无关。';
 });
 
 const selectPairingMode = (mode: 'SEQUENTIAL' | 'SEED') => {

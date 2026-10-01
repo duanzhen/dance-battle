@@ -74,7 +74,7 @@ class SqliteSchemaInitializerTest {
 
         List<String> tables = queryStrings(dataSource,
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-        assertEquals(16, tables.size());
+        assertEquals(17, tables.size());
         assertTrue(tables.contains("t_tournament"));
         assertTrue(tables.contains("t_stage_roster_entry"));
         assertTrue(tables.contains("t_vis_widget"));
@@ -93,7 +93,8 @@ class SqliteSchemaInitializerTest {
     @Test
     void schemaInitializerAddsMissingColumnsToExistingTable() throws Exception {
         DataSource dataSource = newSqliteDataSource();
-        // 造一个「旧版本」的 t_stage:表在,但缺实体上已有的 roster 三列
+        // 造一个「旧版本」的 t_stage:表在,但缺实体上已有的 roster 状态位列
+        // (roster_config_json 已随来源组表化下线,不再补)
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE `t_stage` (`id` INTEGER NOT NULL, `name` TEXT, PRIMARY KEY (`id`))");
@@ -103,9 +104,8 @@ class SqliteSchemaInitializerTest {
         new DatabaseSchemaInitializer(dataSource, "jdbc:sqlite::memory:", null, null, true)
             .afterSingletonsInstantiated();
 
-        // 缺的列被自动补上(否则查询会报 no such column: roster_config_json)
+        // 缺的列被自动补上(否则查询会报 no such column: roster_applied)
         List<String> columns = queryStrings(dataSource, "SELECT name FROM pragma_table_info('t_stage')");
-        assertTrue(columns.contains("roster_config_json"), "应补上 roster_config_json: " + columns);
         assertTrue(columns.contains("roster_applied"), "应补上 roster_applied: " + columns);
         assertTrue(columns.contains("roster_skipped"), "应补上 roster_skipped: " + columns);
         // 只加列,不动已有数据

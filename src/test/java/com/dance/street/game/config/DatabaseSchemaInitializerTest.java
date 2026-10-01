@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 验证 sql/game_db.sql 的建表语句解析:只保留 CREATE TABLE,
- * 忽略 DROP/SET/注释,并正确识别 16 张业务表。
+ * 忽略 DROP/SET/注释,并正确识别 17 张业务表。
  */
 class DatabaseSchemaInitializerTest {
 
@@ -29,7 +29,7 @@ class DatabaseSchemaInitializerTest {
 
         List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
 
-        assertEquals(16, ddlList.size());
+        assertEquals(17, ddlList.size());
         for (String ddl : ddlList) {
             assertTrue(ddl.matches("(?is)^CREATE\\s+TABLE.*"), "应为 CREATE TABLE 语句: " + ddl);
             assertFalse(ddl.matches("(?is)^DROP\\s+TABLE.*"), "不应包含 DROP 语句: " + ddl);
@@ -42,6 +42,8 @@ class DatabaseSchemaInitializerTest {
             + "  `id` bigint NOT NULL,\n"
             + "  `amount` decimal(10,2) DEFAULT NULL,\n"
             + "  `remark` varchar(50) DEFAULT NULL COMMENT '标签A,标签B',\n"
+            + "  -- 夹在列定义之间的注释行(不能当成列名)\n"
+            + "  `flagged` tinyint NOT NULL DEFAULT 0,\n"
             + "  PRIMARY KEY (`id`),\n"
             + "  KEY `idx_amount` (`amount`),\n"
             + "  CONSTRAINT `fk_x` FOREIGN KEY (`id`) REFERENCES `t_y` (`id`)\n"
@@ -49,8 +51,8 @@ class DatabaseSchemaInitializerTest {
 
         java.util.Map<String, String> columns = DatabaseSchemaInitializer.parseColumnDefinitions(ddl);
 
-        // 类型里的逗号 decimal(10,2)、注释里的逗号都不应把定义切断;表级约束不算列
-        assertEquals(java.util.Set.of("id", "amount", "remark"), columns.keySet());
+        // 类型里的逗号 decimal(10,2)、注释里的逗号都不应把定义切断;表级约束与行内注释不算列
+        assertEquals(java.util.Set.of("id", "amount", "remark", "flagged"), columns.keySet());
         assertEquals("`amount` decimal(10,2) DEFAULT NULL", columns.get("amount"));
     }
 
@@ -98,8 +100,8 @@ class DatabaseSchemaInitializerTest {
         List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
         List<String> indexList = DatabaseSchemaInitializer.parseCreateIndexStatements(script);
 
-        assertEquals(16, ddlList.size());
-        assertEquals(19, indexList.size());
+        assertEquals(17, ddlList.size());
+        assertEquals(22, indexList.size());
         for (String index : indexList) {
             assertTrue(index.matches("(?is)^CREATE\\s+(UNIQUE\\s+)?INDEX.*"), "应为 CREATE INDEX 语句: " + index);
             assertFalse(index.matches("(?is)^CREATE\\s+TABLE.*"), "不应包含建表语句: " + index);

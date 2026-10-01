@@ -202,11 +202,10 @@ class AuditionZoneExitTest {
     /** 移除自动生成的默认衔接组(源=直接前驱、无圈/无名次段),与 TTournamentServiceImpl 口径一致 */
     private void removeGeneratedDefault(Long targetStageId, Long sourceStageId) {
         List<TStageRosterGroupBo> groups = rosterService.listByTarget(targetStageId).get(0).getGroups();
-        for (int i = 0; i < groups.size(); i++) {
-            TStageRosterGroupBo g = groups.get(i);
+        for (TStageRosterGroupBo g : groups) {
             if (Objects.equals(g.getSourceStageId(), sourceStageId)
                 && g.getZone() == null && g.getRankStart() == null && g.getRankEnd() == null) {
-                rosterService.removeGroup(targetStageId, i);
+                rosterService.removeGroup(targetStageId, g.getId());
                 return;
             }
         }

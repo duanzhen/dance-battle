@@ -70,11 +70,8 @@ public class TStage extends TenantEntity {
      */
     private String ruleConfig;
 
-    /**
-     * 名单来源组(JSON:{"groups":[...]},唯一事实源)
-     */
-    private String rosterConfigJson;
-
+    // 名单来源组已搬到独立边表 t_stage_roster_group(赛段间依赖的边+取人规则),
+    // 这里不再有 roster_config_json 列:依赖关系只留一份事实,避免"链/JSON/边表"三方打架。
     /**
      * 名单快照是否已物化(apply 成功置 1)
      */

@@ -147,8 +147,16 @@ public interface ITStageLifecycleService {
     StageCompleteVo completeStage(Long stageId);
 
     /**
-     * 回退到草稿:清除赛段已生成的全部场次(级联轮次/参赛明细/打分),参赛方回退待定,
-     * isInitialized 归零、状态置 DRAFT,可重新排种子/生成对阵。仅 DRAFT 状态可用。
+     * 撤销赛段数据(发现数据出错后重新处理):删除该赛段下属的全部比赛数据
+     * (场次/轮次/参赛明细/裁判/打分),名单快照回退,参赛方回退待定;
+     * isInitialized 与 rosterApplied/rosterSkipped 归零、状态置 DRAFT,
+     * 整体退回"中间态还没确认"的状态,可重新调整后再次确认名单。
+     *
+     * <p>撤销必须从后往前:本赛段的结果已被下游消费(下游不是规划中/已生成对阵/已确认名单)时
+     * 直接报错并点名下游赛段,先撤下游再撤本赛段。已取消(DISCARD)的赛段不可撤销。</p>
+     *
+     * <p>入口赛段(没有中间态、签到后直接进来)特殊处理:参赛人保持不变,
+     * 只删比赛与判罚数据,名单状态位不动,可直接重新开赛。</p>
      */
     void resetStageToDraft(Long stageId);
 

@@ -168,9 +168,9 @@
 
             <p v-if="currentStage && !canStart && currentStage.status === 'DRAFT'" class="mt-3 text-[10px] text-neutral-500 leading-relaxed">
               <template v-if="currentStage.awaitingAdvancement">
-                上一赛段已结束，晋级者尚未确认。请先在管理端「中间态」确认晋级，确认后「开始赛段」将自动可用。
+                名单来源已全部结束，晋级者尚未确认。请先在管理端「中间态」确认晋级，确认后「开始赛段」将自动可用。
               </template>
-              <template v-else> 上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。 </template>
+              <template v-else>名单来源尚未全部结束（依赖以出口配置为准，不一定是「上一赛段」），来源结束后方可开始本赛段。 </template>
             </p>
 
             <div v-if="currentStage.status === 'DRAFT'" class="mt-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/10">
@@ -925,18 +925,15 @@ const currentCompetitorByMatch = ref<Record<string, string | number | null>>({})
 
 const currentStage = computed(() => stages.value.find((s) => s.id === selectedStageId.value));
 
-// 上一赛段:由有序赛段列表反查(流程规范:上一赛段未结束不可开始下一赛段)
-const prevStage = computed(() => {
-  if (!currentStage.value?.prevStageId) return null;
-  return stages.value.find((s) => s.id === currentStage.value!.prevStageId) || null;
-});
-
+// 开赛依赖以名单来源(出口配置)为准;prevStageId 只用于展示"上一赛段"
 const canStart = computed(() => {
   if (!currentStage.value) return false;
   if (currentStage.value.status !== 'DRAFT') return false;
-  // 中间态未确认时:开启「跳过中间态确认」配置才允许点击(点击时弹窗确认后自动确认晋级再开始)
+  // 依赖以名单来源(出口配置)为准,不再看链上的"上一赛段":
+  // 来源已全部结束但名单还没确认时 awaitingAdvancement 为真,需先确认(开启「跳过中间态确认」则点击时弹窗确认)。
+  // 来源还没结束时后端会拦下并点名是哪几段,这里不再用前端复制一份判断。
   if (currentStage.value.awaitingAdvancement && !currentStage.value.skipConfirm) return false;
-  return !prevStage.value || prevStage.value.status === 'SETTLED';
+  return true;
 });
 
 const canComplete = computed(() => {

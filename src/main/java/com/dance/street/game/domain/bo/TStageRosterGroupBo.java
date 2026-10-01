@@ -15,6 +15,9 @@ import java.math.BigDecimal;
 @Data
 public class TStageRosterGroupBo {
 
+    /** 来源组行 ID(表化后按 id 定位,不再用数组下标);新增时为空 */
+    private Long id;
+
     /** 来源赛段(NULL=外部签到/外卡) */
     private Long sourceStageId;
 
@@ -46,8 +49,27 @@ public class TStageRosterGroupBo {
     /** 本组取人上限(0=不限) */
     private Integer quota;
 
-    /** 本组优先级(小者先取且优先保留) */
-    private Integer priority;
+    /** 取人顺序(小者先取);表化后由服务端按列表顺序维护(取代旧 JSON 里的 priority 死字段) */
+    private Integer sortOrder;
+
+    /** 1 = 建段时系统自动补的链式衔接(按出处判断,不再看字段长相) */
+    private Integer generated;
+
+    /**
+     * 旧 JSON 时代按"字段长相"判断这条是不是系统自动生成的链式衔接(上一赛段·整单晋级·AUTO)。
+     *
+     * <p><b>只用于一次性数据搬迁</b>:新代码一律读 {@code generated} 列,不再看长相——
+     * 出口面板配出来的自定义出口长相与默认组完全相同,按长相判断会把真实依赖误删。</p>
+     */
+    public boolean looksLikeGeneratedDefault() {
+        return sourceStageId != null
+            && (fillMode == null || "AUTO".equals(fillMode))
+            && "ADVANCE".equals(resultFilter)
+            && zone == null && round == null
+            && rankStart == null && rankEnd == null
+            && scoreMin == null && scoreMax == null
+            && !Boolean.TRUE.equals(rankByZone);
+    }
 
     /**
      * 组内排序键:FINAL_RANK/ZONE_RANK/ZONE_RANK_ROTATE/SCORE/NUMBER/RANDOM。

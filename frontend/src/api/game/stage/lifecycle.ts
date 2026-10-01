@@ -69,7 +69,11 @@ export const completeStage = (id: string | number) => {
   });
 };
 
-/** 重置赛段为草稿:清除已生成对阵,参赛方回退待定,可重新排种子/生成(仅 DRAFT 可用) */
+/**
+ * 撤销赛段数据(发现数据出错后重新处理):删除该赛段下属全部比赛数据
+ * (场次/轮次/参赛明细/裁判/打分),参赛方回退待定,整体退回「中间态还没确认」。
+ * 下游已确认名单或已开赛时必须先撤销下游。
+ */
 export const resetStageToDraft = (id: string | number) => {
   return request({
     url: '/game/stage/' + id + '/reset-to-draft',

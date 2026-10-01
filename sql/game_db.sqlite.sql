@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS `t_stage` (
   `members` INTEGER DEFAULT 1,
   `visual_col_index` INTEGER,
   `rule_config` TEXT,
-  `roster_config_json` TEXT,
+  -- 名单来源组已搬到独立边表 t_stage_roster_group
   `roster_applied` INTEGER DEFAULT 0,
   `roster_skipped` INTEGER DEFAULT 0,
   `status` TEXT DEFAULT 'DRAFT',
@@ -269,6 +269,41 @@ CREATE TABLE IF NOT EXISTS `t_stage` (
   `remark` TEXT,
   PRIMARY KEY (`id`)
 );
+
+-- ----------------------------
+-- Table structure for table `t_stage_roster_group`
+-- 赛段名单来源组:赛段间依赖的"边 + 取人规则"(auto_generated=1 表示系统自动补的链式衔接)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `t_stage_roster_group` (
+  `id` INTEGER NOT NULL,
+  `tenant_id` INTEGER NOT NULL,
+  `tournament_id` INTEGER NOT NULL,
+  `target_stage_id` INTEGER NOT NULL,
+  `source_stage_id` INTEGER,
+  `result_filter` TEXT,
+  `zone` TEXT,
+  `round_no` INTEGER,
+  `rank_start` INTEGER,
+  `rank_end` INTEGER,
+  `rank_by_zone` INTEGER NOT NULL DEFAULT 0,
+  `score_min` REAL,
+  `score_max` REAL,
+  `fill_mode` TEXT NOT NULL DEFAULT 'AUTO',
+  `quota` INTEGER NOT NULL DEFAULT 0,
+  `order_by` TEXT,
+  `sort_order` INTEGER NOT NULL DEFAULT 1,
+  `auto_generated` INTEGER NOT NULL DEFAULT 0,
+  `create_by` INTEGER,
+  `create_time` TEXT,
+  `update_by` INTEGER,
+  `update_time` TEXT,
+  `remark` TEXT,
+  PRIMARY KEY (`id`)
+);
+
+CREATE INDEX IF NOT EXISTS `idx_roster_group_target` ON `t_stage_roster_group` (`target_stage_id`, `sort_order`);
+CREATE INDEX IF NOT EXISTS `idx_roster_group_source` ON `t_stage_roster_group` (`source_stage_id`);
+CREATE INDEX IF NOT EXISTS `idx_roster_group_tournament` ON `t_stage_roster_group` (`tournament_id`);
 
 --
 -- Table structure for table `t_tournament`

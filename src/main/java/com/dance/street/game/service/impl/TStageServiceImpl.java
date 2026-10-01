@@ -35,7 +35,6 @@ import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.SnowflakeJson;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
-import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.engine.common.PairingModeResolver;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.service.RefereeSseNotifier;
@@ -849,20 +848,13 @@ public class TStageServiceImpl implements ITStageService {
             return vo;
         }
 
-        TStage prev = resolvePrevStage(stage);
-        if (prev == null) {
-            vo.setStatus("NO_PREV");
-            return vo;
-        }
-        // 预排用于 淘汰赛/海选/排名赛 → 淘汰赛;擂台赛段也要预排——对战树控件绑定擂台赛段后,
-        // 要在还没进入擂台赛时就显示"目前谁进来了"(名单写入前显示预排晋级者)。
-        // 小组等其他赛段间不做预排。
+        // 预排只做"中间态 → 对阵"的视图变换:内容全部来自中间层名单,与赛段链、来源组配置无关
+        // (依赖方向/开赛条件那些由开赛守卫与名单就绪度负责,这里不重复判断)。
+        // 淘汰赛与擂台赛段要预排(对战树控件绑上去后,名单写入前也能看到"目前谁进来了");
+        // 小组等其他赛制不做对阵预排。
         boolean targetKnockout = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode());
         boolean targetArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
-        boolean prevSupportsPreview = StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())
-            || StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
-            || StageModeEnum.RANK.getCode().equals(prev.getStageMode());
-        if ((!targetKnockout && !targetArena) || (targetKnockout && !prevSupportsPreview)) {
+        if (!targetKnockout && !targetArena) {
             vo.setStatus("UNSUPPORTED");
             return vo;
         }
@@ -883,10 +875,8 @@ public class TStageServiceImpl implements ITStageService {
             return vo;
         }
 
-        // 来源场次名取预排候选的真实来源赛段
+        // 来源场次名取预排候选的真实来源赛段(直接从中间态行的 sourceStageId 推导,不查来源组)
         Map<Long, String> sourceMatch = new HashMap<>();
-        List<TMatch> prevMatches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, prev.getId()));
         List<Long> sourceCompetitorIds = filled.stream()
             .map(TStageRosterEntry::getSourceCompetitorId)
             .filter(Objects::nonNull).distinct().toList();
@@ -913,10 +903,11 @@ public class TStageServiceImpl implements ITStageService {
             }
         }
 
-        // 座位直接来自中间层:slot 即座位号,空位(BYE/PENDING)留空但照样占号,后面的人不前移
+        // 座位直接来自中间层:slot 即座位号,空位(BYE/PENDING)留空但照样占号,后面的人不前移。
+        // 座位数优先取赛段计划规模,否则就按中间层的行数(中间层已经把 1..N 每个座位都铺了一行)
         int totalSlots = stage.getTeamCountStart() != null && stage.getTeamCountStart() > 0
             ? stage.getTeamCountStart().intValue()
-            : Math.max(entries.size(), prevMatches.size());
+            : entries.size();
         totalSlots = Math.max(1, totalSlots);
         PreBracketVo.PreSeed[] seedArr = new PreBracketVo.PreSeed[totalSlots];
         for (TStageRosterEntry e : filled) {
@@ -957,10 +948,8 @@ public class TStageServiceImpl implements ITStageService {
         RuleConfigHolder stageRc = RuleConfigParser.parse(stage.getRuleConfig());
         String configuredPairing = stageRc != null && stageRc.getKnockout() != null
             ? stageRc.getKnockout().getPairingMode() : null;
-        String pairingMode = PairingModeResolver.resolve(
-            configuredPairing,
-            seedsFromRanking(stage.getId()),
-            PairingModeResolver.prevIsRanking(prev));
+        // 配对方式只看本赛段配置(未配置 = 顺序相邻),预排不对配对方式做任何推断
+        String pairingMode = PairingModeResolver.resolve(configuredPairing);
         if ("SEED".equalsIgnoreCase(pairingMode)) {
             int bracketSize = Math.max(2, nextPowerOfTwo(seedArr.length));
             int[] layout = KnockoutGenerator.seedLayout(bracketSize);
@@ -1021,17 +1010,6 @@ public class TStageServiceImpl implements ITStageService {
         return p;
     }
 
-    /** 本赛段名单的来源里是否有海选/排名赛(决定默认是否头尾交叉配对) */
-    private boolean seedsFromRanking(Long stageId) {
-        TStage stage = baseMapper.selectById(stageId);
-        if (stage == null) {
-            return false;
-        }
-        return PairingModeResolver.seedsFromRanking(
-            StageRosterGroupCodec.parse(stage.getRosterConfigJson()),
-            baseMapper::selectById);
-    }
-
     private PreBracketVo.PreSeed toPreSeed(TCompetitor c, Long seedRank, String sourceMatchName) {
         PreBracketVo.PreSeed s = new PreBracketVo.PreSeed();
         s.setCompetitorId(c.getId());
@@ -1042,8 +1020,4 @@ public class TStageServiceImpl implements ITStageService {
         return s;
     }
 
-    @Override
-    public TStage resolvePrevStage(TStage stage) {
-        return stageChain.prevOf(stage);
-    }
 }

@@ -80,7 +80,7 @@
                   </div>
                   <div
                     v-for="e in circleOtherExits(i - 1)"
-                    :key="String(e.targetStageId) + '-' + e.groupIndex"
+                    :key="String(e.groupId)"
                     class="flex items-center gap-2 rounded bg-neutral-900/70 border border-neutral-800 px-2 py-1"
                   >
                     <span class="text-[11px] text-amber-500/90 flex-none">{{ stageNameOf(e.targetStageId) }}</span>
@@ -366,7 +366,8 @@ const hasGeneratedMatches = ref(false);
 
 interface ExitEntry {
   targetStageId: string | number;
-  groupIndex: number;
+  /** 来源组行 ID(表化后按 ID 定位,不再用数组下标) */
+  groupId: string | number;
   g: any;
 }
 const exits = ref<ExitEntry[]>([]);
@@ -471,17 +472,17 @@ const wizard = reactive({
   /** 默认晋级出口的去向赛段(默认取链上最近的可写入下游) */
   defaultTargetId: null as string | number | null,
   /** 编辑已有圈时,默认出口那条组的组下标(新增为空) */
-  defaultGroupIndex: null as number | null,
+  defaultGroupId: null as string | number | null,
   /** 其他出口:只填默认晋级段之外的名次 */
   exits: [] as {
     targetStageId: string | number | null;
     rankStart: number | null;
     rankEnd: number | null;
     /** 编辑已有出口时携带其组下标(新增出口为空) */
-    groupIndex?: number;
+    groupId?: string | number;
   }[],
   /** 编辑时该圈现有的全部出口组,用于保存时对账删除 */
-  originalExits: [] as { targetStageId: string | number; groupIndex: number }[]
+  originalExits: [] as { targetStageId: string | number; groupId: string | number }[]
 });
 const wizardCircleNo = computed(() => circleCount.value + 1);
 /** 编辑中的圈下标(null = 新增圈) */
@@ -513,7 +514,7 @@ const openAddCircle = () => {
   wizard.referees = [];
   wizard.advance = remaining;
   wizard.defaultTargetId = nearestTargetId();
-  wizard.defaultGroupIndex = null;
+  wizard.defaultGroupId = null;
   wizard.exits = [];
   wizard.originalExits = [];
   wizardVisible.value = true;
@@ -528,7 +529,7 @@ const openEditCircle = (i: number) => {
   const def = circleDefaultExit(i);
   wizard.advance = circleQuota(i) || (def ? Number(def.g?.rankEnd) || null : null) || 1;
   wizard.defaultTargetId = def?.targetStageId ?? nearestTargetId();
-  wizard.defaultGroupIndex = def ? def.groupIndex : null;
+  wizard.defaultGroupId = def ? def.groupId : null;
   // 覆盖第 1 名的那条就是默认晋级出口,其余都是"其他出口"
   wizard.exits = circleExits
     .filter((e) => e !== def)
@@ -536,9 +537,9 @@ const openEditCircle = (i: number) => {
       targetStageId: e.targetStageId,
       rankStart: e.g?.rankStart ?? null,
       rankEnd: e.g?.rankEnd ?? null,
-      groupIndex: e.groupIndex
+      groupId: e.groupId
     }));
-  wizard.originalExits = circleExits.map((e) => ({ targetStageId: e.targetStageId, groupIndex: e.groupIndex }));
+  wizard.originalExits = circleExits.map((e) => ({ targetStageId: e.targetStageId, groupId: e.groupId }));
   wizardVisible.value = true;
 };
 
@@ -595,15 +596,11 @@ const dropGenericAdvanceGroup = async (targetStageId: string | number) => {
     const resp: any = await getStageRoster(targetStageId);
     const groups: any[] = resp?.data?.groups || [];
     if (groups.length <= 1) return;
-    const defaultIdx = groups.findIndex(
-      (g) =>
-        String(g.sourceStageId) === String(props.stage.id) &&
-        !g.zone &&
-        (g.resultFilter || 'ADVANCE') === 'ADVANCE' &&
-        (g.fillMode || 'AUTO') === 'AUTO'
-    );
-    if (defaultIdx >= 0) {
-      await removeRosterGroup(targetStageId, defaultIdx);
+    // 按 generated 出处判断"系统自动补的整单晋级衔接",不看字段长相——
+    // 出口面板配出来的自定义出口长得一模一样,按长相判断会误删真实出口。
+    const generic = groups.find((g) => g.generated === 1 && String(g.sourceStageId) === String(props.stage.id) && !g.zone);
+    if (generic) {
+      await removeRosterGroup(targetStageId, generic.id);
     }
   } catch {
     // 目标赛段已锁定/无权限时忽略,不阻断出口保存
@@ -619,8 +616,8 @@ const syncCircleExits = async (idx: number, advance: number) => {
     targetStageId: string | number;
     rankStart: number | null;
     rankEnd: number | null;
-    /** 对应已有组的原下标(新增为 null) */
-    keepIndex: number | null;
+    /** 对应已有组的行 ID(新增为 null) */
+    keepId: string | number | null;
   }
   const desired: Desired[] = [];
   if (wizard.defaultTargetId != null) {
@@ -628,7 +625,7 @@ const syncCircleExits = async (idx: number, advance: number) => {
       targetStageId: wizard.defaultTargetId,
       rankStart: 1,
       rankEnd: advance,
-      keepIndex: wizard.defaultGroupIndex
+      keepId: wizard.defaultGroupId
     });
   }
   wizard.exits.forEach((ex) => {
@@ -637,45 +634,22 @@ const syncCircleExits = async (idx: number, advance: number) => {
       targetStageId: ex.targetStageId,
       rankStart: ex.rankStart ?? null,
       rankEnd: ex.rankEnd ?? null,
-      keepIndex: ex.groupIndex ?? null
+      keepId: ex.groupId ?? null
     });
   });
 
-  const origByTarget = new Map<string, number[]>();
-  wizard.originalExits.forEach((o) => {
-    const key = String(o.targetStageId);
-    if (!origByTarget.has(key)) origByTarget.set(key, []);
-    origByTarget.get(key)!.push(o.groupIndex);
-  });
-  const keepByTarget = new Map<string, Set<number>>();
-  desired.forEach((d) => {
-    if (d.keepIndex == null) return;
-    const key = String(d.targetStageId);
-    if (!keepByTarget.has(key)) keepByTarget.set(key, new Set());
-    keepByTarget.get(key)!.add(d.keepIndex);
-  });
-
-  // 1) 删除本圈多余/改到别处的出口(倒序,避免同目标内下标位移)
-  const shiftedIndex = new Map<string, number>();
-  for (const [target, origIdxList] of origByTarget) {
-    const keep = keepByTarget.get(target) || new Set<number>();
-    const drop = origIdxList.filter((i) => !keep.has(i));
-    for (const i of [...drop].sort((a, b) => b - a)) {
-      await removeRosterGroup(target, i);
+  // 1) 删除本圈多余/改到别处的出口:表化后按行 ID 删除,不存在下标位移问题
+  const keepIds = new Set(desired.filter((d) => d.keepId != null).map((d) => String(d.keepId)));
+  for (const o of wizard.originalExits) {
+    if (!keepIds.has(String(o.groupId))) {
+      await removeRosterGroup(o.targetStageId, o.groupId);
     }
-    const dropAsc = [...drop].sort((a, b) => a - b);
-    origIdxList.forEach((old) => {
-      if (!keep.has(old)) return;
-      shiftedIndex.set(target + '|' + old, old - dropAsc.filter((d) => d < old).length);
-    });
   }
 
   // 2) 保留的原地更新,缺的新增
   for (const d of desired) {
-    const target = String(d.targetStageId);
     const rule = buildExitRule(idx, d.rankStart, d.rankEnd);
-    const newIndex = d.keepIndex == null ? undefined : shiftedIndex.get(target + '|' + d.keepIndex);
-    if (newIndex === undefined) {
+    if (d.keepId == null) {
       await addRosterGroups(d.targetStageId, {
         sourceStageId: props.stage.id,
         resultFilter: 'ANY',
@@ -684,7 +658,7 @@ const syncCircleExits = async (idx: number, advance: number) => {
         groups: [rule] as any
       });
     } else {
-      await updateRosterGroup(d.targetStageId, newIndex, rule as any);
+      await updateRosterGroup(d.targetStageId, d.keepId, rule as any);
     }
   }
 };
@@ -795,11 +769,11 @@ const loadExits = async () => {
     const rosters: any[] = resp?.data || [];
     const list: ExitEntry[] = [];
     for (const r of rosters) {
-      (r.groups || []).forEach((g: any, gi: number) => {
+      (r.groups || []).forEach((g: any) => {
         if (String(g.sourceStageId) === String(sid)) {
           list.push({
             targetStageId: r.targetStageId ?? r.id,
-            groupIndex: gi,
+            groupId: g.id,
             g
           });
         }
@@ -822,7 +796,7 @@ const removeExit = async (e: ExitEntry) => {
     return;
   }
   try {
-    await removeRosterGroup(e.targetStageId, e.groupIndex);
+    await removeRosterGroup(e.targetStageId, e.groupId);
     ElMessage.success('出口已移除');
     await loadExits();
   } catch (err: any) {

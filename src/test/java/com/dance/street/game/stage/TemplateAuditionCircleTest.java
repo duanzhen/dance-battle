@@ -10,12 +10,12 @@ import com.dance.street.game.domain.bo.TTournamentTemplateBo;
 import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
-import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITTournamentService;
+import com.dance.street.game.service.ITStageRosterService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +65,7 @@ class TemplateAuditionCircleTest {
     @Autowired private TRefereeMapper refereeMapper;
     @Autowired private TMatchRefereeMapper matchRefereeMapper;
     @Autowired private ITTournamentService tournamentService;
+    @Autowired private ITStageRosterService rosterService;
 
     @Test
     void templateCreatesSingleCircleWithAllRefereesBound() {
@@ -108,7 +109,7 @@ class TemplateAuditionCircleTest {
         TStage next = stages.stream()
             .filter(s -> !"AUDITION".equals(s.getStageMode()))
             .findFirst().orElseThrow(() -> new AssertionError("模板应包含下一赛段"));
-        List<TStageRosterGroupBo> groups = StageRosterGroupCodec.parse(next.getRosterConfigJson());
+        List<TStageRosterGroupBo> groups = rosterService.groupsOfStage(next.getId());
         assertTrue(groups.stream().anyMatch(g -> "ZONE-1".equals(g.getZone())
                 && Boolean.TRUE.equals(g.getRankByZone())
                 && Integer.valueOf(1).equals(g.getRankStart())

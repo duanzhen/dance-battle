@@ -116,17 +116,12 @@ class ExitConfigConsistencyTest {
     private void removeGeneratedDefault(Long targetStageId, Long sourceStageId) {
         List<TStageRosterVo> rosters = rosterService.listByTarget(targetStageId);
         List<TStageRosterGroupBo> groups = rosters.get(0).getGroups();
-        int idx = -1;
-        for (int i = 0; i < groups.size(); i++) {
-            TStageRosterGroupBo g = groups.get(i);
+        for (TStageRosterGroupBo g : groups) {
             if (java.util.Objects.equals(g.getSourceStageId(), sourceStageId)
                 && g.getZone() == null && g.getRankStart() == null && g.getRankEnd() == null) {
-                idx = i;
-                break;
+                rosterService.removeGroup(targetStageId, g.getId());
+                return;
             }
-        }
-        if (idx >= 0) {
-            rosterService.removeGroup(targetStageId, idx);
         }
     }
 

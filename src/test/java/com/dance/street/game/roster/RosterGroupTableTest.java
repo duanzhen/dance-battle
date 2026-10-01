@@ -1,0 +1,215 @@
+package com.dance.street.game.roster;
+
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.dance.street.game.domain.TCompetitor;
+import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TStageRosterEntry;
+import com.dance.street.game.domain.TTournament;
+import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageRosterBo;
+import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.mapper.TCompetitorMapper;
+import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.mapper.TTournamentMapper;
+import com.dance.street.game.service.ITStageRosterService;
+import com.dance.street.game.service.ITStageService;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * 名单来源组表化后的核心语义回归:
+ *
+ * <ul>
+ *   <li>人工配置的出口不会因为链变更被当成"过期默认组"删掉(按 generated 出处判断,不看长相);</li>
+ *   <li>取人顺序(sortOrder)真正生效——多出口时顺序决定先取谁的人。</li>
+ * </ul>
+ */
+@SpringBootTest(properties = {"app.redis.enabled=false", "app.schema-init.enabled=true"})
+class RosterGroupTableTest {
+
+    private static final String DB_PATH = "target/roster-group-table.db";
+
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + DB_PATH
+            + "?date_class=text&date_string_format=yyyy-MM-dd HH:mm:ss.SSS");
+    }
+
+    @BeforeAll
+    static void clean() throws Exception {
+        for (String suffix : new String[]{"", "-wal", "-shm"}) {
+            Files.deleteIfExists(Path.of(DB_PATH + suffix));
+        }
+    }
+
+    @Autowired private TTournamentMapper tournamentMapper;
+    @Autowired private TStageMapper stageMapper;
+    @Autowired private TCompetitorMapper competitorMapper;
+    @Autowired private ITStageService stageService;
+    @Autowired private ITStageRosterService rosterService;
+
+    /**
+     * 自定义出口的形状和系统默认衔接完全一样(ADVANCE / 无圈 / 无名次段),但它是人配的。
+     * 链变更时只能清理 generated=1 的那条,不能按"长相"把人工出口一起删掉。
+     */
+    @Test
+    void customExitSurvivesChainChange() {
+        Long tid = newTournament("链变更不误删出口");
+        TStageVo a = newStage(tid, "A", null);
+        TStageVo b = newStage(tid, "B", a.getId());
+        TStageVo c = newStage(tid, "C", b.getId());
+
+        // C 上人工配一条"来自 A 的整单晋级"——字段长相与系统默认衔接一模一样
+        TStageRosterBo bo = new TStageRosterBo();
+        bo.setSourceStageId(a.getId());
+        bo.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
+        bo.setFillMode("AUTO");
+        rosterService.addGroups(c.getId(), bo);
+        Long customId = rosterService.groupsOfStage(c.getId()).stream()
+            .filter(g -> a.getId().equals(g.getSourceStageId()))
+            .map(TStageRosterGroupBo::getId)
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("自定义出口应写入"));
+
+        // 在 B 与 C 之间插一段 → 触发 C 的名单对账(链上前驱从 B 变成新段)
+        TStageVo z = newStage(tid, "Z", b.getId());
+
+        List<TStageRosterGroupBo> after = rosterService.groupsOfStage(c.getId());
+        assertTrue(after.stream().anyMatch(g -> customId.equals(g.getId())),
+            "人工配的出口必须保留(不能按长相当过期默认组删掉),实际=" + after);
+        assertTrue(after.stream().noneMatch(g -> Integer.valueOf(1).equals(g.getGenerated())
+                && b.getId().equals(g.getSourceStageId())),
+            "系统自动补的旧默认衔接应被清理(它指向的已经不是链上前驱),实际=" + after);
+        // 还剩一条来源 → 不再自动补默认衔接:补默认衔接只在"一条来源都不剩"时兜底
+        assertTrue(after.stream().noneMatch(g -> z.getId().equals(g.getSourceStageId())),
+            "还有人工来源时不应再自动补链式衔接,实际=" + after);
+    }
+
+    /** 多出口取人顺序:调整 sortOrder 后,中间层里先落的是另一条出口的人 */
+    @Test
+    void reorderGroupsChangesPickingOrder() {
+        Long tid = newTournament("取人顺序");
+        // 来源用海选:排座走"按候选顺序填空位",取人顺序才会真正决定谁坐 1 号位
+        // (淘汰赛来源是"名次=座位",顺序不影响落座)
+        TStageVo source = newAuditionStage(tid, "海选", null);
+        TStageVo target = newStage(tid, "16强", source.getId());
+        // 两条并列出口:按名次段各取一人
+        Long first = insertCompetitor(tid, source.getId(), "甲", "1", 1L, OutcomeStatusEnum.ADVANCE.getCode());
+        Long second = insertCompetitor(tid, source.getId(), "乙", "2", 2L, OutcomeStatusEnum.ADVANCE.getCode());
+        Long groupA = addRankGroup(tid, target.getId(), source.getId(), 1, 1);
+        Long groupB = addRankGroup(tid, target.getId(), source.getId(), 2, 2);
+        // 去掉建段自动补的默认衔接,避免它把两个人也带进来
+        Long generated = rosterService.groupsOfStage(target.getId()).stream()
+            .filter(g -> Integer.valueOf(1).equals(g.getGenerated()))
+            .map(TStageRosterGroupBo::getId).findFirst().orElse(null);
+        if (generated != null) {
+            rosterService.removeGroup(target.getId(), generated);
+        }
+
+        // 来源赛段结算,名单就绪
+        TStage settled = new TStage();
+        settled.setId(source.getId());
+        settled.setStatus(StageConstants.STAGE_SETTLED);
+        stageMapper.updateById(settled);
+
+        rosterService.rebuildEntries(target.getId());
+        assertEquals(first, firstSeatSourceId(target.getId()), "默认顺序:名次段 1~1 的组先取,甲坐 1 号位");
+
+        // 交换两条出口的取人顺序
+        rosterService.reorderGroups(target.getId(), List.of(groupB, groupA));
+        rosterService.rebuildEntries(target.getId());
+        assertEquals(second, firstSeatSourceId(target.getId()), "调整顺序后乙坐 1 号位");
+    }
+
+    // ===== 工具 =====
+
+    /** 1 号座位上的人(取人顺序直接决定谁先落座) */
+    private Long firstSeatSourceId(Long targetStageId) {
+        return rosterService.entriesOf(targetStageId).stream()
+            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+            .filter(e -> Long.valueOf(1L).equals(e.getSlot()))
+            .map(TStageRosterEntry::getSourceCompetitorId)
+            .filter(java.util.Objects::nonNull)
+            .findFirst()
+            .orElse(null);
+    }
+
+    private Long addRankGroup(Long tid, Long targetStageId, Long sourceStageId, int start, int end) {
+        TStageRosterGroupBo g = new TStageRosterGroupBo();
+        g.setSourceStageId(sourceStageId);
+        g.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
+        g.setFillMode("AUTO");
+        g.setQuota(0);
+        g.setRankStart(start);
+        g.setRankEnd(end);
+        TStageRosterBo bo = new TStageRosterBo();
+        bo.setSourceStageId(sourceStageId);
+        bo.setGroups(List.of(g));
+        rosterService.addGroups(targetStageId, bo);
+        return rosterService.groupsOfStage(targetStageId).stream()
+            .filter(x -> Integer.valueOf(start).equals(x.getRankStart()))
+            .map(TStageRosterGroupBo::getId).findFirst()
+            .orElseThrow(() -> new AssertionError("出口未写入"));
+    }
+
+    private Long insertCompetitor(Long tid, Long stageId, String name, String number,
+                                  Long finalRank, String outcome) {
+        TCompetitor c = new TCompetitor();
+        c.setTournamentId(tid);
+        c.setStageId(stageId);
+        c.setType(0L);
+        c.setName(name);
+        c.setNumber(number);
+        c.setSeedRank(finalRank);
+        c.setFinalRank(finalRank);
+        c.setOutcomeStatus(outcome);
+        competitorMapper.insert(c);
+        return c.getId();
+    }
+
+    private Long newTournament(String name) {
+        TTournament t = new TTournament();
+        t.setName(name);
+        tournamentMapper.insert(t);
+        return t.getId();
+    }
+
+    private TStageVo newStage(Long tournamentId, String name, Long afterStageId) {
+        return newStage(tournamentId, name, afterStageId, "KNOCKOUT", "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":8,"
+            + "\"advanceCount\":4,\"pairingMode\":\"SEQUENTIAL\"}}");
+    }
+
+    private TStageVo newAuditionStage(Long tournamentId, String name, Long afterStageId) {
+        return newStage(tournamentId, name, afterStageId, "AUDITION",
+            "{\"mode\":\"AUDITION\",\"circles\":1,\"advanceCount\":2,\"circleAdvanceCounts\":[2]}");
+    }
+
+    private TStageVo newStage(Long tournamentId, String name, Long afterStageId,
+                              String stageMode, String ruleConfig) {
+        TStageBo bo = new TStageBo();
+        bo.setTournamentId(tournamentId);
+        bo.setName(name);
+        bo.setStageMode(stageMode);
+        bo.setStatus(StageConstants.STAGE_DRAFT);
+        bo.setTeamCountStart(8L);
+        bo.setTeamCountEnd(4L);
+        bo.setAfterStageId(afterStageId);
+        bo.setIsInitialized(0L);
+        bo.setRuleConfig(ruleConfig);
+        return stageService.insertByBo(bo);
+    }
+}

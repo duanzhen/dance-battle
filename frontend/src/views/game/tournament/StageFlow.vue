@@ -163,7 +163,6 @@
                   :is="getStageConfigComponent(selectedCreateMode)"
                   :stage="tempStage"
                   :mode="ConfigMode.CREATE"
-                  :prev-stage-mode="createPrevStageMode"
                   @update="handleTempStageUpdate"
                 />
               </div>
@@ -209,7 +208,6 @@
               :is="getStageConfigComponent(currentStage.stageMode)"
               :stage="currentStage as StageData"
               :mode="currentConfigMode"
-              :prev-stage-mode="prevStageModeOf(currentStage)"
               @update="handleStageUpdate"
             />
             <div v-if="!getStageConfigComponent(currentStage.stageMode)" class="bg-neutral-900 border border-neutral-800 rounded-xl p-8 text-center">
@@ -349,9 +347,8 @@ const visibleGroups = (stage: Stage): any[] => {
   const defaultOnly =
     groups.length === 1 &&
     (isEntryCheckinGroup(first) ||
-      (String(first.sourceStageId ?? '') === String(stage.prevStageId ?? '') &&
-        first.resultFilter === 'ADVANCE' &&
-        (first.fillMode || 'AUTO') === 'AUTO'));
+      // 系统自动补的链式衔接按 generated 出处判断(不再看"source 是不是链上前一段"+长相)
+      first.generated === 1);
   return defaultOnly ? [] : groups;
 };
 
@@ -368,9 +365,7 @@ const incomingTooltip = (stage: Stage): string => {
       const name = source?.name || (g.sourceStageId == null ? '外部/签到' : '未知赛段');
       const result = g.resultFilter === 'ELIMINATED' ? '落选' : g.resultFilter === 'ADVANCE' ? '晋级' : g.resultFilter || '不限';
       const zone = g.zone ? zoneText(g.zone) : '';
-      const rank = g.rankStart != null || g.rankEnd != null
-        ? `${g.rankByZone ? '圈内' : '全场'}第${g.rankStart ?? ''}~${g.rankEnd ?? '末'}名`
-        : '';
+      const rank = g.rankStart != null || g.rankEnd != null ? `${g.rankByZone ? '圈内' : '全场'}第${g.rankStart ?? ''}~${g.rankEnd ?? '末'}名` : '';
       const quota = g.quota && g.quota > 0 ? `取前${g.quota}` : '';
       const mode = g.fillMode === 'MANUAL' ? '手动' : g.fillMode === 'STREAM' ? '流式签到' : '自动';
       return [name, zone, result, rank, quota, mode].filter(Boolean).join('·');
@@ -381,7 +376,7 @@ const incomingTooltip = (stage: Stage): string => {
 /** ZONE-2 → 第2圈(无法识别时原样返回) */
 const zoneText = (zone?: string | null): string => {
   const m = /^ZONE-(\d+)$/.exec(zone || '');
-  return m ? `第${m[1]}圈` : (zone || '');
+  return m ? `第${m[1]}圈` : zone || '';
 };
 
 // --- 加载赛段数据 ---
@@ -622,24 +617,6 @@ const handleFlowOpenStage = (stageId: string) => {
   flowExpanded.value = false;
 };
 
-// 当前赛段的上一赛段类型(淘汰赛默认配对方式等配置按此推导)
-const prevStageModeOf = (stage?: Stage | null): string => {
-  if (!stage?.prevStageId) return '';
-  const prev = stages.value.find((s) => String(s.id) === String(stage.prevStageId));
-  return prev?.stageMode || '';
-};
-
-// 新建赛段时的上一赛段类型:插入到某赛段后=该赛段;追加到末尾=当前最后一个赛段
-const createPrevStageMode = computed(() => {
-  let prev: Stage | undefined;
-  if (insertAfterStageId.value) {
-    prev = stages.value.find((s) => String(s.id) === String(insertAfterStageId.value));
-  } else if (stages.value.length > 0) {
-    prev = stages.value[stages.value.length - 1];
-  }
-  return prev?.stageMode || '';
-});
-
 // 计算当前配置模式
 const currentConfigMode = computed<ConfigMode>(() => {
   if (isCreatingStage.value) {
@@ -830,7 +807,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       name: name,
       stageMode: stageMode,
       // 海选为打分制,无 BO1/BO3;其余赛制按配置
-      format: stageMode === StageMode.AUDITION ? '' : (config.format || 'BO3'),
+      format: stageMode === StageMode.AUDITION ? '' : config.format || 'BO3',
       teamCountStart: stageMode === StageMode.AUDITION ? 0 : config.teamsCount || config.scale || 0,
       teamCountEnd: config.advanceCount || config.advanceQuota || 0,
       status: status,

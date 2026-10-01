@@ -37,7 +37,6 @@ public class TStageRosterVo implements Serializable {
     private BigDecimal scoreMax;
     private Integer quota;
     private String fillMode;
-    private Integer priority;
 
     /** 名单状态(展示用):CONFIRMED/SKIPPED/READY/WAIT_SOURCE */
     private String state;

@@ -11,7 +11,6 @@ import org.dromara.common.core.utils.StringUtils;
 import com.dance.street.game.excel.ExcelUtil;
 import com.dance.street.game.engine.common.PairingModeResolver;
 import com.dance.street.game.engine.common.SnowflakeJson;
-import com.dance.street.game.engine.common.StageRosterGroupCodec;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.domain.TMatch;
@@ -24,10 +23,12 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
+import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
+import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRoundScore;
@@ -301,17 +302,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 从海选赛进入的淘汰赛,未显式配置时默认标准种子对位(1-16、2-15)
         if (StageModeEnum.KNOCKOUT.equals(mode)
             && rc != null && rc.getKnockout() != null) {
-            // 与预排(getPreBracket)口径一致:上一赛段由 next 链推导(库里没有 prev 列),
-            // 不存在"指针正常但上一赛段为空"导致误走 SEED 头尾交叉的情况
-            TStage prev = stageService.resolvePrevStage(stage);
-            if (prev != null && StageModeEnum.KNOCKOUT.getCode().equals(prev.getStageMode())) {
-                rc.getKnockout().setPairingMode("SEQUENTIAL");
-            } else if (StringUtils.isBlank(rc.getKnockout().getPairingMode())
-                && prev != null
-                && (StageModeEnum.AUDITION.getCode().equals(prev.getStageMode())
-                    || StageModeEnum.RANK.getCode().equals(prev.getStageMode()))) {
-                rc.getKnockout().setPairingMode("SEED");
-            }
+            // 首轮配对方式只看本赛段配置(头尾交叉与否是显式选择),不再按来源赛制推断
+            rc.getKnockout().setPairingMode(PairingModeResolver.resolve(rc.getKnockout().getPairingMode()));
         }
         String matchMode;
         if (StageModeEnum.AUDITION.equals(mode)) {
@@ -393,9 +385,9 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             }
         }
 
-        // 淘汰赛:补齐空缺的配对方式,并统一到与中间态/大屏一致的判定口径
-        if (StageModeEnum.KNOCKOUT.equals(mode) && rc != null) {
-            normalizePairingMode(stage, rc);
+        // 淘汰赛:配对方式未配置时补本赛段自己的默认值(顺序相邻),与中间态/大屏同一口径
+        if (StageModeEnum.KNOCKOUT.equals(mode) && rc != null && rc.getKnockout() != null) {
+            rc.getKnockout().setPairingMode(PairingModeResolver.resolve(rc.getKnockout().getPairingMode()));
         }
         BracketPlan plan = generatorFactory.generate(mode, seededIds, rc);
 
@@ -921,7 +913,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     /**
      * 本赛段内是否还有会向 {@code match} 填入参赛方的未结算场次(按 promotion_rule 反查)。
      *
-     * <p>跨赛段的晋级走名单装配,开赛时参赛行已物化完毕(上一赛段必须 SETTLED 才能开赛),
+     * <p>跨赛段的晋级走名单装配,开赛时参赛行已物化完毕(名单来源全部 SETTLED 才能开赛),
      * 因此只在本赛段内反查即可。</p>
      */
     private boolean hasUnsettledUpstream(TMatch match) {
@@ -1241,16 +1233,10 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             && plannedCircleCount(stage) < 1) {
             throw new ServiceException("海选尚未配置圈,请先在赛段配置中新增至少一圈(人数/裁判/去向)");
         }
-        // 流程规范:上一赛段必须已结束(SETTLED),否则不允许开始本赛段。
-        // 前驱由 next 链推导(见 StageChain)——库里不再有 prev 列,不存在"列与链不一致"。
-        TStage prev = stageService.resolvePrevStage(stage);
-        if (prev == null) {
-            // 链表头(入口赛段)没有上游,名单守卫由名单服务按"无内部来源组"自动放行
-            return;
-        }
-        if (!StageConstants.STAGE_SETTLED.equals(prev.getStatus())) {
-            throw new ServiceException("上一赛段[{}]尚未结束,无法开始本赛段", prev.getName());
-        }
+        // 开赛依赖 = 名单来源组里的<b>边</b>:每条边的来源赛段都必须已结束(SETTLED),
+        // 且名单已确认/跳过。链(next_stage_id)只决定显示顺序,不参与开赛判定 ——
+        // 所以多入口汇合 / 并行分支时,只要"自己那几条来源边"都跑完就能开,
+        // 不会被"链上前一段还在跑"拦住(这正是多赛段同时进行的前提)。
         // 名单守卫(规则+覆盖+快照模型):语义见 ITStageRosterService#assertStageStartable
         rosterService.assertStageStartable(stage.getId());
     }
@@ -1811,30 +1797,6 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
             .max().orElse(0L) + 1L;
     }
 
-    /** 本赛段名单的来源里是否有海选/排名赛(决定默认是否头尾交叉配对) */
-    private boolean seedsFromRanking(TStage stage) {
-        if (stage == null) {
-            return false;
-        }
-        return PairingModeResolver.seedsFromRanking(
-            StageRosterGroupCodec.parse(stage.getRosterConfigJson()),
-            stageMapper::selectById);
-    }
-
-    /** 生成对阵前把空配对方式按统一口径补齐,保证与中间态/大屏一致 */
-    private void normalizePairingMode(TStage stage, RuleConfigHolder rc) {
-        if (rc == null || rc.getKnockout() == null) {
-            return;
-        }
-        if (org.apache.commons.lang3.StringUtils.isNotBlank(rc.getKnockout().getPairingMode())) {
-            return;
-        }
-        // 上一赛段走链遍历(next 为事实源),决定配对方式时同样以链为准
-        TStage prev = stageService.resolvePrevStage(stage);
-        rc.getKnockout().setPairingMode(PairingModeResolver.resolve(
-            null, seedsFromRanking(stage), PairingModeResolver.prevIsRanking(prev)));
-    }
-
     @Override
     @Transactional(rollbackFor = Exception.class)
     public StageCompleteVo completeStage(Long stageId) {
@@ -2277,9 +2239,14 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Transactional(rollbackFor = Exception.class)
     public void resetStageToDraft(Long stageId) {
         TStage stage = mustGetStage(stageId);
-        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
-            throw new ServiceException("仅规划中(DRAFT)状态的赛段可重置为草稿,当前: {}", stage.getStatus());
+        if (StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
+            throw new ServiceException("已取消的赛段不能撤销数据");
         }
+        assertDownstreamRevertible(stage);
+        // 入口赛段(海选/排名赛等第一个赛段)没有中间态:名单就是签到进来的人,
+        // 撤销时人一个都不能动,只清比赛与判罚数据。
+        boolean entryStage = rosterService.groupsOfStage(stageId).stream()
+            .noneMatch(g -> g.getSourceStageId() != null);
         // 级联清除场次/轮次/参赛明细/打分
         List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId));
@@ -2297,20 +2264,26 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
                 .in(TMatchParticipant::getMatchId, matchIds));
             matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
                 .in(TMatchRound::getMatchId, matchIds));
+            // 场次裁判也必须删:留着孤儿行,重新生成对阵后裁判名单会越积越多
+            matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery()
+                .in(TMatchReferee::getMatchId, matchIds));
             matchMapper.deleteByIds(matchIds);
         }
-        // 名单快照:删除 apply 写入的行(from_roster=1)及其成员,名单 applied 回退,可重新装配;
-        // 保留签到/手工 GUEST 等非快照行按旧语义回退待定
-        List<TCompetitor> snapshotRows = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, stageId)
-            .eq(TCompetitor::getFromRoster, 1L));
-        if (!snapshotRows.isEmpty()) {
-            List<Long> snapshotRowIds = snapshotRows.stream().map(TCompetitor::getId).toList();
-            competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()
-                .in(TCompetitorMember::getCompetitorId, snapshotRowIds));
-            competitorMapper.deleteByIds(snapshotRowIds);
+        if (!entryStage) {
+            // 名单快照:删除 apply 写入的行(from_roster=1)及其成员,名单 applied 回退,可重新装配;
+            // 保留签到/手工 GUEST 等非快照行按旧语义回退待定
+            List<TCompetitor> snapshotRows = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stageId)
+                .eq(TCompetitor::getFromRoster, 1L));
+            if (!snapshotRows.isEmpty()) {
+                List<Long> snapshotRowIds = snapshotRows.stream().map(TCompetitor::getId).toList();
+                competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()
+                    .in(TCompetitorMember::getCompetitorId, snapshotRowIds));
+                competitorMapper.deleteByIds(snapshotRowIds);
+            }
+            // 退回"中间态还没确认":只翻状态位,中间层的行(含人工调整)原样留着当重新确认的起点
+            rosterService.resetByTarget(stageId);
         }
-        rosterService.resetByTarget(stageId);
         // 参赛方回退未开始(保留种子位,可重新 setSeedOrder/initialize)
         competitorMapper.update(null, Wrappers.<TCompetitor>lambdaUpdate()
             .eq(TCompetitor::getStageId, stageId)
@@ -2325,7 +2298,43 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         // 否则重置后中间态还挂着已经不算数的人(人工加进来的行保持不动)。
         rosterService.syncPreAdvance(stageId);
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
-        log.info("赛段[{}]已重置为草稿:清除{}场对阵,参赛方回退待定", stageId, matches.size());
+        log.info("赛段[{}]已撤销数据:清除{}场对阵及轮次/明细/裁判/打分,{}",
+            stageId, matches.size(), entryStage ? "入口赛段参赛方保留" : "退回中间态未确认");
+    }
+
+    /**
+     * 撤销必须从后往前:本赛段的晋级结果一旦被下游"确认名单 / 生成对阵 / 开赛"消费过,
+     * 先撤本赛段会把下游留在一批不再成立的选手上。这里直接拦住并点名下游赛段。
+     *
+     * <p>下游只是"规划中且还没确认名单"时不用拦:重置末尾的
+     * {@code syncPreAdvance} 会把从本赛段来的人还原成空位。</p>
+     */
+    private void assertDownstreamRevertible(TStage stage) {
+        List<Long> targets = rosterService.listBySource(stage.getId()).stream()
+            .map(TStageRosterVo::getTargetStageId)
+            .filter(Objects::nonNull)
+            .filter(id -> !Objects.equals(id, stage.getId()))
+            .distinct()
+            .toList();
+        if (targets.isEmpty()) {
+            return;
+        }
+        List<String> blocked = new ArrayList<>();
+        for (TStage target : stageMapper.selectByIds(targets)) {
+            boolean consumed = !StageConstants.STAGE_DRAFT.equals(target.getStatus())
+                || Long.valueOf(1L).equals(target.getRosterApplied())
+                || Long.valueOf(1L).equals(target.getRosterSkipped())
+                || matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+                    .eq(TMatch::getStageId, target.getId())) > 0;
+            if (consumed) {
+                blocked.add(target.getName());
+            }
+        }
+        if (!blocked.isEmpty()) {
+            // 撤销只能从后往前:后面的赛段还在进行中/已结束时,先撤它,再撤本赛段
+            throw new ServiceException("下游赛段[{}]已确认名单或已开赛,请先撤销它再撤销本赛段",
+                String.join("、", blocked));
+        }
     }
 
     @Override
@@ -2336,19 +2345,25 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (!StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
             throw new ServiceException("仅 SETTLED 状态的赛段可计算晋级");
         }
-        Long nextStageId = resolveNextStageId(stage);
-        if (nextStageId == null) {
-            return 0;
+        // 晋级者写进"所有引用了本赛段的赛段":依赖以来源组(边)为准,不再只写链上的下一个。
+        // 分支场景下有多条下游,跳过中间态就应当把每条都喂上。
+        int total = 0;
+        for (Long targetId : referencingTargetIds(stageId)) {
+            if (stageMapper.selectById(targetId) == null) {
+                continue;
+            }
+            total += rosterService.applyRoster(targetId, null);
         }
-        if (stageMapper.selectById(nextStageId) == null) {
-            return 0;
-        }
-        return rosterService.applyRoster(nextStageId, null);
+        return total;
     }
 
-    /** 下一赛段(晋级者要写进哪一段):以 {@code next_stage_id} 链为唯一事实源。 */
-    private Long resolveNextStageId(TStage stage) {
-        return stage.getNextStageId();
+    /** 引用了本赛段(即"本赛段的人会流进去")的目标赛段 ID */
+    private List<Long> referencingTargetIds(Long sourceStageId) {
+        return rosterService.listBySource(sourceStageId).stream()
+            .map(TStageRosterVo::getTargetStageId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
     }
 
     @Override
@@ -2532,14 +2547,16 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
         if (!StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
             throw new ServiceException("仅已结算(SETTLED)的排名赛赛段可调整同分晋级");
         }
-        // 幂等:下一赛段若已接收晋级者,不允许再调整
-        Long nextStageId = resolveNextStageId(stage);
-        if (nextStageId != null) {
+        // 幂等:只要有任意下游赛段已经接收了本赛段的晋级者,就不允许再调整
+        // (依赖以来源组为准,分支场景下要逐个检查,不能只看链上的下一个)
+        for (Long nextStageId : referencingTargetIds(stageId)) {
             long existed = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, nextStageId)
                 .isNotNull(TCompetitor::getSourceCompetitorId));
             if (existed > 0) {
-                throw new ServiceException("下一赛段已接收晋级者,无法再调整同分晋级");
+                TStage downstream = stageMapper.selectById(nextStageId);
+                throw new ServiceException("下游赛段[{}]已接收晋级者,无法再调整同分晋级",
+                    downstream == null ? nextStageId : downstream.getName());
             }
         }
         List<TCompetitor> pending = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()

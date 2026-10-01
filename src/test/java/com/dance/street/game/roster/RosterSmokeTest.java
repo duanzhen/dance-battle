@@ -230,13 +230,14 @@ class RosterSmokeTest {
             "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"template\":\"ROUND_8\",\"teamsCount\":4,\"advanceCount\":2,\"format\":\"BO1\"}}");
         stageMapper.updateById(stageBRule);
 
-        // DAG 守卫:不能把后置赛段作为来源
+        // 连边方向:只能往后连,Z 作为 A 的来源属于反向,a 必须拦下
         TStageRosterBo invalid = new TStageRosterBo();
         invalid.setSourceStageId(stageB.getId());
         invalid.setResultFilter(OutcomeStatusEnum.ELIMINATED.getCode());
         ServiceException dagBlocked = assertThrows(ServiceException.class,
             () -> rosterService.addGroups(stageA.getId(), invalid));
-        assertTrue(dagBlocked.getMessage().contains("推进链之前"));
+        assertTrue(dagBlocked.getMessage().contains("必须排在"),
+            "应拦反向来源,实际: " + dagBlocked.getMessage());
 
         // 复活名单:target=B, source=A, ELIMINATED
         TStageRosterBo revive = new TStageRosterBo();
@@ -244,7 +245,6 @@ class RosterSmokeTest {
         revive.setResultFilter(OutcomeStatusEnum.ELIMINATED.getCode());
         revive.setFillMode(RosterConstants.FILL_AUTO);
         revive.setQuota(0);
-        revive.setPriority(2);
         rosterService.addGroups(stageB.getId(), revive);
         // 收敛模型:同一目标只有一条名单行,新增来源 = 往 groups 追加组
         assertEquals(1, rosterService.listByTarget(stageB.getId()).size());
@@ -307,9 +307,9 @@ class RosterSmokeTest {
         reviveGroups.setResultFilter(OutcomeStatusEnum.ELIMINATED.getCode());
         reviveGroups.setFillMode(RosterConstants.FILL_AUTO);
         reviveGroups.setQuota(0);
-        reviveGroups.setPriority(1);
         rosterService.addGroups(revive.getId(), reviveGroups);
-        rosterService.removeGroup(reviveRoster.getId(), 0);
+        // 去掉建段自动补的默认衔接边(按行 ID 定位)
+        rosterService.removeGroup(reviveRoster.getId(), defaultGroupIdOf(reviveRoster.getId()));
 
         // 预选:两名待赛选手 → 开赛 → 判一场 → 完成(产出 1 晋级 + 1 落选)
         insertPendingCompetitor(tournament.getId(), pre.getId(), "正赛A", "1");
@@ -327,7 +327,6 @@ class RosterSmokeTest {
         directRoster.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
         directRoster.setFillMode(RosterConstants.FILL_AUTO);
         directRoster.setQuota(0);
-        directRoster.setPriority(2);
         rosterService.addGroups(finals.getId(), directRoster);
 
         // 复活海选:落选者经复活名单进入 → 打分 → 完成
@@ -476,7 +475,6 @@ class RosterSmokeTest {
         revive.setResultFilter(OutcomeStatusEnum.ELIMINATED.getCode());
         revive.setFillMode(RosterConstants.FILL_AUTO);
         revive.setQuota(0);
-        revive.setPriority(2);
         rosterService.addGroups(stageB.getId(), revive);
 
         TStage settled = new TStage();
@@ -504,7 +502,8 @@ class RosterSmokeTest {
         edited.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
         edited.setFillMode(RosterConstants.FILL_AUTO);
         edited.setQuota(0);
-        rosterService.updateGroup(bySource.get(0).getId(), 1, edited);
+        Long secondGroupId = rosterService.groupsOfStage(stageB.getId()).get(1).getId();
+        rosterService.updateGroup(bySource.get(0).getId(), secondGroupId, edited);
         assertEquals(OutcomeStatusEnum.ADVANCE.getCode(),
             rosterService.listByTarget(stageB.getId()).get(0).getGroups().get(1).getResultFilter());
     }
@@ -697,10 +696,12 @@ class RosterSmokeTest {
         TStageVo stage2 = stageService.insertByBo(
             baseStage(tournament.getId(), "16强", "KNOCKOUT", 2L, 1L, stage1.getId()));
 
-        // 建段默认组已双写:stage.roster_config_json 含 groups
+        // 建段默认组已落进来源组边表(表化后不再写 t_stage 的 JSON 列)
         TStage stageRow = stageMapper.selectById(stage2.getId());
-        assertNotNull(stageRow.getRosterConfigJson());
-        assertTrue(stageRow.getRosterConfigJson().contains("\"groups\""));
+        List<TStageRosterGroupBo> defaultGroups = rosterService.groupsOfStage(stage2.getId());
+        assertEquals(1, defaultGroups.size(), "建段应自动补一条默认衔接边");
+        assertEquals(stage1.getId(), defaultGroups.get(0).getSourceStageId(), "默认衔接应指向上一赛段");
+        assertEquals(Integer.valueOf(1), defaultGroups.get(0).getGenerated(), "默认衔接应标记为系统生成");
         assertEquals(0L, stageRow.getRosterApplied().longValue());
         assertEquals(0L, stageRow.getRosterSkipped().longValue());
 
@@ -709,13 +710,10 @@ class RosterSmokeTest {
         revive.setSourceStageId(stage1.getId());
         revive.setResultFilter(OutcomeStatusEnum.ELIMINATED.getCode());
         revive.setFillMode(RosterConstants.FILL_AUTO);
-        revive.setPriority(2);
         rosterService.addGroups(stage2.getId(), revive);
         TStageRosterVo vo = rosterService.listByTarget(stage2.getId()).get(0);
         assertEquals(2, vo.getGroups().size());
-        stageRow = stageMapper.selectById(stage2.getId());
-        assertNotNull(stageRow.getRosterConfigJson());
-        assertTrue(stageRow.getRosterConfigJson().contains("\"groups\""));
+        assertEquals(2, rosterService.groupsOfStage(stage2.getId()).size(), "边表应有两组");
 
         // apply 成功后 roster_applied=1;reset 后回 0
         insertCompetitorWithReturn(tournament.getId(), stage1.getId(), "晋级A", "1", 1L);
@@ -741,9 +739,14 @@ class RosterSmokeTest {
         assertEquals(0L, stageMapper.selectById(stage2.getId()).getRosterSkipped().longValue());
     }
 
-    /** 未配置出口时:上一赛段晋级者默认进入下一赛段(删掉最后一条引用前驱的组会自动补回) */
+    /**
+     * 删掉默认衔接边后不再自动补回 —— 表化后的关键语义变更。
+     *
+     * <p>回归的事故:此前按"有没有引用链上前驱的组"判断,删掉默认衔接后立刻补回,
+     * 于是分支赛段永远甩不掉"链上前驱"这个假来源,真正的分支(branch)根本配不出来。</p>
+     */
     @Test
-    void prevChainDefaultRestoredWhenNoExitConfigured() {
+    void deletedDefaultEdgeIsNotRestored() {
         TTournament tournament = new TTournament();
         tournament.setName("默认衔接兜底赛事");
         tournamentMapper.insert(tournament);
@@ -769,20 +772,22 @@ class RosterSmokeTest {
         rosterService.addGroups(s2.getId(), extra);
         List<TStageRosterGroupBo> before = rosterService.listByTarget(s2.getId()).get(0).getGroups();
         assertEquals(2, before.size());
-        int defaultIdx = -1;
-        for (int i = 0; i < before.size(); i++) {
-            if (s1.getId().equals(before.get(i).getSourceStageId())) {
-                defaultIdx = i;
+        Long defaultGroupId = null;
+        for (TStageRosterGroupBo g : before) {
+            if (s1.getId().equals(g.getSourceStageId())) {
+                defaultGroupId = g.getId();
                 break;
             }
         }
-        assertTrue(defaultIdx >= 0);
-        rosterService.removeGroup(s2.getId(), defaultIdx);
+        assertNotNull(defaultGroupId);
+        rosterService.removeGroup(s2.getId(), defaultGroupId);
 
-        // 删除后已无任何组引用直接前驱 → 自动补回"上一赛段·晋级"默认衔接
+        // 删除后不再补回:剩下的只有人工配的跨级来源
         List<TStageRosterGroupBo> after = rosterService.listByTarget(s2.getId()).get(0).getGroups();
-        assertTrue(after.stream().anyMatch(g -> s1.getId().equals(g.getSourceStageId())),
-            "未配置出口时应自动补回直接前驱的默认衔接");
+        assertEquals(1, after.size(), "删掉默认衔接后应只剩跨级来源这一条");
+        assertTrue(after.stream().noneMatch(g -> s1.getId().equals(g.getSourceStageId())),
+            "默认衔接删掉就是删掉,不再自动补回");
+        assertEquals(s0.getId(), after.get(0).getSourceStageId(), "剩下的应是人工配置的跨级来源");
     }
 
     /** 中间插段(A→Z→B)后:B 的 prev 变为 Z,名单默认来源应从 A 迁移到 Z */
@@ -1154,6 +1159,15 @@ class RosterSmokeTest {
         assertEquals(1, rosterService.applyRoster(target.getId(), null),
             "空赛段(仅 is_initialized 误标)仍应能装配晋级名单");
         assertEquals(1, countOutcome(target.getId(), OutcomeStatusEnum.PENDING.getCode()));
+    }
+
+    /** 建段时自动补的那条默认衔接边的行 ID */
+    private Long defaultGroupIdOf(Long targetStageId) {
+        return rosterService.groupsOfStage(targetStageId).stream()
+            .filter(g -> Integer.valueOf(1).equals(g.getGenerated()))
+            .map(TStageRosterGroupBo::getId)
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("该赛段应有系统生成的默认衔接边"));
     }
 
     /** 模拟导播在中间态把"待落位"的人拖到座位上(多入口汇合必须先落位才能确认名单) */

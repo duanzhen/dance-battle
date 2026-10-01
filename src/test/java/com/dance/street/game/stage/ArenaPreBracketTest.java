@@ -4,6 +4,7 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
@@ -12,6 +13,7 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageService;
+import com.dance.street.game.service.ITStageRosterService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +69,8 @@ class ArenaPreBracketTest {
     private TCompetitorMapper competitorMapper;
     @Autowired
     private ITStageService stageService;
+    @Autowired
+    private ITStageRosterService rosterService;
 
     /** 上一赛段已出晋级者、擂台赛名单还没写入:对战树应能看到这 8 个人的座位。 */
     @Test
@@ -180,10 +184,11 @@ class ArenaPreBracketTest {
 
     /** 给目标赛段写默认来源组:取上一赛段的晋级者(与模板生成的一致)。 */
     private void wireRosterFrom(Long targetStageId, Long sourceStageId) {
-        TStage patch = new TStage();
-        patch.setId(targetStageId);
-        patch.setRosterConfigJson("{\"groups\":[{\"fillMode\":\"AUTO\",\"priority\":1,"
-            + "\"resultFilter\":\"ADVANCE\",\"sourceStageId\":\"" + sourceStageId + "\"}]}");
-        stageMapper.updateById(patch);
+        // 来源组现在存在独立边表里:按服务口径写入(不再直接拼 JSON)
+        TStageRosterBo bo = new TStageRosterBo();
+        bo.setSourceStageId(sourceStageId);
+        bo.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
+        bo.setFillMode("AUTO");
+        rosterService.addGroups(targetStageId, bo);
     }
 }

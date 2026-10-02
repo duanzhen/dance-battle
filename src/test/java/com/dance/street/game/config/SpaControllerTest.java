@@ -10,10 +10,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
-import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
@@ -46,22 +44,6 @@ class SpaControllerTest {
         @Bean
         StubLoginController stubLoginController() {
             return new StubLoginController();
-        }
-    }
-
-    /** 旧实现:仅靠 ViewControllerRegistry 回退(复现 405) */
-    @Configuration
-    @EnableWebMvc
-    static class ViewControllerConfig implements WebMvcConfigurer {
-        @Bean
-        StubLoginController stubLoginController() {
-            return new StubLoginController();
-        }
-
-        @Override
-        public void addViewControllers(ViewControllerRegistry registry) {
-            registry.addViewController("/{path:[^\\.]*}").setViewName("forward:/index.html");
-            registry.addViewController("/**/{path:[^\\.]*}").setViewName("forward:/index.html");
         }
     }
 
@@ -103,14 +85,4 @@ class SpaControllerTest {
             .andExpect(forwardedUrl("/index.html"));
     }
 
-    @Test
-    void viewControllerOnlyFallbackReturns405OnLoginRefresh() throws Exception {
-        MockMvc mvc = buildMvc(ViewControllerConfig.class);
-
-        int status = mvc.perform(get("/login"))
-            .andReturn()
-            .getResponse()
-            .getStatus();
-        assertEquals(405, status);
-    }
 }

@@ -1,7 +1,12 @@
 package com.dance.street.game.controller;
 
+import cn.dev33.satoken.annotation.SaCheckPermission;
+import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.TVisWidget;
+import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
+import com.dance.street.game.service.ITVisWidgetService;
+import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,22 +18,26 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 大屏倒计时状态回写接口。
+ * 倒计时开始/暂停的写入面:大屏只读,写入走管理端。
  *
- * <p>大屏是公开播放端(不带管理员 JWT),现场的「开始/暂停」又必须落库——否则刷新页面后
- * 倒计时从头再来,和现场对不上表。这里验证:无凭证也能写、只写 endAt/remainMs、
- * 计划时长(hours/minutes/seconds/milliseconds)不受影响、非倒计时组件拒绝。</p>
+ * <p>大屏投射端是公开播放端,只能读取;现场的「开始/暂停」由管理端发起。
+ * 这里验证:公开的 {@code /tournament/screen/widget/{id}/timer-state} 已不存在(404),
+ * 管理端 {@code /game/visWidget/{id}/timer-state} 带编辑权限注解,且写入只认
+ * endAt/remainMs 两个键(计划时长不受影响、锁定控件也能计时、非倒计时组件拒绝)。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -57,31 +66,58 @@ class ScreenTimerStateTest {
     @Autowired
     private TVisWidgetMapper widgetMapper;
     @Autowired
-    private com.dance.street.game.mapper.TTournamentMapper tournamentMapper;
+    private TTournamentMapper tournamentMapper;
+    @Autowired
+    private ITVisWidgetService visWidgetService;
 
+    /** 公开大屏不再有写接口:老路由不再映射,且不会落库 */
     @Test
-    void screenCanPersistTimerStateWithoutAuth() throws Exception {
-        Long id = newWidget("TIMER", "{\"title\":\"倒计时\",\"hours\":0,\"minutes\":5,"
-            + "\"seconds\":0,\"milliseconds\":0,\"fontSize\":48}");
+    void publicScreenTimerWriteEndpointIsRemoved() throws Exception {
+        Long id = newWidget("TIMER", "{\"title\":\"倒计时\",\"minutes\":5}", 0L);
         MockMvc mvc = MockMvcBuilders.webAppContextSetup(wac).build();
 
-        // 开始计时:写结束时间(大屏无 JWT 也必须能写)
         mvc.perform(post("/tournament/screen/widget/" + id + "/timer-state")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"endAt\":4102444800000,\"remainMs\":null}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.code").value(200));
+                .content("{\"endAt\":4102444800000,\"remainMs\":null}"));
 
+        assertFalse(widgetMapper.selectById(id).getDataConfig().contains("endAt"),
+            "公开路由已移除,配置不该被写入");
+
+        boolean hasPublicMapping = Arrays.stream(ScreenController.class.getMethods())
+            .anyMatch(m -> {
+                org.springframework.web.bind.annotation.PostMapping pm =
+                    m.getAnnotation(org.springframework.web.bind.annotation.PostMapping.class);
+                return pm != null && Arrays.asList(pm.value()).contains("/widget/{id}/timer-state");
+            });
+        assertFalse(hasPublicMapping, "公开大屏控制器不该再有计时器写接口");
+    }
+
+    /** 管理端计时器接口必须受编辑权限保护 */
+    @Test
+    void adminTimerEndpointRequiresEditPermission() throws Exception {
+        Method method = TVisWidgetController.class.getMethod("updateTimerState", Long.class, Map.class);
+        SaCheckPermission ann = method.getAnnotation(SaCheckPermission.class);
+        assertNotNull(ann, "管理端计时器接口必须有 @SaCheckPermission");
+        assertTrue(Arrays.asList(ann.value()).contains("game:visWidget:edit"),
+            "应要求控件编辑权限,实际: " + Arrays.toString(ann.value()));
+    }
+
+    /** 开始/暂停只改 endAt/remainMs,计划时长(hours/minutes/...)不受影响 */
+    @Test
+    void timerStatePatchOnlyTouchesEndAtAndRemainMs() {
+        Long id = newWidget("TIMER", "{\"title\":\"倒计时\",\"hours\":0,\"minutes\":5,"
+            + "\"seconds\":0,\"milliseconds\":0}", 0L);
+
+        visWidgetService.updateTimerState(id, Map.of("endAt", 4102444800000L));
         String started = widgetMapper.selectById(id).getDataConfig();
         assertTrue(started.contains("\"endAt\":4102444800000"), "应写入结束时间,实际: " + started);
         assertTrue(started.contains("\"hours\":0") && started.contains("\"minutes\":5"),
             "计划时长不能被改动,实际: " + started);
 
-        // 暂停:清结束时间,写剩余时长
-        mvc.perform(post("/tournament/screen/widget/" + id + "/timer-state")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"endAt\":null,\"remainMs\":125000}"))
-            .andExpect(status().isOk());
+        Map<String, Object> pause = new HashMap<>();
+        pause.put("endAt", null);
+        pause.put("remainMs", 125000L);
+        visWidgetService.updateTimerState(id, pause);
 
         String paused = widgetMapper.selectById(id).getDataConfig();
         assertTrue(paused.contains("\"endAt\":null"), "暂停要清掉结束时间,实际: " + paused);
@@ -89,34 +125,33 @@ class ScreenTimerStateTest {
         assertTrue(paused.contains("\"minutes\":5"), "暂停同样不能改计划时长,实际: " + paused);
     }
 
+    /** 控件锁定是防误拖布局,现场开始/暂停仍要能落库(有意绕过锁定保护) */
     @Test
-    void nonTimerWidgetIsRejected() throws Exception {
-        Long id = newWidget("TEXT", "{\"text\":\"标题\",\"fontSize\":24}");
-        MockMvc mvc = MockMvcBuilders.webAppContextSetup(wac).build();
+    void lockedTimerCanStillBeControlled() {
+        Long id = newWidget("TIMER", "{\"minutes\":5}", 1L);
+        visWidgetService.updateTimerState(id, Map.of("endAt", 4102444800000L));
+        assertTrue(widgetMapper.selectById(id).getDataConfig().contains("\"endAt\":4102444800000"),
+            "锁定的倒计时也应能开始/暂停");
+    }
 
-        mvc.perform(post("/tournament/screen/widget/" + id + "/timer-state")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"endAt\":4102444800000}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.code").value(500))
-            .andExpect(jsonPath("$.msg").value("仅倒计时组件支持回写计时状态"));
-
+    @Test
+    void nonTimerWidgetIsRejected() {
+        Long id = newWidget("TEXT", "{\"text\":\"标题\",\"fontSize\":24}", 0L);
+        ServiceException ex = assertThrows(ServiceException.class,
+            () -> visWidgetService.updateTimerState(id, Map.of("endAt", 4102444800000L)));
+        assertTrue(ex.getMessage().contains("仅倒计时组件"), "实际: " + ex.getMessage());
         assertFalse(widgetMapper.selectById(id).getDataConfig().contains("endAt"),
             "非倒计时组件的配置不该被写入");
     }
 
     @Test
-    void unknownWidgetIsRejected() throws Exception {
-        MockMvc mvc = MockMvcBuilders.webAppContextSetup(wac).build();
-        mvc.perform(post("/tournament/screen/widget/999999999/timer-state")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"endAt\":1}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.msg").value("组件不存在"));
+    void unknownWidgetIsRejected() {
+        assertThrows(ServiceException.class,
+            () -> visWidgetService.updateTimerState(999999999L, Map.of("endAt", 1L)));
     }
 
-    private Long newWidget(String type, String dataConfig) {
-        com.dance.street.game.domain.TTournament t = new com.dance.street.game.domain.TTournament();
+    private Long newWidget(String type, String dataConfig, Long locked) {
+        TTournament t = new TTournament();
         t.setName(type + "测试赛事");
         tournamentMapper.insert(t);
         TVisWidget w = new TVisWidget();
@@ -130,12 +165,11 @@ class ScreenTimerStateTest {
         w.setH(100L);
         w.setZIndex(1L);
         w.setVisible(1L);
-        w.setLocked(0L);
+        w.setLocked(locked);
         w.setLayoutConfig("{}");
         w.setDataConfig(dataConfig);
         w.setRenderConfig("{}");
         widgetMapper.insert(w);
-        assertEquals(type, widgetMapper.selectById(w.getId()).getType());
         return w.getId();
     }
 }

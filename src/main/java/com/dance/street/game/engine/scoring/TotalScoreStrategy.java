@@ -4,6 +4,7 @@ import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.engine.common.ScoringConfig;
 import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
+import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import java.util.Map;
  *
  * @author duane
  */
+@Component
 public class TotalScoreStrategy implements ScoreStrategy {
 
     @Override

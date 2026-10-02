@@ -2,6 +2,7 @@ package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
+import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.List;
  *
  * @author duane
  */
+@Component
 public class FreeMatchGenerator implements StageGenerator {
 
     @Override

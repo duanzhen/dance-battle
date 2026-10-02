@@ -5,7 +5,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -17,7 +16,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>这两条是"一个大屏/一部锁屏手机拖垮整个实例推送"的防线,回退会直接表现为
  * 现场推送整体变慢甚至卡死,因此用测试钉住。</p>
  */
-@Tag("local")
 class SseSendDispatcherTest {
 
     /**

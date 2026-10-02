@@ -45,6 +45,8 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITStageRosterService;
+import com.dance.street.game.engine.common.StageModeProfile;
+import com.dance.street.game.engine.common.StageModeProfiles;
 import com.dance.street.game.service.ITVisSceneService;
 import com.dance.street.game.service.ITVisWidgetService;
 import com.dance.street.game.service.ITRefereeService;
@@ -304,7 +306,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         //    尺寸取自手工调优后的线上排版(参考赛事 2087560015994183682 / 2087560627817308162)。
         int idx = 0;
         for (TStageVo stage : stages) {
-            if (!"KNOCKOUT".equals(stage.getStageMode())) {
+            if (!stageCap(stage).knockout()) {
                 continue;
             }
             long[] wh = bracketSize(bo.getTemplateCode(), stage.getTeamCountStart());
@@ -331,7 +333,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
 
         // 擂台模板专用:定位擂台赛段(8 强展示 + 擂台场景均绑定它)
         TStageVo arenaStage = stages.stream()
-            .filter(s -> "ARENA".equals(s.getStageMode()))
+            .filter(s -> stageCap(s).arena())
             .findFirst()
             .orElse(null);
 
@@ -420,7 +422,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         // 6.6 圈结构落库:圈配置(6.5)写完之后,按配置把海选圈场次建出来。
         //     圈只由配置侧产生——签到只负责人落进已有的圈,不再补建圈。
         stages.stream()
-            .filter(s -> StageModeEnum.AUDITION.getCode().equals(s.getStageMode()))
+            .filter(s -> stageCap(s).audition())
             .forEach(s -> stageLifecycleService.ensureAuditionCircles(s.getId()));
 
         log.info("按模版[{}]创建赛事[{}]完成:{} 个赛段,{} 个对战树 widget,1 个当前场次 widget,2 个背景图片 widget",
@@ -523,7 +525,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
      */
     private void autoConfigureAuditionCircles(List<TStageVo> stages, List<Long> refereeIds) {
         TStageVo audition = stages.stream()
-            .filter(s -> "AUDITION".equals(s.getStageMode()))
+            .filter(s -> stageCap(s).audition())
             .findFirst().orElse(null);
         if (audition == null) {
             return;
@@ -750,5 +752,10 @@ public class TTournamentServiceImpl implements ITTournamentService {
             return null;
         }
         return baseMapper.selectVoById(tournament.getId());
+    }
+
+    /** 赛段赛制画像(模板/装配里替代 mode 字符串比较)。 */
+    private StageModeProfile stageCap(TStageVo stage) {
+        return StageModeProfiles.of(stage.getStageMode());
     }
 }

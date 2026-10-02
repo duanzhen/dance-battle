@@ -1,6 +1,5 @@
 package com.dance.street.game.engine.common;
 
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -11,9 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * RuleConfigParser / RuleConfigHolder 的 JSON 往返与容错测试(M1 验收)。
- * <p>根 pom surefire 按 @Tag 过滤(profiles.active),故标注 @Tag("local") 以便在默认环境执行。</p>
  */
-@Tag("local")
 class RuleConfigParserTest {
 
     @Test

@@ -2,7 +2,6 @@ package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.KnockoutConfig;
 import com.dance.street.game.engine.common.RuleConfigHolder;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 淘汰赛对阵生成算法单测:种子位排布、对阵配对、轮空 BYE、占位、决赛与下游连线。
  */
-@Tag("local")
 class KnockoutGeneratorTest {
 
     private final KnockoutGenerator generator = new KnockoutGenerator();

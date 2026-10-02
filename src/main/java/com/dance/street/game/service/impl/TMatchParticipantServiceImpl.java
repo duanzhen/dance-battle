@@ -23,6 +23,7 @@ import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchParticipantService;
+import com.dance.street.game.engine.common.StageModeProfiles;
 
 import java.util.List;
 import java.util.Map;
@@ -115,7 +116,7 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
             TMatch m = entry.getValue();
             TStage s = m.getStageId() == null ? null : stageById.get(m.getStageId());
             boolean hidden = false;
-            if (s != null && StageModeEnum.RANK.getCode().equals(s.getStageMode())
+            if (s != null && StageModeProfiles.of(s.getStageMode()).rank()
                 && !StageConstants.STAGE_SETTLED.equals(s.getStatus())) {
                 RuleConfigHolder rc = RuleConfigParser.parse(s.getRuleConfig());
                 hidden = rc != null && rc.getPublishMode() != null

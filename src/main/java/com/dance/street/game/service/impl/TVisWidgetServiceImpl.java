@@ -111,6 +111,9 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
             throw new ServiceException("倒计时状态序列化失败: {}", e.getMessage());
         }
         baseMapper.updateById(upd);
+
+        // 管理端改的计时状态要同步到正在投射该场景的大屏(sceneUpdate → 大屏重载场景配置续跑)
+        notifySceneUpdate(widget.getSceneId());
     }
 
     /**

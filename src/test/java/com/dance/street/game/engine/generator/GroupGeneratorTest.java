@@ -2,7 +2,6 @@ package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.GroupConfig;
 import com.dance.street.game.engine.common.RuleConfigHolder;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -12,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 小组赛对阵生成单测:蛇形分组、Round-Robin 配对、场次结构。
  */
-@Tag("local")
 class GroupGeneratorTest {
 
     private final GroupGenerator generator = new GroupGenerator();

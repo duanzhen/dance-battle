@@ -32,6 +32,8 @@ import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
+import com.dance.street.game.engine.common.StageModeProfile;
+import com.dance.street.game.engine.common.StageModeProfiles;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -112,9 +114,10 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         // 淘汰赛读 knockout.publishMode,擂台赛等读顶层 publishMode(统一在 RuleConfigHolder)
         String publishMode = stageRc == null ? "AUTO" : stageRc.resolvePublishMode();
         String publishScope = stageRc != null ? stageRc.getPublishScope() : null;
-        boolean isAuditionStage = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
-        boolean isRankStage = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
-        boolean perCompetitorStage = isAuditionStage || isRankStage;
+        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        boolean isAuditionStage = profile.audition();
+        boolean isRankStage = profile.rank();
+        boolean perCompetitorStage = profile.result().perCompetitor();
         // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分
         boolean rankResultHidden = isRankStage && !"AUTO".equalsIgnoreCase(publishMode);
         // 分圈海选:裁判只应看到/判罚自己绑定的圈(t_match_referee 圈级绑定)。

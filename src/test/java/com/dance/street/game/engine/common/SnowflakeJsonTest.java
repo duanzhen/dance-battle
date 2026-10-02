@@ -1,6 +1,5 @@
 package com.dance.street.game.engine.common;
 
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -13,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 内部配置 JSON 的雪花 ID 精度保护:超出 JS 安全整数范围的 Long 必须写成字符串。
  */
-@Tag("local")
 class SnowflakeJsonTest {
 
     private final ObjectMapper mapper = SnowflakeJson.mapper();

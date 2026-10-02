@@ -6,6 +6,7 @@ import com.dance.street.game.engine.common.ScoringConfig;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
+import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import java.util.Map;
  *
  * @author duane
  */
+@Component
 public class MultiDimStrategy implements ScoreStrategy {
 
     @Override

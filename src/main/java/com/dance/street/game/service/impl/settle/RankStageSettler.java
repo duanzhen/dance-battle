@@ -48,7 +48,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RankStageSettler implements StageSettler {
 
-    private final ScoringEngine scoringEngine = new ScoringEngine();
+    private final ScoringEngine scoringEngine;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
     private final TMatchRoundMapper matchRoundMapper;

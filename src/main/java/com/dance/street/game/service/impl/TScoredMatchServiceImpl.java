@@ -33,6 +33,8 @@ import com.dance.street.game.service.impl.flow.JudgeCompletenessChecker;
 import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
+import com.dance.street.game.engine.common.StageModeProfile;
+import com.dance.street.game.engine.common.StageModeProfiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,7 +58,7 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     private final TCompetitorMapper competitorMapper;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
-    private final ScoringEngine scoringEngine = new ScoringEngine();
+    private final ScoringEngine scoringEngine;
     /** 场次状态推进唯一入口(场次 + 轮次成套写) */
     private final MatchStateWriter matchStateWriter;
     /** 当前生效轮的唯一口径(与提交结果侧共用,避免"写入轮/回显轮"分叉) */
@@ -132,9 +134,10 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
             }
             List<MatchScoreResult> results = computeAll(match, stage);
             // 按赛制做后处理
-            if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+            StageModeProfile stageProfile = StageModeProfiles.of(stage.getStageMode());
+            if (stageProfile.knockout()) {
                 resolveKnockoutDownstream(match, results);
-            } else if (StageModeEnum.GROUP.getCode().equals(stage.getStageMode())) {
+            } else if (stageProfile.group()) {
                 writeGroupOutcomes(match, results);
             }
             writeParticipantScores(match, results, null);

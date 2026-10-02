@@ -1,7 +1,6 @@
 package com.dance.street.game.engine.scoring;
 
 import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -12,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * ScoreAggregator 四种汇总规则的纯函数测试。
  */
-@Tag("local")
 class ScoreAggregatorTest {
 
     private static final BigDecimal TRIM = new BigDecimal("0.2");

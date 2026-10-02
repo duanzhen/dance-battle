@@ -3,12 +3,14 @@ package com.dance.street.game.controller;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.dev33.satoken.annotation.SaIgnore;
 import com.dance.street.game.domain.TCompetitor;
+import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
+import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageService;
@@ -25,9 +27,16 @@ import org.springframework.web.context.WebApplicationContext;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -70,7 +79,31 @@ class ScreenPublicDataTest {
     @Autowired
     private TCompetitorMapper competitorMapper;
     @Autowired
+    private TRefereeMapper refereeMapper;
+    @Autowired
     private ITStageService stageService;
+
+    /**
+     * 公开的大屏裁判列表不得带出裁判登录凭证 authKey(否则未认证访客可冒用裁判身份)。
+     */
+    @Test
+    void screenRefereeListHidesAuthKey() throws Exception {
+        Long tid = newTournament("大屏裁判脱敏");
+        TReferee r = new TReferee();
+        r.setTournamentId(tid);
+        r.setName("裁判A");
+        r.setAuthKey("SECRET-AUTH-KEY-XYZ");
+        refereeMapper.insert(r);
+
+        MockMvc mvc = MockMvcBuilders.webAppContextSetup(wac).build();
+        String body = mvc.perform(get("/tournament/screen/referee/list")
+                .param("tournamentId", String.valueOf(tid)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].name").value("裁判A"))
+            .andReturn().getResponse().getContentAsString();
+
+        assertFalse(body.contains("SECRET-AUTH-KEY-XYZ"), "公开裁判列表泄露了 authKey: " + body);
+    }
 
     /** 不带任何 Authorization 头也能读大屏数据 */
     @Test
@@ -101,6 +134,21 @@ class ScreenPublicDataTest {
         mvc.perform(get("/tournament/screen/referee-stage/referee-ids").param("stageId", String.valueOf(stage.getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(200));
+    }
+
+    /**
+     * 大屏独立控制器必须无认证且零写入:不允许出现任何 POST/PUT/PATCH/DELETE 接口。
+     */
+    @Test
+    void screenControllerHasNoWriteEndpoints() {
+        assertNotNull(ScreenController.class.getAnnotation(SaIgnore.class),
+            "大屏控制器应整体 @SaIgnore(不认证)");
+        boolean hasWrite = Arrays.stream(ScreenController.class.getDeclaredMethods())
+            .anyMatch(m -> m.isAnnotationPresent(PostMapping.class)
+                || m.isAnnotationPresent(PutMapping.class)
+                || m.isAnnotationPresent(PatchMapping.class)
+                || m.isAnnotationPresent(DeleteMapping.class));
+        assertFalse(hasWrite, "大屏控制器不得有任何写入接口");
     }
 
     /**

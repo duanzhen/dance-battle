@@ -47,6 +47,8 @@ import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
+import com.dance.street.game.engine.common.StageModeProfile;
+import com.dance.street.game.engine.common.StageModeProfiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -91,7 +93,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private final MatchRoundLocator matchRoundLocator;
     /** 参赛方成绩批量写入口(整场一条 SQL) */
     private final ParticipantScoreWriter scoreWriter;
-    private final ScoringEngine scoringEngine = new ScoringEngine();
+    private final ScoringEngine scoringEngine;
     /** 待公布结果 JSON:内部配置读写统一走雪花 ID 安全 mapper */
     private static final tools.jackson.databind.ObjectMapper RESULT_MAPPER = SnowflakeJson.mapper();
 
@@ -107,7 +109,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         stripClientRefereeIds(bo);
         List<Long> competitorIds = competitorIdsOf(match.getId());
 
-        boolean isArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
+        boolean isArena = profile(stage).arena();
         boolean perCompetitor = isPerCompetitorStage(stage);
         // 擂台赛:1v1 判胜负平,必须给出双方判定(胜+负 / 负+胜 / 平+平);
         // 平局时双方均排到队尾,由 computeArenaQueue 回放处理
@@ -159,8 +161,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
 
     /** 海选/排名赛为「逐选手累计打分」赛制:一次提交只写部分选手的分,不即时结算。 */
     private boolean isPerCompetitorStage(TStage stage) {
-        return StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
-            || StageModeEnum.RANK.getCode().equals(stage.getStageMode());
+        return profile(stage).result().perCompetitor();
+    }
+
+    /** 本赛段赛制画像(决策分派;打分本身仍由 ScoringEngine 按 matchMode 负责)。 */
+    private StageModeProfile profile(TStage stage) {
+        return StageModeProfiles.of(stage.getStageMode());
     }
 
     /**
@@ -171,7 +177,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private MatchResultVo submitPerCompetitorScores(TMatch match, TStage stage, RuleConfigHolder rc,
                                                     ScoringConfig sc, SubmitResultBo bo,
                                                     List<Long> competitorIds) {
-        boolean isAudition = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
+        boolean isAudition = profile(stage).result().writeBackSubmittedOnly();
         writePerCompetitorScores(match, rc, sc, bo, competitorIds, isAudition);
         if (isAudition) {
             // 只回写本次真正提交了的选手:此前对整圈参赛方逐个 UPDATE,
@@ -259,7 +265,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                                             SubmitResultBo bo, List<Long> competitorIds, boolean isArena) {
         List<TRoundScore> rawScores = writeRawScores(match, bo, competitorIds);
 
-        boolean isKnockoutStandard = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())
+        boolean isKnockoutStandard = profile(stage).knockout()
             && MatchModeEnum.STANDARD.equals(mode);
         String publishMode = readPublishMode(stage);
         // 擂台赛同样是"单场判胜负"(STANDARD),导播台判定模式下裁判端不显示场次,这里再兜一道
@@ -442,7 +448,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .toList());
 
         // 淘汰特有:填下游占位 / 标决赛胜者晋级下一赛段
-        if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+        if (profile(stage).knockout()) {
             resolveKnockoutDownstream(match, results);
             // 本场胜者若已被判为「晋级下一赛段」(名次也写回了),立刻落进下一赛段中间态的对应座位:
             // 现场就是"判完一场,下一个赛段中间态立刻多一个人",而不是等整个赛段结算才出名单。
@@ -507,7 +513,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             return;
         }
         // 淘汰赛逐场进行:同赛段其他进行中场次回退 PENDING 并清空已提交分数,保证同时只有一个进行中
-        if (StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+        if (profile(stage).knockout()) {
             List<TMatch> otherGaming = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
                 .eq(TMatch::getStageId, match.getStageId())
                 .eq(TMatch::getStatus, StageConstants.MATCH_GAMING)
@@ -562,7 +568,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
             throw new ServiceException("赛段状态不允许取消开始场次");
         }
-        if (!StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())) {
+        if (!profile(stage).knockout()) {
             throw new ServiceException("仅淘汰赛支持取消开始场次");
         }
         // 清空本场已提交的分数/结果,场次与轮次回 PENDING(已提交判罚一并作废,由前端确认兜底)

@@ -24,6 +24,11 @@ import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.MatchCurrentCompetitorStore;
+import com.dance.street.game.service.impl.stage.hook.StageHooks;
+import com.dance.street.game.engine.common.StageModeProfile;
+import com.dance.street.game.engine.common.StageModeProfile.GeneratePolicy;
+import com.dance.street.game.engine.common.StageModeProfile.Setup.Trait;
+import com.dance.street.game.engine.common.StageModeProfiles;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -73,17 +78,18 @@ public class StageRunService {
     private final MatchCurrentCompetitorStore currentCompetitorStore;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
+    private final StageHooks stageHooks;
 
     /** 开赛:一键完成初始化、生成对阵、开赛守卫与状态推进。 */
     @Transactional(rollbackFor = Exception.class)
     public void startStage(Long stageId) {
         TStage stage = stageLookup.get(stageId);
         assertCanStart(stage);
+        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
         // 一键开赛:无对阵时自动初始化(如未初始化)并生成对阵,淘汰赛/小组赛/海选均适用
         long exist = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stageId));
-        boolean isArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
-        // 自由对抗:对手由线下抽签/指认,场次全部由导播台手动添加,开赛不生成任何对阵
-        boolean isFreeMatch = StageModeEnum.FREE_MATCH.getCode().equals(stage.getStageMode());
+        // 擂台赛/自由对抗不生成对阵(擂台由导播逐场创建,自由对抗对手线下抽签),其余赛制一键生成
+        boolean generatesMatches = profile.setup().generatePolicy() == GeneratePolicy.GENERATE;
         if (exist == 0) {
             long entrants = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, stageId)
@@ -101,7 +107,7 @@ public class StageRunService {
                     // 初始化后重新读取赛段(状态/isInitialized 已更新)
                     stage = stageLookup.get(stageId);
                 }
-                if (!isArena && !isFreeMatch) {
+                if (generatesMatches) {
                     GenerateMatchesBo gm = new GenerateMatchesBo();
                     gm.setStageId(stageId);
                     stageSetupService.generateMatches(gm);
@@ -124,20 +130,20 @@ public class StageRunService {
             }
         }
         // 海选落圈守卫:圈位由客户端在签到时指定,开赛前必须人人已落圈(见 assertAuditionAllAttached)
-        assertAuditionAllAttached(stageId);
-        // 海选裁判守卫:每个圈都要有裁判,否则开赛后没人能判、赛段既结算不了也结束不了
-        assertAuditionCirclesHaveReferees(stageId);
+        // 生成后的赛制专属守卫(海选:人人已落圈、每圈有裁判)
+        stageHooks.startGuard(stage.getStageMode())
+            .ifPresent(guard -> guard.assertPostGenerate(stageLookup.get(stageId)));
         ensureStageGaming(stageId);
 
         // 擂台赛:开赛后自动创建并开始第一场对决(队首擂主 vs 队次挑战者)
-        if (isArena) {
+        if (profile.run().autoStartFirstMatch()) {
             arenaRunService.startNextArenaMatch(stageId);
             return;
         }
 
         // 淘汰赛:开始赛段仅完成生成与开赛,场次全部保持待开始,由导播台逐场点「开始」开始(避免自动开始第一场)。
         // 海选等其他赛制:场次一并进入 GAMING,裁判可直接开评。
-        boolean singleActive = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode());
+        boolean singleActive = profile.run().singleActiveMatch();
         List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId)
             .orderByAsc(TMatch::getDisplayRow)
@@ -249,9 +255,9 @@ public class StageRunService {
         if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
             throw new ServiceException("仅规划中(DRAFT)状态的赛段可开始,当前: {}", stage.getStatus());
         }
-        // 海选圈默认为空:必须先配置至少一圈(人数/裁判/去向)才能开始
-        if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
-            && auditionCircleSupport.plannedCircleCount(stage) < 1) {
+        // 赛制专属开赛守卫(海选:必须先配置至少一圈(人数/裁判/去向))
+        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        if (profile.setup().has(Trait.REQUIRES_CIRCLES) && auditionCircleSupport.plannedCircleCount(stage) < 1) {
             throw new ServiceException("海选尚未配置圈,请先在赛段配置中新增至少一圈(人数/裁判/去向)");
         }
         // 开赛依赖 = 名单来源组里的<b>边</b>:每条边的来源赛段都必须已结束(SETTLED),
@@ -262,75 +268,4 @@ public class StageRunService {
         rosterService.assertStageStartable(stage.getId());
     }
 
-    /**
-     * 海选开赛守卫:所有未退赛的参赛方都必须已落入某个圈场次。
-     *
-     * <p>落圈由客户端(签到页)指定,后端不再自动分配。若有人没落圈就开赛,
-     * 他不会参与任何场次,结算时静默消失——所以这里宁可拦住并列出具体名单。</p>
-     */
-    private void assertAuditionAllAttached(Long stageId) {
-        TStage stage = stageMapper.selectById(stageId);
-        if (stage == null || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
-            return;
-        }
-        List<TCompetitor> comps = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-            .eq(TCompetitor::getStageId, stageId)
-            .ne(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.WITHDRAWN.getCode()));
-        if (comps.isEmpty()) {
-            return;
-        }
-        List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stageId)
-                .select(TMatch::getId))
-            .stream().map(TMatch::getId).toList();
-        Set<Long> attached = matchIds.isEmpty() ? Set.of()
-            : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                    .in(TMatchParticipant::getMatchId, matchIds)
-                    .select(TMatchParticipant::getCompetitorId))
-                .stream().map(TMatchParticipant::getCompetitorId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        List<String> missed = comps.stream()
-            .filter(c -> !attached.contains(c.getId()))
-            .map(c -> c.getNumber() == null ? c.getName() : c.getName() + "(" + c.getNumber() + "号)")
-            .toList();
-        if (!missed.isEmpty()) {
-            throw new ServiceException("海选有 {} 名参赛者尚未落圈,无法开始:{};请先为其指定圈子"
-                + "(签到页选圈,或调用「参赛方落圈」接口)",
-                missed.size(), String.join("、", missed));
-        }
-    }
-
-    /**
-     * 海选开赛守卫:每个圈都必须至少有一名裁判。
-     *
-     * <p>海选是<b>按圈判</b>的——裁判端只显示自己绑到圈上的那场({@code t_match_referee})。
-     * 圈上没有裁判时谁也打不了分,赛段既结算不了也结束不了,现场只能删赛事重建;
-     * 而"赛段级裁判"({@code t_referee_stage})只表示谁参与本赛段,不会自动落到圈上。
-     * 所以开赛前拦住,并列出缺裁判的圈。</p>
-     */
-    private void assertAuditionCirclesHaveReferees(Long stageId) {
-        TStage stage = stageMapper.selectById(stageId);
-        if (stage == null || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
-            return;
-        }
-        List<TMatch> circles = auditionCircleSupport.circles(stage);
-        if (circles.isEmpty()) {
-            return;
-        }
-        List<String> missing = new ArrayList<>();
-        for (int i = 0; i < circles.size(); i++) {
-            TMatch circle = circles.get(i);
-            long refs = matchRefereeMapper.selectCount(Wrappers.<TMatchReferee>lambdaQuery()
-                .eq(TMatchReferee::getMatchId, circle.getId()));
-            if (refs == 0) {
-                missing.add(circle.getName() != null ? circle.getName() : ("第" + (i + 1) + "圈"));
-            }
-        }
-        if (!missing.isEmpty()) {
-            throw new ServiceException("海选有 {} 个圈还没有裁判,无法开始:{};"
-                + "请给每圈指定裁判(赛段流程→海选配置→每圈裁判)",
-                missing.size(), String.join("、", missing));
-        }
-    }
 }

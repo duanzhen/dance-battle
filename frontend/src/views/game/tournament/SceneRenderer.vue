@@ -96,7 +96,7 @@ import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
 import AuditionWidget from './widgets/AuditionWidget.vue';
 import ParticipantWidget from './widgets/ParticipantWidget.vue';
-import { updateWidgetTimerState } from '@/api/game/screen';
+import { updateWidgetTimerState } from '@/api/game/visWidget';
 import html2canvas from 'html2canvas';
 
 const componentMap: Record<string, any> = {
@@ -152,33 +152,40 @@ const route = useRoute();
 // 计算是否为编辑模式（向后兼容）
 const editable = computed(() => props.mode === 'edit');
 
+/**
+ * 是否允许操作倒计时(开始/暂停/重置)。
+ * 只允许在管理端编辑画布操作;大屏投射端是公开播放面,一律只读。
+ */
+const canControlTimer = computed(() => editable.value);
+
 // 从 sceneConfig 中读取缩略图数据（缩略图模式使用）
 const thumbnailData = computed(() => props.sceneConfig.thumbnailData);
 
 // 解析 widget 的 dataConfig 为 props
-const widgetProps = (widget: SceneElement) => {
+const widgetProps = (widget: SceneElement): Record<string, unknown> => {
+  let parsed: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(widget.dataConfig || '{}');
-    // 统一注入 tournamentId:优先组件配置 → 场景/路由,保证大屏投射窗口也能拿到赛事上下文
-    return {
-      ...parsed,
-      tournamentId: parsed.tournamentId ?? props.tournamentId ?? route.query.id ?? route.query.tournamentId ?? undefined
-    };
+    parsed = JSON.parse(widget.dataConfig || '{}');
   } catch {
-    return { tournamentId: props.tournamentId ?? route.query.id ?? route.query.tournamentId ?? undefined };
+    parsed = {};
   }
+  // 统一注入 tournamentId:优先组件配置 → 场景/路由,保证大屏投射窗口也能拿到赛事上下文
+  const merged: Record<string, unknown> = {
+    ...parsed,
+    tournamentId: parsed.tournamentId ?? props.tournamentId ?? route.query.id ?? route.query.tournamentId ?? undefined
+  };
+  if (widget.type === 'TIMER') {
+    merged.canControl = canControlTimer.value;
+  }
+  return merged;
 };
 
 /**
  * 组件在查看模式里改写自己的配置(目前只有倒计时:开始/暂停把 endAt / remainMs 写回配置)。
  *
- * <p>两条路径:</p>
- * <ul>
- *   <li>编辑器画布:有 store,走 store 更新,顺带把本地缓存改掉——否则之后在属性面板改别的属性时
- *       会用旧的 dataConfig 覆盖,把 endAt 冲掉;</li>
- *   <li>大屏投射页:公开播放端没有管理员 JWT、也没有 store,直接调大屏唯一的写接口
- *       {@code /tournament/screen/widget/{id}/timer-state}(只允许改这两个键)。</li>
- * </ul>
+ * <p>只有管理端编辑画布会触发(大屏投射端只读,不展示控制按钮)。写入走管理端窄接口
+ * {@code /game/visWidget/{id}/timer-state}:只改 endAt/remainMs,锁定控件也允许,
+ * 落库后由后端广播 sceneUpdate 让大屏重载配置继续走。</p>
  *
  * <p>本地先改一份:同一帧内后续读取(以及组件重新挂载)能立刻看到新配置。</p>
  */
@@ -189,21 +196,25 @@ const persistWidgetConfig = async (widget: SceneElement, patch: Record<string, u
   } catch {
     config = {};
   }
-  const next = { ...config, ...patch };
-  widget.dataConfig = JSON.stringify(next);
-  const inStore = !!store.scenes?.some((s: any) => (s.widgets || []).some((w: any) => String(w.id) === String(widget.id)));
+  widget.dataConfig = JSON.stringify({ ...config, ...patch });
+
+  // 只提交本次真正变化的键,避免把另一键(如刚开始计时写下的 endAt)冲成 null
+  const body: { endAt?: number | null; remainMs?: number | null } = {};
+  if ('endAt' in patch) {
+    body.endAt = (patch.endAt as number | null) ?? null;
+  }
+  if ('remainMs' in patch) {
+    body.remainMs = (patch.remainMs as number | null) ?? null;
+  }
+  if (Object.keys(body).length === 0) {
+    return;
+  }
+
   try {
-    if (inStore) {
-      await store.updateWidget(String(widget.id), { dataConfig: next });
-      return;
-    }
-    await updateWidgetTimerState(widget.id, {
-      endAt: (patch.endAt as number | null) ?? null,
-      remainMs: (patch.remainMs as number | null) ?? null
-    });
+    await updateWidgetTimerState(widget.id, body);
   } catch (e) {
     // 落库失败不回滚本地状态:现场优先"屏幕上是对的",下一次开始/暂停会再写一次
-    console.warn('[SceneRenderer] 组件配置回写失败', e);
+    console.warn('[SceneRenderer] 计时状态回写失败', e);
   }
 };
 

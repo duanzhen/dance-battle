@@ -1,6 +1,7 @@
 package com.dance.street.game.controller;
 
 import java.util.List;
+import java.util.Map;
 
 import cn.dev33.satoken.annotation.SaIgnore;
 import lombok.RequiredArgsConstructor;
@@ -113,6 +114,21 @@ public class TVisWidgetController extends BaseController {
     @PutMapping()
     public R<TVisWidgetVo> edit(@Validated(EditGroup.class) @RequestBody TVisWidgetBo bo) {
         return R.ok(tVisWidgetService.updateByBo(bo));
+    }
+
+    /**
+     * 倒计时开始/暂停(管理端):请求体是一段 JSON 补丁,只合并进 dataConfig 的
+     * {@code endAt}/{@code remainMs} 两个键,计划时长等仍归组件属性。
+     *
+     * <p>大屏投射端只读、不再暴露写接口,计时控制回到管理端鉴权面。单独开窄接口而非走通用
+     * {@link #edit}:锁定是防误拖布局,现场开始/暂停在控件锁定时也要能落库。</p>
+     */
+    @SaCheckPermission("game:visWidget:edit")
+    @PostMapping("/{id}/timer-state")
+    public R<Void> updateTimerState(@PathVariable("id") Long id,
+                                    @RequestBody(required = false) Map<String, Object> patch) {
+        tVisWidgetService.updateTimerState(id, patch);
+        return R.ok();
     }
 
     /**

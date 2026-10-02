@@ -37,6 +37,7 @@ import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.settle.StageSettleOutcome;
 import com.dance.street.game.service.impl.settle.StageSettlerRegistry;
+import com.dance.street.game.engine.common.StageModeProfiles;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -290,8 +291,7 @@ public class StageSettlementService {
     @Transactional(rollbackFor = Exception.class)
     public int adjustAdvancement(Long stageId, List<Long> competitorIds) {
         TStage stage = stageLookup.get(stageId);
-        if (!StageModeEnum.RANK.getCode().equals(stage.getStageMode())
-            && !StageModeEnum.GROUP.getCode().equals(stage.getStageMode())) {
+        if (!StageModeProfiles.of(stage.getStageMode()).view().advancementAdjustment()) {
             throw new ServiceException("仅排名赛/小组赛赛段支持手动调整同分晋级");
         }
         if (!StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
@@ -371,7 +371,7 @@ public class StageSettlementService {
     /** 排名赛名次明细(按圈/维度),MANUAL/BATCH 未公布前隐藏分数。 */
     public RankDetailVo getRankDetail(Long stageId) {
         TStage stage = stageLookup.get(stageId);
-        if (!StageModeEnum.RANK.getCode().equals(stage.getStageMode())) {
+        if (!StageModeProfiles.of(stage.getStageMode()).view().rankDetail()) {
             throw new ServiceException("仅排名赛赛段支持排名明细");
         }
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());

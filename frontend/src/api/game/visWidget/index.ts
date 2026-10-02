@@ -86,3 +86,18 @@ export const delVisWidget = (id: string | number | Array<string | number>) => {
     method: 'delete'
   });
 };
+
+/**
+ * 倒计时开始/暂停(管理端):只写 dataConfig 的 endAt/remainMs,锁定控件也允许。
+ * 大屏投射端只读,计时控制走这里(需要管理端登录态)。
+ */
+export const updateWidgetTimerState = (
+  id: string | number,
+  data: { endAt?: number | null; remainMs?: number | null }
+): AxiosPromise<void> => {
+  return request({
+    url: `/game/visWidget/${id}/timer-state`,
+    method: 'post',
+    data
+  });
+};

@@ -30,6 +30,8 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
+import com.dance.street.game.engine.common.StageModeProfile;
+import com.dance.street.game.engine.common.StageModeProfiles;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
@@ -208,7 +210,7 @@ public class TMatchServiceImpl implements ITMatchService {
             .collect(Collectors.toMap(TStage::getId, TStage::getStageMode, (a, b) -> a));
 
         List<TMatchVo> auditionMatches = matches.stream()
-            .filter(m -> "AUDITION".equals(stageModeById.get(m.getStageId())))
+            .filter(m -> stageCap(stageModeById.get(m.getStageId())).audition())
             .toList();
         if (auditionMatches.isEmpty()) {
             return;
@@ -452,7 +454,7 @@ public class TMatchServiceImpl implements ITMatchService {
             return;
         }
         for (TStage stage : stageMapper.selectByIds(stageIds)) {
-            if (!StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            if (!stageCap(stage.getStageMode()).audition()) {
                 continue;
             }
             List<TMatch> stageMatches = baseMapper.selectList(Wrappers.<TMatch>lambdaQuery()
@@ -491,7 +493,7 @@ public class TMatchServiceImpl implements ITMatchService {
             .collect(Collectors.toMap(TStage::getId, TStage::getStageMode, (a, b) -> a));
 
         List<TMatchVo> koMatches = matches.stream()
-            .filter(m -> "KNOCKOUT".equals(stageModeById.get(m.getStageId()))
+            .filter(m -> stageCap(stageModeById.get(m.getStageId())).knockout()
                 && "STANDARD".equals(m.getMatchMode()))
             .toList();
         if (koMatches.isEmpty()) {
@@ -724,5 +726,10 @@ public class TMatchServiceImpl implements ITMatchService {
             //TODO 做一些业务上的校验,判断是否需要校验
         }
         return baseMapper.deleteByIds(ids) > 0;
+    }
+
+    /** 赛制画像(读模型里替代 mode 字符串/枚举比较)。 */
+    private StageModeProfile stageCap(String stageMode) {
+        return StageModeProfiles.of(stageMode);
     }
 }

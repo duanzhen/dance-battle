@@ -6,7 +6,6 @@ import com.dance.street.game.engine.common.OutcomeScore;
 import com.dance.street.game.engine.common.ScoringConfig;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import org.dromara.common.core.exception.ServiceException;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -20,10 +19,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /**
  * ScoringEngine 端到端策略测试:三种打分模式 + 同分并列。
  */
-@Tag("local")
 class ScoringEngineTest {
 
-    private final ScoringEngine engine = new ScoringEngine();
+    private final ScoringEngine engine = new ScoringEngine(List.of(
+        new WinLossDrawStrategy(), new TotalScoreStrategy(), new MultiDimStrategy()));
 
     // ---------------- STANDARD: 判胜负平 ----------------
 

@@ -1,7 +1,6 @@
 package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.RuleConfigHolder;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -17,7 +16,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>落圈由客户端在签到时指定,生成器不得按号码或随机把人塞进圈——
  * 否则同一批号码会因调用顺序不同得到不同的分圈结果。</p>
  */
-@Tag("local")
 class AuditionGeneratorTest {
 
     private final AuditionGenerator generator = new AuditionGenerator();

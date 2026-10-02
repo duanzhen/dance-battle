@@ -5,6 +5,7 @@ import com.dance.street.game.engine.common.ScoringConfig;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import org.dromara.common.core.exception.ServiceException;
+import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ import java.util.Map;
  *
  * @author duane
  */
+@Component
 public class WinLossDrawStrategy implements ScoreStrategy {
 
     private static final BigDecimal DEFAULT_WIN = BigDecimal.ONE;

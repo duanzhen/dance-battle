@@ -24,8 +24,6 @@ import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.domain.vo.TVisSceneVo;
 import com.dance.street.game.domain.vo.TVisWidgetVo;
 import com.dance.street.game.service.ITCompetitorService;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import com.dance.street.game.service.ITMatchParticipantService;
 import com.dance.street.game.service.ITMatchRefereeService;
 import com.dance.street.game.service.ITMatchService;
@@ -42,15 +40,17 @@ import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
+import org.dromara.common.sse.core.TournamentSseEmitterManager;
+import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 大屏(投射页)公开数据接口。
@@ -60,11 +60,10 @@ import java.util.Map;
  * 的读取接口({@code @SaCheckPermission}),在没有管理员 JWT 的机器上全部 401,而管理端
  * 响应拦截器见到 401 就弹「登录状态已过期」,把大屏整个挡住。</p>
  *
- * <p>这里把这批"本来就是给观众看"的数据单独收拢成一组 {@code @SaIgnore} 接口:
- * 除倒计时状态回写({@code POST /widget/{id}/timer-state},只改 dataConfig 的
- * endAt/remainMs 两个键)外全部为查询,返回结构与对应的管理端接口一致(直接委托同一批 service),
- * 前端大屏只依赖本控制器,和鉴权体系彻底解耦。赛事凭证(authKey)不在任何返回的 VO 里,
- * 因此开放这批只读数据不会泄露入台凭证。</p>
+ * <p>这里把这批"本来就是给观众看"的数据单独收拢成一组 {@code @SaIgnore} 只读接口,
+ * 全部为查询,返回结构与对应的管理端接口一致(直接委托同一批 service),
+ * 前端大屏只依赖本控制器,和鉴权体系彻底解耦。大屏端只读:赛事/裁判凭证(authKey)
+ * 不出现在任何返回里,写入(如倒计时开始/暂停)一律回到管理端鉴权接口。</p>
  *
  * @author duane
  */
@@ -88,30 +87,25 @@ public class ScreenController {
     private final ITRefereeService refereeService;
     private final ITMatchRefereeService matchRefereeService;
     private final ITRefereeStageService refereeStageService;
+    private final TournamentSseEmitterManager tournamentSseEmitterManager;
 
     // ==================== 场景 / 控件 ====================
+
+    /**
+     * 大屏查看端 SSE 长连接:只接收场景切换/实时数据广播,无任何写入能力。
+     * EventSource 无法自定义请求头,故与其它大屏只读接口一样公开(不认证)。
+     */
+    @GetMapping(value = "/view", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter screenView(@RequestParam("screenId") String screenId,
+                                 @RequestParam("terminalId") String terminalId) {
+        return tournamentSseEmitterManager.connect(screenId, terminalId,
+            TournamentSseEmitterManager.ClientType.VIEWER);
+    }
 
     /** 场景详情:大屏按 screenId 拿到当前投射的场景后读取 */
     @GetMapping("/scene/{id}")
     public R<TVisSceneVo> scene(@PathVariable("id") Long id) {
         return R.ok(visSceneService.queryById(id));
-    }
-
-    /**
-     * 倒计时状态回写(本控制器唯一的写入接口):请求体就是一段 JSON 补丁,合并进组件 dataConfig。
-     *
-     * <p>大屏是公开播放端、不带管理员 JWT,但现场的「开始/暂停」必须落库:否则刷新页面后
-     * 倒计时从头开始,现场对不上表。写入只允许 TIMER 组件、且只认 {@code endAt}/{@code remainMs}
-     * 两个键(组件配置本身就是 JSON,计划时长仍归组件属性),
-     * 因此开放这个窄接口不会让大屏拿到改动布局/内容的能力。</p>
-     *
-     * <p>示例:开始 {@code {"endAt":1699999999999,"remainMs":null}};暂停 {@code {"endAt":null,"remainMs":125000}}。</p>
-     */
-    @PostMapping("/widget/{id}/timer-state")
-    public R<Void> updateTimerState(@PathVariable("id") Long id,
-                                   @RequestBody(required = false) Map<String, Object> patch) {
-        visWidgetService.updateTimerState(id, patch);
-        return R.ok();
     }
 
     /** 场景下的控件列表 */
@@ -216,7 +210,12 @@ public class ScreenController {
     /** 裁判列表(按赛事) */
     @GetMapping("/referee/list")
     public TableDataInfo<TRefereeVo> referees(TRefereeBo bo, PageQuery pageQuery) {
-        return refereeService.queryPageList(bo, pageQuery);
+        TableDataInfo<TRefereeVo> page = refereeService.queryPageList(bo, pageQuery);
+        // 大屏是公开只读面:剔除裁判登录凭证 authKey,避免未认证访客拿到后冒用裁判身份
+        if (page.getData() != null) {
+            page.getData().forEach(referee -> referee.setAuthKey(null));
+        }
+        return page;
     }
 
     /** 某赛段各场次(圈)已分配的裁判 */

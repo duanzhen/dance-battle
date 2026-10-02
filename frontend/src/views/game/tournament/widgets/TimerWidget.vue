@@ -10,6 +10,7 @@
 
       <!-- 播放控制栏 -->
       <div
+        v-if="canControl"
         class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-auto z-50"
       >
         <div class="flex items-center justify-center gap-3">
@@ -140,7 +141,12 @@ const props = defineProps<{
   textAlign?: 'left' | 'center' | 'right';
   showTitle?: boolean;
   showMilliseconds?: boolean;
-  mode?: 'view' | 'edit';
+  mode?: 'view' | 'edit' | 'render' | 'thumbnail';
+  /**
+   * 是否展示开始/暂停/重置控制。只有管理端编辑画布传 true;大屏投射端只读,未传或 false
+   * 时只显示倒计时。
+   */
+  canControl?: boolean;
   /** 计时中:结束时间戳(ms)。开始计时时写入配置,刷新/换窗口后据此续跑 */
   endAt?: number | string | null;
   /** 暂停时保存的剩余毫秒(不改动 hours/minutes/seconds 的计划时长) */
@@ -252,6 +258,18 @@ const clearTicking = () => {
   isRunning.value = false;
 };
 
+/**
+ * 回写计时状态。只有管理端编辑画布(canControl=true)才允许发写入事件;
+ * 大屏投射端是公开只读面,即使倒计时走到 0 也只在本地显示,不落库。
+ */
+const emitTimerState = (endAt: number | null, remainMs: number | null) => {
+  if (!props.canControl) {
+    return;
+  }
+  emit('update:endAt', endAt);
+  emit('update:remainMs', remainMs);
+};
+
 /** 按绝对结束时间推进:10ms 一跳只是为了显示毫秒,剩余时间始终由 endAt 推出来 */
 const tick = () => {
   remainingTime.value = Math.max(0, tickingEndAt - Date.now());
@@ -259,8 +277,7 @@ const tick = () => {
     // 走完:清掉结束时间(否则刷新后又会"续跑"一个已经结束的计时)
     remainingTime.value = 0;
     clearTicking();
-    emit('update:endAt', null);
-    emit('update:remainMs', 0);
+    emitTimerState(null, 0);
     console.log('Timer finished!');
   }
 };
@@ -287,8 +304,7 @@ const startTimer = () => {
     return;
   }
   runUntil(Date.now() + remain);
-  emit('update:endAt', tickingEndAt);
-  emit('update:remainMs', null);
+  emitTimerState(tickingEndAt, null);
 };
 
 /**
@@ -300,8 +316,7 @@ const startTimer = () => {
 const stopTimer = (persist = true) => {
   clearTicking();
   if (persist) {
-    emit('update:endAt', null);
-    emit('update:remainMs', Math.max(0, Math.round(remainingTime.value)));
+    emitTimerState(null, Math.max(0, Math.round(remainingTime.value)));
   }
 };
 
@@ -309,8 +324,7 @@ const stopTimer = (persist = true) => {
 const resetTimer = () => {
   stopTimer(false);
   remainingTime.value = totalTime.value;
-  emit('update:endAt', null);
-  emit('update:remainMs', null);
+  emitTimerState(null, null);
 };
 
 // 切换倒计时状态
@@ -375,8 +389,7 @@ watch(
     remainingTime.value = totalTime.value;
     // 计划时长改了:计时状态一并复位(旧 endAt/暂停剩余都不能再留着),
     // 原本在跑的就按新时长重新开始
-    emit('update:endAt', null);
-    emit('update:remainMs', null);
+    emitTimerState(null, null);
     if (wasRunning) {
       startTimer();
     }

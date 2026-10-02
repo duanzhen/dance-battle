@@ -69,14 +69,6 @@ public class SseController implements DisposableBean {
     }
 
     @SaIgnore
-    @GetMapping(value = "/tournament/screen/view", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter screenView(@RequestParam("screenId") String screenId,
-                                  @RequestParam("terminalId") String terminalId) {
-        return tournamentSseEmitterManager.connect(screenId, terminalId,
-            TournamentSseEmitterManager.ClientType.VIEWER);
-    }
-
-    @SaIgnore
     @GetMapping(value = "/tournament/screen/control", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter screenControl(@RequestParam(value = "screenIds", required = false) String screenIds,
                                     @RequestParam(value = "screenId", required = false) String screenId,

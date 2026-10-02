@@ -50,8 +50,43 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* 全局隐藏滚动条:滚动能力保留,仅不显示滚动条。
+   放在全局入口并加 !important,以覆盖各组件里自绘的 custom-scrollbar / custom-scrollbar-x
+   (那些规则按类选择器,特异性高于通配符,不加 !important 会被它们重新显形)。 */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / 旧 Edge */
+}
+
+*::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece,
+*::-webkit-scrollbar-corner {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Element Plus 的 overlay 滚动条是自绘的,原生规则盖不到,单独隐藏 */
+.el-scrollbar__bar {
+  display: none !important;
+}
+
 html.dark .svg-icon {
   fill: var(--el-text-color-regular);
+}
+
+/* 整屏壳高度:优先 dvh(移动端随地址栏收放动态变化),旧浏览器回退 vh。
+   直接用 h-screen(100vh)在手机上会按"地址栏收起"的最大高度计算,比可视区高一截;
+   而整屏壳都是 overflow-hidden,底部那段既看不到、页面也滚不动 —— 表现为"往上拖拖不动"。 */
+.h-viewport {
+  height: 100vh;
+  height: 100dvh;
 }
 
 // lucide 图标是描边风格(fill="none" + stroke=currentColor),

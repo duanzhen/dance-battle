@@ -77,19 +77,6 @@
         >
           完成赛段
         </button>
-
-        <!-- 撤销赛段数据:发现数据出错时重新处理 -->
-        <button
-          v-if="localStage.status !== 'DISCARD'"
-          @click="doUndoStageData"
-          :disabled="lifecycleLoading"
-          class="w-full py-2.5 text-sm font-medium rounded-lg border border-red-900/30 text-red-500 hover:bg-red-900/10 hover:border-red-900/50 transition-colors disabled:opacity-50"
-        >
-          撤销赛段数据
-        </button>
-        <p v-if="localStage.status !== 'DISCARD'" class="text-[10px] text-neutral-500 leading-relaxed">
-          数据出错时用:删除本赛段下属的全部比赛数据,整体退回「中间态还没确认」,可重新调整后再次确认名单。
-        </p>
       </div>
 
       <!-- 海选:裁判由「圈配置」按圈指定,这里不再单独配置裁判组(避免两处口径) -->
@@ -158,6 +145,18 @@
         <p v-if="!canDelete" class="text-xs text-neutral-600 mt-2 text-center">
           {{ getDeleteDisabledReason() }}
         </p>
+      </div>
+
+      <!-- 撤销赛段数据:低频且容易误触,弱化成最底部的小字文本按钮(说明放 title) -->
+      <div v-if="localStage.status !== 'DISCARD'" class="pt-2 text-center">
+        <button
+          @click="doUndoStageData"
+          :disabled="lifecycleLoading"
+          class="inline-block text-[11px] font-normal leading-none bg-transparent p-0 text-neutral-600 underline decoration-neutral-800 underline-offset-2 transition-colors hover:!bg-transparent hover:!text-red-400 hover:decoration-red-400/50 disabled:opacity-40"
+          title="数据出错时用:删除本赛段下属的全部比赛数据,整体退回「中间态还没确认」,可重新调整后再次确认名单"
+        >
+          撤销赛段数据
+        </button>
       </div>
     </div>
   </div>

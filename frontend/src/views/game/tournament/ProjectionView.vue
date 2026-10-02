@@ -1,5 +1,5 @@
 <template>
-  <div class="w-screen h-screen bg-black text-white overflow-hidden relative group">
+  <div class="w-full h-viewport bg-black text-white overflow-hidden relative group">
     <!-- 右上角连接状态圆点:绿=已连上(20s 内有心跳)/ 黄呼吸=连接中或重连中 / 红=已停止重连 -->
     <SseLiveBadge :status="sseStatus" dot-only class="absolute top-3 right-3 z-[60]" />
 

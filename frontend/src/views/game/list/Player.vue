@@ -1,51 +1,14 @@
 <template>
   <div class="space-y-1">
-    <!-- 第一行：标题 + 搜索(移动端上下排列) -->
-    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-      <h2 class="text-xl font-bold text-neutral-100 flex items-center flex-shrink-0"><Users class="w-5 h-5 text-amber-500" /> 参赛阵容</h2>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <!-- 全部 / 未签到 过滤 -->
-        <el-segmented
-          v-if="displayMode === 'player'"
-          :model-value="filterUncheckInOnly ? 'uncheck' : 'all'"
-          :options="[
-            { label: '全部', value: 'all' },
-            { label: '未签到', value: 'uncheck' }
-          ]"
-          size="small"
-          class="amber-segmented flex-shrink-0"
-          @change="handleFilterMode"
-        />
-
-        <!-- 排序:默认顺序 / 按签到拿到的号码升序 -->
-        <el-segmented
-          v-model="sortMode"
-          :options="[
-            { label: '默认顺序', value: 'DEFAULT' },
-            { label: '按号码', value: 'NUMBER' }
-          ]"
-          size="small"
-          class="amber-segmented flex-shrink-0"
-          title="按签到拿到的号码升序排列(没号码的排在最后)"
-        />
-
-        <el-input
-          v-model="searchKeyword"
-          :placeholder="displayMode === 'player' ? '搜索选手姓名' : '搜索参赛选手'"
-          size="small"
-          :prefix-icon="Users"
-          clearable
-          class="search-input w-full sm:w-52 rounded-lg"
-        />
-      </div>
-    </div>
-
-    <!-- 第二行：说明 + 操作按钮(移动端纵向堆叠、按钮换行) -->
-    <div class="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 pb-4">
+    <!-- 第一行:标题 + 统计(左) / 主操作(右) -->
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div class="flex flex-wrap items-center gap-2 min-w-0">
+        <h2 class="text-xl font-bold text-neutral-100 flex items-center gap-2 flex-shrink-0"><Users class="w-5 h-5 text-amber-500" /> 参赛阵容</h2>
         <span class="text-xs text-neutral-500 hidden lg:inline">管理选手档案与参赛名单</span>
-        <span class="px-2 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-[10px] text-neutral-300 flex items-center gap-1 flex-shrink-0">
+        <span
+          class="px-2 py-0.5 bg-neutral-800 border border-neutral-700 rounded text-[10px] text-neutral-300 flex-shrink-0"
+          title="选手总数 / 已签到人数"
+        >
           选手 {{ playerStats.total }} · 已签到 {{ playerStats.checkedIn }}
         </span>
         <span
@@ -56,6 +19,7 @@
           海选进行中，签到后自动加入场次
         </span>
       </div>
+
       <div class="flex flex-wrap items-center gap-1.5 toolbar-buttons">
         <el-button type="warning" size="small" :icon="Plus" @click="handleAdd" class="amber-button">添加选手</el-button>
         <!-- 测试工具:一键把所有未签到选手签到(仅开发/测试构建可见,见 VITE_ENABLE_DEV_TOOLS) -->
@@ -71,8 +35,45 @@
           一键全签到
         </el-button>
         <el-button size="small" @click="showImportDialog = true" class="import-button">批量导入</el-button>
-        <el-segmented v-model="displayMode" :options="displayModeOptions" size="small" class="amber-segmented" @change="handleModeChange" />
         <el-button size="small" circle :icon="RefreshCw" class="import-button" title="刷新" @click="refreshAll" />
+      </div>
+    </div>
+
+    <!-- 第二行:筛选工具栏(签到 / 排序 / 搜索 同一行) -->
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 pb-4">
+      <!-- 全部 / 未签到 过滤 -->
+      <div class="flex items-center gap-1.5">
+        <span class="hidden text-[11px] text-neutral-500 md:inline">签到</span>
+        <el-segmented
+          :model-value="filterUncheckInOnly ? 'uncheck' : 'all'"
+          :options="[
+            { label: '全部', value: 'all' },
+            { label: '未签到', value: 'uncheck' }
+          ]"
+          size="small"
+          class="amber-segmented"
+          @change="handleFilterMode"
+        />
+      </div>
+
+      <!-- 排序:默认顺序 / 按签到拿到的号码升序 -->
+      <div class="flex items-center gap-1.5">
+        <span class="hidden text-[11px] text-neutral-500 md:inline">排序</span>
+        <el-segmented
+          v-model="sortMode"
+          :options="[
+            { label: '默认顺序', value: 'DEFAULT' },
+            { label: '按号码', value: 'NUMBER' }
+          ]"
+          size="small"
+          class="amber-segmented"
+          title="按签到拿到的号码升序排列(没号码的排在最后)"
+        />
+      </div>
+
+      <!-- 宽度放外层 div:el-input 自带 width 规则会盖掉工具类宽度;sm 起靠右对齐 -->
+      <div class="w-full sm:ml-auto sm:w-56">
+        <el-input v-model="searchKeyword" placeholder="搜索选手姓名" size="small" :prefix-icon="Users" clearable class="search-input rounded-lg" />
       </div>
     </div>
 
@@ -82,147 +83,153 @@
         <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-amber-500"></div>
       </div>
       <!-- 显示选手列表 -->
-      <TransitionGroup v-if="displayMode === 'player'" name="card">
+      <TransitionGroup
+        v-if="displayMode === 'player'"
+        tag="div"
+        name="card"
+        class="grid grid-cols-1 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3"
+      >
         <div
           v-for="player in filteredPlayers"
           :key="player.id"
-          class="bg-neutral-900 border border-neutral-800 rounded-xl p-3 sm:p-4 flex items-center gap-3 sm:gap-4 relative group hover:border-neutral-600 hover:shadow-lg transition-all duration-300"
+          class="flex flex-col gap-3 rounded-2xl border bg-neutral-900 p-4 transition-colors"
+          :class="player.competitorId ? 'border-neutral-800 hover:border-amber-500/40' : 'border-neutral-800/80 hover:border-neutral-700'"
         >
-          <div
-            class="w-12 h-12 rounded-lg bg-white border border-neutral-800 flex-none flex items-center justify-center text-neutral-700 overflow-hidden relative group-hover:border-amber-500/30 transition-colors"
-          >
-            <img v-if="player.avatar" :src="player.avatar" crossorigin="anonymous" class="w-full h-full object-cover" />
-            <User v-else class="w-6 h-6" />
-            <div class="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full border border-neutral-950 shadow-[0_0_5px_lime]"></div>
-            <!-- 签到状态标记 -->
-            <div class="absolute top-0.5 right-0.5 flex items-center justify-center w-4 h-4 rounded-full shadow-md bg-neutral-900">
-              <Check v-if="player.competitorId" class="w-2.5 h-2.5 text-green-500" />
-              <Clock v-else class="w-2.5 h-2.5 text-neutral-400" />
-            </div>
-          </div>
-
-          <div class="flex-1 min-w-0 flex items-center gap-2 sm:gap-4 flex-wrap">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 flex-wrap">
-                <div class="text-sm font-bold text-white truncate">{{ player.name || '未命名' }}</div>
-                <!-- 签到状态标签 -->
-                <span
-                  v-if="player.competitorId"
-                  class="px-1.5 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-[10px] text-green-500 flex-shrink-0"
-                >
-                  已签到
-                </span>
-                <span v-else class="px-1.5 py-0.5 bg-neutral-500/10 border border-neutral-500/20 rounded text-[10px] text-neutral-500 flex-shrink-0">
-                  未签到
-                </span>
-                <!-- 选手号码 -->
-                <span
-                  v-if="player.competitorVo?.number"
-                  class="px-1.5 py-0.5 bg-amber-500/20 border border-amber-500/30 rounded text-[10px] text-amber-500 font-bold flex-shrink-0"
-                >
-                  NO.{{ player.competitorVo.number }}
-                </span>
-                <!-- 所在圈(以圈裁判命名) -->
-                <span
-                  v-if="player.competitorId && circleLabelOf(player.competitorId)"
-                  class="px-1.5 py-0.5 bg-sky-500/10 border border-sky-500/30 rounded text-[10px] text-sky-400 flex-shrink-0"
-                  title="所在圈(以裁判命名)"
-                >
-                  {{ circleLabelOf(player.competitorId) }}
-                </span>
+          <!-- 主行:头像 + 姓名/备注 + 操作 -->
+          <div class="flex items-start gap-3">
+            <div class="relative flex-none">
+              <div class="h-12 w-12 overflow-hidden rounded-full border border-neutral-700 bg-neutral-800">
+                <img v-if="player.avatar" :src="player.avatar" crossorigin="anonymous" class="h-full w-full object-cover" />
+                <div v-else class="flex h-full w-full items-center justify-center text-neutral-600">
+                  <User class="h-5 w-5" />
+                </div>
               </div>
-              <div v-if="player.remark" class="text-xs text-neutral-400 truncate">{{ player.remark }}</div>
-            </div>
-
-            <div v-if="player.tags" class="flex items-center gap-1 flex-wrap">
+              <!-- 签到状态角标(唯一状态标记,不再另加装饰性绿点) -->
               <span
-                v-for="tag in parseTags(player.tags)"
-                :key="tag"
-                class="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[10px] text-amber-500"
+                class="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-neutral-900 shadow"
+                :class="player.competitorId ? 'bg-green-500 text-neutral-900' : 'bg-neutral-700 text-neutral-300'"
+                :title="player.competitorId ? '已签到' : '未签到'"
               >
-                {{ tag }}
+                <Check v-if="player.competitorId" class="h-3 w-3" />
+                <Clock v-else class="h-3 w-3" />
               </span>
             </div>
 
-            <div v-if="player.idCard" class="text-[10px] text-neutral-500 font-mono flex-shrink-0 hidden sm:block">ID: {{ player.idCard }}</div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="truncate text-sm font-bold text-white">{{ player.name || '未命名' }}</span>
+                <span
+                  class="flex-none rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                  :class="player.competitorId ? 'bg-green-500/10 text-green-400' : 'bg-neutral-700/40 text-neutral-400'"
+                >
+                  {{ player.competitorId ? '已签到' : '未签到' }}
+                </span>
+              </div>
+              <p class="mt-0.5 truncate text-xs text-neutral-500">{{ player.remark || '—' }}</p>
+            </div>
+
+            <!-- 操作按钮:常显 -->
+            <div class="flex flex-none items-center gap-1.5">
+              <button
+                v-if="!player.competitorId"
+                @click.stop="handleCheckIn(player)"
+                class="flex h-8 w-8 items-center justify-center rounded-lg border border-green-500/25 bg-green-500/10 text-green-400 transition-colors hover:!border-green-500 hover:!bg-green-500 hover:!text-neutral-900"
+                title="签到"
+              >
+                <UserRoundCheck class="h-4 w-4" />
+              </button>
+              <button
+                v-else-if="!checkInLocked"
+                @click.stop="handleEditCheckIn(player)"
+                class="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800/60 text-neutral-300 transition-colors hover:!border-amber-500/40 hover:!bg-amber-500/15 hover:!text-amber-400"
+                title="编辑签到结果"
+              >
+                <UserRoundCheck class="h-4 w-4" />
+              </button>
+              <button
+                @click.stop="handleEdit(player)"
+                class="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800/60 text-neutral-300 transition-colors hover:!border-amber-500/40 hover:!bg-amber-500/15 hover:!text-amber-400"
+                title="编辑"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                </svg>
+              </button>
+            </div>
           </div>
 
-          <!-- 编辑按钮 -->
-          <button
-            @click.stop="handleEdit(player)"
-            class="bg-amber-500/20 text-amber-500 hover:bg-amber-500 hover:text-white p-1.5 rounded-full opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all shadow-md flex items-center justify-center"
-            title="编辑"
+          <!-- 信息行:号码 / 所在圈 / 标签 / 证件号 -->
+          <div
+            v-if="player.competitorVo?.number || player.competitorId || player.tags || player.idCard"
+            class="flex flex-wrap items-center gap-1.5 border-t border-neutral-800/70 pt-2.5"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="w-3.5 h-3.5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+            <span v-if="player.competitorVo?.number" class="rounded-md bg-amber-500/15 px-1.5 py-0.5 font-mono text-[11px] font-bold text-amber-400">
+              NO.{{ player.competitorVo.number }}
+            </span>
+            <span
+              v-if="player.competitorId && circleLabelOf(player.competitorId)"
+              class="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-400"
+              title="所在圈(以裁判命名)"
             >
-              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-            </svg>
-          </button>
-
-          <!-- 编辑签到结果(已签到) -->
-          <button
-            v-if="player.competitorId && !checkInLocked"
-            @click.stop="handleEditCheckIn(player)"
-            class="bg-amber-500/20 text-amber-500 hover:bg-amber-500 hover:text-white p-1.5 rounded-full transition-all shadow-md flex items-center justify-center"
-            title="编辑签到结果"
-          >
-            <UserRoundCheck class="w-3.5 h-3.5" />
-          </button>
-
-          <!-- 签到按钮 -->
-          <button
-            v-if="!player.competitorId"
-            @click.stop="handleCheckIn(player)"
-            class="bg-green-500/20 text-green-500 hover:bg-green-500 hover:text-white p-1.5 rounded-full transition-all shadow-md flex items-center justify-center"
-            title="签到"
-          >
-            <UserRoundCheck class="w-3.5 h-3.5" />
-          </button>
+              {{ circleLabelOf(player.competitorId) }}
+            </span>
+            <span v-for="tag in parseTags(player.tags)" :key="tag" class="rounded-md bg-neutral-800 px-1.5 py-0.5 text-[11px] text-neutral-400">
+              {{ tag }}
+            </span>
+            <span v-if="player.idCard" class="ml-auto hidden font-mono text-[10px] text-neutral-600 sm:block">ID {{ player.idCard }}</span>
+          </div>
         </div>
       </TransitionGroup>
 
       <!-- 显示参赛选手列表 -->
-      <TransitionGroup v-else name="card">
+      <TransitionGroup v-else tag="div" name="card" class="grid grid-cols-1 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3">
         <div
           v-for="competitor in filteredCompetitors"
           :key="competitor.id"
-          class="bg-neutral-900 border border-neutral-800 rounded-xl p-3 sm:p-4 flex items-center gap-3 sm:gap-4 relative group hover:border-neutral-600 hover:shadow-lg transition-all duration-300"
+          class="flex flex-col gap-3 rounded-2xl border border-neutral-800/80 bg-neutral-900 p-4 transition-colors hover:border-neutral-700"
         >
-          <!-- 选手号码徽章 -->
-          <div class="w-12 h-12 rounded-lg bg-amber-500/20 border border-amber-500/30 flex-none flex items-center justify-center">
-            <span class="text-amber-500 font-bold text-lg">{{ competitor.number || '-' }}</span>
-          </div>
+          <div class="flex items-start gap-3">
+            <!-- 号码徽章 -->
+            <div class="flex h-12 w-12 flex-none items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10">
+              <span class="text-lg font-bold text-amber-400">{{ competitor.number || '-' }}</span>
+            </div>
 
-          <div class="flex-1 min-w-0 flex items-center gap-2 sm:gap-4">
-            <div class="flex-1 min-w-0">
-              <!-- 选手姓名列表 -->
-              <div v-if="competitor.playerList && competitor.playerList.length > 0" class="flex items-center gap-1 flex-wrap">
-                <span v-for="player in competitor.playerList" :key="player.id" class="text-sm font-medium text-neutral-200">
+            <div class="min-w-0 flex-1">
+              <!-- 成员姓名 -->
+              <div v-if="competitor.playerList && competitor.playerList.length > 0" class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                <span v-for="player in competitor.playerList" :key="player.id" class="truncate text-sm font-bold text-white">
                   {{ player.name }}
                 </span>
               </div>
-              <div v-else class="text-sm font-bold text-white truncate">{{ competitor.name || '未命名' }}</div>
-              <div v-if="competitor.remark" class="text-xs text-neutral-400 truncate">{{ competitor.remark }}</div>
+              <div v-else class="truncate text-sm font-bold text-white">{{ competitor.name || '未命名' }}</div>
+              <p class="mt-0.5 truncate text-xs text-neutral-500">{{ competitor.remark || '—' }}</p>
             </div>
+          </div>
 
-            <div class="flex items-center gap-2 text-[10px] font-mono flex-shrink-0 flex-wrap">
-              <span
-                v-if="circleLabelOf(competitor.id)"
-                class="px-1.5 py-0.5 bg-sky-500/10 border border-sky-500/30 rounded text-[10px] text-sky-400"
-                title="所在圈(以裁判命名)"
-              >
-                {{ circleLabelOf(competitor.id) }}
-              </span>
-              <span v-if="competitor.seedRank !== null">SEED: {{ competitor.seedRank }}</span>
-            </div>
+          <!-- 信息行:种子位 / 所在圈 -->
+          <div
+            v-if="competitor.seedRank !== null || circleLabelOf(competitor.id)"
+            class="flex flex-wrap items-center gap-1.5 border-t border-neutral-800/70 pt-2.5"
+          >
+            <span v-if="competitor.seedRank !== null" class="rounded-md bg-neutral-800 px-1.5 py-0.5 font-mono text-[11px] text-neutral-400">
+              SEED {{ competitor.seedRank }}
+            </span>
+            <span
+              v-if="circleLabelOf(competitor.id)"
+              class="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-400"
+              title="所在圈(以裁判命名)"
+            >
+              {{ circleLabelOf(competitor.id) }}
+            </span>
           </div>
         </div>
       </TransitionGroup>
@@ -247,8 +254,8 @@
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
         @click.self="showImportDialog = false"
       >
-        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-md mx-4 shadow-2xl" @click.stop>
-          <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
+        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-md mx-4 max-h-[90vh] flex flex-col shadow-2xl" @click.stop>
+          <div class="flex-none px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-neutral-100">批量导入选手</h3>
             <button @click="showImportDialog = false" class="dialog-close-btn">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -257,7 +264,7 @@
             </button>
           </div>
 
-          <div class="p-5 space-y-4">
+          <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             <div class="p-3 rounded-lg bg-neutral-800 border border-neutral-700">
               <p class="text-[10px] text-neutral-400 mb-2">下载模板，按格式填写后上传</p>
               <button @click="downloadTemplate" class="text-xs text-amber-500 hover:text-amber-400 underline">下载导入模板</button>
@@ -303,7 +310,7 @@
             </div>
           </div>
 
-          <div class="px-5 py-4 border-t border-neutral-800 flex justify-end gap-3">
+          <div class="flex-none px-5 py-4 border-t border-neutral-800 flex justify-end gap-3">
             <button
               @click="showImportDialog = false"
               class="px-4 py-2 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded-lg border border-neutral-700 transition-colors"
@@ -348,10 +355,6 @@ const props = defineProps<{
 
 // 本地状态
 const displayMode = ref<'player' | 'competitor'>('player');
-const displayModeOptions = [
-  { label: '选手', value: 'player' },
-  { label: '参赛选手', value: 'competitor' }
-];
 const searchKeyword = ref('');
 const filterUncheckInOnly = ref(false);
 /** 排序方式:DEFAULT=后端顺序 / NUMBER=按签到拿到的号码升序 */
@@ -615,11 +618,6 @@ const refreshAll = async () => {
     await nextTick();
     restoreScroll(positions);
   }
-};
-
-// 切换显示模式（不再加载数据，只用于切换视图）
-const handleModeChange = () => {
-  // 数据已经在 refreshAll 中统一加载
 };
 
 /** 全部 / 未签到 过滤切换 */

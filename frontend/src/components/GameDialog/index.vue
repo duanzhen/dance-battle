@@ -95,8 +95,6 @@ const emit = defineEmits<{
   padding: 12px 16px;
   color: #f5f5f5;
   background-color: #171717;
-  max-height: 52vh;
-  overflow-y: auto;
 }
 
 .game-dialog .el-dialog__footer {

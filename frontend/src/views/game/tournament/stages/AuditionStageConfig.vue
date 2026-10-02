@@ -143,8 +143,11 @@
         class="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
         @click.self="closeWizard"
       >
-        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden" @click.stop>
-          <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
+        <div
+          class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+          @click.stop
+        >
+          <div class="flex-none px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-white">
               {{ editingCircleIndex === null ? `新增第 ${wizardCircleNo} 圈` : `编辑第 ${editingCircleIndex + 1} 圈` }}
             </h3>
@@ -155,7 +158,7 @@
             </div>
           </div>
 
-          <div class="p-5 space-y-4 text-xs text-neutral-300">
+          <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 text-xs text-neutral-300">
             <!-- Step 1 裁判 -->
             <template v-if="wizardStep === 1">
               <p class="text-neutral-400 leading-relaxed">
@@ -283,7 +286,7 @@
             </template>
           </div>
 
-          <div class="px-5 py-4 border-t border-neutral-800 flex items-center justify-between">
+          <div class="flex-none px-5 py-4 border-t border-neutral-800 flex items-center justify-between">
             <button
               v-if="wizardStep > 1"
               class="px-3 py-2 text-xs rounded border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors"

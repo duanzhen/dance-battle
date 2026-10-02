@@ -1,10 +1,20 @@
 <template>
-  <div class="h-full flex flex-col bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden">
+  <div class="flex flex-col bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden" :class="expanded ? '' : 'h-full'">
     <!-- 头部 -->
     <div class="flex-none px-3 sm:px-6 py-3 sm:py-4 border-b border-neutral-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
       <div class="flex items-center gap-2">
         <Users class="w-4 h-4 text-neutral-400" />
         <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider">参赛选手</h3>
+        <!-- 展开/收起:展开后卡片随名单长度变高,由外层页面滚动;收起时卡片内滚动 -->
+        <button
+          @click="emit('update:expanded', !expanded)"
+          class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors bg-neutral-800 text-neutral-300 border-neutral-700 hover:border-amber-500 hover:text-amber-400 flex items-center gap-1"
+          :title="expanded ? '收起列表(恢复卡片内滚动)' : '展开列表(卡片随名单长度变高)'"
+        >
+          <ChevronUp v-if="expanded" class="w-3.5 h-3.5" />
+          <ChevronDown v-else class="w-3.5 h-3.5" />
+          {{ expanded ? '收起' : '展开' }}
+        </button>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <!-- 海选赛:号码牌 / 名次 排序切换 -->
@@ -73,7 +83,7 @@
     </div>
 
     <!-- 选手列表 -->
-    <div v-else class="flex-1 overflow-y-auto">
+    <div v-else :class="expanded ? '' : 'flex-1 overflow-y-auto'">
       <div v-if="canArrange && !circleFiltered" class="flex-none px-3 sm:px-6 py-2 border-b border-neutral-800/50 text-[11px] text-neutral-500">
         <template v-if="sortPicked">当前为排序视图(不可拖动);再次点击排序按钮可切回拖动排序</template>
         <template v-else>按外部抽签结果拖动排序,保存后 seedRank 依次 1..n,生成对阵时按此顺序配对</template>
@@ -226,7 +236,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Users, Pencil, Check, X, Hash, Trophy, Download } from 'lucide-vue-next';
+import { Users, Pencil, Check, X, Hash, Trophy, Download, ChevronDown, ChevronUp } from 'lucide-vue-next';
 import { listCompetitor, updateCompetitor } from '@/api/game/competitor';
 import { setStageSeedOrder } from '@/api/game/stage';
 import { exportAuditionResult, getAuditionResult } from '@/api/game/stage';
@@ -246,6 +256,12 @@ const props = defineProps<{
   stageMode?: string;
   stageStatus?: string;
   isInitialized?: boolean;
+  /** 展开:卡片高度随名单长度自适应,由外层页面滚动(默认收起,卡片内滚动) */
+  expanded?: boolean;
+}>();
+
+const emit = defineEmits<{
+  'update:expanded': [value: boolean];
 }>();
 
 // 状态

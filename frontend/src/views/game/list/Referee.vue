@@ -19,8 +19,8 @@
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
         @click.self="closeAddDialog"
       >
-        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-md mx-4 shadow-2xl" @click.stop>
-          <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
+        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-md mx-4 max-h-[90vh] flex flex-col shadow-2xl" @click.stop>
+          <div class="flex-none px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-neutral-100">添加裁判</h3>
             <button @click="closeAddDialog" class="dialog-close-btn">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -28,7 +28,7 @@
               </svg>
             </button>
           </div>
-          <div class="p-5 space-y-4">
+          <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             <div class="flex flex-col items-center gap-2">
               <div
                 class="w-20 h-20 rounded-full bg-neutral-800 border border-neutral-700 overflow-hidden flex items-center justify-center cursor-pointer relative group"
@@ -50,7 +50,7 @@
               />
             </div>
           </div>
-          <div class="px-5 py-4 border-t border-neutral-800 flex justify-end gap-3">
+          <div class="flex-none px-5 py-4 border-t border-neutral-800 flex justify-end gap-3">
             <button
               @click="closeAddDialog"
               class="px-4 py-2 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded-lg border border-neutral-700 transition-colors"
@@ -129,8 +129,8 @@
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
         @click.self="showQrDialog = false"
       >
-        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-sm mx-4 shadow-2xl" @click.stop>
-          <div class="px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
+        <div class="bg-neutral-900 border border-neutral-700 rounded-xl w-full max-w-sm mx-4 max-h-[90vh] flex flex-col shadow-2xl" @click.stop>
+          <div class="flex-none px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-neutral-100">裁判扫码入口</h3>
             <button @click="showQrDialog = false" class="dialog-close-btn">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -138,7 +138,7 @@
               </svg>
             </button>
           </div>
-          <div class="p-6 flex flex-col items-center gap-4">
+          <div class="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col items-center gap-4">
             <p class="text-xs text-neutral-400">裁判 <span class="text-amber-400 font-bold">{{ qrRefereeName }}</span> 扫码进入判罚页面</p>
             <div class="bg-white p-3 rounded-lg">
               <img
@@ -151,7 +151,7 @@
             </div>
             <p class="text-[10px] text-neutral-500">点击二维码在浏览器新窗口打开；手机扫码可直接进入判罚界面</p>
           </div>
-          <div class="px-5 py-4 border-t border-neutral-800 flex justify-between items-center">
+          <div class="flex-none px-5 py-4 border-t border-neutral-800 flex justify-between items-center">
             <button
               @click="resetRefereeQr"
               :disabled="resettingRefereeQr"

@@ -189,10 +189,11 @@
       <!-- 编辑已有赛段 -->
       <div v-else-if="selection.type === 'STAGE' && currentStage" class="flex justify-center p-3 sm:p-8">
         <div class="flex flex-col lg:flex-row gap-4 w-full max-w-[1240px]">
-          <!-- 左侧:专用配置 -->
-          <div class="w-full lg:w-[900px] flex-shrink-0 min-w-0">
+          <!-- 左侧:专用配置。宽屏最多占 900px(stage-config 自身 max-width 约束),
+               中等宽度(如 iPad 横屏)改为弹性收缩,避免两栏定宽把整页顶出横向滚动 -->
+          <div class="w-full min-w-0 lg:flex-1">
             <!-- 参赛选手列表限高,内部滚动,避免把下方赛段配置顶出屏幕 -->
-            <div class="mb-4 h-[min(38vh,420px)]">
+            <div class="mb-4" :class="competitorExpanded ? '' : 'h-[min(38vh,420px)]'">
               <StageCompetitorList
                 :key="'comp-' + currentStage.id"
                 :tournament-id="tournamentId"
@@ -200,6 +201,7 @@
                 :stage-mode="currentStage.stageMode"
                 :stage-status="currentStage.status"
                 :is-initialized="currentStage.isInitialized"
+                v-model:expanded="competitorExpanded"
               />
             </div>
 
@@ -217,7 +219,7 @@
           </div>
 
           <!-- 右侧:通用配置 -->
-          <div class="w-full lg:w-[320px] flex-shrink-0">
+          <div class="w-full lg:w-[320px] lg:flex-none">
             <div class="bg-neutral-900 border-2 border-neutral-800 rounded-2xl shadow-2xl overflow-hidden">
               <StageSidebar
                 :key="'sidebar-' + currentStage.id"
@@ -604,6 +606,8 @@ const stageNameMap = computed<Record<string, string>>(() => Object.fromEntries(s
 const FLOW_VIEW_ENABLED = true;
 const hasFlowView = computed(() => FLOW_VIEW_ENABLED && stages.value.some((s) => visibleGroups(s).length > 0));
 const flowExpanded = ref(false);
+/** 参赛选手卡片:展开后卡片随名单长度变高(整页滚动),不再卡片内滚动 */
+const competitorExpanded = ref(false);
 
 /** 点击流向图中的池:跳到其目标赛段的名单工作区(前驱箭头)或赛段编辑 */
 const handleFlowOpenStage = (stageId: string) => {

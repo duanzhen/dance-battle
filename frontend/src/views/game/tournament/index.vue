@@ -1,6 +1,6 @@
 <template>
   <div
-    class="flex flex-col h-screen w-screen bg-neutral-950 text-neutral-100 overflow-hidden font-sans select-none selection:bg-amber-500 selection:text-white"
+    class="flex flex-col h-viewport w-full bg-neutral-950 text-neutral-100 overflow-hidden font-sans select-none selection:bg-amber-500 selection:text-white"
     tabindex="0"
     @keydown.tab.prevent="handleTabKey"
     @keydown="handleRootKeydown"

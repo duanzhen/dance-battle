@@ -84,8 +84,6 @@ public class StageSettlementService {
     private final StageSettlerRegistry settlerRegistry;
     /** 名单服务:中间层重建、来源边关系与快照回退 */
     private final ITStageRosterService rosterService;
-    /** 赛段链唯一入口:确认晋级时推导上一赛段 */
-    private final com.dance.street.game.service.impl.StageChain stageChain;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
 
@@ -245,26 +243,6 @@ public class StageSettlementService {
         }
     }
 
-    /** 确认晋级:把已结算赛段的晋级者装配进所有引用它的下游赛段(名单整单装配的唯一内核)。 */
-    @Transactional(rollbackFor = Exception.class)
-    public int calculateAdvancement(Long stageId) {
-        // 导播台「跳过中间态确认」入口:统一委托名单整单装配(唯一写库内核)
-        TStage stage = stageLookup.get(stageId);
-        if (!StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
-            throw new ServiceException("仅 SETTLED 状态的赛段可计算晋级");
-        }
-        // 晋级者写进"所有引用了本赛段的赛段":依赖以来源组(边)为准,不再只写链上的下一个。
-        // 分支场景下有多条下游,跳过中间态就应当把每条都喂上。
-        int total = 0;
-        for (Long targetId : referencingTargetIds(stageId)) {
-            if (stageMapper.selectById(targetId) == null) {
-                continue;
-            }
-            total += rosterService.applyRoster(targetId, null);
-        }
-        return total;
-    }
-
     /** 引用了本赛段(即"本赛段的人会流进去")的目标赛段 ID */
     private List<Long> referencingTargetIds(Long sourceStageId) {
         return rosterService.listBySource(sourceStageId).stream()
@@ -274,17 +252,23 @@ public class StageSettlementService {
             .toList();
     }
 
-    /** 导播台「确认晋级」:装配本赛段上一赛段(按 next 链推导)的晋级者。 */
+    /**
+     * 导播台「跳过中间态确认」:直接把<b>本赛段自己的</b>中间层名单整单物化(确认名单)。
+     *
+     * <p>中间态是目标赛段自己的东西({@code t_stage_roster_entry.target_stage_id}):
+     * 装配谁、装配几个人,全部由本赛段自己的来源组规则与中间层行决定,和链上前驱、
+     * 和任何其他赛段都无关。来源边是否都已结束由 {@code applyRoster} 内部的名单就绪度守卫
+     * 负责判断,所以并行分支下确认/跳过本赛段,不会被兄弟赛段的进行状态影响。</p>
+     *
+     * <p>旧实现按链上前驱推导、并把晋级者扇出给前驱的所有下游,在多赛段同时进行时
+     * 会装配到别的赛段、甚至因为某个兄弟赛段已在 GAMING 而直接抛错,已废弃。</p>
+     *
+     * @param stageId 要确认名单(即将开始)的赛段ID
+     * @return 带入人数(幂等:已装配/已锁定返回 0)
+     */
     @Transactional(rollbackFor = Exception.class)
-    public int confirmAdvancementOfPreviousStage(Long stageId) {
-        // 导播台点「确认晋级」时手里是"要开始的那个赛段",而要装配的是它的上一段
-        // (已结算的源赛段)。上一段由 next 链推导,prev 列只是展示字段。
-        TStage stage = stageLookup.get(stageId);
-        TStage prev = stageChain.prevOf(stage);
-        if (prev == null) {
-            throw new ServiceException("该赛段没有上一赛段,无需确认晋级");
-        }
-        return calculateAdvancement(prev.getId());
+    public int confirmStageRoster(Long stageId) {
+        return rosterService.applyRoster(stageId, null);
     }
 
     /** 排名赛/小组赛:手动决定同分者谁晋级(已接收晋级者的下游会被拦下)。 */

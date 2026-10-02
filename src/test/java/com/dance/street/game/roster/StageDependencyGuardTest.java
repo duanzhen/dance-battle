@@ -28,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -143,6 +144,51 @@ class StageDependencyGuardTest {
         // 正向跨级(海选 → 决赛这种直入)是允许的
         assertDoesNotThrow(() -> rosterService.addGroups(c.getId(), sourceBo(a.getId())),
             "来源排在目标之前即可跨级连边");
+    }
+
+    /**
+     * 跳过中间态只装配「本赛段自己」:兄弟赛段已经开赛,也不能影响本赛段确认名单。
+     *
+     * <p>链顺序 A→B→C,但 C 的来源是 A(分支 A→B / A→C)。A 结算后 C 先确认名单并进入进行中;
+     * 此时对 B 跳过中间态,旧实现按"链上前驱 A"扇出给 A 的所有下游,会去装配已在 GAMING 的 C
+     * 而直接报错(本赛段反而开不了);新实现只装配 B 自己,C 保持不动。</p>
+     */
+    @Test
+    void skippingIntermediateRosterOnlyMaterializesOwnStage() {
+        Long tid = newTournament("跳过中间态只装本段");
+        TStageVo a = newStage(tid, "A", null);
+        TStageVo b = newStage(tid, "B", a.getId());
+        TStageVo c = newStage(tid, "C", b.getId());
+
+        // 把 C 的来源换成 A(先加 A→C 边,再删掉建段自动补的"B→C"衔接边),形成分支 A→B / A→C
+        rosterService.addGroups(c.getId(), sourceBo(a.getId()));
+        Long generated = rosterService.groupsOfStage(c.getId()).stream()
+            .filter(g -> Integer.valueOf(1).equals(g.getGenerated()))
+            .map(TStageRosterGroupBo::getId)
+            .findFirst().orElse(null);
+        if (generated != null) {
+            rosterService.removeGroup(c.getId(), generated);
+        }
+
+        // A 结算并给出两名晋级者
+        insertCompetitor(tid, a.getId(), "甲", OutcomeStatusEnum.ADVANCE.getCode(), 1L);
+        insertCompetitor(tid, a.getId(), "乙", OutcomeStatusEnum.ADVANCE.getCode(), 2L);
+        settle(a.getId());
+
+        // C 先跳过中间态确认名单,并进入进行中(模拟两段并行,C 已在 GAMING)
+        assertEquals(2, lifecycleService.confirmStageRoster(c.getId()));
+        stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+            .eq(TStage::getId, c.getId()).set(TStage::getStatus, StageConstants.STAGE_GAMING));
+
+        // B 再跳过中间态:旧口径会因 C(M 的兄弟下游)已在 GAMING 抛错,新口径只装配 B 自己
+        assertDoesNotThrow(() -> lifecycleService.confirmStageRoster(b.getId()),
+            "跳过中间态只应装配本赛段,不能被兄弟赛段的进行状态拦住");
+        assertEquals(2, competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, b.getId())));
+        assertEquals(StageConstants.STAGE_GAMING, stageMapper.selectById(c.getId()).getStatus());
+        assertEquals(2, competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, c.getId())),
+            "装配 B 不应改动兄弟赛段 C 的名单");
     }
 
     // ===== 工具 =====

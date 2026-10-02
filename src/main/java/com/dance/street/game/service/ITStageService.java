@@ -79,7 +79,8 @@ public interface ITStageService {
     /**
      * 调整赛段链顺序:把 {@code stageId} 移到 {@code afterStageId} 之后(空 = 移到链头)。
      *
-     * <p>改链的唯一入口:只表达意图,顺序由后端按现有链推导后统一写入。</p>
+     * <p><b>已不再对外提供入口</b>:赛段在链上的位置不允许调整,HTTP 侧的移动接口已移除。
+     * 本方法仅为内部/测试构造链场景保留,业务代码不要调用。</p>
      *
      * @param stageId      要移动的赛段
      * @param afterStageId 移动到该赛段之后;空 = 移到链头

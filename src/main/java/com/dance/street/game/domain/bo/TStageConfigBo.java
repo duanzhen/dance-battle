@@ -11,8 +11,8 @@ import lombok.EqualsAndHashCode;
  * {@code prevStageId}/{@code nextStageId} 一起回传,后端据此重写整条链——只要前端那份
  * 副本过期,一次纯配置保存就能把链写歪。</p>
  *
- * <p>本 BO 刻意不提供指针字段,{@code PUT /game/stage/{id}/config} 因此不可能动链;
- * 需要改链请走 {@code PUT /game/stage/{id}/link}(意图 = 移到哪个赛段之后)。</p>
+ * <p>本 BO 刻意不提供指针字段,{@code PUT /game/stage/{id}/config} 因此不可能动链。
+ * 赛段在链上的位置不允许调整,系统不再提供移动入口。</p>
  *
  * @author duane
  */

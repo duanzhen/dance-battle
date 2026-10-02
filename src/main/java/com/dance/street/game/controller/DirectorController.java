@@ -80,8 +80,9 @@ public class DirectorController {
     }
 
     /**
-     * 跳过中间态确认晋级(仅开启「跳过中间态确认阶段」配置时可用):
-     * MC 导播台开始赛段时弹窗确认后调用,按当前预排把晋级者写入下一赛段
+     * 跳过中间态确认(仅开启「跳过中间态确认阶段」配置时可用):
+     * MC 导播台开始赛段时弹窗确认后调用,把<b>本赛段自己的</b>中间层名单整单物化。
+     * 中间态属于本赛段,装配只读本赛段的来源组规则与中间层行,与其他赛段无关。
      */
     @Log(title = "导播台确认晋级", businessType = BusinessType.UPDATE)
     @PostMapping("/stage/{id}/advance")
@@ -91,7 +92,7 @@ public class DirectorController {
         if (!stageLifecycleService.isAutoConfirmAdvancement(tournament.getId())) {
             throw new ServiceException("未开启「跳过中间态确认阶段」配置,请先在管理端中间态确认晋级");
         }
-        return R.ok(stageLifecycleService.confirmAdvancementOfPreviousStage(id));
+        return R.ok(stageLifecycleService.confirmStageRoster(id));
     }
 
     /**

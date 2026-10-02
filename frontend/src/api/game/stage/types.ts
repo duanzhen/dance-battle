@@ -236,7 +236,7 @@ export interface StageQuery extends PageQuery {
  * 赛段配置表单(只含配置字段)
  *
  * 刻意没有 prevStageId / nextStageId:配置保存走 `/game/stage/{id}/config`,
- * 后端不会、也无法从这条入口改赛段链。改链用 `moveStageAfter`(意图:移到哪个赛段之后)。
+ * 后端不会、也无法从这条入口改赛段链。赛段在链上的位置不允许调整,移动入口已移除。
  */
 export interface StageConfigForm {
   name?: string;

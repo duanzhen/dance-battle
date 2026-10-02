@@ -117,20 +117,13 @@
         >
           <div class="flex items-center justify-between gap-2 px-1 pb-1">
             <span class="text-[11px] font-bold text-amber-400/90">待落位 · {{ holdingItems.length }} 人</span>
-            <button
-              v-if="!rosterReadonly && holdingItems.length > 0"
-              @click="autoPlaceHolding"
-              class="px-2 py-0.5 rounded text-[10px] border border-amber-600/40 text-amber-400 hover:bg-amber-500/10 transition-colors"
-            >
-              按顺序自动落位
-            </button>
           </div>
           <div v-if="holdingItems.length > 0" class="flex flex-wrap gap-1 px-1 pb-0.5">
             <div
               v-for="(it, idx) in holdingItems"
               :key="itemKeyOf(it)"
               :draggable="!rosterReadonly"
-              @dragstart="onHoldingDragStart(idx)"
+              @dragstart="onHoldingDragStart(idx, $event)"
               @dragend="onDragEnd"
               class="px-2 py-1 rounded bg-neutral-900 border border-neutral-700 text-[11px] text-neutral-300"
               :class="rosterReadonly ? '' : 'cursor-grab hover:border-amber-600/50'"
@@ -149,7 +142,7 @@
           </div>
           <p v-else class="px-1 pb-0.5 text-[10px] text-neutral-500">空置位:把名单里的选手拖到这里可取消落位(这个人不再占座位号)。</p>
           <p class="px-1 text-[10px] text-neutral-500">
-            多入口汇合不自动排座:把每个人拖到座位(或点「按顺序自动落位」再微调);有待落位的人时不能确认名单。
+            多入口汇合不自动排座:把每个人拖到座位;有待落位的人时不能确认名单。
           </p>
         </div>
 
@@ -240,14 +233,14 @@
               v-for="(it, idx) in seatItems"
               :key="'r' + idx"
               draggable="true"
-              @dragstart="onDragStartItem(idx)"
+              @dragstart="onDragStartItem(idx, $event)"
               @dragend="onDragEnd"
               @dragover.prevent="hoverIndex = idx"
               @drop.stop.prevent="onDropToRoster(idx)"
               class="flex items-center gap-2 px-1.5 h-7 rounded cursor-grab text-[12px]"
               :class="dragIndex !== null && hoverIndex === idx ? 'bg-amber-500/10 border-t border-amber-500/50' : 'hover:bg-neutral-800/60'"
             >
-              <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank ?? idx + 1 }}</span>
+              <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank }}</span>
               <span class="flex-1 min-w-0 truncate text-neutral-300">{{ it.name || '未命名' }}</span>
               <span class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(it.entryTag) }}</span>
               <button
@@ -259,9 +252,16 @@
               </button>
             </div>
             <!-- 还没到齐时按计划人数补空位,位置和出场次序对得上 -->
-            <div v-for="n in emptySlots" :key="'slot-' + n" class="flex items-center gap-2 px-1.5 h-7 rounded text-[12px] text-neutral-700">
+            <div
+              v-for="n in emptySlots"
+              :key="'slot-' + n"
+              class="flex items-center gap-2 px-1.5 h-7 rounded text-[12px] text-neutral-700"
+              @dragover.prevent="hoverIndex = -n"
+              @drop.stop.prevent="onDropHoldingToEmptySlot(n)"
+              :class="hoverIndex === -n ? 'bg-amber-500/10 ring-1 ring-amber-500/40' : ''"
+            >
               <span class="font-mono w-5 flex-none">{{ n }}</span>
-              <span class="flex-1 min-w-0">空位</span>
+              <span class="flex-1 min-w-0">{{ dragHoldingIndex != null ? '放到此位' : '空位' }}</span>
             </div>
           </div>
 
@@ -286,7 +286,7 @@
               v-for="(c, idx) in rosterRows"
               :key="itemKeyOf(c)"
               draggable="true"
-              @dragstart="onArenaDragStart(idx)"
+              @dragstart="onArenaDragStart(idx, $event)"
               @dragend="onDragEnd"
               @dragover.prevent="arenaHoverIndex = idx"
               @drop.stop.prevent="onDropToArena(idx)"
@@ -317,6 +317,8 @@
               v-for="n in emptySlots"
               :key="'arena-slot-' + n"
               class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border border-dashed border-neutral-800 text-[12px] text-neutral-700"
+              @dragover.prevent="arenaHoverIndex = -n"
+              @drop.stop.prevent="onDropHoldingToEmptySlot(n)"
             >
               <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-500 flex-none">{{
                 n
@@ -904,12 +906,16 @@ const emptySlots = computed(() => {
 /** 名单按出场次序排列(只含已落位的人;落位预览、分组预览、对战树共用) */
 const rosterRows = computed<any[]>(() => [...seatItems.value].sort((a, b) => Number(a.seedRank ?? 0) - Number(b.seedRank ?? 0)));
 
-const onDragStartItem = (idx: number) => {
+const onDragStartItem = (idx: number, e?: DragEvent) => {
   dragIndex.value = idx;
+  e?.dataTransfer?.setData('text/plain', String(seatItems.value[idx]?.sourceCompetitorId ?? idx));
+  if (e?.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 };
 
-const onHoldingDragStart = (idx: number) => {
+const onHoldingDragStart = (idx: number, e?: DragEvent) => {
   dragHoldingIndex.value = idx;
+  e?.dataTransfer?.setData('text/plain', String(holdingItems.value[idx]?.sourceCompetitorId ?? idx));
+  if (e?.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 };
 
 const onDragEnd = () => {
@@ -1036,18 +1042,36 @@ const onDropToRoster = async (idx: number) => {
   }
 };
 
-/** 待落位的人拖到座位列表的第 idx 个位置 → 落位并重排 */
+/** 把待落位的人放到指定座位号:原占位者回待落位区,其他人的座位号保持不变。 */
+const placeHoldingAtSeed = async (moved: any, seed: number) => {
+  if (!moved || !(seed > 0)) return;
+  listItems.value = listItems.value.map((it) => {
+    if (it === moved) return { ...it, seedRank: seed };
+    if (Number(it.seedRank) === seed) return { ...it, seedRank: null };
+    return it;
+  });
+  await persistOrder();
+  await loadRosters();
+};
+
+/** 待落位的人拖到座位列表的某一行 → 落到该行的座位号 */
 const dropHoldingIntoSeat = async (idx: number) => {
+  const from = dragHoldingIndex.value;
+  const moved = from == null ? null : holdingItems.value[from];
+  const seed = Number(seatItems.value[idx]?.seedRank) || 0;
+  onDragEnd();
+  if (!moved || seed <= 0) return;
+  await placeHoldingAtSeed(moved, seed);
+};
+
+/** 待落位的人拖到空位行 → 直接落到该座位号 */
+const onDropHoldingToEmptySlot = async (seed: number) => {
+  if (rosterReadonly.value) return;
   const from = dragHoldingIndex.value;
   const moved = from == null ? null : holdingItems.value[from];
   onDragEnd();
   if (!moved) return;
-  const rest = holdingItems.value.filter((_, i) => i !== from);
-  const seats = [...seatItems.value];
-  seats.splice(Math.max(0, Math.min(idx, seats.length)), 0, moved);
-  listItems.value = [...seats.map((it, i) => ({ ...it, seedRank: i + 1 })), ...rest.map((it) => ({ ...it, seedRank: null }))];
-  await persistOrder();
-  await loadRosters();
+  await placeHoldingAtSeed(moved, Number(seed));
 };
 
 /** 名单里的人(座位列表 / 擂台赛出场队列 / 对战树格子)拖回待落位区(没有座位号) */
@@ -1059,40 +1083,31 @@ const onDropToHolding = async () => {
   const moved = fromSeat != null ? seatItems.value[fromSeat] : fromArena != null ? rosterRows.value[fromArena] : bracketDragItem.value;
   onDragEnd();
   if (!moved) return;
-  const rest = [...seatItems.value].filter((it) => it !== moved);
-  listItems.value = [
-    ...rest.map((it, i) => ({ ...it, seedRank: i + 1 })),
-    ...holdingItems.value.filter((it) => it !== moved).map((it) => ({ ...it, seedRank: null })),
-    { ...moved, seedRank: null }
-  ];
-  await persistOrder();
-  await loadRosters();
-};
-
-/**
- * 一键把待落位的人按「来源赛段顺序 + 来源名次」依次填到已有名单之后。
- * 这是显式的人工动作(不是系统自动排座):导播点一下得到一版可用的顺序,再按现场需要微调。
- */
-const autoPlaceHolding = async () => {
-  if (rosterReadonly.value || holdingItems.value.length === 0) return;
-  const ordered = [...holdingItems.value].sort((a, b) => {
-    const sa = Number(a.sourceStageId ?? 0);
-    const sb = Number(b.sourceStageId ?? 0);
-    if (sa !== sb) return sa - sb;
-    return Number(a.finalRank ?? 0) - Number(b.finalRank ?? 0);
-  });
-  listItems.value = [...seatItems.value, ...ordered].map((it, i) => ({ ...it, seedRank: i + 1 }));
+  // 只摘掉被拖这个人的座位号,其他人的座位号保持不变(空出来的座位由后端补成空位行);
+  // 否则每拖一个人回待落位区,后面的人都会被整体往前顶一位,打乱已经排好的顺序。
+  listItems.value = listItems.value.map((it) => (it === moved ? { ...it, seedRank: null } : it));
   await persistOrder();
   await loadRosters();
 };
 
 // ---- 擂台赛出场队列:拖动调整出场顺序(1 号位=擂主) ----
-const onArenaDragStart = (idx: number) => {
+const onArenaDragStart = (idx: number, e?: DragEvent) => {
   arenaDragIndex.value = idx;
+  e?.dataTransfer?.setData('text/plain', String(rosterRows.value[idx]?.sourceCompetitorId ?? idx));
+  if (e?.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 };
 
 /** 落到某一行 = 插到该位置;队列位置即出场顺序,拖动后按 1..N 重新编号 */
 const onDropToArena = async (idx: number) => {
+  if (dragHoldingIndex.value != null) {
+    // 待落位的人放到擂台出场队列的某一位置:落到该位置的座位号,原占位者回待落位区
+    const moved = holdingItems.value[dragHoldingIndex.value];
+    const seed = Number(rosterRows.value[idx]?.seedRank) || 0;
+    onDragEnd();
+    if (!moved || seed <= 0) return;
+    await placeHoldingAtSeed(moved, seed);
+    return;
+  }
   const from = arenaDragIndex.value;
   arenaDragIndex.value = null;
   arenaHoverIndex.value = null;
@@ -1573,7 +1588,7 @@ const onBracketSlotDragStart = (item: any, pair: any, side: 'left' | 'right', e:
 };
 
 const onBracketSlotDragOver = (pair: any, side: 'left' | 'right') => {
-  if (bracketDragItem.value) {
+  if (bracketDragItem.value || dragHoldingIndex.value != null) {
     bracketDropKey.value = slotKeyOf(pair, side);
   }
 };
@@ -1605,6 +1620,11 @@ const moveRosterSeed = async (item: any, seed: number) => {
 
 /** 放到另一个选手上:交换两人的出场位置;放到空位上:搬过去(原位置空着) */
 const onBracketSlotDrop = async (pair: any, side: 'left' | 'right') => {
+  if (rosterReadonly.value) return;
+  if (dragHoldingIndex.value != null) {
+    await dropHoldingIntoBracketSlot(pair, side);
+    return;
+  }
   const from = bracketDragItem.value;
   const to = pair[side];
   const targetSeed = Number(slotSeedAt(pair, side));
@@ -1618,6 +1638,21 @@ const onBracketSlotDrop = async (pair: any, side: 'left' | 'right') => {
     return;
   }
   await moveRosterSeed(from, targetSeed);
+};
+
+/** 待落位的人拖到对战树格子:落到该格的种子位;原占位者回待落位区,其他人的座位不动。 */
+const dropHoldingIntoBracketSlot = async (pair: any, side: 'left' | 'right') => {
+  const from = dragHoldingIndex.value;
+  const moved = from == null ? null : holdingItems.value[from];
+  const seed = Number(slotSeedAt(pair, side)) || 0;
+  const cap = Number(overridePreview.value?.capacity || 0);
+  onDragEnd();
+  if (!moved || seed <= 0) return;
+  if (cap > 0 && seed > cap) {
+    ElMessage.warning(`第 ${seed} 位超出赛段计划人数(${cap})`);
+    return;
+  }
+  await placeHoldingAtSeed(moved, seed);
 };
 
 /** 交换两人的出场位置:交换次序后整份顺序落库(位置即出场次序) */

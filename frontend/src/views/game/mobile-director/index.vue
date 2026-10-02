@@ -1194,12 +1194,12 @@ const askConfirm = async (message: string, title = '确认操作') => {
 const handleStartStage = async () => {
   const stage = currentStage.value;
   if (!stage) return;
-  // 中间态未确认 + 开启跳过确认:先弹窗确认,再调用确认晋级接口,最后开始
+  // 本赛段中间态未确认 + 开启跳过确认:先弹窗确认,再把本赛段自己的中间层名单确认掉,最后开始
   const skipAdvance = stage.awaitingAdvancement && !!stage.skipConfirm;
   if (skipAdvance) {
     if (
       !(await askConfirm(
-        `赛段「${stage.name}」上一赛段晋级者尚未在中间态调整。已开启「跳过中间态确认」，是否跳过中间态调整直接开始？确认后将自动按当前预排确认晋级并生成对阵。`
+        `赛段「${stage.name}」的中间态名单尚未确认。已开启「跳过中间态确认」，是否跳过调整直接开始？确认后将按本赛段当前的中间态名单确认并生成对阵。`
       ))
     ) {
       return;

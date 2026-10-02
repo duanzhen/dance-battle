@@ -195,8 +195,8 @@ class RosterSmokeTest {
             () -> lifecycleService.startStage(stage2.getId()));
         assertTrue(blocked.getMessage().contains("名单尚未确认"));
 
-        // 7b) 写穿路径:导播确认晋级委托名单装配并置 applied
-        assertEquals(2, lifecycleService.calculateAdvancement(stage1.getId()));
+        // 7b) 写穿路径:导播台「跳过中间态确认」= 只装配本赛段自己的中间层并置 applied
+        assertEquals(2, lifecycleService.confirmStageRoster(stage2.getId()));
         List<TCompetitor> advRows = competitorMapper.selectList(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, stage2.getId()));
@@ -372,7 +372,7 @@ class RosterSmokeTest {
         assertEquals(1, countOutcome(finals.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
     }
 
-    /** 默认路径(calculateAdvancement 委托 roster apply)与种子覆盖/容量硬校验/覆盖 REMOVE 语义 */
+    /** 默认路径(跳过中间态委托 roster apply)与种子覆盖/容量硬校验/覆盖 REMOVE 语义 */
     @Test
     void defaultApplyHonorsSeedOverridesAndCapacitySqueeze() {
         TTournament tournament = new TTournament();
@@ -437,7 +437,7 @@ class RosterSmokeTest {
             rosterService.listByTarget(stage2.getId()).get(0).getState());
 
         // 已确认后再调返回 0(幂等)
-        assertEquals(0, lifecycleService.calculateAdvancement(stage1.getId()));
+        assertEquals(0, lifecycleService.confirmStageRoster(stage2.getId()));
 
     }
 

@@ -215,14 +215,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public int calculateAdvancement(Long stageId) {
-        return stageSettlementService.calculateAdvancement(stageId);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public int confirmAdvancementOfPreviousStage(Long stageId) {
-        return stageSettlementService.confirmAdvancementOfPreviousStage(stageId);
+    public int confirmStageRoster(Long stageId) {
+        return stageSettlementService.confirmStageRoster(stageId);
     }
 
     @Override

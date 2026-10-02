@@ -867,8 +867,8 @@ const handleStageUpdate = async (updatedStage: StageData) => {
 
   try {
     // 配置保存只走配置接口:不带 prevStageId / nextStageId。
-    // 前端手里那份指针只是某一时刻的副本,回传后由后端写回就会把链(以及下游名单来源)
-    // 改歪——改链请用 PUT /game/stage/{id}/link(意图:移到哪个赛段之后)。
+    // 前端手里那份指针只是某一时刻的副本,回传后由后端写回就会把链(以及下游名单来源)改歪。
+    // 赛段在链上的位置不允许调整,移动入口已移除。
     const formData: StageConfigForm = {
       name: updatedStage.name,
       stageMode: updatedStage.stageMode,

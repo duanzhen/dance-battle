@@ -43,7 +43,8 @@ export const addStage = (data: StageForm) => {
  * 修改赛段流程(兼容入口)
  *
  * 后端已把它收敛成「只改配置」:请求里带的 prevStageId / nextStageId 一律被忽略,
- * 不会再改赛段链。新代码请用 updateStageConfig(配置) / moveStageAfter(改链)。
+ * 不会再改赛段链。新代码请用 updateStageConfig(配置)。
+ * 赛段在链上的位置不允许调整,移动入口已移除。
  * @param data
  */
 export const updateStage = (data: StageForm) => {
@@ -64,19 +65,6 @@ export const updateStageConfig = (id: string | number, data: StageConfigForm) =>
     url: '/game/stage/' + id + '/config',
     method: 'put',
     data
-  });
-};
-
-/**
- * 调整赛段链顺序:把该赛段移动到 afterStageId 之后(不传 = 移到链头)
- *
- * 传意图而不是前后指针:顺序由后端按现有链推导后统一写入。
- */
-export const moveStageAfter = (id: string | number, afterStageId: string | number | null) => {
-  return request({
-    url: '/game/stage/' + id + '/link',
-    method: 'put',
-    data: { afterStageId }
   });
 };
 

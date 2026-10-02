@@ -282,6 +282,9 @@ public class TStageServiceImpl implements ITStageService {
      *
      * <p>改链从「回传前后指针」改成「声明意图」:顺序由 {@link StageChain} 按现有链推导后
      * 统一写入,不读客户端手里的指针副本,也就不存在过期副本把链写歪的窗口。</p>
+     *
+     * <p><b>已不再对外提供入口</b>:赛段在链上的位置不允许调整,HTTP 侧的移动接口已移除。
+     * 本方法仅为内部/测试构造链场景保留,业务代码不要调用。</p>
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -842,10 +845,12 @@ public class TStageServiceImpl implements ITStageService {
             // 座位 = seedRank(座位号),不能用数组下标占位:中间态移出/轮空会在座位上留空洞,
             // 按下标压紧后,对战树(含擂台赛名单)显示的位置会和中间态看到的不一致
             List<PreBracketVo.PreSeed> generated = new ArrayList<>(own.size());
-            for (int i = 0; i < own.size(); i++) {
-                TCompetitor c = own.get(i);
-                Long seat = c.getSeedRank() != null && c.getSeedRank() > 0 ? c.getSeedRank() : (long) i + 1;
-                generated.add(toPreSeed(c, seat, null));
+            for (TCompetitor c : own) {
+                // 没有座位号(未落位/异常)不参与座位排布:绝不按下标占位,否则与中间态座位口径不一致
+                if (c.getSeedRank() == null || c.getSeedRank() <= 0) {
+                    continue;
+                }
+                generated.add(toPreSeed(c, c.getSeedRank(), null));
             }
             vo.setSeededCompetitors(generated);
             return vo;

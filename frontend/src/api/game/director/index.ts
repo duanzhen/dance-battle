@@ -63,7 +63,7 @@ export function directorStartStage(id: string | number) {
   });
 }
 
-/** 跳过中间态确认晋级(开启「跳过中间态确认」配置时可用):按当前预排把晋级者写入下一赛段 */
+/** 跳过中间态确认(开启「跳过中间态确认」配置时可用):把本赛段自己的中间层名单整单物化,与其他赛段无关 */
 export function directorAdvanceStage(id: string | number) {
   return directorRequest({
     url: `/game/director/stage/${id}/advance`,

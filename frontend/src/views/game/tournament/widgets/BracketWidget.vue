@@ -547,15 +547,20 @@ const arenaSlots = computed<BracketSlot[]>(() => {
       bySeat.set(seat, v);
     }
   };
-  competitors.value.forEach((c: any, idx: number) => {
+  // 只有带座位号的人参与排布;没有座位号(未落位/异常)不参与——绝不按下标占位
+  competitors.value.forEach((c: any) => {
     const seat = Number(c.seedRank);
-    put(Number.isFinite(seat) && seat > 0 ? seat : idx + 1, c);
+    if (Number.isFinite(seat) && seat > 0) {
+      put(seat, c);
+    }
   });
-  if (bySeat.size === 0) {
+  if (competitors.value.length === 0) {
     // 擂台赛名单还没写入:用上一赛段的预排晋级者占位(开赛前就能看到谁要进来)
-    preSeeds.value.forEach((p: any, idx: number) => {
+    preSeeds.value.forEach((p: any) => {
       const seat = Number(p?.seedRank);
-      put(Number.isFinite(seat) && seat > 0 ? seat : idx + 1, p);
+      if (Number.isFinite(seat) && seat > 0) {
+        put(seat, p);
+      }
     });
   }
   const atSeat = (seatNo: number) => bySeat.get(seatNo) ?? null;
@@ -683,9 +688,12 @@ const bracketSlots = computed<BracketSlot[]>(() => {
   // 座位空着就是轮空——绝不能用数组下标占位(那等于把名单整体压到 1..n,和中间态对不上)。
   const plan = Math.max(count, stageTeamCountStart.value || 0);
   const bySeat = new Map<number, any>();
-  competitors.value.forEach((c: any, idx: number) => {
+  // 只有带座位号的人参与排布;没有座位号的不参与(绝不按下标占位)
+  competitors.value.forEach((c: any) => {
     const seat = Number(c.seedRank);
-    bySeat.set(Number.isFinite(seat) && seat > 0 ? seat : idx + 1, c);
+    if (Number.isFinite(seat) && seat > 0) {
+      bySeat.set(seat, c);
+    }
   });
   const atSeat = (seatNo: number) => bySeat.get(seatNo) ?? null;
   const seedMode = stagePairingMode.value ? String(stagePairingMode.value).toUpperCase() === 'SEED' : false;

@@ -161,22 +161,16 @@ public interface ITStageLifecycleService {
     void resetStageToDraft(Long stageId);
 
     /**
-     * 确认晋级:把已结算赛段的晋级者装配进下一赛段名单(名单整单装配的唯一内核)。
-     * 供导播台「跳过中间态确认」使用;常规路径由中间态确认名单直接调用名单服务。
-     * 返回带入人数(幂等:已装配返回 0)。
-     */
-    int calculateAdvancement(Long stageId);
-
-    /**
-     * 导播台「确认晋级」:把本赛段的上一赛段(按 next 链推导)的晋级者装配进本赛段。
+     * 导播台「跳过中间态确认」:把<b>本赛段自己的</b>中间层名单整单物化(确认名单)。
      *
-     * <p>与 {@link #calculateAdvancement(Long)} 的区别只在入口口径:导播台点确认时手里是
-     * 「要开始的赛段」,而要装配的是它的上一段。链上没有上一段时直接报错。</p>
+     * <p>中间态属于目标赛段本身:装配谁、装配几个人,只由本赛段的来源组规则与中间层行决定,
+     * 与链上前驱、与任何其他赛段都无关。来源边是否都已结束由名单装配内部统一守卫,
+     * 所以并行分支下确认/跳过本赛段不被兄弟赛段的进行状态影响。</p>
      *
-     * @param stageId 要开始的赛段ID
-     * @return 带入人数(幂等:已装配返回 0)
+     * @param stageId 要确认名单(即将开始)的赛段ID
+     * @return 带入人数(幂等:已装配/已锁定返回 0)
      */
-    int confirmAdvancementOfPreviousStage(Long stageId);
+    int confirmStageRoster(Long stageId);
 
     /**
      * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名

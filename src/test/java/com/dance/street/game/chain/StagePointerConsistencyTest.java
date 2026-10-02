@@ -81,9 +81,9 @@ class StagePointerConsistencyTest {
             + "\"transition\":{\"targetStageId\":" + other.getId() + "}}");
         stageMapper.updateById(settled);
 
-        // 不抛异常(旧实现会因"两个答案"报错),按链 next 装配(无人可带 → 0)
-        assertEquals(0, lifecycleService.calculateAdvancement(a.getId()),
-            "遗留 transition 字段应被忽略,晋级只按链 next 解析");
+        // 不抛异常(旧实现会因"两个答案"报错),按本赛段自己的来源组装配(无人可带 → 0)
+        assertEquals(0, lifecycleService.confirmStageRoster(b.getId()),
+            "遗留 transition 字段应被忽略,装配只按来源组(边)解析");
     }
 
     /**

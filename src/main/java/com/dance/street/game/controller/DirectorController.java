@@ -5,32 +5,21 @@ import com.dance.street.game.domain.bo.FreeMatchBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.TStageBo;
-import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.bo.TCompetitorBo;
-import com.dance.street.game.domain.TCompetitor;
-import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.domain.vo.TStageVo;
-import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.domain.vo.TTournamentVo;
-import com.dance.street.game.engine.common.StageConstants;
-import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.interceptor.DirectorAuthInterceptor;
-import com.dance.street.game.mapper.TCompetitorMapper;
-import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITStageLifecycleService;
-import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITTournamentService;
-import com.dance.street.game.service.impl.StageChain;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.domain.R;
@@ -42,11 +31,6 @@ import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 手机导播台接口：全部走赛事 auth_key 鉴权(DirectorAuthInterceptor),与管理员接口隔离。
@@ -65,11 +49,6 @@ public class DirectorController {
     private final ITCompetitorService competitorService;
     private final ITStageLifecycleService stageLifecycleService;
     private final ITMatchResultService matchResultService;
-    private final TStageMapper stageMapper;
-    private final TCompetitorMapper competitorMapper;
-    /** 赛段链遍历的唯一入口(以 next 链为事实源) */
-    private final StageChain stageChain;
-    private final ITStageRosterService rosterService;
 
     /**
      * 获取当前认证赛事信息(名称等)
@@ -96,7 +75,7 @@ public class DirectorController {
         for (TStageVo s : stages) {
             s.setSkipConfirm(skipConfirm);
         }
-        enrichAwaitingAdvancement(stages);
+        stageService.fillAwaitingAdvancement(stages);
         return R.ok(stages);
     }
 
@@ -112,102 +91,7 @@ public class DirectorController {
         if (!stageLifecycleService.isAutoConfirmAdvancement(tournament.getId())) {
             throw new ServiceException("未开启「跳过中间态确认阶段」配置,请先在管理端中间态确认晋级");
         }
-        // 确认晋级作用于「要开始赛段的上一赛段」(已 SETTLED 的源赛段),把晋级者写入本赛段
-        // 上一赛段由 next 链推导(prev 列仅展示字段)
-        TStage prev = stageChain.prevOf(stageMapper.selectById(id));
-        if (prev == null) {
-            throw new ServiceException("该赛段没有上一赛段,无需确认晋级");
-        }
-        return R.ok(stageLifecycleService.calculateAdvancement(prev.getId()));
-    }
-
-    /**
-     * 标记「等待中间态确认晋级」:与后端 startStage 的守卫一致——
-     * 上一赛段已 SETTLED 且存在晋级者/同分待定,但本赛段尚未接收带来源参赛方。
-     * 导播端据此前置提示并在管理端确认前禁用「开始赛段」。
-     */
-    private void enrichAwaitingAdvancement(List<TStageVo> stages) {
-        if (stages == null || stages.isEmpty()) {
-            return;
-        }
-        // 批量口径:此前每个赛段 5 条 SQL(查赛段 + 查前驱 + 3 次 count),
-        // 导播台首页每次刷新都跑一遍,16 段赛事就是 80 条。现在整页共 3 条。
-        Set<Long> tournamentIds = stages.stream()
-            .map(TStageVo::getTournamentId).filter(Objects::nonNull).collect(Collectors.toSet());
-        if (tournamentIds.isEmpty()) {
-            return;
-        }
-        List<TStage> allStages = stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
-            .in(TStage::getTournamentId, tournamentIds));
-        Map<Long, TStage> stageById = allStages.stream()
-            .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
-        // 前驱按 next 链一次性推导(prev 仅展示:导播台显示「上一赛段」)
-        Map<Long, Long> prevByStage = new HashMap<>();
-        for (Long tid : tournamentIds) {
-            prevByStage.putAll(stageChain.prevIdsFromChain(tid));
-        }
-        // 依赖按名单来源组(边)解析:开赛/待确认的依据是"来源都结束了",不是"链上前一段结束了"
-        Map<Long, List<TStageRosterGroupBo>> groupsByStage = new HashMap<>();
-        Map<Long, List<Long>> sourcesByStage = new HashMap<>();
-        Map<Long, List<TStageRosterVo>> rosters = rosterService.listByTargets(
-            stages.stream().map(TStageVo::getId).filter(Objects::nonNull).toList());
-        rosters.forEach((targetId, list) -> {
-            List<TStageRosterGroupBo> groups = list.isEmpty() ? List.of() : list.get(0).getGroups();
-            groupsByStage.put(targetId, groups);
-            sourcesByStage.put(targetId, groups.stream()
-                .map(TStageRosterGroupBo::getSourceStageId)
-                .filter(Objects::nonNull).distinct().toList());
-        });
-        // 参赛方统计:一次取回相关赛段的行,在内存里数
-        Set<Long> involved = new HashSet<>();
-        for (TStageVo s : stages) {
-            if (s.getId() != null) {
-                involved.add(s.getId());
-            }
-            involved.addAll(sourcesByStage.getOrDefault(s.getId(), List.of()));
-        }
-        // stageId -> [已接收晋级者数, 晋级数, 待定数]
-        Map<Long, long[]> stats = new HashMap<>();
-        if (!involved.isEmpty()) {
-            List<TCompetitor> rows = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-                .in(TCompetitor::getStageId, involved)
-                .select(TCompetitor::getStageId, TCompetitor::getOutcomeStatus,
-                    TCompetitor::getSourceCompetitorId));
-            for (TCompetitor c : rows) {
-                long[] st = stats.computeIfAbsent(c.getStageId(), k -> new long[3]);
-                if (c.getSourceCompetitorId() != null) {
-                    st[0]++;
-                }
-                if (OutcomeStatusEnum.ADVANCE.getCode().equals(c.getOutcomeStatus())) {
-                    st[1]++;
-                } else if (OutcomeStatusEnum.PENDING.getCode().equals(c.getOutcomeStatus())) {
-                    st[2]++;
-                }
-            }
-        }
-        for (TStageVo stage : stages) {
-            Long prevId = prevByStage.get(stage.getId());
-            stage.setPrevStageId(prevId);
-            List<Long> sources = sourcesByStage.getOrDefault(stage.getId(), List.of());
-            if (sources.isEmpty()) {
-                continue;   // 入口赛段(签到/外部来源):没有依赖,谈不上等确认
-            }
-            boolean allSettled = sources.stream().allMatch(id -> {
-                TStage src = stageById.get(id);
-                return src != null && StageConstants.STAGE_SETTLED.equals(src.getStatus());
-            });
-            if (!allSettled) {
-                continue;
-            }
-            if (stats.getOrDefault(stage.getId(), new long[3])[0] > 0) {
-                continue;   // 已经接收过晋级者 = 名单已确认
-            }
-            long candidates = sources.stream().mapToLong(id -> {
-                long[] s = stats.getOrDefault(id, new long[3]);
-                return s[1] + s[2];
-            }).sum();
-            stage.setAwaitingAdvancement(candidates > 0);
-        }
+        return R.ok(stageLifecycleService.confirmAdvancementOfPreviousStage(id));
     }
 
     /**

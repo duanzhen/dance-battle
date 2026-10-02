@@ -112,4 +112,15 @@ public interface ITStageService {
      * 下一赛段对战树预排:上一赛段胜者按种子顺位排入本赛段
      */
     PreBracketVo getPreBracket(Long stageId);
+
+    /**
+     * 填充导播台赛段列表的展示字段:上一赛段展示位,以及「等待中间态确认晋级」标记。
+     *
+     * <p>与 startStage 的守卫同一口径:本赛段的全部来源赛段都已结算、且本赛段还没接收过
+     * 带来源的参赛方,但上游确实有晋级者/同分待定时,标记为待确认。
+     * 依赖按名单来源组(边)解析,不是按链上的前一段。</p>
+     *
+     * @param stages 待填充的赛段列表(原地修改)
+     */
+    void fillAwaitingAdvancement(List<TStageVo> stages);
 }

@@ -168,6 +168,17 @@ public interface ITStageLifecycleService {
     int calculateAdvancement(Long stageId);
 
     /**
+     * 导播台「确认晋级」:把本赛段的上一赛段(按 next 链推导)的晋级者装配进本赛段。
+     *
+     * <p>与 {@link #calculateAdvancement(Long)} 的区别只在入口口径:导播台点确认时手里是
+     * 「要开始的赛段」,而要装配的是它的上一段。链上没有上一段时直接报错。</p>
+     *
+     * @param stageId 要开始的赛段ID
+     * @return 带入人数(幂等:已装配返回 0)
+     */
+    int confirmAdvancementOfPreviousStage(Long stageId);
+
+    /**
      * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名
      *
      * @param stageId  海选赛赛段ID

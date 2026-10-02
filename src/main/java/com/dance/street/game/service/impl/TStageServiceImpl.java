@@ -36,6 +36,7 @@ import com.dance.street.game.engine.common.SnowflakeJson;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.PairingModeResolver;
+import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.engine.generator.KnockoutGenerator;
@@ -986,6 +987,94 @@ public class TStageServiceImpl implements ITStageService {
         }
         vo.setPairs(pairList);
         return vo;
+    }
+
+    /**
+     * 填充导播台赛段列表的展示字段(上一赛段 + 是否等待中间态确认晋级)。
+     *
+     * <p>导播台首页每次刷新都会调,所以整页只跑 3 条 SQL:一次取赛事全部赛段、
+     * 一次取相关赛段的名单来源组、一次取相关赛段的参赛方统计,其余在内存里算。</p>
+     */
+    @Override
+    public void fillAwaitingAdvancement(List<TStageVo> stages) {
+        if (stages == null || stages.isEmpty()) {
+            return;
+        }
+        Set<Long> tournamentIds = stages.stream()
+            .map(TStageVo::getTournamentId).filter(Objects::nonNull).collect(Collectors.toSet());
+        if (tournamentIds.isEmpty()) {
+            return;
+        }
+        List<TStage> allStages = baseMapper.selectList(Wrappers.<TStage>lambdaQuery()
+            .in(TStage::getTournamentId, tournamentIds));
+        Map<Long, TStage> stageById = allStages.stream()
+            .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
+        // 前驱按 next 链一次性推导(prev 仅展示:导播台显示「上一赛段」)
+        Map<Long, Long> prevByStage = new HashMap<>();
+        for (Long tid : tournamentIds) {
+            prevByStage.putAll(stageChain.prevIdsFromChain(tid));
+        }
+        // 依赖按名单来源组(边)解析:开赛/待确认的依据是"来源都结束了",不是"链上前一段结束了"
+        Map<Long, List<TStageRosterGroupBo>> groupsByStage = new HashMap<>();
+        Map<Long, List<Long>> sourcesByStage = new HashMap<>();
+        Map<Long, List<TStageRosterVo>> rosters = rosterService.listByTargets(
+            stages.stream().map(TStageVo::getId).filter(Objects::nonNull).toList());
+        rosters.forEach((targetId, list) -> {
+            List<TStageRosterGroupBo> groups = list.isEmpty() ? List.of() : list.get(0).getGroups();
+            groupsByStage.put(targetId, groups);
+            sourcesByStage.put(targetId, groups.stream()
+                .map(TStageRosterGroupBo::getSourceStageId)
+                .filter(Objects::nonNull).distinct().toList());
+        });
+        // 参赛方统计:一次取回相关赛段的行,在内存里数
+        Set<Long> involved = new HashSet<>();
+        for (TStageVo s : stages) {
+            if (s.getId() != null) {
+                involved.add(s.getId());
+            }
+            involved.addAll(sourcesByStage.getOrDefault(s.getId(), List.of()));
+        }
+        // stageId -> [已接收晋级者数, 晋级数, 待定数]
+        Map<Long, long[]> stats = new HashMap<>();
+        if (!involved.isEmpty()) {
+            List<TCompetitor> rows = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .in(TCompetitor::getStageId, involved)
+                .select(TCompetitor::getStageId, TCompetitor::getOutcomeStatus,
+                    TCompetitor::getSourceCompetitorId));
+            for (TCompetitor c : rows) {
+                long[] st = stats.computeIfAbsent(c.getStageId(), k -> new long[3]);
+                if (c.getSourceCompetitorId() != null) {
+                    st[0]++;
+                }
+                if (OutcomeStatusEnum.ADVANCE.getCode().equals(c.getOutcomeStatus())) {
+                    st[1]++;
+                } else if (OutcomeStatusEnum.PENDING.getCode().equals(c.getOutcomeStatus())) {
+                    st[2]++;
+                }
+            }
+        }
+        for (TStageVo stage : stages) {
+            stage.setPrevStageId(prevByStage.get(stage.getId()));
+            List<Long> sources = sourcesByStage.getOrDefault(stage.getId(), List.of());
+            if (sources.isEmpty()) {
+                continue;   // 入口赛段(签到/外部来源):没有依赖,谈不上等确认
+            }
+            boolean allSettled = sources.stream().allMatch(id -> {
+                TStage src = stageById.get(id);
+                return src != null && StageConstants.STAGE_SETTLED.equals(src.getStatus());
+            });
+            if (!allSettled) {
+                continue;
+            }
+            if (stats.getOrDefault(stage.getId(), new long[3])[0] > 0) {
+                continue;   // 已经接收过晋级者 = 名单已确认
+            }
+            long candidates = sources.stream().mapToLong(id -> {
+                long[] s = stats.getOrDefault(id, new long[3]);
+                return s[1] + s[2];
+            }).sum();
+            stage.setAwaitingAdvancement(candidates > 0);
+        }
     }
 
     /**

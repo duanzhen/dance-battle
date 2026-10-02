@@ -1368,9 +1368,7 @@ const entryTagLabel = (tag?: string): string => {
   const map: Record<string, string> = {
     ADVANCE: '晋级',
     REVIVE: '复活',
-    GUEST: '外卡',
-    MANUAL: '手动',
-    CHECKIN: '签到'
+    GUEST: '外卡'
   };
   return (tag && map[tag]) || tag || '';
 };

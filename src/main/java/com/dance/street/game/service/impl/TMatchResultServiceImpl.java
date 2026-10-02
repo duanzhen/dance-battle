@@ -98,36 +98,17 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MatchResultVo submitResult(SubmitResultBo bo) {
-        TMatch match = matchMapper.selectById(bo.getMatchId());
-        if (match == null) {
-            throw new ServiceException("场次不存在");
-        }
-        if (!StageConstants.MATCH_GAMING.equals(match.getStatus())) {
-            throw new ServiceException("场次当前状态[{}]不可提交结果,仅 GAMING 可提交", match.getStatus());
-        }
+        TMatch match = loadGamingMatch(bo.getMatchId());
         TStage stage = stageMapper.selectById(match.getStageId());
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
         ScoringConfig sc = rc != null ? rc.getScoring() : null;
         MatchModeEnum mode = MatchModeEnum.fromCode(match.getMatchMode());
 
-        // 安全:打分明细里的 refereeId 一律以服务端确定的 bo.refereeId 为准,
-        // 清除客户端逐条提交的 refereeId,防止冒用其他裁判身份投票/打分
-        if (bo.getScores() != null) {
-            for (ScoreEntryBo se : bo.getScores()) {
-                se.setRefereeId(null);
-            }
-        }
+        stripClientRefereeIds(bo);
+        List<Long> competitorIds = competitorIdsOf(match.getId());
 
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, match.getId()));
-        List<Long> competitorIds = parts.stream()
-            .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
-
-        // 海选赛/排名赛(AUDITION/RANK): 多裁判累计打分,不即时结算。重复提交以最新为准(先删旧再写新)
-        boolean isAudition = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
-        boolean isRank = StageModeEnum.RANK.getCode().equals(stage.getStageMode());
-        boolean perCompetitor = isAudition || isRank;
         boolean isArena = StageModeEnum.ARENA.getCode().equals(stage.getStageMode());
+        boolean perCompetitor = isPerCompetitorStage(stage);
         // 擂台赛:1v1 判胜负平,必须给出双方判定(胜+负 / 负+胜 / 平+平);
         // 平局时双方均排到队尾,由 computeArenaQueue 回放处理
         if (isArena && (bo.getOutcomes() == null || bo.getOutcomes().isEmpty())) {
@@ -135,126 +116,149 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
         // 多裁判累计打分(VOTING/RANKING,非逐选手轮次):只累计不结算,由 completeStage 统一结算
         if (!perCompetitor && (mode == MatchModeEnum.VOTING || mode == MatchModeEnum.RANKING)) {
-            List<MatchScoreResult> accumulated = scoredMatchService.accumulateScores(match, stage, bo);
-            return buildVo(match.getId(), StageConstants.MATCH_GAMING, accumulated);
+            return buildVo(match.getId(), StageConstants.MATCH_GAMING,
+                scoredMatchService.accumulateScores(match, stage, bo));
         }
-        // 海选赛/排名赛:逐选手 upsert(逐个提交/回改互不影响),提交后立即累计回显,不结算
+        // 海选赛/排名赛(AUDITION/RANK):逐选手 upsert(重复提交以最新为准:先删旧再写新),不即时结算
         if (perCompetitor) {
-            List<TMatchRound> auditionRounds = matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()));
-            Map<Long, TMatchRound> roundByCompetitor = new HashMap<>();
-            for (TMatchRound r : auditionRounds) {
-                if (r.getCompetitorId() != null) {
-                    roundByCompetitor.putIfAbsent(r.getCompetitorId(), r);
-                }
-            }
-            Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
-            if (bo.getScores() != null) {
-                // 按 (轮次,选手) 分组:同一选手多个维度一次删除再批量插入,
-                // 避免逐条「先删后插」导致同一次提交的多维度分互相覆盖
-                Map<String, List<ScoreEntryBo>> byRoundCompetitor = new java.util.LinkedHashMap<>();
-                for (ScoreEntryBo se : bo.getScores()) {
-                    if (se.getCompetitorId() == null || se.getScore() == null) {
-                        continue;
-                    }
-                    // 分数校验:海选按赛段配置满分校验(默认 10 分制,可配置 100 分制);
-                    // 排名赛按维度满分校验(未配置时默认 100)
-                    java.math.BigDecimal maxScore = isAudition
-                        ? (rc != null && rc.getMaxScore() != null
-                            ? rc.getMaxScore() : java.math.BigDecimal.valueOf(10))
-                        : rankMaxScore(sc, se.getDimension());
-                    if (se.getScore().compareTo(java.math.BigDecimal.ZERO) < 0
-                        || se.getScore().compareTo(maxScore) > 0) {
-                        throw new ServiceException("{}打分须在 0-{} 之间", isAudition ? "海选" : "维度", maxScore);
-                    }
-                    // 越界校验:只能给本场参赛方打分(海选/排名赛逐选手轮次);
-                    // 加赛场次等单轮共评场景无选手专属轮次,回退到当前轮
-                    if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
-                        throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
-                    }
-                    TMatchRound target = roundByCompetitor.get(se.getCompetitorId());
-                    if (target == null) {
-                        target = matchRoundLocator.current(match);
-                    }
-                    byRoundCompetitor
-                        .computeIfAbsent(target.getId() + ":" + se.getCompetitorId(), k -> new ArrayList<>())
-                        .add(se);
-                }
-                for (Map.Entry<String, List<ScoreEntryBo>> e : byRoundCompetitor.entrySet()) {
-                    String[] key = e.getKey().split(":");
-                    Long roundId = Long.valueOf(key[0]);
-                    Long competitorId = Long.valueOf(key[1]);
-                    roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                        .eq(TRoundScore::getRoundId, roundId)
-                        .eq(TRoundScore::getRefereeId, refId)
-                        .eq(TRoundScore::getCompetitorId, competitorId));
-                    for (ScoreEntryBo se : e.getValue()) {
-                        TRoundScore rs = new TRoundScore();
-                        rs.setTournamentId(match.getTournamentId());
-                        rs.setRoundId(roundId);
-                        rs.setTenantId(match.getTenantId());
-                        rs.setCompetitorId(competitorId);
-                        rs.setRefereeId(refId);
-                        rs.setScore(se.getScore());
-                        rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
-                        rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
-                        roundScoreMapper.insert(rs);
-                    }
-                }
-            }
-            if (isAudition) {
-                // 只回写本次真正提交了的选手:此前对整圈参赛方逐个 UPDATE,
-                // 36 人的圈子点一次提交就要写 36 行(纯属放大写锁与往返)
-                accumulateAuditionScores(match, touchedCompetitorIds(bo, competitorIds));
-            } else {
-                accumulateRankScores(match, stage, competitorIds);
-            }
-            List<MatchScoreResult> accumulated = loadAuditionResults(match, competitorIds);
-            refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
-            tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
-            // 海选(含二海/三海)不自动结算:打分只是攒分,结算统一由导播台/管理端点「完成赛段」触发。
-            // 这样裁判判完最后一个人不会当场生成下一级加赛,导播可以先确认分数、再决定收尾。
-            // 排名赛 BATCH 公布模式:全部裁判对全部选手打分完成后,自动完成赛段一次性公布
-            if (isRank) {
-                maybeAutoPublishRankStage(stage);
-            }
-            return buildVo(match.getId(), StageConstants.MATCH_GAMING, accumulated);
+            return submitPerCompetitorScores(match, stage, rc, sc, bo, competitorIds);
         }
+        return settleMatchResult(match, stage, mode, sc, bo, competitorIds, isArena);
+    }
 
-        // 写明细分 → TRoundScore(非海选)
-        List<TRoundScore> rawScores = new ArrayList<>();
-        if (bo.getScores() != null && !bo.getScores().isEmpty()) {
-            TMatchRound round = matchRoundLocator.current(match);
-            // 重复提交以最新为准:先删本裁判本轮旧分再写。
-            // t_round_score 上有唯一键 (round_id, referee_id, competitor_id, dimension),
-            // 只 insert 不删的话,同一裁判改分第二次提交会直接撞唯一键报错。
-            Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
-            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaUpdate()
-                .eq(TRoundScore::getRoundId, round.getId())
-                .eq(TRoundScore::getRefereeId, refId));
-            for (ScoreEntryBo se : bo.getScores()) {
-                // 越界校验:只能给本场参赛方提交打分,避免向不相关选手写入脏数据
-                if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
-                    throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
-                }
-                TRoundScore rs = new TRoundScore();
-                rs.setTournamentId(match.getTournamentId());
-                rs.setRoundId(round.getId());
-                // 裁判端无登录租户上下文,需显式带租户,否则 tenant_id 插入报错
-                rs.setTenantId(match.getTenantId());
-                rs.setCompetitorId(se.getCompetitorId());
-                // 与累计打分类路径统一:未带裁判ID(管理端录入)记为 0,避免 referee_id 为 null
-                // 时唯一键判重失效、重复提交各自留下多行
-                rs.setRefereeId(refId);
-                rs.setScore(se.getScore());
-                rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
-                rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
-                roundScoreMapper.insert(rs);
-                rawScores.add(rs);
+    /** 提交入口守卫:场次必须存在且处于 GAMING(仅进行中的场次可提交结果)。 */
+    private TMatch loadGamingMatch(Long matchId) {
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在");
+        }
+        if (!StageConstants.MATCH_GAMING.equals(match.getStatus())) {
+            throw new ServiceException("场次当前状态[{}]不可提交结果,仅 GAMING 可提交", match.getStatus());
+        }
+        return match;
+    }
+
+    /**
+     * 安全:打分明细里的 refereeId 一律以服务端确定的 bo.refereeId 为准,
+     * 清除客户端逐条提交的 refereeId,防止冒用其他裁判身份投票/打分。
+     */
+    private void stripClientRefereeIds(SubmitResultBo bo) {
+        if (bo.getScores() == null) {
+            return;
+        }
+        for (ScoreEntryBo se : bo.getScores()) {
+            se.setRefereeId(null);
+        }
+    }
+
+    private List<Long> competitorIdsOf(Long matchId) {
+        return participantMapper.selectList(
+                Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, matchId))
+            .stream().map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
+    }
+
+    /** 海选/排名赛为「逐选手累计打分」赛制:一次提交只写部分选手的分,不即时结算。 */
+    private boolean isPerCompetitorStage(TStage stage) {
+        return StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())
+            || StageModeEnum.RANK.getCode().equals(stage.getStageMode());
+    }
+
+    /**
+     * 海选赛/排名赛:逐选手写入本轮打分,再从已写入明细重新累计并回显,场次保持 GAMING。
+     * 海选(含二海/三海)不自动结算——打分只是攒分,结算统一由导播台「完成赛段」触发;
+     * 排名赛 BATCH 公布模式则在全部裁判打完时自动完成赛段一次性公布。
+     */
+    private MatchResultVo submitPerCompetitorScores(TMatch match, TStage stage, RuleConfigHolder rc,
+                                                    ScoringConfig sc, SubmitResultBo bo,
+                                                    List<Long> competitorIds) {
+        boolean isAudition = StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
+        writePerCompetitorScores(match, rc, sc, bo, competitorIds, isAudition);
+        if (isAudition) {
+            // 只回写本次真正提交了的选手:此前对整圈参赛方逐个 UPDATE,
+            // 36 人的圈子点一次提交就要写 36 行(纯属放大写锁与往返)
+            accumulateAuditionScores(match, touchedCompetitorIds(bo, competitorIds));
+        } else {
+            accumulateRankScores(match, stage, competitorIds);
+        }
+        List<MatchScoreResult> accumulated = loadAuditionResults(match, competitorIds);
+        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
+        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
+        if (!isAudition) {
+            maybeAutoPublishRankStage(stage);
+        }
+        return buildVo(match.getId(), StageConstants.MATCH_GAMING, accumulated);
+    }
+
+    /**
+     * 逐 (轮次, 选手) 覆盖写本轮打分:同一选手多个维度一次删除再批量插入,
+     * 避免逐条「先删后插」导致同一次提交的多维度分互相覆盖。
+     */
+    private void writePerCompetitorScores(TMatch match, RuleConfigHolder rc, ScoringConfig sc,
+                                          SubmitResultBo bo, List<Long> competitorIds, boolean isAudition) {
+        if (bo.getScores() == null || bo.getScores().isEmpty()) {
+            return;
+        }
+        Map<Long, TMatchRound> roundByCompetitor = new HashMap<>();
+        List<TMatchRound> rounds = matchRoundMapper.selectList(
+            Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()));
+        for (TMatchRound r : rounds) {
+            if (r.getCompetitorId() != null) {
+                roundByCompetitor.putIfAbsent(r.getCompetitorId(), r);
             }
         }
+        Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
+        // 按 (轮次,选手) 分组:同一选手多个维度一次删除再批量插入,
+        // 避免逐条「先删后插」导致同一次提交的多维度分互相覆盖
+        Map<String, List<ScoreEntryBo>> byRoundCompetitor = new java.util.LinkedHashMap<>();
+        for (ScoreEntryBo se : bo.getScores()) {
+            if (se.getCompetitorId() == null || se.getScore() == null) {
+                continue;
+            }
+            // 分数校验:海选按赛段配置满分校验(默认 10 分制,可配置 100 分制);
+            // 排名赛按维度满分校验(未配置时默认 100)
+            java.math.BigDecimal maxScore = isAudition
+                ? (rc != null && rc.getMaxScore() != null
+                    ? rc.getMaxScore() : java.math.BigDecimal.valueOf(10))
+                : rankMaxScore(sc, se.getDimension());
+            if (se.getScore().compareTo(java.math.BigDecimal.ZERO) < 0
+                || se.getScore().compareTo(maxScore) > 0) {
+                throw new ServiceException("{}打分须在 0-{} 之间", isAudition ? "海选" : "维度", maxScore);
+            }
+            // 越界校验:只能给本场参赛方打分(海选/排名赛逐选手轮次);
+            // 加赛场次等单轮共评场景无选手专属轮次,回退到当前轮
+            if (!competitorIds.contains(se.getCompetitorId())) {
+                throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
+            }
+            TMatchRound target = roundByCompetitor.get(se.getCompetitorId());
+            if (target == null) {
+                target = matchRoundLocator.current(match);
+            }
+            byRoundCompetitor
+                .computeIfAbsent(target.getId() + ":" + se.getCompetitorId(), k -> new ArrayList<>())
+                .add(se);
+        }
+        for (Map.Entry<String, List<ScoreEntryBo>> e : byRoundCompetitor.entrySet()) {
+            String[] key = e.getKey().split(":");
+            Long roundId = Long.valueOf(key[0]);
+            Long competitorId = Long.valueOf(key[1]);
+            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                .eq(TRoundScore::getRoundId, roundId)
+                .eq(TRoundScore::getRefereeId, refId)
+                .eq(TRoundScore::getCompetitorId, competitorId));
+            for (ScoreEntryBo se : e.getValue()) {
+                writeScoreEntry(match, roundId, competitorId, refId, se);
+            }
+        }
+    }
 
-        // 结果公布模式:DIRECTOR 模式裁判无需判罚
+    /**
+     * 单场判胜负路径(淘汰/擂台/小组等 STANDARD 场次):写明细分 → 裁判投票汇聚 → 算分 →
+     * 平局加赛 / 待公布暂存 / 结算回写与下游路由。
+     */
+    private MatchResultVo settleMatchResult(TMatch match, TStage stage, MatchModeEnum mode, ScoringConfig sc,
+                                            SubmitResultBo bo, List<Long> competitorIds, boolean isArena) {
+        List<TRoundScore> rawScores = writeRawScores(match, bo, competitorIds);
+
         boolean isKnockoutStandard = StageModeEnum.KNOCKOUT.getCode().equals(stage.getStageMode())
             && MatchModeEnum.STANDARD.equals(mode);
         String publishMode = readPublishMode(stage);
@@ -268,96 +272,166 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 裁判判罚投票(STANDARD):裁判端提交只记一票并落库;
         // 多名裁判时全部判完才统一结算,单名裁判提交后立即结算
         Map<Long, String> effectiveOutcomes = bo.getOutcomes();
-        boolean refereeVote = MatchModeEnum.STANDARD.equals(mode)
-            && !perCompetitor
-            && bo.getRefereeId() != null
-            && !competitorIds.isEmpty()
-            && !refereeStageService.getRefereeIdsByStageId(stage.getId()).isEmpty();
-        if (refereeVote) {
-            int assigned = refereeStageService.getRefereeIdsByStageId(stage.getId()).size();
-            TMatchRound voteRound = matchRoundLocator.current(match);
-            // 覆盖写本裁判本轮投票(WIN=1 / LOSS=0 / DRAW=0.5),不影响其他裁判
-            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                .eq(TRoundScore::getRoundId, voteRound.getId())
-                .eq(TRoundScore::getRefereeId, bo.getRefereeId())
-                .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE));
-            for (Long cid : competitorIds) {
-                String o = bo.getOutcomes() == null ? null : bo.getOutcomes().get(cid);
-                java.math.BigDecimal v = MatchOutcomeEnum.WIN.getCode().equals(o) ? java.math.BigDecimal.ONE
-                    : MatchOutcomeEnum.DRAW.getCode().equals(o) ? new java.math.BigDecimal("0.5")
-                    : MatchOutcomeEnum.LOSS.getCode().equals(o) ? java.math.BigDecimal.ZERO : null;
-                if (v == null) {
-                    continue;
-                }
-                TRoundScore vote = new TRoundScore();
-                vote.setTournamentId(match.getTournamentId());
-                vote.setRoundId(voteRound.getId());
-                vote.setTenantId(match.getTenantId());
-                vote.setCompetitorId(cid);
-                vote.setRefereeId(bo.getRefereeId());
-                vote.setScore(v);
-                vote.setDimension(StageConstants.DIMENSION_MAIN);
-                vote.setAction(StageConstants.SCORE_ACTION_VOTE);
-                roundScoreMapper.insert(vote);
-            }
-            long voted = roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .eq(TRoundScore::getRoundId, voteRound.getId())
-                    .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE)
-                    .select(TRoundScore::getRefereeId))
-                .stream().map(TRoundScore::getRefereeId).filter(Objects::nonNull).distinct().count();
-            if (voted < assigned) {
-                log.info("场次[{}]裁判[{}]已投票({}/{}),等待其他裁判", match.getId(), bo.getRefereeId(), voted, assigned);
-                refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
-                tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
+        if (isRefereeVoteSubmission(stage, mode, bo, competitorIds)) {
+            RefereeVote vote = collectRefereeVotes(match, stage, bo, competitorIds, isArena);
+            if (vote.pending()) {
                 return buildVo(match.getId(), StageConstants.MATCH_GAMING, List.of());
             }
-            Map<Long, String> aggregated = aggregateRefereeVotes(voteRound, competitorIds, assigned);
-            if (aggregated == null) {
-                // 票数持平(如 1红1蓝、1红1蓝1平):综合判定为平局。
-                // 淘汰赛在当前场次下加赛一轮重新比;擂台赛直接以平局结算,
-                // 擂主与挑战者均排到队尾,由 computeArenaQueue 回放处理
-                log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),判定平局{}",
-                    match.getId(), leftWinVotes(voteRound, competitorIds),
-                    rightWinVotes(voteRound, competitorIds), isArena ? "(擂台赛双方排到队尾)" : "并加赛一轮");
-                aggregated = new HashMap<>();
-                for (Long cid : competitorIds) {
-                    aggregated.put(cid, MatchOutcomeEnum.DRAW.getCode());
-                }
-            }
-            effectiveOutcomes = aggregated;
+            effectiveOutcomes = vote.outcomes();
         }
 
-        MatchScoreInput input = MatchScoreInput.builder()
+        List<MatchScoreResult> results = scoringEngine.compute(MatchScoreInput.builder()
             .matchMode(mode)
             .scoringConfig(sc)
             .competitorIds(competitorIds)
             .rawScores(rawScores)
             .directOutcomes(effectiveOutcomes)
-            .build();
-        List<MatchScoreResult> results = scoringEngine.compute(input);
+            .build());
 
         // 淘汰赛 STANDARD 平局:不结算、不填下游,自动新增一轮加赛,等待再次判罚
         if (isKnockoutStandard && isDrawResult(competitorIds, results)) {
             return createReplayRound(match, results);
         }
-
         // 结果公布模式 MANUAL:裁判判完仅暂存结果,场次保持进行中,待导播台确认公布。
         // 擂台赛与淘汰赛一样是"单场判胜负",同样要支持 MANUAL——此前只判 isKnockoutStandard,
         // 擂台赛配了 MANUAL 也会当场结算,配置形同虚设。
         if ((isKnockoutStandard || isArenaStandard) && bo.getRefereeId() != null
             && "MANUAL".equalsIgnoreCase(publishMode)) {
-            TMatch pending = new TMatch();
-            pending.setId(match.getId());
-            pending.setResultJson(toResultJson(effectiveOutcomes));
-            matchMapper.updateById(pending);
-            log.info("场次[{}]裁判已判完,结果待导播台公布: {}", match.getId(), effectiveOutcomes);
+            return holdForManualPublish(match, effectiveOutcomes);
+        }
+        return settleAndAdvance(match, stage, bo, results, competitorIds);
+    }
+
+    /** 裁判端提交是否走「多裁判投票汇聚」而非常规单方判罚。 */
+    private boolean isRefereeVoteSubmission(TStage stage, MatchModeEnum mode, SubmitResultBo bo,
+                                            List<Long> competitorIds) {
+        return MatchModeEnum.STANDARD.equals(mode)
+            && bo.getRefereeId() != null
+            && !competitorIds.isEmpty()
+            && !refereeStageService.getRefereeIdsByStageId(stage.getId()).isEmpty();
+    }
+
+    /**
+     * 覆盖写本裁判本轮投票(WIN=1 / LOSS=0 / DRAW=0.5),不影响其他裁判。
+     * 票未投满时返回 waiting(调用方直接回 GAMING 等待);投满则汇总全场生效判定,
+     * 票数持平时综合判定为平局(淘汰赛加赛一轮,擂台赛双方排到队尾)。
+     */
+    private RefereeVote collectRefereeVotes(TMatch match, TStage stage, SubmitResultBo bo,
+                                            List<Long> competitorIds, boolean isArena) {
+        int assigned = refereeStageService.getRefereeIdsByStageId(stage.getId()).size();
+        TMatchRound voteRound = matchRoundLocator.current(match);
+        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+            .eq(TRoundScore::getRoundId, voteRound.getId())
+            .eq(TRoundScore::getRefereeId, bo.getRefereeId())
+            .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE));
+        for (Long cid : competitorIds) {
+            String o = bo.getOutcomes() == null ? null : bo.getOutcomes().get(cid);
+            java.math.BigDecimal v = MatchOutcomeEnum.WIN.getCode().equals(o) ? java.math.BigDecimal.ONE
+                : MatchOutcomeEnum.DRAW.getCode().equals(o) ? new java.math.BigDecimal("0.5")
+                : MatchOutcomeEnum.LOSS.getCode().equals(o) ? java.math.BigDecimal.ZERO : null;
+            if (v == null) {
+                continue;
+            }
+            TRoundScore vote = new TRoundScore();
+            vote.setTournamentId(match.getTournamentId());
+            vote.setRoundId(voteRound.getId());
+            vote.setTenantId(match.getTenantId());
+            vote.setCompetitorId(cid);
+            vote.setRefereeId(bo.getRefereeId());
+            vote.setScore(v);
+            vote.setDimension(StageConstants.DIMENSION_MAIN);
+            vote.setAction(StageConstants.SCORE_ACTION_VOTE);
+            roundScoreMapper.insert(vote);
+        }
+        long voted = roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                .eq(TRoundScore::getRoundId, voteRound.getId())
+                .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE)
+                .select(TRoundScore::getRefereeId))
+            .stream().map(TRoundScore::getRefereeId).filter(Objects::nonNull).distinct().count();
+        if (voted < assigned) {
+            log.info("场次[{}]裁判[{}]已投票({}/{}),等待其他裁判", match.getId(), bo.getRefereeId(), voted, assigned);
             refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
             tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
-            return buildVo(match.getId(), StageConstants.MATCH_GAMING, List.of());
+            return new RefereeVote(true, null);
         }
+        Map<Long, String> aggregated = aggregateRefereeVotes(voteRound, competitorIds, assigned);
+        if (aggregated == null) {
+            // 票数持平(如 1红1蓝、1红1蓝1平):综合判定为平局。
+            // 淘汰赛在当前场次下加赛一轮重新比;擂台赛直接以平局结算,
+            // 擂主与挑战者均排到队尾,由 computeArenaQueue 回放处理
+            log.info("场次[{}]裁判意见持平(左胜{} vs 右胜{}),判定平局{}",
+                match.getId(), leftWinVotes(voteRound, competitorIds),
+                rightWinVotes(voteRound, competitorIds), isArena ? "(擂台赛双方排到队尾)" : "并加赛一轮");
+            aggregated = new HashMap<>();
+            for (Long cid : competitorIds) {
+                aggregated.put(cid, MatchOutcomeEnum.DRAW.getCode());
+            }
+        }
+        return new RefereeVote(false, aggregated);
+    }
 
-        // 回写 participant
-        // 整场一条 SQL(此前逐参赛方 update,64 人 = 64 条)
+    /**
+     * 非海选路径:按提交明细写本轮 TRoundScore。重复提交以最新为准(先删本裁判本轮旧分再写),
+     * 返回本次写入的行供 ScoringEngine 直接使用(免二次查询)。
+     */
+    private List<TRoundScore> writeRawScores(TMatch match, SubmitResultBo bo, List<Long> competitorIds) {
+        List<TRoundScore> rawScores = new ArrayList<>();
+        if (bo.getScores() == null || bo.getScores().isEmpty()) {
+            return rawScores;
+        }
+        TMatchRound round = matchRoundLocator.current(match);
+        // t_round_score 上有唯一键 (round_id, referee_id, competitor_id, dimension),
+        // 只 insert 不删的话,同一裁判改分第二次提交会直接撞唯一键报错。
+        Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
+        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaUpdate()
+            .eq(TRoundScore::getRoundId, round.getId())
+            .eq(TRoundScore::getRefereeId, refId));
+        for (ScoreEntryBo se : bo.getScores()) {
+            // 越界校验:只能给本场参赛方提交打分,避免向不相关选手写入脏数据
+            if (se.getCompetitorId() == null || !competitorIds.contains(se.getCompetitorId())) {
+                throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
+            }
+            rawScores.add(writeScoreEntry(match, round.getId(), se.getCompetitorId(), refId, se));
+        }
+        return rawScores;
+    }
+
+    /**
+     * 写一条打分明细(维度/动作未指定时按 MAIN/SCORE 落库)。
+     * 裁判端无登录租户上下文,需显式带租户,否则 tenant_id 插入报错;
+     * 未带裁判 ID(管理端录入)记为 0,避免 referee_id 为 null 时唯一键判重失效、重复提交各自留下多行。
+     */
+    private TRoundScore writeScoreEntry(TMatch match, Long roundId, Long competitorId, Long refereeId,
+                                        ScoreEntryBo se) {
+        TRoundScore rs = new TRoundScore();
+        rs.setTournamentId(match.getTournamentId());
+        rs.setRoundId(roundId);
+        rs.setTenantId(match.getTenantId());
+        rs.setCompetitorId(competitorId);
+        rs.setRefereeId(refereeId);
+        rs.setScore(se.getScore());
+        rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
+        rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
+        roundScoreMapper.insert(rs);
+        return rs;
+    }
+
+    /** MANUAL 公布模式:裁判判完仅暂存结果,场次保持进行中,待导播台确认公布。 */
+    private MatchResultVo holdForManualPublish(TMatch match, Map<Long, String> effectiveOutcomes) {
+        TMatch pending = new TMatch();
+        pending.setId(match.getId());
+        pending.setResultJson(toResultJson(effectiveOutcomes));
+        matchMapper.updateById(pending);
+        log.info("场次[{}]裁判已判完,结果待导播台公布: {}", match.getId(), effectiveOutcomes);
+        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
+        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
+        return buildVo(match.getId(), StageConstants.MATCH_GAMING, List.of());
+    }
+
+    /** 结算:回写参赛方成绩 → 淘汰赛下游路由与中间态同步 → 场次 SETTLED → 可选自动完成赛段。 */
+    private MatchResultVo settleAndAdvance(TMatch match, TStage stage, SubmitResultBo bo,
+                                           List<MatchScoreResult> results, List<Long> competitorIds) {
+        // 回写 participant:整场一条 SQL(此前逐参赛方 update,64 人 = 64 条)
         scoreWriter.writeBatch(match.getId(), results.stream()
             .filter(r -> r.getCompetitorId() != null)
             .map(r -> new ParticipantScoreWriter.ScorePatch(
@@ -382,8 +456,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         RedisUtils.deleteObject("arena:revote:" + match.getId());
 
         // 默认不自动 complete 赛段:最后一个场次结束后由导播台手动"完成赛段"(仅显式传 true 时自动)
-        boolean auto = Boolean.TRUE.equals(bo.getFinalizeStageIfComplete());
-        if (auto) {
+        if (Boolean.TRUE.equals(bo.getFinalizeStageIfComplete())) {
             long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
                 .eq(TMatch::getStageId, stage.getId()).ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
             if (unfinished == 0) {
@@ -392,8 +465,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
         refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "match");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
-
         return buildVo(match.getId(), StageConstants.MATCH_SETTLED, results);
+    }
+
+    /** 裁判投票汇总结果:pending=true 表示票未投满(等待其他裁判),outcomes 为全场生效判定。 */
+    private record RefereeVote(boolean pending, Map<Long, String> outcomes) {
     }
 
     /**

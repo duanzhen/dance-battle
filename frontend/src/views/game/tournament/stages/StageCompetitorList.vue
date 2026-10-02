@@ -434,8 +434,11 @@ const displayList = computed(() => {
 });
 const visibleCount = computed(() => displayList.value.length);
 
-// GUEST 标记:remark == GUEST(由后端 addGuest 写入)
-const isGuest = (competitor: CompetitorVO) => competitor.remark === 'GUEST';
+// 外卡标记:只认入场性质 entryTag(外卡只有一条路径 —— 中间态手动加人后物化,
+// 由后端 copyGuestIntoStage 写 entryTag=GUEST)。remark 兜底是兼容用途:
+// 旧的「赛段嘉宾直加」入口(已删除)当时把 GUEST 写在备注里,老数据的 entryTag 可能为空。
+const isGuest = (competitor: CompetitorVO) =>
+  competitor.entryTag === 'GUEST' || competitor.remark === 'GUEST';
 
 /** 展示备注:过滤内部使用的临时弃权标记(ARENA_SKIP:xxx) */
 const remarkText = (remark?: string) =>

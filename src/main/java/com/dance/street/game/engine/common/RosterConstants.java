@@ -26,8 +26,6 @@ public final class RosterConstants {
     public static final String ENTRY_ADVANCE = "ADVANCE";
     public static final String ENTRY_REVIVE = "REVIVE";
     public static final String ENTRY_GUEST = "GUEST";
-    public static final String ENTRY_MANUAL = "MANUAL";
-    public static final String ENTRY_CHECKIN = "CHECKIN";
 
     /** result_filter 取值:ANY 表示不限结果(与 OutcomeStatusEnum 互补) */
     public static final String FILTER_ANY = "ANY";
@@ -49,8 +47,6 @@ public final class RosterConstants {
     /** 覆盖操作:固定某源行/外卡的种子位 */
     public static final String OVERRIDE_SEED = "SEED";
 
-    /** 组排序键:源赛段结算全局名次升序(默认) */
-    public static final String ORDER_FINAL_RANK = "FINAL_RANK";
     /** 组排序键:按圈分组、圈内名次升序 */
     public static final String ORDER_ZONE_RANK = "ZONE_RANK";
     /** 组排序键:跨圈按圈内名次轮转交叉(圈1第1、圈2第1、圈1第2…) */

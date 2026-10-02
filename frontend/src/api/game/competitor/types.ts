@@ -20,6 +20,11 @@ export interface CompetitorVO {
   sourceCompetitorId: string | number;
 
   /**
+   * 入场性质:ADVANCE/REVIVE/GUEST/MANUAL/CHECKIN
+   */
+  entryTag?: string;
+
+  /**
    * 0:个人, 1:选手
    */
   type: number;

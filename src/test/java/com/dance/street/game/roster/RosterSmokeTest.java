@@ -54,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -645,7 +646,8 @@ class RosterSmokeTest {
             .findFirst().orElse(null);
         assertNotNull(xRow);
         assertEquals(RosterConstants.ENTRY_GUEST, xRow.getEntryTag());
-        assertEquals("GUEST", xRow.getRemark());
+        // 外卡身份只由 entryTag 表达;remark 不再写内部标记(旧「赛段嘉宾直加」路径的遗留)
+        assertNull(xRow.getRemark(), "外卡不应把 GUEST 写进备注");
         assertEquals(2L, xRow.getSeedRank().longValue());
         assertNotNull(xRow.getNumber());
         assertTrue(xRow.getNumber().startsWith("G"));

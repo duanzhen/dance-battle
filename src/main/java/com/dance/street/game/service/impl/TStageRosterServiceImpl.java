@@ -2279,7 +2279,6 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         nc.setNumber(number);
         nc.setSeedRank(row.seedRank);
         nc.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
-        nc.setRemark("GUEST");
         competitorMapper.insert(nc);
         if (row.guestPlayerId != null) {
             TCompetitorMember nm = new TCompetitorMember();

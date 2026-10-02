@@ -41,9 +41,6 @@ public final class StageConstants {
     /** 默认打分维度 */
     public static final String DIMENSION_MAIN = "MAIN";
 
-    /** 比赛格式 */
-    public static final String FORMAT_BO1 = "BO1";
-
     /**
      * t_match_participant.slot_kind 取值:座位类型。
      *

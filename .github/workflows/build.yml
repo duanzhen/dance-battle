@@ -8,8 +8,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # 测试跑在 SQLite 兜底库上,不需要 MySQL/Redis;
+      # mvn test 只到 test 阶段,不会触发 prepare-package 里的 npm 构建(前端 dist 非必需,已在无 dist 环境下验证)
+      - name: Run tests
+        run: mvn -B test
+
   jar-image:
     name: Jar Image (root Dockerfile)
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,6 +76,7 @@ jobs:
 
   native-image:
     name: Native Image
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 120
     if: github.event_name != 'pull_request'

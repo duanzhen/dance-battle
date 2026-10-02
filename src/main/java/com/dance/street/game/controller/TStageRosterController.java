@@ -192,6 +192,15 @@ public class TStageRosterController {
         return R.ok();
     }
 
+    /** 批量撤销人工覆盖(一次请求,替代前端逐条 DELETE) */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "批量撤销名单人工覆盖", businessType = BusinessType.UPDATE)
+    @PostMapping("/{stageId}/roster/overrides/batch-delete")
+    public R<Void> deleteOverrides(@PathVariable Long stageId, @RequestBody List<Long> overrideIds) {
+        rosterService.deleteOverrides(stageId, overrideIds);
+        return R.ok();
+    }
+
     /** 保存手工名单顺序(中间态两列拖动结果) */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "保存名单顺序", businessType = BusinessType.UPDATE)

@@ -146,6 +146,19 @@ public class AuditionResultService {
                 .computeIfAbsent(zone, k -> new ArrayList<>())
                 .add(m);
         }
+        // 全部加赛场次一次取回参与方/打分/参赛单位,再按「深度×圈」在内存分组:
+        // 此前每个分组各发 3 类查询(K 个组 ≈ 3K 条),现在固定 3 条。
+        List<Long> allIds = tbMatches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        List<TMatchParticipant> allParts = allIds.isEmpty() ? List.of()
+            : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .in(TMatchParticipant::getMatchId, allIds)
+                .isNotNull(TMatchParticipant::getCompetitorId));
+        Map<Long, List<TMatchParticipant>> partsByMatch = allParts.stream()
+            .filter(p -> p.getMatchId() != null)
+            .collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
+        Map<String, BigDecimal> allScoreByRef = roundScoreByRef(allIds);
+        Map<Long, TCompetitor> allCompById = competitorById(allParts);
+
         List<AuditionResultVo.TiebreakerItem> result = new ArrayList<>();
         for (Map.Entry<Integer, LinkedHashMap<String, List<TMatch>>> depthEntry : byDepthZone.entrySet()) {
             for (Map.Entry<String, List<TMatch>> zoneEntry : depthEntry.getValue().entrySet()) {
@@ -153,14 +166,12 @@ public class AuditionResultService {
                 List<Long> ids = group.stream().map(TMatch::getId).toList();
                 Map<Long, TMatch> matchById = group.stream()
                     .collect(Collectors.toMap(TMatch::getId, m -> m, (a, b) -> a));
-                List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                    .in(TMatchParticipant::getMatchId, ids)
-                    .isNotNull(TMatchParticipant::getCompetitorId));
-                Map<String, BigDecimal> scoreByRef = roundScoreByRef(ids);
-                Map<Long, TCompetitor> compById = competitorById(parts);
+                List<TMatchParticipant> parts = ids.stream()
+                    .flatMap(id -> partsByMatch.getOrDefault(id, List.of()).stream())
+                    .toList();
                 List<AuditionResultVo.CompetitorItem> items = new ArrayList<>();
                 for (TMatchParticipant p : parts) {
-                    items.add(toCompetitorItem(p, compById, matchById, scoreByRef, referees, refNameById));
+                    items.add(toCompetitorItem(p, allCompById, matchById, allScoreByRef, referees, refNameById));
                 }
                 items.sort(Comparator.comparingInt(i -> parseCompetitorNumber(i.getNumber())));
                 AuditionResultVo.TiebreakerItem tb = new AuditionResultVo.TiebreakerItem();

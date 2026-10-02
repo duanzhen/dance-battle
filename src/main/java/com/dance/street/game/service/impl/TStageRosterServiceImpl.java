@@ -160,6 +160,12 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void deleteOverrides(Long stageId, List<Long> overrideIds) {
+        rosterOverrideService.deleteOverrides(stageId, overrideIds);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void reorderRoster(Long stageId, List<TStageRosterOrderBo.Item> items) {
         rosterOverrideService.reorderRoster(stageId, items);
     }

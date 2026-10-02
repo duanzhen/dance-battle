@@ -105,13 +105,46 @@ public class RankStageSettler implements StageSettler {
         // 圈内已晋级数(支持重复结算幂等)
         Map<String, Integer> zoneAdvanced = countRankAdvancedByZone(matches);
 
+        // 批量预取参赛方/轮次/打分/参赛单位:此前每圈各发 4 条查询(K 圈 ≈ 4K 条),现在固定 4 条
+        List<Long> allMatchIds = matches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        Map<Long, List<TMatchParticipant>> partsByMatch = allMatchIds.isEmpty() ? Map.of()
+            : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .in(TMatchParticipant::getMatchId, allMatchIds)
+                    .isNotNull(TMatchParticipant::getCompetitorId))
+                .stream()
+                .filter(p -> p.getMatchId() != null)
+                .collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
+        List<TMatchRound> allRounds = allMatchIds.isEmpty() ? List.of()
+            : matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .in(TMatchRound::getMatchId, allMatchIds)
+                .select(TMatchRound::getId, TMatchRound::getMatchId));
+        Map<Long, List<Long>> roundIdsByMatch = allRounds.stream()
+            .filter(r -> r.getMatchId() != null && r.getId() != null)
+            .collect(Collectors.groupingBy(TMatchRound::getMatchId,
+                Collectors.mapping(TMatchRound::getId, Collectors.toList())));
+        List<Long> allRoundIds = allRounds.stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        Map<Long, List<TRoundScore>> scoresByRound = allRoundIds.isEmpty() ? Map.of()
+            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                    .in(TRoundScore::getRoundId, allRoundIds))
+                .stream()
+                .filter(s -> s.getRoundId() != null)
+                .collect(Collectors.groupingBy(TRoundScore::getRoundId));
+        List<Long> allCompIds = partsByMatch.values().stream()
+            .flatMap(List::stream)
+            .map(TMatchParticipant::getCompetitorId)
+            .filter(Objects::nonNull).distinct().toList();
+        Map<Long, TCompetitor> allCompById = settlementSupport.competitorMap(allCompIds);
+
         for (TMatch match : matches) {
             if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
                 continue;
             }
             String zone = match.getDisplayZone();
             settleRankMatch(match, rc, zoneQuota.getOrDefault(zone, 0),
-                zoneBase.getOrDefault(zone, 0), zoneAdvanced);
+                zoneBase.getOrDefault(zone, 0), zoneAdvanced,
+                partsByMatch.getOrDefault(match.getId(), List.of()),
+                roundIdsByMatch.getOrDefault(match.getId(), List.of()),
+                scoresByRound, allCompById);
         }
     }
 
@@ -150,17 +183,16 @@ public class RankStageSettler implements StageSettler {
      * 用 RANKING 策略算总分排名,按本圈剩余名额晋级;晋级线同分并列时保持 PENDING。
      */
     private void settleRankMatch(TMatch match, RuleConfigHolder rc, int advanceQuota,
-                                 int zoneBase, Map<String, Integer> zoneAdvanced) {
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, match.getId())
-                .isNotNull(TMatchParticipant::getCompetitorId));
+                                 int zoneBase, Map<String, Integer> zoneAdvanced,
+                                 List<TMatchParticipant> parts, List<Long> roundIds,
+                                 Map<Long, List<TRoundScore>> scoresByRound,
+                                 Map<Long, TCompetitor> compMap) {
         if (parts.isEmpty()) {
             settlementSupport.markMatchSettled(match);
             return;
         }
         List<Long> partIds = parts.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).toList();
-        Map<Long, TCompetitor> compMap = settlementSupport.competitorMap(partIds);
         // 退赛选手不参与排名、不占用晋级名额(保持 WITHDRAWN)
         List<Long> competitorIds = partIds.stream()
             .filter(cid -> {
@@ -173,14 +205,9 @@ public class RankStageSettler implements StageSettler {
             return;
         }
         // 未打分守卫:从未被任何裁判打分的选手不允许随结算"0 分自动晋级"
-        List<Long> roundIds = matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
         Map<Long, Long> scoreCountByCompetitor = roundIds.isEmpty() ? Map.of()
-            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds)
-                    .select(TRoundScore::getCompetitorId))
-                .stream()
+            : roundIds.stream()
+                .flatMap(id -> scoresByRound.getOrDefault(id, List.of()).stream())
                 .filter(rs -> rs.getCompetitorId() != null)
                 .collect(Collectors.groupingBy(TRoundScore::getCompetitorId, Collectors.counting()));
         List<String> unjudged = competitorIds.stream()
@@ -196,8 +223,10 @@ public class RankStageSettler implements StageSettler {
         }
 
         // 分数分布在各自轮次,跨本场全部轮次汇总
-        List<TRoundScore> allScores = roundIds.isEmpty() ? List.of() : roundScoreMapper.selectList(
-            Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
+        List<TRoundScore> allScores = roundIds.isEmpty() ? List.of()
+            : roundIds.stream()
+                .flatMap(id -> scoresByRound.getOrDefault(id, List.of()).stream())
+                .toList();
 
         MatchScoreInput input = MatchScoreInput.builder()
             .matchMode(MatchModeEnum.RANKING)

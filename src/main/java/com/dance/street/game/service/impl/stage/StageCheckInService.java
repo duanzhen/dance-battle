@@ -186,16 +186,18 @@ public class StageCheckInService {
             // 尚未生成对阵:号码更新由后续生成对阵统一纳入
             return;
         }
-        TMatch source = null;
-        for (TMatch m : matches) {
-            long cnt = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
-                .eq(TMatchParticipant::getMatchId, m.getId())
-                .eq(TMatchParticipant::getCompetitorId, competitorId));
-            if (cnt > 0) {
-                source = m;
-                break;
-            }
-        }
+        // 该参赛方当前所在的圈场次一次查回(此前按场次逐个 selectCount)
+        List<Long> matchIds = matches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        Set<Long> attachedMatchIds = matchIds.isEmpty() ? Set.of()
+            : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .in(TMatchParticipant::getMatchId, matchIds)
+                    .eq(TMatchParticipant::getCompetitorId, competitorId)
+                    .select(TMatchParticipant::getMatchId))
+                .stream().map(TMatchParticipant::getMatchId).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        TMatch source = matches.stream()
+            .filter(m -> attachedMatchIds.contains(m.getId()))
+            .findFirst().orElse(null);
         if (source == null) {
             // 未挂入场次(异常数据兜底):直接按新号码/目标圈补挂,避免新号码不参与场次
             appendStageCompetitor(stageId, competitorId, targetMatchId);
@@ -248,12 +250,18 @@ public class StageCheckInService {
             .eq(TMatch::getStageId, stageId)
             .orderByAsc(TMatch::getDisplayRow)
             .orderByAsc(TMatch::getId));
+        // 一次查回该参赛方所在的全部圈场次,替代逐场 selectCount
+        List<Long> matchIds = matches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        Set<Long> attachedMatchIds = matchIds.isEmpty() ? Set.of()
+            : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .in(TMatchParticipant::getMatchId, matchIds)
+                    .eq(TMatchParticipant::getCompetitorId, competitorId)
+                    .select(TMatchParticipant::getMatchId))
+                .stream().map(TMatchParticipant::getMatchId).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         boolean removed = false;
         for (TMatch m : matches) {
-            long cnt = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
-                .eq(TMatchParticipant::getMatchId, m.getId())
-                .eq(TMatchParticipant::getCompetitorId, competitorId));
-            if (cnt > 0) {
+            if (attachedMatchIds.contains(m.getId())) {
                 removeParticipantWithRound(m, competitorId);
                 removed = true;
             }

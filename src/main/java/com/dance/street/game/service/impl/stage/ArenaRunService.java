@@ -244,13 +244,19 @@ public class ArenaRunService {
                 .eq(TMatch::getStatus, StageConstants.MATCH_GAMING)
                 .select(TMatch::getId))
             .stream().map(TMatch::getId).toList();
+        // 进行中场次的参赛方一次批量取回后按场次分组(通常只有 1 场,避免逐场回查)
+        Map<Long, List<TMatchParticipant>> partsByMatch = gamingMatchIds.isEmpty() ? Map.of()
+            : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .in(TMatchParticipant::getMatchId, gamingMatchIds)
+                    .orderByAsc(TMatchParticipant::getDisplaySlotIndex))
+                .stream()
+                .filter(p -> p.getMatchId() != null)
+                .collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
         Long matchId = null;
         Long withdrawnSlot = null;
         Long otherId = null;
         for (Long mid : gamingMatchIds) {
-            List<TMatchParticipant> ps = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                .eq(TMatchParticipant::getMatchId, mid)
-                .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+            List<TMatchParticipant> ps = partsByMatch.getOrDefault(mid, List.of());
             for (TMatchParticipant p : ps) {
                 if (p.getCompetitorId() == null) {
                     continue;

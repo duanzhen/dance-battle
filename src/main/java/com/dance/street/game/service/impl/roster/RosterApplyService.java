@@ -189,18 +189,26 @@ public class RosterApplyService {
             stageMapper.updateById(upd);
         }
         // 中间层的行与目标层参赛方挂钩:确认后可用于回溯"当时确认了谁"
+        // 一次取回本赛段全部带来源的参赛方并建映射,替代逐行 selectOne(32/64 人)
+        Map<Long, Long> createdIdBySource = new HashMap<>();
+        if (!sourceIds.isEmpty()) {
+            for (TCompetitor c : competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, targetStageId)
+                .in(TCompetitor::getSourceCompetitorId, sourceIds))) {
+                if (c.getSourceCompetitorId() != null) {
+                    createdIdBySource.putIfAbsent(c.getSourceCompetitorId(), c.getId());
+                }
+            }
+        }
         for (TStageRosterEntry e : players) {
             if (e.getSourceCompetitorId() == null) {
                 continue;
             }
-            TCompetitor created0 = competitorMapper.selectOne(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, targetStageId)
-                .eq(TCompetitor::getSourceCompetitorId, e.getSourceCompetitorId())
-                .last("LIMIT 1"));
-            if (created0 != null && !Objects.equals(created0.getId(), e.getCompetitorId())) {
+            Long createdId = createdIdBySource.get(e.getSourceCompetitorId());
+            if (createdId != null && !Objects.equals(createdId, e.getCompetitorId())) {
                 entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
                     .eq(TStageRosterEntry::getId, e.getId())
-                    .set(TStageRosterEntry::getCompetitorId, created0.getId()));
+                    .set(TStageRosterEntry::getCompetitorId, createdId));
             }
         }
         log.info("赛段[{}]整单装配完成:新增 {} 人(中间层 {} 人)", targetStageId, created, players.size());

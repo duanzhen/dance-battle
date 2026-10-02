@@ -102,10 +102,10 @@
       <div>
         <div class="flex items-center justify-between gap-2 mb-1.5">
           <label class="block text-sm font-medium text-neutral-400">参赛号码</label>
-          <!-- 随机取号范围:默认就近(最小的 10 个空号内),取消勾选则在选手数量以内的全部空号里随机 -->
+          <!-- 随机取号范围:默认就近(最小的 10 个空号内),取消勾选则在阵容人数以内的全部空号里随机 -->
           <label
             class="flex items-center gap-1.5 text-[11px] text-neutral-400 cursor-pointer select-none"
-            title="勾选：只在当前最小的 10 个空号里随机（号码更连续）；不勾选：在选手数量以内的全部空号中随机"
+            title="勾选：在最小的 10 个空号里随机（号码更连续）；不勾选：在阵容人数（1~人数）以内的空号中随机"
           >
             <input type="checkbox" v-model="randomNearbyOnly" class="accent-amber-500 w-3.5 h-3.5" />
             就近取号（最小 10 个空号）
@@ -249,7 +249,7 @@ const editing = ref(false);
 const competitors = ref<CompetitorVO[]>([]);
 const playerCount = ref(0);
 const selectedSlot = ref<{ number: number; competitor: CompetitorVO | null } | null>(null);
-/** 随机取号范围(默认勾选):true=只在最小的 10 个空号里随机;false=选手数量以内的全部空号随机 */
+/** 随机取号范围(默认勾选):true=只在最小的 10 个空号里随机;false=阵容人数以内的全部空号随机 */
 const randomNearbyOnly = ref(true);
 const playerName = ref('');
 const playerAvatar = ref('');
@@ -398,7 +398,7 @@ const scrollToFirstFreeSlot = async () => {
 const loadCompetitors = async () => {
   loading.value = true;
   try {
-    // 已添加的选手总数:随机抽号时最多只会抽到这个数字以内的号码
+    // 阵容列表人数:随机取号的上限、以及号码列表范围(人数+20)都以它为基准
     try {
       const pResp: any = await listPlayer({
         tournamentId: props.tournamentId,
@@ -420,13 +420,11 @@ const loadCompetitors = async () => {
     });
     competitors.value = response.data || [];
 
-    let maxNumber = 10;
-    if (competitors.value.length > 0) {
-      const numbers = competitors.value.map((c) => parseInt(c.number || '0')).filter((n) => !isNaN(n) && n > 0);
-      if (numbers.length > 0) {
-        maxNumber = Math.max(...numbers) + 10;
-      }
-    }
+    // 号码列表范围:阵容人数 + 20(至少 20 个),手动选号可滚到"阵容人数 + 20"的位置;
+    // 已有号码超出该范围时以最大已用号码兜底,避免把已占用的座位挤出列表
+    const usedNumbers = competitors.value.map((c) => parseInt(c.number || '0')).filter((n) => !isNaN(n) && n > 0);
+    const maxUsed = usedNumbers.length > 0 ? Math.max(...usedNumbers) : 0;
+    const maxNumber = Math.max(20, playerCount.value + 20, maxUsed);
 
     const competitorMap = new Map<number, CompetitorVO>();
     competitors.value.forEach((c) => {
@@ -568,7 +566,7 @@ const handleRandomSelect = () => {
     }
     candidates = withinPlayerCount.slice(0, 10);
   } else {
-    // 不勾选:在"已添加选手数量以内"的全部空闲号码里随机(没有符合条件的退回全部空号)
+    // 不勾选:在"阵容人数以内"的全部空闲号码里随机(号码被占满时退回全部空号,避免无法签到)
     candidates = availableSlots.filter((slot) => slot.number <= playerCount.value);
     if (candidates.length === 0) {
       candidates = availableSlots;

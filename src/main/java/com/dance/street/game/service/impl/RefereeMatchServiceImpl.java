@@ -179,21 +179,25 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
                 .filter(m -> matchId != null && m.getId().equals(matchId))
                 .findFirst()
                 .orElse(matches.get(0));
-            participants = participantMapper.selectList(
-                Wrappers.<TMatchParticipant>lambdaQuery()
-                    .eq(TMatchParticipant::getMatchId, match.getId()));
+            // 候选场次的参赛方一次批量取回后按场次分组:此前当前场次无参赛方时逐场回查
+            List<Long> candidateMatchIds = matches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+            Map<Long, List<TMatchParticipant>> partsByMatch = candidateMatchIds.isEmpty() ? Map.of()
+                : participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                        .in(TMatchParticipant::getMatchId, candidateMatchIds))
+                    .stream()
+                    .filter(p -> p.getMatchId() != null)
+                    .collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
+            participants = new ArrayList<>(partsByMatch.getOrDefault(match.getId(), List.of()));
             // 当前场次无参赛方时,自动切到有参赛方的进行中场次(避免"暂无参赛信息")
             if (participants.isEmpty()) {
                 for (TMatch alt : matches) {
                     if (alt.getId().equals(match.getId())) {
                         continue;
                     }
-                    List<TMatchParticipant> altParts = participantMapper.selectList(
-                        Wrappers.<TMatchParticipant>lambdaQuery()
-                            .eq(TMatchParticipant::getMatchId, alt.getId()));
+                    List<TMatchParticipant> altParts = partsByMatch.getOrDefault(alt.getId(), List.of());
                     if (!altParts.isEmpty()) {
                         match = alt;
-                        participants = altParts;
+                        participants = new ArrayList<>(altParts);
                         break;
                     }
                 }

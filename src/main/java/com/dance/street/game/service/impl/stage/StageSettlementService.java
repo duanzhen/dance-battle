@@ -225,13 +225,25 @@ public class StageSettlementService {
         if (targets.isEmpty()) {
             return;
         }
+        List<TStage> targetStages = stageMapper.selectByIds(targets);
+        // 只对"草稿且未确认名单"的下游查是否已开赛,一次 IN 取回后按赛段归集(替代逐段 selectCount)
+        List<Long> needMatchCheck = targetStages.stream()
+            .filter(t -> StageConstants.STAGE_DRAFT.equals(t.getStatus())
+                && !Long.valueOf(1L).equals(t.getRosterApplied())
+                && !Long.valueOf(1L).equals(t.getRosterSkipped()))
+            .map(TStage::getId).filter(Objects::nonNull).toList();
+        Set<Long> stagesWithMatches = needMatchCheck.isEmpty() ? Set.of()
+            : matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                    .in(TMatch::getStageId, needMatchCheck)
+                    .select(TMatch::getStageId))
+                .stream().map(TMatch::getStageId).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         List<String> blocked = new ArrayList<>();
-        for (TStage target : stageMapper.selectByIds(targets)) {
+        for (TStage target : targetStages) {
             boolean consumed = !StageConstants.STAGE_DRAFT.equals(target.getStatus())
                 || Long.valueOf(1L).equals(target.getRosterApplied())
                 || Long.valueOf(1L).equals(target.getRosterSkipped())
-                || matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, target.getId())) > 0;
+                || stagesWithMatches.contains(target.getId());
             if (consumed) {
                 blocked.add(target.getName());
             }
@@ -283,14 +295,19 @@ public class StageSettlementService {
         }
         // 幂等:只要有任意下游赛段已经接收了本赛段的晋级者,就不允许再调整
         // (依赖以来源组为准,分支场景下要逐个检查,不能只看链上的下一个)
-        for (Long nextStageId : referencingTargetIds(stageId)) {
-            long existed = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, nextStageId)
-                .isNotNull(TCompetitor::getSourceCompetitorId));
-            if (existed > 0) {
-                TStage downstream = stageMapper.selectById(nextStageId);
+        List<Long> nextStageIds = referencingTargetIds(stageId);
+        if (!nextStageIds.isEmpty()) {
+            Set<Long> received = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                    .in(TCompetitor::getStageId, nextStageIds)
+                    .isNotNull(TCompetitor::getSourceCompetitorId)
+                    .select(TCompetitor::getStageId))
+                .stream().map(TCompetitor::getStageId).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+            if (!received.isEmpty()) {
+                Long offending = nextStageIds.stream().filter(received::contains).findFirst().orElse(null);
+                TStage downstream = offending == null ? null : stageMapper.selectById(offending);
                 throw new ServiceException("下游赛段[{}]已接收晋级者,无法再调整同分晋级",
-                    downstream == null ? nextStageId : downstream.getName());
+                    downstream == null ? offending : downstream.getName());
             }
         }
         List<TCompetitor> pending = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()

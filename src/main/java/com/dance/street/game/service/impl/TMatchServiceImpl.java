@@ -326,6 +326,12 @@ public class TMatchServiceImpl implements ITMatchService {
         // 裁判分配一次批量取回:此前每个需要显示投票进度的场次都回查一次赛段裁判
         Map<Long, List<Long>> refereesByStage = stageIds.isEmpty() ? Map.of()
             : refereeStageService.getRefereeIdsByStageIds(stageIds);
+        // 裁判姓名也一次批量取回(覆盖所有赛段),下面按场次填判罚明细时不再逐场 selectByIds
+        Set<Long> allAssignedRefereeIds = refereesByStage.values().stream()
+            .flatMap(List::stream).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> assignedRefereeNameById = allAssignedRefereeIds.isEmpty() ? Map.of()
+            : refereeMapper.selectByIds(allAssignedRefereeIds).stream()
+                .collect(Collectors.toMap(TReferee::getId, TReferee::getName, (a, b) -> a));
         // 需要统计投票的场次:STANDARD、进行中、公布模式非 DIRECTOR
         List<TMatchVo> votingMatches = matches.stream()
             .filter(m -> "STANDARD".equals(m.getMatchMode())
@@ -399,9 +405,7 @@ public class TMatchServiceImpl implements ITMatchService {
             vo.setDrawVotes(drawReferees.size());
 
             // 各裁判判罚明细(一行一个裁判:红/蓝/平/未判)
-            Map<Long, String> refNameById = assignedIds.isEmpty() ? Map.of()
-                : refereeMapper.selectByIds(assignedIds).stream()
-                    .collect(Collectors.toMap(TReferee::getId, TReferee::getName, (a, b) -> a));
+            Map<Long, String> refNameById = assignedRefereeNameById;
             List<TMatchVo.RefereeVoteInfo> rvs = new ArrayList<>();
             for (Long rid : assignedIds) {
                 TMatchVo.RefereeVoteInfo rv = new TMatchVo.RefereeVoteInfo();
@@ -453,12 +457,22 @@ public class TMatchServiceImpl implements ITMatchService {
         if (stageIds.isEmpty()) {
             return;
         }
-        for (TStage stage : stageMapper.selectByIds(stageIds)) {
+        List<TStage> stages = stageMapper.selectByIds(stageIds);
+        // 各海选赛段的全部场次一次取回后分组,替代逐赛段 selectList
+        List<Long> auditionStageIds = stages.stream()
+            .filter(s -> stageCap(s.getStageMode()).audition())
+            .map(TStage::getId).toList();
+        Map<Long, List<TMatch>> stageMatchesByStage = auditionStageIds.isEmpty() ? Map.of()
+            : baseMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                    .in(TMatch::getStageId, auditionStageIds))
+                .stream()
+                .filter(m -> m.getStageId() != null)
+                .collect(Collectors.groupingBy(TMatch::getStageId));
+        for (TStage stage : stages) {
             if (!stageCap(stage.getStageMode()).audition()) {
                 continue;
             }
-            List<TMatch> stageMatches = baseMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, stage.getId()));
+            List<TMatch> stageMatches = stageMatchesByStage.getOrDefault(stage.getId(), List.of());
             Map<Long, Integer> advanceByMatch = auditionAdvanceInfoSupport.matchAdvanceCounts(stage, stageMatches);
             int stageTotal = auditionAdvanceInfoSupport.stageAdvanceCount(stage);
             Map<Long, TMatch> matchById = stageMatches.stream()

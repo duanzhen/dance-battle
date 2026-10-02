@@ -242,7 +242,7 @@
     </div>
 
     <footer class="h-32 sm:h-36 flex-none bg-neutral-900 border-t border-neutral-800 flex flex-col z-20 shadow-[0_-5px_20px_rgba(0,0,0,0.3)]">
-      <div class="h-8 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4">
+      <div class="h-8 bg-[#101010] border-b border-neutral-800 flex items-center justify-between px-4">
         <span class="text-[10px] font-bold text-neutral-500 tracking-wider uppercase">场景</span>
         <div class="flex items-center gap-2">
           <div class="flex items-center gap-1">

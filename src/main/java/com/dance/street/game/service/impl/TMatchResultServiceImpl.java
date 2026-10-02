@@ -58,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 比赛结果提交编排:写明细分 → ScoringEngine 算分算排名 → 回写 participant →
@@ -518,20 +519,30 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 .eq(TMatch::getStageId, match.getStageId())
                 .eq(TMatch::getStatus, StageConstants.MATCH_GAMING)
                 .ne(TMatch::getId, match.getId()));
+            // 其他进行中场次的轮次/已提交判罚一次批量取回,替代逐场两条查询
+            List<Long> otherMatchIds = otherGaming.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+            List<TMatchRound> otherRounds = otherMatchIds.isEmpty() ? List.of()
+                : matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                    .in(TMatchRound::getMatchId, otherMatchIds)
+                    .select(TMatchRound::getId, TMatchRound::getMatchId));
+            Map<Long, List<Long>> otherRoundIdsByMatch = otherRounds.stream()
+                .filter(r -> r.getMatchId() != null && r.getId() != null)
+                .collect(Collectors.groupingBy(TMatchRound::getMatchId,
+                    Collectors.mapping(TMatchRound::getId, Collectors.toList())));
+            List<Long> allOtherRoundIds = otherRounds.stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+            Set<Long> votedRoundIds = allOtherRoundIds.isEmpty() ? Set.of()
+                : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                        .in(TRoundScore::getRoundId, allOtherRoundIds)
+                        .select(TRoundScore::getRoundId))
+                    .stream().map(TRoundScore::getRoundId).filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
             for (TMatch other : otherGaming) {
                 // 防误操作丢票:其他进行中场次已有裁判提交判罚时拒绝切换,
                 // 要求先完成或显式重置,避免静默清空已投票
-                List<Long> otherRoundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                        .eq(TMatchRound::getMatchId, other.getId())
-                        .select(TMatchRound::getId))
-                    .stream().map(TMatchRound::getId).toList();
-                if (!otherRoundIds.isEmpty()) {
-                    long voted = roundScoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
-                        .in(TRoundScore::getRoundId, otherRoundIds));
-                    if (voted > 0) {
-                        throw new ServiceException(
-                            "场次[{}]已有裁判提交判罚,请先完成或重置该场次后再开始新场次", other.getId());
-                    }
+                if (otherRoundIdsByMatch.getOrDefault(other.getId(), List.of()).stream()
+                    .anyMatch(votedRoundIds::contains)) {
+                    throw new ServiceException(
+                        "场次[{}]已有裁判提交判罚,请先完成或重置该场次后再开始新场次", other.getId());
                 }
                 clearMatchState(other, StageConstants.MATCH_PENDING);
                 refereeSseNotifier.notifyMatch(other.getStageId(), other.getId(), "match");

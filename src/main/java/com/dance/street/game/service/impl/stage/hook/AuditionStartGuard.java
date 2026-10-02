@@ -85,12 +85,18 @@ public class AuditionStartGuard implements StageStartGuard {
         if (circles.isEmpty()) {
             return;
         }
+        // 各圈的裁判绑定数一次查回(此前逐圈 selectCount)
+        List<Long> circleIds = circles.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        Set<Long> circledWithReferee = circleIds.isEmpty() ? Set.of()
+            : matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
+                    .in(TMatchReferee::getMatchId, circleIds)
+                    .select(TMatchReferee::getMatchId))
+                .stream().map(TMatchReferee::getMatchId).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
         List<String> missing = new ArrayList<>();
         for (int i = 0; i < circles.size(); i++) {
             TMatch circle = circles.get(i);
-            long refs = matchRefereeMapper.selectCount(Wrappers.<TMatchReferee>lambdaQuery()
-                .eq(TMatchReferee::getMatchId, circle.getId()));
-            if (refs == 0) {
+            if (!circledWithReferee.contains(circle.getId())) {
                 missing.add(circle.getName() != null ? circle.getName() : ("第" + (i + 1) + "圈"));
             }
         }

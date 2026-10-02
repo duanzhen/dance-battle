@@ -140,6 +140,9 @@ public interface ITStageRosterService {
     /** 撤销人工覆盖 */
     void deleteOverride(Long stageId, Long overrideId);
 
+    /** 批量撤销人工覆盖 */
+    void deleteOverrides(Long stageId, List<Long> overrideIds);
+
     /** 保存手工名单顺序(两列拖动结果,按位置落种子位) */
     void reorderRoster(Long stageId, List<TStageRosterOrderBo.Item> items);
 

@@ -797,6 +797,13 @@ public class TStageServiceImpl implements ITStageService {
                 }
             }
         }
+        // 参赛方姓名一次批量取回(compIds 上面已算好),避免逐个 selectById
+        Map<Long, String> compNameById = new HashMap<>();
+        if (!compIds.isEmpty()) {
+            for (TCompetitor c : competitorMapper.selectByIds(compIds)) {
+                compNameById.put(c.getId(), c.getName());
+            }
+        }
         vo.setCurrentMatchParticipants(parts.stream().map(p -> {
             StageFlowVo.StageFlowParticipant sp = new StageFlowVo.StageFlowParticipant();
             sp.setCompetitorId(p.getCompetitorId());
@@ -807,8 +814,9 @@ public class TStageServiceImpl implements ITStageService {
             sp.setRankInMatch(p.getRankInMatch());
             sp.setOutcomeStatus(p.getOutcomeStatus());
             if (p.getCompetitorId() != null) {
-                var comp = competitorMapper.selectById(p.getCompetitorId());
-                sp.setCompetitorName(comp != null ? comp.getName() : ("选手 " + p.getCompetitorId()));
+                sp.setCompetitorName(compNameById.containsKey(p.getCompetitorId())
+                    ? compNameById.get(p.getCompetitorId())
+                    : ("选手 " + p.getCompetitorId()));
             } else {
                 sp.setCompetitorName(StageConstants.SLOT_BYE.equals(p.getSlotKind()) ? "轮空" : "待定");
             }

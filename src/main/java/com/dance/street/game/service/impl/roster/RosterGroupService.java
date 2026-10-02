@@ -482,6 +482,15 @@ public class RosterGroupService {
         }
         List<TStageRosterGroupBo> merged = new ArrayList<>(rosterGroupStore.groupsOf(target));
         boolean changed = false;
+        // 候选来源赛段一次批量取回(id 可能来自入参兜底),替代逐组 selectById
+        List<Long> candidateSourceIds = new ArrayList<>(desired.stream()
+            .map(TStageRosterGroupBo::getSourceStageId).filter(Objects::nonNull).distinct().toList());
+        if (bo.getSourceStageId() != null && !candidateSourceIds.contains(bo.getSourceStageId())) {
+            candidateSourceIds.add(bo.getSourceStageId());
+        }
+        Map<Long, TStage> sourceById = candidateSourceIds.isEmpty() ? Map.of()
+            : stageMapper.selectByIds(candidateSourceIds).stream()
+                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
         for (TStageRosterGroupBo g : desired) {
             if (g.getSourceStageId() == null) {
                 g.setSourceStageId(bo.getSourceStageId());
@@ -498,7 +507,7 @@ public class RosterGroupService {
                 g.setQuota(bo.getQuota());
             }
             if (g.getSourceStageId() != null) {
-                TStage source = stageMapper.selectById(g.getSourceStageId());
+                TStage source = sourceById.get(g.getSourceStageId());
                 if (source == null || !Objects.equals(source.getTournamentId(), target.getTournamentId())) {
                     throw new ServiceException("来源赛段不存在或不属于同一赛事");
                 }
@@ -673,17 +682,28 @@ public class RosterGroupService {
     // ------------------------------------------------------------------
 
     public void assertNoPendingInSources(List<TStageRosterGroupBo> groups) {
+        // 来源赛段与各来源的待定人数一次批量取回,替代逐组 selectById + selectCount
+        List<Long> sourceIds = groups.stream()
+            .map(TStageRosterGroupBo::getSourceStageId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, TStage> sourceById = sourceIds.isEmpty() ? Map.of()
+            : stageMapper.selectByIds(sourceIds).stream()
+                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
+        Map<Long, Long> pendingBySource = sourceIds.isEmpty() ? Map.of()
+            : competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                    .in(TCompetitor::getStageId, sourceIds)
+                    .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode())
+                    .select(TCompetitor::getStageId))
+                .stream().map(TCompetitor::getStageId).filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(id -> id, Collectors.counting()));
         for (TStageRosterGroupBo g : groups) {
             if (g.getSourceStageId() == null) {
                 continue;
             }
-            TStage src = stageMapper.selectById(g.getSourceStageId());
+            TStage src = sourceById.get(g.getSourceStageId());
             if (src == null) {
                 continue;
             }
-            long pending = competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
-                .eq(TCompetitor::getStageId, src.getId())
-                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
+            long pending = pendingBySource.getOrDefault(src.getId(), 0L);
             if (pending > 0) {
                 throw new ServiceException(
                     "来源赛段[{}]仍有 {} 名同分待定参赛方未裁决,请先在中间态处理后再确认名单",
@@ -772,11 +792,16 @@ public class RosterGroupService {
     /** 还没结束(SETTLED)的来源赛段名(用于开赛守卫的报错文案) */
     private List<String> unsettledSourceNames(List<TStageRosterGroupBo> groups) {
         List<String> names = new ArrayList<>();
+        List<Long> sourceIds = groups.stream()
+            .map(TStageRosterGroupBo::getSourceStageId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, TStage> sourceById = sourceIds.isEmpty() ? Map.of()
+            : stageMapper.selectByIds(sourceIds).stream()
+                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
         for (TStageRosterGroupBo g : groups) {
             if (g.getSourceStageId() == null) {
                 continue;
             }
-            TStage src = stageMapper.selectById(g.getSourceStageId());
+            TStage src = sourceById.get(g.getSourceStageId());
             if (src == null) {
                 names.add("赛段#" + g.getSourceStageId());
             } else if (!StageConstants.STAGE_SETTLED.equals(src.getStatus())) {

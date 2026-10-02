@@ -223,6 +223,34 @@ public class RosterOverrideService {
         if (e == null || !Objects.equals(e.getTargetStageId(), stageId)) {
             return;
         }
+        applyDeleteOverride(e);
+        log.info("赛段[{}]撤销人工条目[{}]", stageId, overrideId);
+        rosterGroupStore.notifyTarget(stageId);
+    }
+
+    /** 批量撤销人工覆盖:行一次查回、广播一次,替代前端逐条 DELETE */
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteOverrides(Long stageId, List<Long> overrideIds) {
+        assertOverrideEditable(stageId);
+        if (overrideIds == null || overrideIds.isEmpty()) {
+            return;
+        }
+        List<Long> ids = overrideIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        for (TStageRosterEntry e : entryMapper.selectByIds(ids)) {
+            if (e == null || !Objects.equals(e.getTargetStageId(), stageId)) {
+                continue;
+            }
+            applyDeleteOverride(e);
+        }
+        log.info("赛段[{}]批量撤销人工条目 {}", stageId, ids);
+        rosterGroupStore.notifyTarget(stageId);
+    }
+
+    /** 撤销单条人工覆盖的行级动作(还原"移出"/清回空位) */
+    private void applyDeleteOverride(TStageRosterEntry e) {
         if (StageConstants.SLOT_BYE.equals(e.getSlotKind()) && e.getSourceCompetitorId() != null) {
             // 撤销"移出":把这个座位的人放回来
             e.setSlotKind(StageConstants.SLOT_PLAYER);
@@ -244,8 +272,6 @@ public class RosterOverrideService {
         } else {
             throw new ServiceException("该条目不是人工调整,无法撤销");
         }
-        log.info("赛段[{}]撤销人工条目[{}]", stageId, overrideId);
-        rosterGroupStore.notifyTarget(stageId);
     }
 
     @Transactional(rollbackFor = Exception.class)

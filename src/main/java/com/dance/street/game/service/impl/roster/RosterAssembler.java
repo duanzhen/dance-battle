@@ -146,6 +146,13 @@ public class RosterAssembler {
 
     private List<TCompetitor> autoCandidates(List<TStageRosterGroupBo> groups) {
         Map<Long, TCompetitor> merged = new LinkedHashMap<>();
+        // 来源赛段名称一次批量取回,替代逐组 selectById
+        List<Long> sourceStageIds = groups.stream()
+            .map(TStageRosterGroupBo::getSourceStageId)
+            .filter(Objects::nonNull).distinct().toList();
+        Map<Long, TStage> sourceStageById = sourceStageIds.isEmpty() ? Map.of()
+            : stageMapper.selectByIds(sourceStageIds).stream()
+                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
         for (TStageRosterGroupBo g : groups) {
             if (g.getSourceStageId() == null
                 || RosterConstants.FILL_STREAM.equals(g.getFillMode())
@@ -153,7 +160,7 @@ public class RosterAssembler {
                 continue;
             }
             List<TCompetitor> rows = new ArrayList<>(groupRows(g));
-            TStage src = stageMapper.selectById(g.getSourceStageId());
+            TStage src = sourceStageById.get(g.getSourceStageId());
             if (rotateNeeded(g, src)) {
                 reorderByCircleRank(src, rows);
             }

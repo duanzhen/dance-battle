@@ -149,3 +149,12 @@ export const deleteRosterOverride = (stageId: string | number, overrideId: strin
     method: 'delete'
   });
 };
+
+/** 批量撤销人工覆盖(一次请求,替代逐条 DELETE) */
+export const deleteRosterOverrides = (stageId: string | number, overrideIds: (string | number)[]) => {
+  return request({
+    url: `/game/stage/${stageId}/roster/overrides/batch-delete`,
+    method: 'post',
+    data: overrideIds
+  });
+};

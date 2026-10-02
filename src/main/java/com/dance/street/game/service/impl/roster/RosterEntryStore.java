@@ -210,7 +210,7 @@ public class RosterEntryStore {
 
     /** 名单就绪度(纯函数):全部内部来源组已结算 */
     public boolean readyByGroups(List<TStageRosterGroupBo> groups) {
-        return readyByGroups(groups, null);
+        return readyByGroups(groups, prefetchSourceStages(groups));
     }
 
     /** 同上,来源赛段可预取(批量路径一次取回,避免逐组 selectById) */
@@ -243,6 +243,11 @@ public class RosterEntryStore {
      * {@link #readyByGroups}(全部来源已结算),否则会把人还没打完的半成品名单物化进下一赛段。</p>
      */
     public boolean materializableByGroups(List<TStageRosterGroupBo> groups) {
+        return materializableByGroups(groups, prefetchSourceStages(groups));
+    }
+
+    /** 同上,来源赛段可预取(批量路径一次取回,避免逐组 selectById) */
+    public boolean materializableByGroups(List<TStageRosterGroupBo> groups, Map<Long, TStage> sourceStages) {
         if (groups.isEmpty()) {
             return false;
         }
@@ -250,7 +255,9 @@ public class RosterEntryStore {
             if (RosterConstants.FILL_STREAM.equals(g.getFillMode()) || g.getSourceStageId() == null) {
                 continue;
             }
-            TStage src = stageMapper.selectById(g.getSourceStageId());
+            TStage src = sourceStages == null
+                ? stageMapper.selectById(g.getSourceStageId())
+                : sourceStages.get(g.getSourceStageId());
             if (src == null || StageConstants.STAGE_DISCARD.equals(src.getStatus())) {
                 return false;
             }
@@ -261,6 +268,19 @@ public class RosterEntryStore {
             }
         }
         return true;
+    }
+
+    /** 来源组引用到的来源赛段一次批量取回(替代逐组 selectById) */
+    private Map<Long, TStage> prefetchSourceStages(List<TStageRosterGroupBo> groups) {
+        if (groups == null || groups.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> sourceStageIds = groups.stream()
+            .map(TStageRosterGroupBo::getSourceStageId)
+            .filter(Objects::nonNull).distinct().toList();
+        return sourceStageIds.isEmpty() ? Map.of()
+            : stageMapper.selectByIds(sourceStageIds).stream()
+                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
     }
 
     /** 撤回已确认名单(只在赛段尚未开赛时调用,调用方已守卫) */
@@ -458,22 +478,36 @@ public class RosterEntryStore {
         if (referencing.isEmpty()) {
             return 0;
         }
+        List<TStage> targets = stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
+                .eq(TStage::getTournamentId, source.getTournamentId())
+                .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
+                .in(TStage::getId, referencing)).stream()
+            .filter(t -> !Objects.equals(t.getId(), sourceStageId))
+            .toList();
+        if (targets.isEmpty()) {
+            return 0;
+        }
+        // 批量预取:来源组 / 来源赛段 / 各下游赛段场次各一次查询,替代逐下游赛段回查
+        List<Long> targetIds = targets.stream().map(TStage::getId).filter(Objects::nonNull).toList();
+        Map<Long, List<TStageRosterGroupBo>> groupsByTarget = rosterGroupStore.groupsOfTargets(targetIds);
+        Map<Long, TStage> sourceStages = prefetchSourceStages(groupsByTarget.values().stream()
+            .flatMap(List::stream).toList());
+        Map<Long, List<Long>> matchIdsByStage = targetIds.isEmpty() ? Map.of()
+            : matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                    .in(TMatch::getStageId, targetIds)
+                    .select(TMatch::getId, TMatch::getStageId))
+                .stream()
+                .filter(m -> m.getStageId() != null && m.getId() != null)
+                .collect(Collectors.groupingBy(TMatch::getStageId,
+                    Collectors.mapping(TMatch::getId, Collectors.toList())));
+
         int changed = 0;
-        for (TStage target : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
-            .eq(TStage::getTournamentId, source.getTournamentId())
-            .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
-            .in(TStage::getId, referencing))) {
-            if (Objects.equals(target.getId(), sourceStageId)) {
-                continue;
-            }
+        for (TStage target : targets) {
             // 还有来源没结算:那些座位仍是"待定",不能动
-            if (!readyByGroups(rosterGroupStore.groupsOf(target))) {
+            if (!readyByGroups(groupsByTarget.getOrDefault(target.getId(), List.of()), sourceStages)) {
                 continue;
             }
-            List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, target.getId())
-                    .select(TMatch::getId))
-                .stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+            List<Long> matchIds = matchIdsByStage.getOrDefault(target.getId(), List.of());
             if (matchIds.isEmpty()) {
                 continue;
             }

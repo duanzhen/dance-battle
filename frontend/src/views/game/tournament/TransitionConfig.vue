@@ -669,6 +669,7 @@ import {
   getRosterCandidates,
   addRosterOverride,
   deleteRosterOverride,
+  deleteRosterOverrides,
   getRosterPreview,
   rebuildStageRoster,
   setRosterOrder
@@ -1322,7 +1323,8 @@ const submitAdd = async () => {
           (o) => o.op === 'REMOVE' && o.sourceCompetitorId != null && String(o.sourceCompetitorId) === String(sourceCompetitorId)
         );
         if (removed.length > 0) {
-          for (const o of removed) await deleteRosterOverride(p.id, o.id);
+          // 一次批量撤销,替代逐条 DELETE
+          await deleteRosterOverrides(p.id, removed.map((o) => o.id));
         } else {
           const created: any = await addRosterOverride(p.id, {
             op: 'ADD_SOURCE',

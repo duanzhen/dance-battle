@@ -1060,8 +1060,13 @@ const submitKnockout = async (side: 'LEFT' | 'DRAW' | 'RIGHT') => {
   submitting.value = true;
   try {
     await submitRefereeScore(matchId.value, { outcomes });
-    // 静默刷新:淘汰赛平局自动进入加赛轮;擂台赛平局直接结算(双方排到队尾);分出胜负后随下一场/赛段切换
-    await loadData(stageId.value ?? undefined, matchId.value ?? undefined, undefined, true);
+    if (side === 'DRAW') {
+      // 平局:淘汰赛会自动开加赛轮,需要整页刷新才能拿到新一轮
+      await loadData(stageId.value ?? undefined, matchId.value ?? undefined, undefined, true);
+    } else {
+      // 分出胜负:不再阻塞按钮等整页 my-match,交给(提交中会延后的)SSE match 事件异步校正
+      scheduleFullRefresh();
+    }
   } catch (e: any) {
     console.error('提交判罚失败:', e);
     notifyError(e, '提交失败');
@@ -1444,7 +1449,11 @@ const mergeLive = (data: any) => {
 
 /** 轮询跟随:当前 赛段/场次/轮次 变化时自动切换(可能改变判罚模式),否则只刷新累计 */
 const refresh = async () => {
-  if (submitting.value) return;
+  if (submitting.value) {
+    // 正在提交判罚:这次事件先别丢,等提交结束后再刷(否则页面会停在旧场次)
+    scheduleFullRefresh();
+    return;
+  }
   try {
     const resp = await getRefereeMyMatch(stageId.value ?? undefined, matchId.value ?? undefined);
     const data = payloadOf<any>(resp);

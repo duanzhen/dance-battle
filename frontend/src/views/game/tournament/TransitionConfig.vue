@@ -576,19 +576,19 @@
 
       <!-- 晋级确认:所有流转必须经过中间态 -->
       <div class="space-y-3">
-        <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">晋级确认 · {{ sourceStageName }} → {{ targetStageName }}</h4>
+        <h4 class="text-sm font-bold text-neutral-300 uppercase tracking-wider">晋级确认 · {{ sourceLabel }} → {{ targetStageName }}</h4>
         <div class="rounded-lg bg-black border border-neutral-800 p-4 flex items-center justify-between gap-4">
           <div class="text-sm text-neutral-300">
-            <template v-if="sourceStage?.status === 'SETTLED'">
-              {{ sourceStageName }} 已结束
+            <template v-if="sourcesSettled">
+              {{ sourceLabel }} 已结束
               <span :class="advancementConfirmed ? 'text-green-500' : 'text-amber-400'">
                 {{ advancementConfirmed ? '· 晋级已确认' : '· 待确认晋级' }}
               </span>
             </template>
-            <template v-else>等待 {{ sourceStageName }} 结算后,在此确认晋级到 {{ targetStageName }}</template>
+            <template v-else>等待名单来源({{ sourceLabel }})结算后,在此确认晋级到 {{ targetStageName }}</template>
           </div>
           <button
-            v-if="sourceStage?.status === 'SETTLED' && !advancementConfirmed"
+            v-if="sourcesSettled && !advancementConfirmed"
             @click="handleConfirmAdvancement"
             :disabled="confirmingAdvancement || targetLocked || holdingItems.length > 0"
             :title="holdingItems.length > 0 ? `还有 ${holdingItems.length} 人没落位` : ''"
@@ -1712,6 +1712,23 @@ const sourceStageIdsOfRoster = computed<string[]>(() => {
         .map((id) => String(id))
     )
   );
+});
+
+/**
+ * 目标赛段的入边(名单来源组)是否都已结算。
+ * 中间态能否确认只看"入边对应的赛段是否结束",不看链上前驱——
+ * 例如 B圈复活赛依赖的是海选(已结算),而不是链上排在它前面的 A圈复活赛。
+ */
+const sourcesSettled = computed(() => {
+  if (overridePreview.value) return overridePreview.value.ready === true;
+  return sourceStage.value?.status === 'SETTLED';
+});
+
+/** 中间态标题/文案里的"来源"名字:优先列出入边对应的赛段,无入边时退回链上前驱名 */
+const sourceLabel = computed(() => {
+  const ids = sourceStageIdsOfRoster.value;
+  if (ids.length === 0) return props.sourceStageName;
+  return ids.map((id) => sourceNameOf(id)).join(' / ');
 });
 
 /**

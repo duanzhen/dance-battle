@@ -184,6 +184,42 @@ class ParallelStagesE2ETest {
             "待落位名单未确认时不允许直接开赛");
     }
 
+    /**
+     * 多入口汇合里"部分来源还没开赛":已结算来源的晋级者必须立刻出现在待落位区,
+     * 不能因为另一条来源还没开赛就把整段留空(否则"某圈 1~8 直进下一段"的人永远看不到)。
+     */
+    @Test
+    void partiallySettledSourcesStillMaterializeKnownAdvancers() {
+        Long tid = newTournament("部分来源就绪的汇合");
+        TStageVo settled = newKnockoutStage(tid, "已结算来源", 4, 2, null);
+        TStageVo fresh = newKnockoutStage(tid, "未开赛来源", 4, 2, settled.getId());
+        TStageVo merge = newKnockoutStage(tid, "汇合", 4, 2, fresh.getId());
+        // 汇合段同时依赖「已结算来源」与「还没开赛的来源」
+        setOnlySource(merge, settled, OutcomeStatusEnum.ADVANCE.getCode());
+        addSource(merge, fresh);
+
+        for (int i = 1; i <= 4; i++) {
+            insertPending(tid, settled.getId(), "S" + i, String.valueOf(i), i);
+        }
+        lifecycleService.startStage(settled.getId());
+        for (TMatch m : matchesOf(settled.getId())) {
+            finishByDirector(m.getId());
+        }
+        lifecycleService.completeStage(settled.getId());
+        Set<Long> advancers = advancersOf(settled.getId());
+        assertEquals(2, advancers.size());
+
+        List<TStageRosterEntry> holding = entriesOf(merge.getId()).stream()
+            .filter(e -> e.getSlot() == null)
+            .toList();
+        Set<Long> sources = holding.stream()
+            .map(TStageRosterEntry::getSourceCompetitorId)
+            .filter(Objects::nonNull)
+            .collect(java.util.stream.Collectors.toSet());
+        assertTrue(sources.containsAll(advancers),
+            "已结算来源的晋级者应已进入汇合段待落位区,实际:" + sources);
+    }
+
     // ------------------------------------------------------------------
 
     private void runConcurrently(Callable<StageCompleteVo> first, Callable<StageCompleteVo> second) throws Exception {

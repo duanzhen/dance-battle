@@ -65,14 +65,6 @@ public class RosterApplyService {
             return 0;
         }
         List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(target);
-        // 装配前兜底:未配置出口时,上一赛段晋级者默认进入本赛段
-        int groupCountBefore = groups.size();
-        rosterGroupService.ensurePrevChainDefault(target, groups);
-        if (groups.size() != groupCountBefore) {
-            rosterGroupStore.saveGroups(target, groups);
-            // 规则刚补上:中间层必须按新规则重建,不能直接拿旧规则算出来的行去物化
-            rosterEntryStore.rebuildEntries(targetStageId);
-        }
         boolean anyInternal = groups.stream().anyMatch(g -> g.getSourceStageId() != null);
         // 纯签到/人工名单:没有内部来源组,也没有人工加进来的行时,本赛段不带人
         boolean hasManualRows = entryMapper.selectCount(Wrappers.<TStageRosterEntry>lambdaQuery()

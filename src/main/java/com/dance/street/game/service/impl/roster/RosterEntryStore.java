@@ -60,17 +60,32 @@ public class RosterEntryStore {
     private final RosterAssembler rosterAssembler;
     private final TMatchParticipantMapper participantMapper;
 
-    /** 读中间层当前名单:按座位号升序,含空位行(BYE/PENDING);表空或口径过时时按规则重建一次 */
+    /**
+     * 读中间层当前名单:按座位号升序,含空位行(BYE/PENDING)。
+     *
+     * <p>只有"一行都没有"时才补一次物化(来源状态是直接改库/工具脚本改出来的,没走到写时物化),
+     * 这是非破坏性的;<b>已有行一律不动</b>——不再做"口径过时"式清空重建,避免把现场的人工调整覆盖掉。</p>
+     */
     public List<TStageRosterEntry> entriesOf(Long targetStageId) {
         if (targetStageId == null) {
             return List.of();
         }
         List<TStageRosterEntry> rows = selectEntries(targetStageId);
-        if (entriesNeedRebuild(targetStageId, rows)) {
+        if (rows.isEmpty() && materializeWhenEmpty(targetStageId)) {
             rebuildEntries(targetStageId);
             rows = selectEntries(targetStageId);
         }
         return rows;
+    }
+
+    /** 空表是否应补物化:赛段未锁定、规划中,且至少有一条来源已开赛 */
+    private boolean materializeWhenEmpty(Long targetStageId) {
+        TStage stage = stageMapper.selectById(targetStageId);
+        if (stage == null || isApplied(stage) || isSkipped(stage)
+            || !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            return false;
+        }
+        return materializableByGroups(rosterGroupStore.groupsOf(stage));
     }
 
     /**
@@ -181,33 +196,6 @@ public class RosterEntryStore {
         return rebuilt;
     }
 
-    /**
-     * 读路径兜底:表空(首次生成)或口径过时(来源结算状态与座位类型对不上)时,按规则重建一次。
-     *
-     * <p>正常路径由"来源结算 / 来源组变更"事件写入(写时物化);这里只兜"表是空的"这一种情况
-     * ——例如来源赛段的状态是直接改库改出来的(历史数据/工具脚本)。</p>
-     *
-     * <p>口径过时指:来源还没打完却把空座位写成了"轮空"(旧版本写下的行),或来源已结算
-     * 却还留着"待定"。这时重建一次即可自愈,现场不会一直卡在"一半轮空一半待定"。
-     * 有人的行(PLAYER)与空位口径都正常时,读路径完全不计算。</p>
-     */
-    private boolean entriesNeedRebuild(Long targetStageId, List<TStageRosterEntry> rows) {
-        TStage stage = stageMapper.selectById(targetStageId);
-        if (stage == null || isLocked(stage) || !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
-            return false;
-        }
-        List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(stage);
-        if (rows.isEmpty()) {
-            // 来源还没开赛:确实该是空的,等开场事件再物化
-            return materializableByGroups(groups);
-        }
-        boolean sourceReady = readyByGroups(groups);
-        return rows.stream().anyMatch(e -> !StageConstants.SLOT_PLAYER.equals(e.getSlotKind())
-            && (sourceReady
-                ? !StageConstants.SLOT_BYE.equals(e.getSlotKind())
-                : !StageConstants.SLOT_PENDING.equals(e.getSlotKind())));
-    }
-
     /** 名单就绪度(纯函数):全部内部来源组已结算 */
     public boolean readyByGroups(List<TStageRosterGroupBo> groups) {
         return readyByGroups(groups, prefetchSourceStages(groups));
@@ -251,23 +239,25 @@ public class RosterEntryStore {
         if (groups.isEmpty()) {
             return false;
         }
+        boolean hasStagedSource = false;
         for (TStageRosterGroupBo g : groups) {
             if (RosterConstants.FILL_STREAM.equals(g.getFillMode()) || g.getSourceStageId() == null) {
                 continue;
             }
+            hasStagedSource = true;
             TStage src = sourceStages == null
                 ? stageMapper.selectById(g.getSourceStageId())
                 : sourceStages.get(g.getSourceStageId());
-            if (src == null || StageConstants.STAGE_DISCARD.equals(src.getStatus())) {
-                return false;
-            }
-            boolean started = StageConstants.STAGE_GAMING.equals(src.getStatus())
-                || StageConstants.STAGE_SETTLED.equals(src.getStatus());
-            if (!started) {
-                return false;
+            boolean started = src != null && (StageConstants.STAGE_GAMING.equals(src.getStatus())
+                || StageConstants.STAGE_SETTLED.equals(src.getStatus()));
+            if (started) {
+                // 只要有一条来路已有结果就先物化:多入口汇合时,已结束的那条(如海选 1-8 直进)
+                // 必须马上能在中间态看到;未开赛来源的座位先留 PENDING,等它开赛/结算再重建。
+                return true;
             }
         }
-        return true;
+        // 没有任何"来源赛段"的组(纯手动/流水)可直接物化;所有来源都还没开赛则留空表
+        return !hasStagedSource;
     }
 
     /** 来源组引用到的来源赛段一次批量取回(替代逐组 selectById) */
@@ -307,10 +297,6 @@ public class RosterEntryStore {
 
     private boolean isSkipped(TStage stage) {
         return Long.valueOf(1L).equals(stage.getRosterSkipped());
-    }
-
-    private boolean isLocked(TStage stage) {
-        return isApplied(stage) || isSkipped(stage);
     }
 
     /** 读原始行(不做兜底重建):按座位号升序,含空位行 */

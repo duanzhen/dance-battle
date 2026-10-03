@@ -9,7 +9,6 @@ import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TRefereeStage;
-import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.RefereeMatchVo;
@@ -76,7 +75,6 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
     private final TRefereeStageMapper refereeStageMapper;
     private final ITMatchResultService matchResultService;
     private final ITRefereeStageService refereeStageService;
-    private final ITStageLifecycleService stageLifecycleService;
     /** 海选晋级人数展示口径(与结算同一套) */
     private final AuditionAdvanceInfoSupport auditionAdvanceInfoSupport;
 
@@ -134,40 +132,6 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
                     .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
             if (allowedMatchIds != null) {
                 // Stream.toList() 不可变,后面还要 sort,这里包一层可变列表
-                matches = new ArrayList<>(matches.stream()
-                    .filter(m -> allowedMatchIds.contains(m.getId()))
-                    .toList());
-            }
-        }
-        // 海选赛/排名赛兜底：若赛段已开始但无场次，自动生成
-        if (matches.isEmpty() && perCompetitorStage) {
-            long total = matchMapper.selectCount(
-                Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stage.getId()));
-            if (total == 0) {
-                GenerateMatchesBo gm = new GenerateMatchesBo();
-                gm.setStageId(stage.getId());
-                stageLifecycleService.generateMatches(gm);
-                // 生成后把场次改为 GAMING
-                TMatch upd = new TMatch();
-                upd.setStatus(StageConstants.MATCH_GAMING);
-                matchMapper.update(upd, Wrappers.<TMatch>lambdaUpdate().eq(TMatch::getStageId, stage.getId()));
-                TMatchRound roundUpd = new TMatchRound();
-                roundUpd.setStatus(StageConstants.MATCH_GAMING);
-                List<Long> autoMatchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                        .eq(TMatch::getStageId, stage.getId()).select(TMatch::getId))
-                    .stream().map(TMatch::getId).toList();
-                if (!autoMatchIds.isEmpty()) {
-                    matchRoundMapper.update(roundUpd, Wrappers.<TMatchRound>lambdaUpdate()
-                        .in(TMatchRound::getMatchId, autoMatchIds));
-                }
-                log.info("海选赛赛段[{}]自动补救生成对阵", stage.getId());
-            }
-            matches = matchMapper.selectList(
-                Wrappers.<TMatch>lambdaQuery()
-                    .eq(TMatch::getStageId, stage.getId())
-                    .eq(TMatch::getStatus, StageConstants.MATCH_GAMING));
-            // 兜底查询同样要守圈级权限,否则未绑圈的裁判会看到全部圈
-            if (allowedMatchIds != null) {
                 matches = new ArrayList<>(matches.stream()
                     .filter(m -> allowedMatchIds.contains(m.getId()))
                     .toList());

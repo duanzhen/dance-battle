@@ -499,18 +499,6 @@ public class TStageServiceImpl implements ITStageService {
             boolean changed = false;
             if (StageModeEnum.KNOCKOUT.getCode().equals(mode)) {
                 Map<String, Object> ko = nestedMap(rc, "knockout");
-                // 反向兜底:赛段权威字段(team_count_start/end)缺失或为 0,但配置里有 → 用配置回填,
-                // 避免"客户端只传了 rule_config、没传字段"落出「配置 16/8、字段 0」的不一致。
-                Long rcTeams = asLong(ko.get("teamsCount"));
-                Long rcAdvance = asLong(ko.get("advanceCount"));
-                if (isBlankCount(teamCountStart) && rcTeams != null && rcTeams > 0) {
-                    stage.setTeamCountStart(rcTeams);
-                    teamCountStart = rcTeams;
-                }
-                if (isBlankCount(teamCountEnd) && rcAdvance != null && rcAdvance > 0) {
-                    stage.setTeamCountEnd(rcAdvance);
-                    teamCountEnd = rcAdvance;
-                }
                 if (teamCountStart != null && teamCountStart > 0 && ko.get("teamsCount") == null) {
                     ko.put("teamsCount", teamCountStart);
                     changed = true;
@@ -520,36 +508,16 @@ public class TStageServiceImpl implements ITStageService {
                     changed = true;
                 }
             } else if (StageModeEnum.AUDITION.getCode().equals(mode)) {
-                Long rcAdvance = asLong(rc.get("advanceCount"));
-                if (isBlankCount(teamCountEnd) && rcAdvance != null && rcAdvance > 0) {
-                    stage.setTeamCountEnd(rcAdvance);
-                    teamCountEnd = rcAdvance;
-                }
                 if (teamCountEnd != null && teamCountEnd > 0 && rc.get("advanceCount") == null) {
                     rc.put("advanceCount", teamCountEnd);
                     changed = true;
                 }
             } else if (StageModeEnum.RANK.getCode().equals(mode)) {
-                Long scale = asLong(rc.get("scale"));
-                Long rcAdvance = asLong(rc.get("advanceCount"));
-                if (isBlankCount(teamCountStart) && scale != null && scale > 0) {
-                    stage.setTeamCountStart(scale);
-                    teamCountStart = scale;
-                }
-                if (isBlankCount(teamCountEnd) && rcAdvance != null && rcAdvance > 0) {
-                    stage.setTeamCountEnd(rcAdvance);
-                    teamCountEnd = rcAdvance;
-                }
                 if (teamCountEnd != null && teamCountEnd > 0 && rc.get("advanceCount") == null) {
                     rc.put("advanceCount", teamCountEnd);
                     changed = true;
                 }
             } else if (StageModeEnum.ARENA.getCode().equals(mode)) {
-                Long scale = asLong(rc.get("scale"));
-                if (isBlankCount(teamCountStart) && scale != null && scale > 0) {
-                    stage.setTeamCountStart(scale);
-                    teamCountStart = scale;
-                }
                 // 擂台赛最终只决出 1 个胜者
                 if (isBlankCount(teamCountEnd)) {
                     stage.setTeamCountEnd(1L);
@@ -566,10 +534,6 @@ public class TStageServiceImpl implements ITStageService {
         } catch (Exception e) {
             log.warn("赛段[{}] ruleConfig 归一化失败,保留原配置: {}", stage.getId(), e.getMessage());
         }
-    }
-
-    private static Long asLong(Object v) {
-        return v instanceof Number n ? n.longValue() : null;
     }
 
     private static boolean isBlankCount(Long v) {

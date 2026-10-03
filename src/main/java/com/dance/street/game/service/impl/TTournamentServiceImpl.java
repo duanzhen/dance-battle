@@ -230,6 +230,17 @@ public class TTournamentServiceImpl implements ITTournamentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public TTournamentVo insertByBo(TTournamentBo bo) {
+        TTournament add = insertTournamentOnly(bo);
+        // 非模版创建:自动补一个默认场景,大屏开箱即用(模版创建自带「主视觉/对战」场景,不走这里)
+        createDefaultScene(add);
+        return MapstructUtils.convert(add, TTournamentVo.class);
+    }
+
+    /**
+     * 只落赛事主记录(生成导播凭证、可选建裁判),不创建任何场景。
+     * 供 {@link #insertByBo}(非模版,随后补默认场景)与 {@link #createByTemplate}(自带场景)共用。
+     */
+    private TTournament insertTournamentOnly(TTournamentBo bo) {
         TTournament add = MapstructUtils.convert(bo, TTournament.class);
         // 手机导播台登录凭证:创建赛事时自动生成,泄露后可调用 regenerateAuthKey 重置
         add.setAuthKey(UUID.randomUUID().toString(true));
@@ -240,7 +251,19 @@ public class TTournamentServiceImpl implements ITTournamentService {
         if (bo.getRefereeNames() != null && !bo.getRefereeNames().isEmpty()) {
             createRefereesIfNeeded(add.getId(), bo.getRefereeNames(), null);
         }
-        return MapstructUtils.convert(add, TTournamentVo.class);
+        return add;
+    }
+
+    /**
+     * 非模版创建赛事时的默认场景:一个「主视觉」场景 + 全屏背景图片占位控件,
+     * 与模版创建的「主视觉」场景口径一致,让刚建好的赛事在大屏/导播台上不是空白。
+     * 画布尺寸取赛事的设计稿尺寸(未设置时回退 1920×1080)。
+     */
+    private void createDefaultScene(TTournament tournament) {
+        long width = tournament.getLogicalWidth() != null ? tournament.getLogicalWidth() : CANVAS_W;
+        long height = tournament.getLogicalHeight() != null ? tournament.getLogicalHeight() : CANVAS_H;
+        TVisSceneVo scene = createScene(tournament.getId(), "主视觉", 1L, width, height);
+        insertBackgroundImage(tournament.getId(), scene.getId(), "主视觉背景", width, height);
     }
 
     /**
@@ -263,7 +286,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
         tb.setThemeConfig(StringUtils.isNotBlank(bo.getThemeConfig())
             ? bo.getThemeConfig() : "{\"bgColor\":\"#000000\",\"fontFamily\":\"Roboto\"}");
         tb.setRemark(bo.getRemark());
-        TTournamentVo tournament = insertByBo(tb);
+        // 只落赛事记录:场景由本方法按模版自行创建,不能走带默认场景的 insertByBo
+        TTournamentVo tournament = MapstructUtils.convert(insertTournamentOnly(tb), TTournamentVo.class);
         Long tid = tournament.getId();
 
         // 2. 创建赛段链(首个无 prev,后续依次挂 prev;insert 自动回填相邻 next/prev)
@@ -290,15 +314,15 @@ public class TTournamentServiceImpl implements ITTournamentService {
         }
 
         // 3. 场景:主视觉 + 对战
-        TVisSceneVo mainScene = createScene(tid, "主视觉", 1L);
-        TVisSceneVo bracketScene = createScene(tid, "对战", 2L);
+        TVisSceneVo mainScene = createScene(tid, "主视觉", 1L, CANVAS_W, CANVAS_H);
+        TVisSceneVo bracketScene = createScene(tid, "对战", 2L, CANVAS_W, CANVAS_H);
 
         // 3.5 背景图片 widget:主视觉场景一张、对战场景一张。
         //     全屏占位(src 为空,由导播台在大屏编辑器里替换素材);
         //     对战场景在插入对战树之前创建,服务端按 max+1 分配 zIndex,
         //     背景为 1、对战树从 2 起,背景始终位于对战场景最底部图层。
-        insertBackgroundImage(tid, mainScene.getId(), "主视觉背景");
-        insertBackgroundImage(tid, bracketScene.getId(), "对战背景");
+        insertBackgroundImage(tid, mainScene.getId(), "主视觉背景", CANVAS_W, CANVAS_H);
+        insertBackgroundImage(tid, bracketScene.getId(), "对战背景", CANVAS_W, CANVAS_H);
 
         // 4. 对战场景:每个淘汰赛赛段一个对战树 widget,统一「大框套小框」居中嵌套排版——
         //    外层(人数最多)最宽,内层逐级缩小,所有 widget 中心对齐画布中心 (960,540),
@@ -367,7 +391,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         //     绑定擂台赛段后,16 强结算晋级出的 8 强名单(轮转队列/积分/当前对决)
         //     由 ArenaOverview 实时提供并展示在大屏,避免晋级后看不到是谁进了擂台赛。
         if (arenaStage != null) {
-            TVisSceneVo arenaScene = createScene(tid, "擂台", 3L);
+            TVisSceneVo arenaScene = createScene(tid, "擂台", 3L, CANVAS_W, CANVAS_H);
             TVisWidgetBo arenaWidget = new TVisWidgetBo();
             arenaWidget.setTournamentId(tid);
             arenaWidget.setSceneId(arenaScene.getId());
@@ -438,7 +462,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
      * 模板背景图片 widget:全屏占位(素材 src 由导播台替换)。
      * 先于同场景其他 widget 插入,保证位于最底部图层。
      */
-    private void insertBackgroundImage(Long tournamentId, Long sceneId, String name) {
+    private void insertBackgroundImage(Long tournamentId, Long sceneId, String name, long width, long height) {
         TVisWidgetBo wb = new TVisWidgetBo();
         wb.setTournamentId(tournamentId);
         wb.setSceneId(sceneId);
@@ -449,8 +473,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
         wb.setRenderConfig("{}");
         wb.setX(0L);
         wb.setY(0L);
-        wb.setW(CANVAS_W);
-        wb.setH(CANVAS_H);
+        wb.setW(width);
+        wb.setH(height);
         wb.setVisible(1L);
         wb.setLocked(0L);
         visWidgetService.insertByBo(wb);
@@ -504,12 +528,12 @@ public class TTournamentServiceImpl implements ITTournamentService {
         return refereeIds;
     }
 
-    private TVisSceneVo createScene(Long tournamentId, String name, Long sortOrder) {
+    private TVisSceneVo createScene(Long tournamentId, String name, Long sortOrder, long width, long height) {
         TVisSceneBo bo = new TVisSceneBo();
         bo.setTournamentId(tournamentId);
         bo.setName(name);
-        bo.setDesignWidth(1920L);
-        bo.setDesignHeight(1080L);
+        bo.setDesignWidth(width);
+        bo.setDesignHeight(height);
         bo.setFormat("DEFAULT");
         bo.setBgColor("#000000");
         bo.setSortOrder(sortOrder);

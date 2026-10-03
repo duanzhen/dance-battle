@@ -43,7 +43,8 @@ public interface ITTournamentService {
     List<TTournamentVo> queryList(TTournamentBo bo);
 
     /**
-     * 新增赛事主
+     * 新增赛事主(非模版创建):除赛事记录外,自动补一个「主视觉」默认场景
+     * (含全屏背景图片占位控件),让大屏/导播台建完即可用
      *
      * @param bo 赛事主
      * @return 新增后的赛事主

@@ -367,17 +367,28 @@ const loadCircleInfo = async () => {
   }
 };
 
-// 滚动到第一个空闲号码(只滚动号码列表容器,不影响页面)
-const scrollToFirstFreeSlot = async () => {
+// 把号码列表滚到指定号码(只滚动号码列表容器,不影响页面)
+const scrollToSlot = async (number: number, smooth = false) => {
   await nextTick();
   const container = slotListRef.value;
-  const firstFree = numberSlots.value.find((slot) => !slot.competitor);
-  if (!container || !firstFree) return;
-  const el = container.querySelector(`[data-slot-number="${firstFree.number}"]`) as HTMLElement | null;
+  if (!container) return;
+  const el = container.querySelector(`[data-slot-number="${number}"]`) as HTMLElement | null;
   if (!el) return;
   const targetTop =
     el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - container.clientHeight / 2 + el.clientHeight / 2;
-  container.scrollTop = Math.max(0, targetTop);
+  const top = Math.max(0, targetTop);
+  if (smooth) {
+    container.scrollTo({ top, behavior: 'smooth' });
+  } else {
+    container.scrollTop = top;
+  }
+};
+
+/** 滚动到第一个空闲号码(打开时定位到可选位置) */
+const scrollToFirstFreeSlot = async () => {
+  const firstFree = numberSlots.value.find((slot) => !slot.competitor);
+  if (!firstFree) return;
+  await scrollToSlot(firstFree.number);
 };
 
 const loadCompetitors = async () => {
@@ -559,6 +570,8 @@ const handleRandomSelect = () => {
   }
   const picked = candidates[Math.floor(Math.random() * candidates.length)];
   selectedSlot.value = picked;
+  // 随机到的号码可能在列表可视区外:自动平滑滚到它,现场一眼能看到抽中的号
+  scrollToSlot(picked.number, true);
   ElMessage.success(`已随机抽取号码 ${picked.number}`);
 };
 

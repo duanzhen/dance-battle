@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
  * 的分数算出了名次。</p>
  *
  * <p><b>应到裁判的解析顺序：</b>本场绑定（{@code t_match_referee}，海选按圈绑定）
- * 优先；本场没有绑定时回落到赛段裁判（{@code t_referee_stage}，排名赛/小组赛/
+ * 优先；本场没有绑定时回落到赛段裁判（{@code t_referee_stage}，排名赛/
  * 淘汰赛按赛段分配）；两者都没有时退化为 1（「至少一名裁判评过」，
  * 与历史数据/管理端代打的既有口径一致）。</p>
  *

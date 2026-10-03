@@ -374,7 +374,7 @@ public class StageSetupService {
         // 第二遍:按下游引用回填 promotion_rule(用真实 matchId)。海选赛跳过,由 completeStage 结算晋级
         if (!perCompetitorRound) {
             for (MatchPlan mp : sorted) {
-                // 无胜者去向的场次(如小组赛积分制,按组累计晋级)不写 promotion_rule,
+                // 无胜者去向的场次(如排名赛,统一排名后晋级)不写 promotion_rule,
                 // 否则 winnerTargetRound 为 null 会在下方 unboxing 时 NPE
                 if (!mp.isFinalMatch() && mp.getWinnerTargetRound() == null) {
                     continue;

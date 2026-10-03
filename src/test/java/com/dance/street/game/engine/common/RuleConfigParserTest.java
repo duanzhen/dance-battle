@@ -63,11 +63,11 @@ class RuleConfigParserTest {
     @Test
     void parse_unknownFieldsIgnored() {
         // 前端 ruleConfig 可能附带后端未识别的字段,必须忽略而非抛错(@JsonIgnoreProperties)
-        String json = "{ \"mode\": \"GROUP\", \"futureField\": 123, \"group\": { \"groupCount\": 4 } }";
+        String json = "{ \"mode\": \"KNOCKOUT\", \"futureField\": 123, \"knockout\": { \"teamsCount\": 8 } }";
         RuleConfigHolder holder = RuleConfigParser.parse(json);
         assertNotNull(holder);
-        assertEquals("GROUP", holder.getMode());
-        assertEquals(4, holder.getGroup().getGroupCount());
+        assertEquals("KNOCKOUT", holder.getMode());
+        assertEquals(8, holder.getKnockout().getTeamsCount());
     }
 
     @Test

@@ -51,9 +51,9 @@ public class TStageBo extends BaseEntity {
     private String name;
 
     /**
-     * AUDITION, KNOCKOUT, GROUP, ARENA, RANK
+     * AUDITION, KNOCKOUT, ARENA, RANK
      */
-    @NotBlank(message = "AUDITION, KNOCKOUT, GROUP, ARENA, RANK不能为空", groups = { AddGroup.class, EditGroup.class })
+    @NotBlank(message = "AUDITION, KNOCKOUT, ARENA, RANK不能为空", groups = { AddGroup.class, EditGroup.class })
     private String stageMode;
 
     /**

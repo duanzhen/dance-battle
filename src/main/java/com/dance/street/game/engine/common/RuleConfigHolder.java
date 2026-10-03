@@ -37,9 +37,6 @@ public class RuleConfigHolder implements Serializable {
     /** 淘汰赛配置(mode=KNOCKOUT 时使用) */
     private KnockoutConfig knockout;
 
-    /** 小组赛配置(mode=GROUP 时使用) */
-    private GroupConfig group;
-
     /** 海选分圈数(mode=AUDITION 时使用,1=不分圈,全场一场) */
     private Integer circles;
 

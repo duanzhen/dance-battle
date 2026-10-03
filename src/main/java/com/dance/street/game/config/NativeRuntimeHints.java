@@ -1,7 +1,6 @@
 package com.dance.street.game.config;
 
 import com.dance.street.game.engine.common.DimensionConfig;
-import com.dance.street.game.engine.common.GroupConfig;
 import com.dance.street.game.engine.common.KnockoutConfig;
 import com.dance.street.game.engine.common.OutcomeScore;
 import com.dance.street.game.engine.common.PromotionTarget;
@@ -142,7 +141,6 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 			RuleConfigHolder.class,
 			PromotionTarget.class,
 			KnockoutConfig.class,
-			GroupConfig.class,
 			ScoringConfig.class,
 			DimensionConfig.class,
 			OutcomeScore.class,

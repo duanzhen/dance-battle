@@ -265,19 +265,8 @@
             </div>
           </div>
 
-          <!-- 小组赛:蛇形分组预览 -->
-          <div v-if="targetMode === 'GROUP'" class="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <div v-for="(g, gi) in groupPreview" :key="gi" class="rounded-lg bg-black border border-neutral-800 p-2">
-              <div class="text-[10px] font-bold text-amber-500 mb-1">G{{ gi + 1 }}</div>
-              <div v-for="c in g" :key="c.id" class="text-xs text-neutral-300 truncate py-0.5">
-                {{ c.name }}<span v-if="entryTagLabel(c.entryTag)" class="text-neutral-500"> ·{{ entryTagLabel(c.entryTag) }}</span>
-              </div>
-              <div v-if="g.length === 0" class="text-[10px] text-neutral-600">空组</div>
-            </div>
-          </div>
-
           <!-- 擂台赛:出场队列(1 号位=擂主,拖动可调整出场顺序;只列进入擂台赛的人) -->
-          <div v-else-if="targetMode === 'ARENA'" class="space-y-1">
+          <div v-if="targetMode === 'ARENA'" class="space-y-1">
             <div class="flex items-center justify-between px-1 pb-1">
               <span class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">出场顺序</span>
               <span class="text-[10px] text-neutral-600">1 号位为擂主,拖动可调整顺序</span>
@@ -711,7 +700,6 @@ const isRankSource = computed(() => sourceStage.value?.stageMode === 'RANK');
 const modeLabelMap: Record<string, string> = {
   AUDITION: '海选赛',
   KNOCKOUT: '淘汰赛',
-  GROUP: '小组赛',
   ARENA: '擂台赛',
   RANK: '排名赛',
   FREE_MATCH: '自由对抗'
@@ -1737,7 +1725,6 @@ const directPairingMode = computed(() => {
   // 配对方式只看本赛段配置;未配置 = 顺序相邻。不按来源赛制/链上前一段推断。
   return 'SEQUENTIAL';
 });
-const directGroupCount = computed(() => Number(targetRuleConfig.value?.group?.groupCount) || 1);
 const directCircles = computed(() => Number(targetRuleConfig.value?.circles) || 1);
 
 /** 晋级是否已确认:目标赛段名单快照已物化(唯一口径) */
@@ -1772,20 +1759,6 @@ const handleConfirmAdvancement = async () => {
 
 /** 海选→首个淘汰赛(SEED 模式)的中间态随机交换入口 */
 const isSeedKnockoutTransition = computed(() => targetMode.value === 'KNOCKOUT' && directPairingMode.value === 'SEED');
-
-/** 小组赛落位预览:蛇形分组(与 GroupGenerator.snakeSplit 一致) */
-const groupPreview = computed(() => {
-  if (targetMode.value !== 'GROUP') return [];
-  const gc = Math.max(1, directGroupCount.value);
-  const groups: any[][] = Array.from({ length: gc }, () => []);
-  rosterRows.value.forEach((c, i) => {
-    const row = Math.floor(i / gc);
-    const col = i % gc;
-    const g = row % 2 === 0 ? col : gc - 1 - col;
-    groups[g].push(c);
-  });
-  return groups;
-});
 
 /** 排名赛落位预览:非随机分圈时按种子顺序均分(与 RankGenerator 一致) */
 const circlePreview = computed(() => {

@@ -32,7 +32,7 @@ export interface StageVO {
   name: string;
 
   /**
-   * AUDITION, KNOCKOUT, GROUP, ARENA, RANK
+   * AUDITION, KNOCKOUT, ARENA, RANK
    */
   stageMode: string;
 
@@ -121,7 +121,7 @@ export interface StageForm extends BaseEntity {
   name?: string;
 
   /**
-   * AUDITION, KNOCKOUT, GROUP, ARENA, RANK
+   * AUDITION, KNOCKOUT, ARENA, RANK
    */
   stageMode?: string;
 
@@ -188,7 +188,7 @@ export interface StageQuery extends PageQuery {
   name?: string;
 
   /**
-   * AUDITION, KNOCKOUT, GROUP, ARENA, RANK
+   * AUDITION, KNOCKOUT, ARENA, RANK
    */
   stageMode?: string;
 

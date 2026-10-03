@@ -126,13 +126,13 @@ class ArenaPreBracketTest {
             "座位有空洞时不能压紧成 1..n");
     }
 
-    /** 其他赛制(小组赛)目标仍不做预排,避免这次放开被误用到别处。 */
+    /** 其他赛制(排名赛)目标仍不做预排,避免这次放开被误用到别处。 */
     @Test
     void otherStageModesStillUnsupported() {
         Long tid = newTournament("预排白名单");
         TStageVo prev = newStage(tid, "16强", "KNOCKOUT", 16L, 8L, null);
         prev = settleWithAdvancers(tid, prev.getId(), 16, 8);
-        TStageVo group = newStage(tid, "小组赛", "GROUP", 8L, 4L, prev.getId());
+        TStageVo group = newStage(tid, "排名赛", "RANK", 8L, 4L, prev.getId());
 
         assertEquals("UNSUPPORTED", stageService.getPreBracket(group.getId()).getStatus());
     }

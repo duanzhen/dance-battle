@@ -36,7 +36,7 @@ public class TStageConfigBo extends BaseEntity {
     private String name;
 
     /**
-     * AUDITION, KNOCKOUT, GROUP, ARENA, RANK, FREE_MATCH
+     * AUDITION, KNOCKOUT, ARENA, RANK, FREE_MATCH
      */
     private String stageMode;
 

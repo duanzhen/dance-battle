@@ -41,10 +41,6 @@ public record StageModeProfile(
         return mode == StageModeEnum.RANK;
     }
 
-    public boolean group() {
-        return mode == StageModeEnum.GROUP;
-    }
-
     public boolean knockout() {
         return mode == StageModeEnum.KNOCKOUT;
     }

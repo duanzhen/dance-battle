@@ -519,22 +519,6 @@ public class TStageServiceImpl implements ITStageService {
                     ko.put("advanceCount", teamCountEnd);
                     changed = true;
                 }
-            } else if (StageModeEnum.GROUP.getCode().equals(mode)) {
-                // 小组赛:本段人数 = 组数 × 每组人数;晋级数 = 组数 × 每组晋级数。
-                // 配置可能包裹在 group 段(前端 serializeConfig),也可能是顶层(建段向导默认)。
-                Map<String, Object> grp = rc.get("group") instanceof Map
-                    ? nestedMap(rc, "group") : rc;
-                Long gc = firstLong(grp, rc, "groupCount");
-                Long tpg = firstLong(grp, rc, "teamsPerGroup");
-                Long apg = firstLong(grp, rc, "advancePerGroup");
-                if (isBlankCount(teamCountStart) && gc != null && tpg != null && gc * tpg > 0) {
-                    stage.setTeamCountStart(gc * tpg);
-                    teamCountStart = gc * tpg;
-                }
-                if (isBlankCount(teamCountEnd) && gc != null && apg != null && gc * apg > 0) {
-                    stage.setTeamCountEnd(gc * apg);
-                    teamCountEnd = gc * apg;
-                }
             } else if (StageModeEnum.AUDITION.getCode().equals(mode)) {
                 Long rcAdvance = asLong(rc.get("advanceCount"));
                 if (isBlankCount(teamCountEnd) && rcAdvance != null && rcAdvance > 0) {
@@ -590,11 +574,6 @@ public class TStageServiceImpl implements ITStageService {
 
     private static boolean isBlankCount(Long v) {
         return v == null || v == 0L;
-    }
-
-    private static Long firstLong(Map<String, Object> a, Map<String, Object> b, String key) {
-        Long v = asLong(a == null ? null : a.get(key));
-        return v != null ? v : asLong(b == null ? null : b.get(key));
     }
 
     @SuppressWarnings("unchecked")

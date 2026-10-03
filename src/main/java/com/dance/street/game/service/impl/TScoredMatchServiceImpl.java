@@ -15,7 +15,6 @@ import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
-import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.scoring.MatchScoreInput;
 import com.dance.street.game.engine.scoring.MatchScoreResult;
@@ -67,7 +66,7 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
     private final DownstreamRouter downstreamRouter;
     /** 参赛方成绩批量写入口(整场一条 SQL) */
     private final ParticipantScoreWriter scoreWriter;
-    /** 「判完了吗」的唯一口径(与海选/排名赛/小组赛结算共用) */
+    /** 「判完了吗」的唯一口径(与海选/排名赛结算共用) */
     private final JudgeCompletenessChecker judgeCompletenessChecker;
 
     @Override
@@ -137,8 +136,6 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
             StageModeProfile stageProfile = StageModeProfiles.of(stage.getStageMode());
             if (stageProfile.knockout()) {
                 resolveKnockoutDownstream(match, results);
-            } else if (stageProfile.group()) {
-                writeGroupOutcomes(match, results);
             }
             writeParticipantScores(match, results, null);
             // 场次与轮次成套结算(此前只置场次,轮次会残留 GAMING)
@@ -228,28 +225,4 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
         }
     }
 
-    /** 小组赛:按本场排名写胜负(同分并列第一记平),供小组积分结算使用 */
-    private void writeGroupOutcomes(TMatch match, List<MatchScoreResult> results) {
-        if (results.size() != 2) {
-            log.warn("小组赛多裁判场次[{}]参赛方数量={},跳过胜负回写", match.getId(), results.size());
-            return;
-        }
-        MatchScoreResult a = results.get(0);
-        MatchScoreResult b = results.get(1);
-        boolean tie = a.getRankInMatch() != null && a.getRankInMatch().equals(b.getRankInMatch());
-        String aOut = tie ? MatchOutcomeEnum.DRAW.getCode()
-            : (a.getRankInMatch() != null && a.getRankInMatch() == 1 ? MatchOutcomeEnum.WIN.getCode() : MatchOutcomeEnum.LOSS.getCode());
-        String bOut = tie ? MatchOutcomeEnum.DRAW.getCode()
-            : (b.getRankInMatch() != null && b.getRankInMatch() == 1 ? MatchOutcomeEnum.WIN.getCode() : MatchOutcomeEnum.LOSS.getCode());
-        updateParticipantOutcome(match.getId(), a.getCompetitorId(), aOut);
-        updateParticipantOutcome(match.getId(), b.getCompetitorId(), bOut);
-    }
-
-    private void updateParticipantOutcome(Long matchId, Long competitorId, String outcome) {
-        TMatchParticipant upd = new TMatchParticipant();
-        upd.setOutcomeStatus(outcome);
-        participantMapper.update(upd, Wrappers.<TMatchParticipant>lambdaUpdate()
-            .eq(TMatchParticipant::getMatchId, matchId)
-            .eq(TMatchParticipant::getCompetitorId, competitorId));
-    }
 }

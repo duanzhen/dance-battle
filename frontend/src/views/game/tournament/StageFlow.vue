@@ -284,7 +284,6 @@ import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/
 import StageSidebar from './stages/StageSidebar.vue';
 import TransitionConfig from './TransitionConfig.vue';
 import KnockoutStageConfig from './stages/KnockoutStageConfig.vue';
-import GroupStageConfig from './stages/GroupStageConfig.vue';
 import AuditionStageConfig from './stages/AuditionStageConfig.vue';
 import ArenaStageConfig from './stages/ArenaStageConfig.vue';
 import FreeMatchStageConfig from './stages/FreeMatchStageConfig.vue';
@@ -525,7 +524,6 @@ const insertAfterName = computed(() => {
 // 默认配置与类型列表(新建赛段时使用)
 const defaultConfigs: Record<StageMode, any> = {
   [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
-  [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
   [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
   [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: true, publishMode: 'AUTO' },
   [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },
@@ -562,7 +560,6 @@ const stageTypes = [
 
 const stageModeLabels: Record<string, string> = {
   [StageMode.KNOCKOUT]: '淘汰赛',
-  [StageMode.GROUP]: '小组赛',
   [StageMode.AUDITION]: '海选赛',
   [StageMode.ARENA]: '擂台赛',
   [StageMode.RANK]: '排名赛',
@@ -583,7 +580,6 @@ const tempStage = ref<StageData>({
 // 赛段配置组件映射
 const stageConfigComponents = {
   [StageMode.KNOCKOUT]: markRaw(KnockoutStageConfig),
-  [StageMode.GROUP]: markRaw(GroupStageConfig),
   [StageMode.AUDITION]: markRaw(AuditionStageConfig),
   [StageMode.FREE_MATCH]: markRaw(FreeMatchStageConfig),
   [StageMode.ARENA]: markRaw(ArenaStageConfig),
@@ -727,10 +723,6 @@ const canCompleteCreate = computed(() => {
       const k = parsed.knockout || parsed;
       return k.teamsCount > 0 && k.advanceCount > 0;
     }
-    if (selectedCreateMode.value === StageMode.GROUP) {
-      const g = parsed.group || parsed;
-      return g.groupCount >= 2 && g.teamsPerGroup >= 2 && g.advancePerGroup >= 1;
-    }
     if (selectedCreateMode.value === StageMode.AUDITION) {
       return parsed.advanceCount > 0;
     }
@@ -755,23 +747,16 @@ const completeCreate = () => {
 /**
  * 赛段人数(本段/晋级)在各赛制配置里的位置不同,统一在这里解析,避免只读顶层写成 0:
  *   KNOCKOUT → knockout.teamsCount / knockout.advanceCount
- *   GROUP    → (group 段或顶层).groupCount × teamsPerGroup / × advancePerGroup
  *   AUDITION → 入口不限(start=0) / advanceCount
  *   RANK     → scale / advanceCount;  ARENA → scale / 1;  FREE_MATCH → 动态
  */
 const resolveStageSize = (stageMode: StageMode, config: any): { start: number; end: number } => {
   const c = config || {};
   const ko = c.knockout ?? {};
-  const grp = c.group ?? c;
   const num = (v: any) => Number(v) || 0;
   switch (stageMode) {
     case StageMode.AUDITION:
       return { start: 0, end: num(c.advanceCount ?? c.advanceQuota) };
-    case StageMode.GROUP:
-      return {
-        start: num(grp.groupCount) * num(grp.teamsPerGroup),
-        end: num(grp.groupCount) * num(grp.advancePerGroup)
-      };
     case StageMode.ARENA:
       return { start: num(c.scale), end: 1 };
     case StageMode.KNOCKOUT:
@@ -798,7 +783,6 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
     // 默认配置(向后兼容)
     const defaultConfigs: Record<string, any> = {
       [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
-      [StageMode.GROUP]: { groupCount: 4, teamsPerGroup: 4, format: 'BO1', winPoints: 3, drawPoints: 1, lossPoints: 0, advancePerGroup: 2 },
       [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
       [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: true, publishMode: 'AUTO' },
       [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },

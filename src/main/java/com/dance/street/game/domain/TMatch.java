@@ -44,7 +44,7 @@ public class TMatch extends TenantEntity {
 
     /**
      * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、
-     * ZONE-n(海选第 n 圈)、G1..Gn(小组赛分组)
+     * ZONE-n(海选第 n 圈)
      */
     private String displayZone;
 

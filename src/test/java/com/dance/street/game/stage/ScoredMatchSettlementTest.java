@@ -50,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>覆盖:裁判逐次提交只累计不结算(accumulateScores)、用全部裁判分重算总分排名(computeAll)、
  * 回写 participant(writeParticipantScores),以及 completeStage 时的统一结算
- * (settleScoredMatches):小组赛按组结果定胜负、淘汰赛把胜者送去晋级。</p>
+ * (settleScoredMatches):淘汰赛把胜者送去晋级。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -197,12 +197,6 @@ class ScoredMatchSettlementTest {
         matchResultService.submitResult(bo);
     }
 
-    private static String groupVotingRule(int groupCount, int advancePerGroup) {
-        return "{\"mode\":\"GROUP\",\"group\":{\"groupCount\":" + groupCount + ",\"winPoints\":3,"
-            + "\"drawPoints\":1,\"lossPoints\":0,\"advancePerGroup\":" + advancePerGroup + "},"
-            + "\"scoring\":{\"matchMode\":\"VOTING\",\"aggregateRule\":\"SUM\"}}";
-    }
-
     private static String knockoutVotingRule() {
         return "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":2,\"advanceCount\":1,"
             + "\"format\":\"BO1\",\"pairingMode\":\"SEED\"},"
@@ -228,53 +222,11 @@ class ScoredMatchSettlementTest {
     // 用例
     // ------------------------------------------------------------------
 
-    /** 投票计分小组赛:裁判打分只累计不结算,完成赛段时统一结算并按组积分晋级。 */
-    @Test
-    void votingGroupStageAccumulatesThenSettlesByPoints() {
-        Long tid = newTournament("投票计分小组赛");
-        TStageVo stage = newStage(tid, "小组赛", "GROUP", 4, 2, groupVotingRule(2, 1));
-        for (int i = 1; i <= 4; i++) {
-            insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
-        }
-        Long judge = insertReferee(tid, stage.getId(), "裁判1");
-
-        lifecycleService.startStage(stage.getId());
-        List<TMatch> matches = matchesOf(stage.getId());
-        assertEquals(2, matches.size(), "4 人 2 组应生成 2 场");
-        assertTrue(matches.stream().allMatch(m -> "VOTING".equals(m.getMatchMode())),
-            "组内对抗应为投票计分模式");
-
-        for (TMatch m : matches) {
-            List<TMatchParticipant> parts = realParticipants(m.getId());
-            Map<Long, BigDecimal> scores = new HashMap<>();
-            scores.put(parts.get(0).getCompetitorId(), BigDecimal.valueOf(10));
-            scores.put(parts.get(1).getCompetitorId(), BigDecimal.valueOf(5));
-            submitScores(m.getId(), judge, scores);
-            assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(m.getId()).getStatus(),
-                "累计打分阶段不即时结算,由完成赛段统一处理");
-        }
-
-        List<TMatchParticipant> first = realParticipants(matches.get(0).getId());
-        assertEquals(0, first.get(0).getScoreValue().compareTo(BigDecimal.valueOf(10)),
-            "总分已回写到参赛方");
-        assertEquals(0, first.get(1).getScoreValue().compareTo(BigDecimal.valueOf(5)));
-
-        lifecycleService.completeStage(stage.getId());
-
-        assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(stage.getId()).getStatus());
-        assertTrue(matchesOf(stage.getId()).stream()
-                .allMatch(m -> StageConstants.MATCH_SETTLED.equals(m.getStatus())),
-            "完成赛段应把未结算场次一并结算");
-        assertEquals(2, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
-            "每组积分第 1 名晋级");
-        assertEquals(2, countOutcome(stage.getId(), OutcomeStatusEnum.ELIMINATED.getCode()));
-    }
-
     /** 多名裁判的分按汇总规则聚合后排名(SUM:A=10+2, B=5+1)。 */
     @Test
     void multipleRefereeScoresAreAggregated() {
         Long tid = newTournament("多裁判分数聚合");
-        TStageVo stage = newStage(tid, "小组赛", "GROUP", 2, 1, groupVotingRule(1, 1));
+        TStageVo stage = newStage(tid, "决赛", "KNOCKOUT", 2, 1, knockoutVotingRule());
         Long left = insertPending(tid, stage.getId(), "选手A", "1", 1);
         Long right = insertPending(tid, stage.getId(), "选手B", "2", 2);
         Long j1 = insertReferee(tid, stage.getId(), "裁判1");
@@ -282,6 +234,7 @@ class ScoredMatchSettlementTest {
 
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
 
         submitScores(match.getId(), j1, Map.of(left, BigDecimal.valueOf(10), right, BigDecimal.valueOf(5)));
         submitScores(match.getId(), j2, Map.of(left, BigDecimal.valueOf(2), right, BigDecimal.valueOf(1)));
@@ -337,18 +290,19 @@ class ScoredMatchSettlementTest {
 
         // 已全部结算后再调用:空操作,不抛异常
         Long tid2 = newTournament("重复结算");
-        TStageVo group = newStage(tid2, "小组赛", "GROUP", 2, 1, groupVotingRule(1, 1));
-        Long l = insertPending(tid2, group.getId(), "选手A", "1", 1);
-        Long r = insertPending(tid2, group.getId(), "选手B", "2", 2);
-        Long judge = insertReferee(tid2, group.getId(), "裁判1");
-        lifecycleService.startStage(group.getId());
-        TMatch gm = matchesOf(group.getId()).get(0);
+        TStageVo stage2 = newStage(tid2, "决赛", "KNOCKOUT", 2, 1, knockoutVotingRule());
+        Long l = insertPending(tid2, stage2.getId(), "选手A", "1", 1);
+        Long r = insertPending(tid2, stage2.getId(), "选手B", "2", 2);
+        Long judge = insertReferee(tid2, stage2.getId(), "裁判1");
+        lifecycleService.startStage(stage2.getId());
+        TMatch gm = matchesOf(stage2.getId()).get(0);
+        matchResultService.startMatch(gm.getId());
         submitScores(gm.getId(), judge, Map.of(l, BigDecimal.TEN, r, BigDecimal.ONE));
-        scoredMatchService.settleScoredMatches(group.getId());
+        scoredMatchService.settleScoredMatches(stage2.getId());
         assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(gm.getId()).getStatus());
         assertNotNull(participantScore(gm.getId(), l));
 
-        scoredMatchService.settleScoredMatches(group.getId());
+        scoredMatchService.settleScoredMatches(stage2.getId());
         assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(gm.getId()).getStatus(),
             "重复结算应保持幂等");
     }

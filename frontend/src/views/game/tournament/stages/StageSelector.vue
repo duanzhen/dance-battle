@@ -67,7 +67,6 @@ const onChange = (v: string | number | null) => {
 
 const modeMap: Record<string, string> = {
   KNOCKOUT: '淘汰',
-  GROUP: '小组',
   AUDITION: '选拔',
   ARENA: '擂台',
   RANK: '排名'

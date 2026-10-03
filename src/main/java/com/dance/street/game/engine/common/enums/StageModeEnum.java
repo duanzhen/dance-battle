@@ -17,7 +17,6 @@ public enum StageModeEnum {
     AUDITION("AUDITION", "海选赛"),
     KNOCKOUT("KNOCKOUT", "淘汰赛"),
     ARENA("ARENA", "擂台赛"),
-    GROUP("GROUP", "小组赛"),
     RANK("RANK", "排名赛"),
     /** 自由对抗:线下抽签/指认确定对手,由手机导播台手动添加场次与晋级者,系统只记录对战与结果 */
     FREE_MATCH("FREE_MATCH", "自由对抗");

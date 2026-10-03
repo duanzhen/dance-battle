@@ -87,16 +87,6 @@ class StageRuleNormalizationTest {
     }
 
     @Test
-    void groupConfigFillsStageTeamCounts() {
-        Long tid = newTournament("小组赛归一化");
-        TStageVo vo = insertStage(tid, "小组赛", "GROUP", 0L, 0L,
-            "{\"mode\":\"GROUP\",\"group\":{\"groupCount\":4,\"teamsPerGroup\":4,\"advancePerGroup\":2}}");
-        TStage row = stageMapper.selectById(vo.getId());
-        assertEquals(16L, row.getTeamCountStart(), "小组赛人数 = 组数×每组人数");
-        assertEquals(8L, row.getTeamCountEnd(), "小组赛晋级 = 组数×每组晋级");
-    }
-
-    @Test
     void arenaConfigFillsStageTeamCounts() {
         Long tid = newTournament("擂台归一化");
         TStageVo vo = insertStage(tid, "擂台", "ARENA", 0L, 0L, "{\"mode\":\"ARENA\",\"scale\":8}");

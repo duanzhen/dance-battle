@@ -72,13 +72,6 @@ public final class StageModeProfiles {
             new Result(false, false),
             new View(true, false, false));
 
-        // 小组赛:默认排序、单场判定,支持同分调整
-        put(map, StageModeEnum.GROUP,
-            new Setup(SeedOrder.BY_SEED, GeneratePolicy.GENERATE, null, MatchModePolicy.FROM_CONFIG, Set.of()),
-            new Run(false, false),
-            new Result(false, false),
-            new View(false, false, true));
-
         // 擂台赛:不生成对阵树、开赛自动开第一场、显式落位优先、支持预排
         put(map, StageModeEnum.ARENA,
             new Setup(SeedOrder.SEED_THEN_NUMBER, GeneratePolicy.REJECT,

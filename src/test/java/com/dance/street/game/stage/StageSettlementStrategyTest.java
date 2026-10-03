@@ -22,7 +22,6 @@ import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.impl.settle.ArenaStageSettler;
 import com.dance.street.game.service.impl.settle.AuditionStageSettler;
-import com.dance.street.game.service.impl.settle.GroupStageSettler;
 import com.dance.street.game.service.impl.settle.RankStageSettler;
 import com.dance.street.game.service.impl.settle.ScoredStageSettler;
 import com.dance.street.game.service.impl.settle.StageSettler;
@@ -53,7 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ul>
  *   <li>新增赛制如果忘了写结算策略,要到现场点「完成赛段」才炸——这里把
  *       "每个赛制都有策略"变成断言;</li>
- *   <li>"赛段还不能结束"过去在淘汰赛/小组赛抛异常、在海选/排名赛返回 GAMING,
+ *   <li>"赛段还不能结束"过去在淘汰赛抛异常、在海选/排名赛返回 GAMING,
  *       调用方必须按赛制分别处理。统一为 {@code completed=false + message} 后
  *       在这里锁住口径。</li>
  * </ul>
@@ -120,8 +119,6 @@ class StageSettlementStrategyTest {
             settlerRegistry.of(StageModeEnum.AUDITION.getCode()));
         assertInstanceOf(RankStageSettler.class,
             settlerRegistry.of(StageModeEnum.RANK.getCode()));
-        assertInstanceOf(GroupStageSettler.class,
-            settlerRegistry.of(StageModeEnum.GROUP.getCode()));
         assertInstanceOf(ArenaStageSettler.class,
             settlerRegistry.of(StageModeEnum.ARENA.getCode()));
         assertInstanceOf(ScoredStageSettler.class,

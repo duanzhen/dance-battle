@@ -74,7 +74,7 @@ public class AuditionStageSettler implements StageSettler {
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final SettlementSupport settlementSupport;
-    /** 「判完了吗」的唯一口径(与排名赛/小组赛/淘汰赛上分共用,口径只保留这一份) */
+    /** 「判完了吗」的唯一口径(与排名赛/淘汰赛上分共用,口径只保留这一份) */
     private final JudgeCompletenessChecker judgeCompletenessChecker;
 
     @Override

@@ -283,12 +283,12 @@ public class StageSettlementService {
         return rosterService.applyRoster(stageId, null);
     }
 
-    /** 排名赛/小组赛:手动决定同分者谁晋级(已接收晋级者的下游会被拦下)。 */
+    /** 排名赛:手动决定同分者谁晋级(已接收晋级者的下游会被拦下)。 */
     @Transactional(rollbackFor = Exception.class)
     public int adjustAdvancement(Long stageId, List<Long> competitorIds) {
         TStage stage = stageLookup.get(stageId);
         if (!StageModeProfiles.of(stage.getStageMode()).view().advancementAdjustment()) {
-            throw new ServiceException("仅排名赛/小组赛赛段支持手动调整同分晋级");
+            throw new ServiceException("仅排名赛赛段支持手动调整同分晋级");
         }
         if (!StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
             throw new ServiceException("仅已结算(SETTLED)的排名赛赛段可调整同分晋级");

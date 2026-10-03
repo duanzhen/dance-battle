@@ -86,7 +86,7 @@ public class StageRunService {
         TStage stage = stageLookup.get(stageId);
         assertCanStart(stage);
         StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
-        // 一键开赛:无对阵时自动初始化(如未初始化)并生成对阵,淘汰赛/小组赛/海选均适用
+        // 一键开赛:无对阵时自动初始化(如未初始化)并生成对阵,淘汰赛/海选均适用
         long exist = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stageId));
         // 擂台赛/自由对抗不生成对阵(擂台由导播逐场创建,自由对抗对手线下抽签),其余赛制一键生成
         boolean generatesMatches = profile.setup().generatePolicy() == GeneratePolicy.GENERATE;

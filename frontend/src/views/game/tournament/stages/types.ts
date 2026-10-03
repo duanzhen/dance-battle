@@ -15,7 +15,6 @@ export enum ConfigMode {
 // 赛段类型枚举
 export enum StageMode {
   KNOCKOUT = 'KNOCKOUT', // 淘汰赛
-  GROUP = 'GROUP', // 小组赛
   AUDITION = 'AUDITION', // 海选赛
   ARENA = 'ARENA', // 擂台赛
   RANK = 'RANK', // 排名赛
@@ -42,17 +41,6 @@ export interface KnockoutConfig {
   format: MatchFormat;
   teamsCount: number;
   advanceCount: number;
-}
-
-// 小组赛配置
-export interface GroupConfig {
-  groupCount: number; // 分组数
-  teamsPerGroup: number; // 每组选手数
-  winPoints: number; // 胜积分
-  drawPoints: number; // 平积分
-  lossPoints: number; // 负积分
-  advancePerGroup: number; // 每组晋级数
-  format: MatchFormat;
 }
 
 // 海选赛配置
@@ -111,7 +99,7 @@ export interface FreeMatchConfig {
 }
 
 // 联合类型
-export type StageConfig = KnockoutConfig | GroupConfig | AuditionConfig | ArenaConfig | RankingConfig | FreeMatchConfig;
+export type StageConfig = KnockoutConfig | AuditionConfig | ArenaConfig | RankingConfig | FreeMatchConfig;
 
 // 赛段数据接口
 export interface StageData {

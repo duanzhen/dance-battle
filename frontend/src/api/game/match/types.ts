@@ -20,7 +20,7 @@ export interface MatchVO {
   name: string;
 
   /**
-   * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、ZONE-n(海选第 n 圈)、G1..Gn(小组赛分组)
+   * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、ZONE-n(海选第 n 圈)
    */
   displayZone: string;
 
@@ -83,7 +83,7 @@ export interface MatchForm extends BaseEntity {
   name?: string;
 
   /**
-   * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、ZONE-n(海选第 n 圈)、G1..Gn(小组赛分组)
+   * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、ZONE-n(海选第 n 圈)
    */
   displayZone?: string;
 
@@ -135,7 +135,7 @@ export interface MatchQuery extends PageQuery {
   name?: string;
 
   /**
-   * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、ZONE-n(海选第 n 圈)、G1..Gn(小组赛分组)
+   * 显示分区:LEFT/RIGHT(淘汰赛上下半区)、CENTER(季军赛/排名赛)、ZONE-n(海选第 n 圈)
    */
   displayZone?: string;
 

@@ -1854,49 +1854,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 加人弹窗下拉:深色主题适配(面板挂在 body,需全局选择器) */
-:global(.game-dialog .add-select .el-select__wrapper) {
-  background-color: #0a0a0a;
-  box-shadow: 0 0 0 1px #262626 inset;
-  min-height: 36px;
-  padding: 2px 10px;
-  border-radius: 8px;
-}
-:global(.game-dialog .add-select .el-select__wrapper:hover) {
-  box-shadow: 0 0 0 1px #404040 inset;
-}
-:global(.game-dialog .add-select .el-select__wrapper.is-focused) {
-  box-shadow: 0 0 0 1px #f59e0b inset;
-}
-:global(.game-dialog .add-select .el-select__wrapper.is-disabled) {
-  background-color: #171717;
-  box-shadow: 0 0 0 1px #333 inset;
-}
-:global(.game-dialog .add-select .el-select__placeholder) {
-  color: #6b6b6b;
-}
-:global(.game-dialog .add-select .el-select__selected-item) {
-  color: #e5e5e5;
-}
-:global(.add-select-popper) {
-  background: #171717 !important;
-  border: 1px solid #262626 !important;
-}
-:global(.add-select-popper .el-select-dropdown__list) {
-  padding: 4px;
-}
-:global(.add-select-popper .el-select-dropdown__item) {
-  color: #d4d4d4;
-  border-radius: 6px;
-}
-:global(.add-select-popper .el-select-dropdown__item.is-hovering) {
-  background: #262626;
-}
-:global(.add-select-popper .el-select-dropdown__item.is-selected) {
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
-}
-
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out;
 }

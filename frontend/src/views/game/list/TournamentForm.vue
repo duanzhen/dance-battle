@@ -74,21 +74,11 @@
 
       <div>
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">赛事状态</label>
-        <div class="relative">
-          <select
-            v-model.number="form.status"
-            class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all appearance-none text-sm"
-          >
-            <option :value="0">筹备中</option>
-            <option :value="1">进行中</option>
-            <option :value="2">已结束</option>
-          </select>
-          <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-neutral-500">
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
+        <el-select v-model="form.status" class="w-full">
+          <el-option :value="0" label="筹备中" />
+          <el-option :value="1" label="进行中" />
+          <el-option :value="2" label="已结束" />
+        </el-select>
       </div>
 
       <div v-if="!props.tournament" class="col-span-2">
@@ -233,23 +223,17 @@
         <div v-if="showAdvanced" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
           <div>
             <label class="block text-sm font-medium text-neutral-400 mb-1.5">对战树红蓝位置</label>
-            <select
-              v-model="form.bracketColorOrder"
-              class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all appearance-none text-sm"
-            >
-              <option value="RED_TOP">上红下蓝</option>
-              <option value="BLUE_TOP">上蓝下红</option>
-            </select>
+            <el-select v-model="form.bracketColorOrder" class="w-full">
+              <el-option value="RED_TOP" label="上红下蓝" />
+              <el-option value="BLUE_TOP" label="上蓝下红" />
+            </el-select>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-400 mb-1.5">场次与裁判列表红蓝位置</label>
-            <select
-              v-model="form.matchColorOrder"
-              class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all appearance-none text-sm"
-            >
-              <option value="RED_LEFT">左红右蓝</option>
-              <option value="BLUE_LEFT">右红左蓝</option>
-            </select>
+            <el-select v-model="form.matchColorOrder" class="w-full">
+              <el-option value="RED_LEFT" label="左红右蓝" />
+              <el-option value="BLUE_LEFT" label="右红左蓝" />
+            </el-select>
           </div>
           <label
             class="md:col-span-2 flex items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2.5 cursor-pointer"
@@ -570,42 +554,6 @@ const handleClose = () => {
 </script>
 
 <style scoped>
-/* 裁判配置下拉:深色主题适配 */
-:global(.tournament-dialog .referee-config-select .el-select__wrapper) {
-  background-color: #0a0a0a;
-  box-shadow: 0 0 0 1px #262626 inset;
-  min-height: 42px;
-  padding: 4px 12px;
-  border-radius: 8px;
-  transition: box-shadow 0.2s;
-}
-:global(.tournament-dialog .referee-config-select .el-select__wrapper:hover) {
-  box-shadow: 0 0 0 1px #404040 inset;
-}
-:global(.tournament-dialog .referee-config-select .el-select__wrapper.is-focused) {
-  box-shadow: 0 0 0 1px #f59e0b inset;
-}
-:global(.tournament-dialog .referee-config-select .el-select__wrapper.is-disabled) {
-  background-color: #171717;
-  box-shadow: 0 0 0 1px #333 inset;
-}
-:global(.tournament-dialog .referee-config-select .el-select__placeholder) {
-  color: #525252;
-}
-/* 输入中的文字用亮色,与灰色 placeholder 明显区分 */
-:global(.tournament-dialog .referee-config-select .el-select__input) {
-  color: #f5f5f5;
-  caret-color: #f5f5f5;
-}
-:global(.tournament-dialog .referee-config-select .el-tag) {
-  background-color: #262626;
-  border-color: #404040;
-  color: #e5e5e5;
-  border-radius: 6px;
-}
-:global(.tournament-dialog .referee-config-select .el-select__selection) {
-  gap: 4px;
-}
 /* 点击输入框不弹下拉:仅保留输入+回车快捷添加 */
 :global(.referee-config-no-dropdown) {
   display: none !important;

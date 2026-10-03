@@ -106,8 +106,19 @@ public interface ITStageService {
 
     /**
      * 大屏赛程流转:赛事全部赛段链 + 当前进行中赛段/场次
+     *
+     * <p>"当前"取链上第一个 GAMING 赛段(全局兜底,保持旧行为)。</p>
      */
     StageFlowVo getFlowByTournamentId(Long tournamentId);
+
+    /**
+     * 大屏赛程流转(可指定赛段):{@code stageId} 非空时"当前"固定取该赛段自身的进行中场次,
+     * 供多赛段并行时的控件绑定具体赛段;为空时等价于 {@link #getFlowByTournamentId(Long)}。
+     *
+     * @param tournamentId 赛事ID
+     * @param stageId      绑定的赛段ID(可为 null);不属于本赛事/已作废时按未绑定处理
+     */
+    StageFlowVo getFlowByTournamentId(Long tournamentId, Long stageId);
 
     /**
      * 下一赛段对战树预排:上一赛段胜者按种子顺位排入本赛段

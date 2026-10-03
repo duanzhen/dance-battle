@@ -1045,9 +1045,10 @@ export const useDirectorStore = defineStore('director', () => {
 
     if (type === 'MATCH_DETAIL') {
       defaultName = `当前场次 ${currentScene.value.widgets.length + 1}`;
+      // stageId: 绑定的赛段(空=跟随链上第一个进行中赛段,多赛段并行时可按屏绑定具体分支)
       // showVotePanel: 底部裁判判罚明细,默认不显示,按需在组件属性里开启
       // avatarBgColor: 选手照片背景色,空字符串 = 透明(默认)
-      dataConfig = { bgImage: '', showVotePanel: false, avatarBgColor: '' };
+      dataConfig = { stageId: null, bgImage: '', showVotePanel: false, avatarBgColor: '' };
       defaultWidth = 800;
       defaultHeight = 300;
     }

@@ -123,10 +123,10 @@
               <span class="text-xs text-neutral-400">按总分排名，取前 N 名晋级</span>
               <label class="text-xs text-neutral-500 flex items-center gap-2">
                 满分
-                <select v-if="editable" v-model.number="config.maxScore" class="cfg-select w-32" @change="handleUpdate">
-                  <option :value="10">10 分制</option>
-                  <option :value="100">100 分制</option>
-                </select>
+                <el-select v-if="editable" v-model="config.maxScore" class="w-32" @change="handleUpdate">
+                  <el-option :value="10" label="10 分制" />
+                  <el-option :value="100" label="100 分制" />
+                </el-select>
                 <span v-else class="text-neutral-300">{{ config.maxScore }} 分制</span>
               </label>
               <!-- <span class="text-[11px] text-neutral-600">支持 2 位小数（如 9.75 / 97.50）</span> -->
@@ -228,10 +228,14 @@
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-[11px] text-neutral-400 flex-none">第 1~{{ wizard.advance || '?' }} 名 →</span>
-                  <select v-model="wizard.defaultTargetId" class="cfg-select flex-1 min-w-0">
-                    <option :value="null">请选择去向</option>
-                    <option v-for="t in wizardTargetOptions" :key="'d' + String(t.id)" :value="t.id">{{ t.name }}</option>
-                  </select>
+                  <el-select
+                    v-model="wizard.defaultTargetId"
+                    class="flex-1 min-w-0"
+                    placeholder="请选择去向"
+                    clearable
+                  >
+                    <el-option v-for="t in wizardTargetOptions" :key="'d' + String(t.id)" :label="t.name" :value="t.id" />
+                  </el-select>
                 </div>
                 <p class="text-[11px] text-neutral-600 leading-relaxed">
                   这条线就是「晋级线」，界上同分会在本赛段内开加赛决出；各圈晋级人数会自动汇总成「合计晋级」。
@@ -248,10 +252,9 @@
                   暂无可承接赛段（下游赛段需处于规划中，且名单尚未确认/跳过）
                 </div>
                 <div v-for="(ex, ei) in wizard.exits" :key="ei" class="rounded-lg border border-neutral-800 bg-black/40 p-2.5 space-y-2">
-                  <select v-model="ex.targetStageId" class="cfg-select w-full">
-                    <option :value="null">请选择去向</option>
-                    <option v-for="t in wizardTargetOptions" :key="String(t.id)" :value="t.id">{{ t.name }}</option>
-                  </select>
+                  <el-select v-model="ex.targetStageId" class="w-full" placeholder="请选择去向" clearable>
+                    <el-option v-for="t in wizardTargetOptions" :key="String(t.id)" :label="t.name" :value="t.id" />
+                  </el-select>
                   <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
                     <input
                       v-model.number="ex.rankStart"

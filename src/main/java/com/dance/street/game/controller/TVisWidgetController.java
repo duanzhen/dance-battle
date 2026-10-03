@@ -132,6 +132,21 @@ public class TVisWidgetController extends BaseController {
     }
 
     /**
+     * 视频播放/暂停/结束(管理端):请求体是一段 JSON 补丁,只合并进 dataConfig 的
+     * {@code videoPlaying}/{@code videoStartedAt}/{@code videoPositionMs} 三个键。
+     *
+     * <p>与倒计时同理:大屏投射端只读,播放控制回到管理端鉴权面;落库后广播 sceneUpdate,
+     * 所有投射该场景的大屏按同一份状态 seek + 播放/暂停,保证多端同步。</p>
+     */
+    @SaCheckPermission("game:visWidget:edit")
+    @PostMapping("/{id}/video-state")
+    public R<Void> updateVideoState(@PathVariable("id") Long id,
+                                    @RequestBody(required = false) Map<String, Object> patch) {
+        tVisWidgetService.updateVideoState(id, patch);
+        return R.ok();
+    }
+
+    /**
      * 删除场景控件元素
      *
      * @param ids 主键串

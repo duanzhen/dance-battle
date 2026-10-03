@@ -38,6 +38,7 @@
           :widget-id="widgets.type === 'TIMER' ? String(widgets.id) : undefined"
           @update:endAt="(v: number | null) => persistWidgetConfig(widgets, { endAt: v })"
           @update:remainMs="(v: number | null) => persistWidgetConfig(widgets, { remainMs: v })"
+          @update:playback="(p: Record<string, unknown>) => persistWidgetConfig(widgets, p)"
           class="w-full h-full"
         />
 
@@ -96,7 +97,7 @@ import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
 import AuditionWidget from './widgets/AuditionWidget.vue';
 import ParticipantWidget from './widgets/ParticipantWidget.vue';
-import { updateWidgetTimerState } from '@/api/game/visWidget';
+import { updateWidgetTimerState, updateWidgetVideoState } from '@/api/game/visWidget';
 import html2canvas from 'html2canvas';
 
 const componentMap: Record<string, any> = {
@@ -153,10 +154,10 @@ const route = useRoute();
 const editable = computed(() => props.mode === 'edit');
 
 /**
- * 是否允许操作倒计时(开始/暂停/重置)。
+ * 是否允许操作组件内的控制条(倒计时开始/暂停/重置、视频播放/暂停/结束)。
  * 只允许在管理端编辑画布操作;大屏投射端是公开播放面,一律只读。
  */
-const canControlTimer = computed(() => editable.value);
+const canControlWidget = computed(() => editable.value);
 
 // 从 sceneConfig 中读取缩略图数据（缩略图模式使用）
 const thumbnailData = computed(() => props.sceneConfig.thumbnailData);
@@ -174,8 +175,8 @@ const widgetProps = (widget: SceneElement): Record<string, unknown> => {
     ...parsed,
     tournamentId: parsed.tournamentId ?? props.tournamentId ?? route.query.id ?? route.query.tournamentId ?? undefined
   };
-  if (widget.type === 'TIMER') {
-    merged.canControl = canControlTimer.value;
+  if (widget.type === 'TIMER' || widget.type === 'VIDEO') {
+    merged.canControl = canControlWidget.value;
   }
   return merged;
 };
@@ -198,23 +199,38 @@ const persistWidgetConfig = async (widget: SceneElement, patch: Record<string, u
   }
   widget.dataConfig = JSON.stringify({ ...config, ...patch });
 
-  // 只提交本次真正变化的键,避免把另一键(如刚开始计时写下的 endAt)冲成 null
-  const body: { endAt?: number | null; remainMs?: number | null } = {};
-  if ('endAt' in patch) {
-    body.endAt = (patch.endAt as number | null) ?? null;
-  }
-  if ('remainMs' in patch) {
-    body.remainMs = (patch.remainMs as number | null) ?? null;
-  }
-  if (Object.keys(body).length === 0) {
-    return;
-  }
-
   try {
-    await updateWidgetTimerState(widget.id, body);
+    if (widget.type === 'VIDEO') {
+      // 视频:一次提交整份播放状态
+      const body: { videoPlaying?: boolean; videoStartedAt?: number | null; videoPositionMs?: number | null } = {};
+      if ('videoPlaying' in patch) {
+        body.videoPlaying = patch.videoPlaying as boolean;
+      }
+      if ('videoStartedAt' in patch) {
+        body.videoStartedAt = (patch.videoStartedAt as number | null) ?? null;
+      }
+      if ('videoPositionMs' in patch) {
+        body.videoPositionMs = (patch.videoPositionMs as number | null) ?? null;
+      }
+      if (Object.keys(body).length > 0) {
+        await updateWidgetVideoState(widget.id, body);
+      }
+      return;
+    }
+    // 倒计时:只提交本次真正变化的键,避免把另一键冲成 null
+    const body: { endAt?: number | null; remainMs?: number | null } = {};
+    if ('endAt' in patch) {
+      body.endAt = (patch.endAt as number | null) ?? null;
+    }
+    if ('remainMs' in patch) {
+      body.remainMs = (patch.remainMs as number | null) ?? null;
+    }
+    if (Object.keys(body).length > 0) {
+      await updateWidgetTimerState(widget.id, body);
+    }
   } catch (e) {
-    // 落库失败不回滚本地状态:现场优先"屏幕上是对的",下一次开始/暂停会再写一次
-    console.warn('[SceneRenderer] 计时状态回写失败', e);
+    // 落库失败不回滚本地状态:现场优先"屏幕上是对的",下一次操作会再写一次
+    console.warn('[SceneRenderer] 播放状态回写失败', e);
   }
 };
 

@@ -11,8 +11,10 @@ export default (path: any) => {
       globalsPropValue: true
     },
     resolvers: [
-      // 自动导入 Element Plus 相关函数ElMessage, ElMessageBox... (带样式)
-      ElementPlusResolver()
+      // 自动导入 Element Plus 相关函数 ElMessage, ElMessageBox...
+      // 样式统一走全局引入的 element-plus/dist/index.css(见 assets/styles/index.scss),
+      // 这里不再按组件重复注入,避免样式加载顺序把自定义深色覆盖压掉。
+      ElementPlusResolver({ importStyle: false })
     ],
     vueTemplate: true, // 是否在 vue 模板中自动导入
     dts: path.resolve(path.resolve(__dirname, '../../src'), 'types', 'auto-imports.d.ts')

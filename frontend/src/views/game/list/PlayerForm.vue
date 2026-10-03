@@ -43,21 +43,9 @@
       <!-- 标签 -->
       <div>
         <label class="block text-sm font-medium text-neutral-400 mb-1.5">标签</label>
-        <div class="relative">
-          <select
-            v-model="selectedTag"
-            @change="handleTagAdd"
-            class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all appearance-none text-sm"
-          >
-            <option value="">选择标签添加</option>
-            <option v-for="tag in commonTags" :key="tag" :value="tag">{{ tag }}</option>
-          </select>
-          <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-neutral-500">
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
+        <el-select v-model="selectedTag" class="w-full" placeholder="选择标签添加" @change="handleTagAdd">
+          <el-option v-for="tag in commonTags" :key="tag" :label="tag" :value="tag" />
+        </el-select>
         <!-- 已选标签展示 -->
         <div v-if="formData.tags.length > 0" class="flex flex-wrap gap-2 mt-2">
           <span

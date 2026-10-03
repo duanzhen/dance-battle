@@ -23,11 +23,11 @@
         <!-- 比赛格式:创建时可选,创建后锁定 -->
         <div v-if="currentMode === ConfigMode.CREATE" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
           <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
-          <select v-model="config.format" class="cfg-select w-full" @change="handleUpdate">
-            <option value="BO1">BO1(单局决胜)</option>
-            <option value="BO3">BO3(三局两胜)</option>
-            <option value="BO5">BO5(五局三胜)</option>
-          </select>
+          <el-select v-model="config.format" class="w-full" @change="handleUpdate">
+            <el-option value="BO1" label="BO1(单局决胜)" />
+            <el-option value="BO3" label="BO3(三局两胜)" />
+            <el-option value="BO5" label="BO5(五局三胜)" />
+          </el-select>
         </div>
         <div v-else class="bg-black/50 border border-neutral-800 rounded-lg p-4">
           <div class="text-xs text-neutral-500 mb-2">比赛格式</div>
@@ -147,13 +147,5 @@ onMounted(() => {
 .stage-config {
   max-width: 900px;
   margin: 0 auto;
-}
-.cfg-select {
-  background: #000;
-  border: 1px solid #404040;
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: #fff;
-  font-size: 13px;
 }
 </style>

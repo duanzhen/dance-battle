@@ -93,11 +93,13 @@ export const getFirstStage = (tournamentId: string | number): AxiosPromise<Stage
 /**
  * 大屏赛程流转:赛事全部赛段链 + 当前进行中赛段/场次
  * @param tournamentId 赛事ID
+ * @param stageId 可选:绑定赛段后"当前"跟随该赛段;不传则跟随链上第一个进行中赛段
  */
-export const getStageFlow = (tournamentId: string | number) => {
+export const getStageFlow = (tournamentId: string | number, stageId?: string | number | null) => {
   return request({
     url: '/game/stage/flow/' + tournamentId,
-    method: 'get'
+    method: 'get',
+    params: stageId != null && stageId !== '' ? { stageId } : undefined
   });
 };
 

@@ -1,3 +1,6 @@
+/* Element Plus 基础样式必须最先加载:自定义深色覆盖(element-ui.scss 等)
+   依赖"同优先级后加载生效",否则 el-select 等仍会渲染成默认白底。 */
+@use 'element-plus/dist/index.css';
 @use './variables.module.scss' as *;
 @use './mixin.scss';
 @use './transition.scss';
@@ -6,7 +9,6 @@
 @use './btn.scss';
 @use './ruoyi.scss';
 @use 'animate.css';
-@use 'element-plus/dist/index.css';
 
 /* 全局按钮圆角统一为 rounded-lg(0.5rem),避免各页面圆角数值不一致;
    rounded-none 例外:分段式控件内嵌按钮保持方形(外层容器已有圆角) */
@@ -416,7 +418,6 @@ input[type='number'] {
 
 /* 通用深色表单控件:配置面板/向导统一使用(全局生效,避免子组件里退化成原生白底小控件) */
 .cfg-input,
-.cfg-select,
 .cfg-textarea {
   width: 100%;
   min-height: 36px;
@@ -443,20 +444,4 @@ input[type='number'] {
     opacity: 0.5;
     cursor: not-allowed;
   }
-}
-
-.cfg-select {
-  appearance: none;
-  -webkit-appearance: none;
-  padding-right: 34px;
-  cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 12px;
-}
-
-.cfg-select option {
-  background-color: #171717;
-  color: #f5f5f5;
 }

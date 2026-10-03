@@ -123,14 +123,15 @@
 
       <section>
         <label class="text-xs text-neutral-500 mb-2 block">展示场次(二海场景选择加赛场)</label>
-        <select
-          :value="matchId ?? ''"
-          class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-          @change="$emit('update:matchId', ($event.target as HTMLSelectElement).value || null)"
+        <el-select
+          :model-value="matchId ?? null"
+          class="w-full"
+          placeholder="请选择场次"
+          clearable
+          @change="(v: string | null) => $emit('update:matchId', v || null)"
         >
-          <option value="">请选择场次</option>
-          <option v-for="m in matches" :key="m.id" :value="String(m.id)">{{ m.name || '场次 ' + m.id }}</option>
-        </select>
+          <el-option v-for="m in matches" :key="m.id" :label="m.name || '场次 ' + m.id" :value="String(m.id)" />
+        </el-select>
       </section>
 
       <section>

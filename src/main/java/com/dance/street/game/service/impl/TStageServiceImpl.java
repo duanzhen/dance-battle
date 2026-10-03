@@ -721,6 +721,15 @@ public class TStageServiceImpl implements ITStageService {
      */
     @Override
     public StageFlowVo getFlowByTournamentId(Long tournamentId) {
+        return getFlowByTournamentId(tournamentId, null);
+    }
+
+    /**
+     * 大屏赛程流转(可指定赛段):{@code stageId} 非空时"当前"固定取该赛段自身的进行中场次,
+     * 供多赛段并行时控件绑定具体赛段;为空时回退"链上第一个 GAMING"(旧行为)。
+     */
+    @Override
+    public StageFlowVo getFlowByTournamentId(Long tournamentId, Long stageId) {
         StageFlowVo vo = new StageFlowVo();
         // 链顺序统一由 StageChain 推导(以 next 链为事实源,断链按 id 兜底补齐)
         List<TStage> chain = stageChain.orderedChain(tournamentId);
@@ -741,14 +750,21 @@ public class TStageServiceImpl implements ITStageService {
             return item;
         }).toList());
 
-        // 当前进行中赛段:链上第一个 GAMING
-        TStage current = chain.stream()
-            .filter(s -> StageConstants.STAGE_GAMING.equals(s.getStatus()))
+        // 当前赛段:绑定则取绑定的赛段,未绑定/绑定失效则回退"链上第一个 GAMING"
+        TStage current = stageId == null ? null : chain.stream()
+            .filter(s -> Objects.equals(s.getId(), stageId))
             .findFirst().orElse(null);
+        if (current == null) {
+            current = firstGamingStage(chain);
+        }
         if (current == null) {
             return vo;
         }
         vo.setCurrentStageId(current.getId());
+        // 绑定赛段尚未开赛/已结束:没有"当前场次",控件保持透明(但仍回 currentStageId 供标题展示)
+        if (!StageConstants.STAGE_GAMING.equals(current.getStatus())) {
+            return vo;
+        }
 
         List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, current.getId())
@@ -823,6 +839,13 @@ public class TStageServiceImpl implements ITStageService {
             return sp;
         }).toList());
         return vo;
+    }
+
+    /** 链上第一个进行中(GAMING)赛段;无则返回 null */
+    private static TStage firstGamingStage(List<TStage> chain) {
+        return chain.stream()
+            .filter(s -> StageConstants.STAGE_GAMING.equals(s.getStatus()))
+            .findFirst().orElse(null);
     }
 
     /**

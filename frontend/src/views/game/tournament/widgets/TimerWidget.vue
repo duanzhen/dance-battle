@@ -2,8 +2,8 @@
   <div class="w-full h-full">
     <!-- 查看模式: 显示倒计时 -->
     <div v-if="mode !== 'edit'" class="w-full h-full bg-black overflow-hidden select-none relative group">
-      <div class="w-full h-full bg-neutral-700/30">
-        <div :style="timerStyle" class="w-full h-full flex items-center justify-center pointer-events-none">
+      <div class="w-full h-full">
+          <div ref="displayRef" :style="timerStyle" class="w-full h-full flex items-center justify-center pointer-events-none">
           {{ formattedTime }}
         </div>
       </div>
@@ -44,8 +44,6 @@
       <section>
         <span class="section-title">倒计时属性</span>
 
-        <TextInput label="标题" :model-value="title" @update:model-value="$emit('update:title', $event)" placeholder="倒计时" />
-
         <div class="grid grid-cols-2 gap-3">
           <TextInput
             label="小时 (H)"
@@ -76,9 +74,9 @@
           />
         </div>
 
-        <TextInput label="字体大小" :model-value="fontSize" @update:model-value="$emit('update:fontSize', $event)" placeholder="48px" />
-
         <ColorInput label="文字颜色" :model-value="color" @update:model-value="$emit('update:color', $event)" />
+
+        <ColorInput label="背景颜色" :model-value="bgColor || ''" @update:model-value="$emit('update:bgColor', $event)" />
 
         <SelectInput
           label="字体粗细"
@@ -95,24 +93,10 @@
           ]"
         />
 
-        <ButtonGroup
-          label="对齐方式"
-          :model-value="textAlign || 'center'"
-          @update:model-value="$emit('update:textAlign', $event)"
-          :options="[
-            { value: 'left', label: '左对齐' },
-            { value: 'center', label: '居中' },
-            { value: 'right', label: '右对齐' }
-          ]"
-        />
-
         <CheckboxGroup
           label="选项"
-          :model-value="{ showTitle, showMilliseconds }"
-          :options="[
-            { key: 'showTitle', label: '显示标题' },
-            { key: 'showMilliseconds', label: '显示毫秒' }
-          ]"
+          :model-value="{ showMilliseconds }"
+          :options="[{ key: 'showMilliseconds', label: '显示毫秒' }]"
           @update:item="handleOptionUpdate"
         />
       </section>
@@ -121,13 +105,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import TextInput from './common/TextInput.vue';
 import ColorInput from './common/ColorInput.vue';
 import SelectInput from './common/SelectInput.vue';
-import ButtonGroup from './common/ButtonGroup.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
-import { cssSize } from '@/utils/cssSize';
 
 const props = defineProps<{
   title?: string;
@@ -139,6 +121,8 @@ const props = defineProps<{
   color?: string;
   fontWeight?: string | number;
   textAlign?: 'left' | 'center' | 'right';
+  /** 背景颜色:空字符串=透明(默认透明) */
+  bgColor?: string;
   showTitle?: boolean;
   showMilliseconds?: boolean;
   mode?: 'view' | 'edit' | 'render' | 'thumbnail';
@@ -163,6 +147,7 @@ const emit = defineEmits<{
   'update:milliseconds': [value: number];
   'update:fontSize': [value: string];
   'update:color': [value: string];
+  'update:bgColor': [value: string];
   'update:fontWeight': [value: string | number];
   'update:textAlign': [value: 'left' | 'center' | 'right'];
   'update:showTitle': [value: boolean];
@@ -237,13 +222,36 @@ const formattedTime = computed(() => {
   return timeStr;
 });
 
+// 字号自适应:根据组件尺寸与当前时间串长度计算,保证整串完整显示
+const displayRef = ref<HTMLElement | null>(null);
+const autoFontSize = ref('48px');
+let resizeObserver: ResizeObserver | null = null;
+
+const recalcFontSize = () => {
+  const el = displayRef.value;
+  if (!el) {
+    return;
+  }
+  const w = el.clientWidth - 16; // 减去左右 padding
+  const h = el.clientHeight - 16; // 减去上下 padding
+  if (w <= 0 || h <= 0) {
+    return;
+  }
+  const text = formattedTime.value || '00:00';
+  // 数字加粗后单字符约 0.62em 宽:先满足高度,再保证宽度放得下整串
+  const byHeight = h * 0.72;
+  const byWidth = w / Math.max(1, text.length * 0.62);
+  autoFontSize.value = `${Math.max(10, Math.min(byHeight, byWidth))}px`;
+};
+
 // 计算样式
 const timerStyle = computed(() => ({
-  // 同文本组件:数字字号必须补单位,否则 font-size 非法被浏览器忽略
-  fontSize: cssSize(props.fontSize, '48px'),
+  fontSize: autoFontSize.value,
   color: remainingTime.value < 0 ? '#ef4444' : props.color || '#ffffff',
   fontWeight: props.fontWeight || 'bold',
   textAlign: props.textAlign || 'center',
+  // 默认透明:不填时露出画布/大屏底色
+  backgroundColor: props.bgColor || 'transparent',
   padding: '8px',
   wordBreak: 'break-word' as const,
   overflowWrap: 'break-word' as const
@@ -263,6 +271,7 @@ const clearTicking = () => {
  * 大屏投射端是公开只读面,即使倒计时走到 0 也只在本地显示,不落库。
  */
 const emitTimerState = (endAt: number | null, remainMs: number | null) => {
+  // 只有管理端画布(canControl=true)允许写回;大屏投射端只读,不落库
   if (!props.canControl) {
     return;
   }
@@ -396,12 +405,29 @@ watch(
   }
 );
 
+// 时间串长度变化(显示毫秒/小时位)时重算字号,避免每 10ms 的 tick 触发重排
+watch(
+  () => formattedTime.value.length,
+  () => recalcFontSize()
+);
+
 // 挂载时按配置恢复:配置里有未到期的 endAt 说明本来就在计时,直接续跑
-onMounted(restoreFromConfig);
+onMounted(() => {
+  restoreFromConfig();
+  nextTick(() => {
+    recalcFontSize();
+    if (typeof ResizeObserver !== 'undefined' && displayRef.value) {
+      resizeObserver = new ResizeObserver(recalcFontSize);
+      resizeObserver.observe(displayRef.value);
+    }
+  });
+});
 
 onUnmounted(() => {
   // 卸载只清本地 tick,不回写:页面刷新本来就不会走这里,而切场景再回来要按 endAt 继续走
   clearTicking();
+  resizeObserver?.disconnect();
+  resizeObserver = null;
 });
 </script>
 

@@ -150,6 +150,55 @@ class ScreenTimerStateTest {
             () -> visWidgetService.updateTimerState(999999999L, Map.of("endAt", 1L)));
     }
 
+    /** 管理端视频播放状态接口同样必须受编辑权限保护 */
+    @Test
+    void adminVideoEndpointRequiresEditPermission() throws Exception {
+        Method method = TVisWidgetController.class.getMethod("updateVideoState", Long.class, Map.class);
+        SaCheckPermission ann = method.getAnnotation(SaCheckPermission.class);
+        assertNotNull(ann, "管理端视频播放状态接口必须有 @SaCheckPermission");
+        assertTrue(Arrays.asList(ann.value()).contains("game:visWidget:edit"),
+            "应要求控件编辑权限,实际: " + Arrays.toString(ann.value()));
+    }
+
+    /** 视频播放状态只改 videoPlaying/videoStartedAt/videoPositionMs,src 等内容不受影响 */
+    @Test
+    void videoStatePatchOnlyTouchesPlaybackKeys() {
+        Long id = newWidget("VIDEO", "{\"src\":\"/uploads/a.mp4\",\"loop\":true,\"muted\":false}", 0L);
+
+        Map<String, Object> play = new HashMap<>();
+        play.put("videoPlaying", true);
+        play.put("videoStartedAt", 4102444800000L);
+        play.put("videoPositionMs", 0L);
+        visWidgetService.updateVideoState(id, play);
+
+        String playing = widgetMapper.selectById(id).getDataConfig();
+        assertTrue(playing.contains("\"videoPlaying\":true"), "应写入播放状态,实际: " + playing);
+        assertTrue(playing.contains("\"videoStartedAt\":4102444800000"), "应写入播放起点,实际: " + playing);
+        assertTrue(playing.contains("/uploads/a.mp4"), "视频素材不能被改动,实际: " + playing);
+
+        Map<String, Object> stop = new HashMap<>();
+        stop.put("videoPlaying", false);
+        stop.put("videoStartedAt", null);
+        stop.put("videoPositionMs", 0L);
+        visWidgetService.updateVideoState(id, stop);
+
+        String stopped = widgetMapper.selectById(id).getDataConfig();
+        assertTrue(stopped.contains("\"videoPlaying\":false"), "结束应写回停止状态,实际: " + stopped);
+        assertTrue(stopped.contains("\"videoStartedAt\":null"), "结束时清掉播放起点,实际: " + stopped);
+        assertTrue(stopped.contains("/uploads/a.mp4"), "结束同样不能改素材,实际: " + stopped);
+    }
+
+    /** 视频接口只认 VIDEO 组件 */
+    @Test
+    void nonVideoWidgetIsRejected() {
+        Long id = newWidget("TEXT", "{\"text\":\"标题\"}", 0L);
+        ServiceException ex = assertThrows(ServiceException.class,
+            () -> visWidgetService.updateVideoState(id, Map.of("videoPlaying", true)));
+        assertTrue(ex.getMessage().contains("仅视频组件"), "实际: " + ex.getMessage());
+        assertFalse(widgetMapper.selectById(id).getDataConfig().contains("videoPlaying"),
+            "非视频组件的配置不该被写入");
+    }
+
     private Long newWidget(String type, String dataConfig, Long locked) {
         TTournament t = new TTournament();
         t.setName(type + "测试赛事");

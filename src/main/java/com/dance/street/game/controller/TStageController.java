@@ -165,13 +165,17 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 大屏赛程流转:赛事全部赛段链 + 当前进行中赛段/场次
+     * 大屏赛程流转:赛事全部赛段链 + 当前进行中赛段/场次。
+     *
+     * <p>{@code stageId} 可选:传了则"当前"固定取该赛段(多赛段并行时绑定具体分支);
+     * 不传则回退"链上第一个进行中赛段",与旧行为一致。</p>
      */
     @SaCheckPermission("game:stage:query")
     @GetMapping("/flow/{tournamentId}")
     public R<StageFlowVo> flow(@NotNull(message = "比赛ID不能为空")
-                               @PathVariable Long tournamentId) {
-        return R.ok(tStageService.getFlowByTournamentId(tournamentId));
+                               @PathVariable Long tournamentId,
+                               @RequestParam(value = "stageId", required = false) Long stageId) {
+        return R.ok(tStageService.getFlowByTournamentId(tournamentId, stageId));
     }
 
     /**

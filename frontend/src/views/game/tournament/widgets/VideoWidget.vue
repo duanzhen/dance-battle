@@ -8,11 +8,13 @@
           :src="src"
           class="w-full h-full object-fill block pointer-events-none"
           :loop="loop"
-          :muted="muted"
+          :muted="effectiveMuted"
           :autoplay="autoplay"
           playsinline
-          @loadedmetadata="handleLoadedMetadata"
-          @timeupdate="handleTimeUpdate"
+            @loadedmetadata="handleLoadedMetadata"
+            @loadeddata="applyRemoteState"
+            @canplay="applyRemoteState"
+            @timeupdate="handleTimeUpdate"
           @play="handlePlay"
           @pause="handlePause"
         ></video>
@@ -20,6 +22,7 @@
 
       <!-- 播放控制栏 -->
       <div
+        v-if="canControl"
         class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-auto z-50"
       >
         <div class="flex items-center gap-3">
@@ -30,6 +33,13 @@
             </svg>
             <svg v-else class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
+            </svg>
+          </button>
+
+          <!-- 结束按钮:暂停并回到开头 -->
+          <button @click="stopPlayback" class="flex-shrink-0 text-white hover:text-amber-500 transition-colors" title="结束">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 6h12v12H6z" />
             </svg>
           </button>
 
@@ -100,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import AssetUpload from './common/AssetUpload.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
 
@@ -117,6 +127,12 @@ const props = withDefaults(
     // 音量 (0.0 ~ 1.0)
     volume?: number;
     mode?: 'view' | 'edit';
+    /** 是否展示播放/暂停/结束控制。只有管理端编辑画布传 true;大屏投射端只读 */
+    canControl?: boolean;
+    /** 以下三个键用于多端同步:是否在播放 / 暂停位置(ms) / 本次播放起点时间戳(ms) */
+    videoPlaying?: boolean;
+    videoPositionMs?: number | string | null;
+    videoStartedAt?: number | string | null;
   }>(),
   {
     loop: true,
@@ -134,6 +150,8 @@ const emit = defineEmits<{
   'update:muted': [value: boolean];
   'update:autoplay': [value: boolean];
   'update:volume': [value: number];
+  /** 一次提交整份播放状态:是否在播 / 暂停位置(ms) / 本次播放起点时间戳(ms) */
+  'update:playback': [value: { videoPlaying: boolean; videoStartedAt: number | null; videoPositionMs: number }];
 }>();
 
 // --- 内部逻辑 ---
@@ -144,6 +162,14 @@ const isPlaying = ref(false);
 const currentTime = ref(0);
 const duration = ref(0);
 const isDragging = ref(false);
+/** 播放态下周期性对齐进度的定时器(仅大屏/跟随端用) */
+let syncTimer: number | null = null;
+
+/**
+ * 管理端画布一律静音:同一台设备上画布与投屏会同时播放,不静音会出现重音。
+ * 声音只由投射端(非控制端)按配置输出。
+ */
+const effectiveMuted = computed(() => (props.canControl ? true : !!props.muted));
 
 // 处理复选框更新
 const handleCheckboxUpdate = (key: string, value: boolean) => {
@@ -161,6 +187,68 @@ const handleLoadedMetadata = () => {
   if (videoRef.value) {
     duration.value = videoRef.value.duration;
   }
+  // 元数据就绪后按远端状态落位(大屏/管理端都用同一份播放状态)
+  applyRemoteState();
+};
+
+/** 远端播放状态(管理端写入)推算出的目标位置(秒) */
+const targetPositionSec = () => {
+  const base = Number(props.videoPositionMs ?? 0) || 0;
+  const startedAt = props.videoStartedAt != null ? Number(props.videoStartedAt) : null;
+  const playing = props.videoPlaying === true;
+  const elapsed = playing && startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+  return (base + elapsed) / 1000;
+};
+
+/** 是否已有远端播放状态(没被管理端控制过时保持自动播放) */
+const hasRemoteState = computed(
+  () => props.videoPlaying !== undefined || props.videoStartedAt != null || props.videoPositionMs != null
+);
+
+/** 应用远端播放状态:把本地 video 元素拉到目标进度并按需播放/暂停 */
+const desiredPositionSec = () => {
+  const target = targetPositionSec();
+  const v = videoRef.value;
+  const dur = v?.duration ?? 0;
+  if (Number.isFinite(dur) && dur > 0) {
+    return props.loop ? target % dur : Math.min(target, dur);
+  }
+  return target;
+};
+
+const applyRemoteState = () => {
+  const v = videoRef.value;
+  if (!v || !hasRemoteState.value) {
+    return;
+  }
+  const t = desiredPositionSec();
+  // 只有偏差明显时才 seek,避免每次状态广播都抖动
+  if (Math.abs(v.currentTime - t) > 0.5) {
+    try {
+      v.currentTime = t;
+    } catch (e) {
+      // 元数据未就绪时忽略
+    }
+  }
+  if (props.videoPlaying) {
+    v.play().catch(() => {});
+  } else {
+    v.pause();
+  }
+};
+
+/** 用户操作后把播放状态回写(仅管理端画布) */
+const emitPlaybackState = (playing: boolean, positionMsOverride?: number) => {
+  if (!props.canControl) {
+    return;
+  }
+  const v = videoRef.value;
+  const posMs = positionMsOverride != null ? positionMsOverride : v ? Math.round(v.currentTime * 1000) : 0;
+  emit('update:playback', {
+    videoPlaying: playing,
+    videoStartedAt: playing ? Date.now() : null,
+    videoPositionMs: posMs
+  });
 };
 
 // 监听播放进度更新
@@ -185,9 +273,11 @@ const togglePlay = async () => {
 
   if (isPlaying.value) {
     videoRef.value.pause();
+    emitPlaybackState(false);
   } else {
     try {
       await videoRef.value.play();
+      emitPlaybackState(true);
     } catch (e) {
       console.error('Play failed:', e);
     }
@@ -223,6 +313,8 @@ const handleSeekEnd = async (e: Event) => {
       console.error('Play failed:', e);
     }
   }
+  // 同步进度到其它端(播放中同时刷新起点时间戳)
+  emitPlaybackState(isPlaying.value);
 };
 
 // 计算播放进度百分比
@@ -241,9 +333,9 @@ watch(
 
 // 监听静音状态变化
 watch(
-  () => props.muted,
-  (newMuted) => {
-    if (videoRef.value) videoRef.value.muted = newMuted;
+  effectiveMuted,
+  (m) => {
+    if (videoRef.value) videoRef.value.muted = m;
   }
 );
 
@@ -263,7 +355,23 @@ const pause = () => {
   videoRef.value?.pause();
 };
 
-// 3. 跳转时间 (单位: 秒)
+// 3. 结束:暂停并回到开头
+const stopPlayback = () => {
+  const v = videoRef.value;
+  if (!v) {
+    return;
+  }
+  v.pause();
+  try {
+    v.currentTime = 0;
+  } catch (e) {
+    // 元数据还没就绪时忽略
+  }
+  currentTime.value = 0;
+  emitPlaybackState(false, 0);
+};
+
+// 4. 跳转时间 (单位: 秒)
 const seek = (time: number) => {
   if (videoRef.value) {
     // 确保不超出视频总时长
@@ -272,7 +380,7 @@ const seek = (time: number) => {
   }
 };
 
-// 4. 获取当前状态 (可选)
+// 5. 获取当前状态 (可选)
 const getStatus = () => {
   return {
     currentTime: videoRef.value?.currentTime || 0,
@@ -285,6 +393,7 @@ const getStatus = () => {
 defineExpose({
   play,
   pause,
+  stopPlayback,
   seek,
   getStatus,
   // 也可以直接把 DOM 暴露出去，看你需求
@@ -295,6 +404,31 @@ onMounted(() => {
   // 初始化音量
   if (videoRef.value) {
     videoRef.value.volume = props.volume;
+    videoRef.value.muted = effectiveMuted.value;
+  }
+  applyRemoteState();
+  // 兜底:播放态下周期性对齐进度(阈值 1.5s,避免频繁跳帧),
+  // 防止某一次 sceneUpdate 丢失后大屏长期停在错误进度
+  syncTimer = window.setInterval(() => {
+    if (hasRemoteState.value && props.videoPlaying) {
+      const v = videoRef.value;
+      if (v && Math.abs(v.currentTime - desiredPositionSec()) > 1.5) {
+        applyRemoteState();
+      }
+    }
+  }, 3000);
+});
+
+// 管理端控制后,所有端(含大屏投射)跟随同一份播放状态
+watch(
+  () => [props.videoPlaying, props.videoStartedAt, props.videoPositionMs],
+  () => applyRemoteState()
+);
+
+onUnmounted(() => {
+  if (syncTimer) {
+    clearInterval(syncTimer);
+    syncTimer = null;
   }
 });
 </script>

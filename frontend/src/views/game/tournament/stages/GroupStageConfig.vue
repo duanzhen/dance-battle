@@ -37,6 +37,7 @@
             <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 名选手</div>
             <div class="text-sm text-neutral-300 mt-1">总参赛：{{ totalTeams }} 支 → 晋级：{{ totalAdvance }} 支</div>
             <div class="text-xs text-neutral-500 mt-2">每队比赛：{{ config.teamsPerGroup - 1 }} 场</div>
+            <div class="text-xs text-neutral-500 mt-1">打分机制：判胜负平</div>
           </div>
 
           <StageExitConfig :stage="localStage" />
@@ -49,14 +50,10 @@
             <!-- 基本信息 -->
             <div>
               <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
-              <select
-                v-model="config.format"
-                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                @change="handleUpdate"
-              >
-                <option value="BO1">BO1 (单局决胜)</option>
-                <option value="BO3">BO3 (三局两胜)</option>
-              </select>
+              <el-select v-model="config.format" class="w-full" @change="handleUpdate">
+                <el-option value="BO1" label="BO1 (单局决胜)" />
+                <el-option value="BO3" label="BO3 (三局两胜)" />
+              </el-select>
             </div>
           </template>
 
@@ -166,23 +163,13 @@
               </div>
             </div>
 
-            <!-- 打分与转场配置 -->
-            <ScoringTransitionConfig
-              :scoring="config.scoring"
-              @update:scoring="
-                (v) => {
-                  config.scoring = v;
-                  handleUpdate();
-                }
-              "
-            />
-
             <!-- 预览 -->
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
               <div class="text-sm text-neutral-300">共 {{ config.groupCount }} 个小组，每组 {{ config.teamsPerGroup }} 名选手</div>
               <div class="text-sm text-neutral-300 mt-1">总参赛：{{ totalTeams }} 名选手 → 晋级：{{ totalAdvance }} 名选手</div>
               <div class="text-xs text-neutral-500 mt-2">每队比赛场次：{{ config.teamsPerGroup - 1 }} 场</div>
+              <div class="text-xs text-neutral-500 mt-1">打分机制：判胜负平</div>
             </div>
           </template>
         </template>
@@ -195,7 +182,6 @@
 import { ref, watch, onMounted, computed } from 'vue';
 import { Users } from 'lucide-vue-next';
 import { GroupConfig, StageData, ConfigMode } from './types';
-import ScoringTransitionConfig from './ScoringTransitionConfig.vue';
 import StageExitConfig from './StageExitConfig.vue';
 
 // Props
@@ -256,7 +242,8 @@ const parseConfig = () => {
     if (g.drawPoints !== undefined) config.value.drawPoints = g.drawPoints;
     if (g.lossPoints !== undefined) config.value.lossPoints = g.lossPoints;
     if (g.advancePerGroup !== undefined) config.value.advancePerGroup = g.advancePerGroup;
-    if (parsed.scoring) config.value.scoring = parsed.scoring;
+    // 打分机制由赛制决定(小组赛=判胜负平,积分由胜/平/负换算),不是配置项
+    if (parsed.scoring) config.value.scoring = { ...parsed.scoring, type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' };
   } catch (e) {
     console.warn('Failed to parse ruleConfig:', e);
   }
@@ -275,7 +262,8 @@ const serializeConfig = () => {
       lossPoints: config.value.lossPoints,
       advancePerGroup: config.value.advancePerGroup
     },
-    scoring: config.value.scoring
+    // 打分机制由赛制决定(小组赛=判胜负平),不作为用户配置项
+    scoring: { ...config.value.scoring, type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' }
     // 不写 transition:下一赛段以赛段链 next 为唯一事实源(详见 api/game/stage/index.ts 的说明);
     // 该字段已由 API 层统一剥离,组件内不再保留/回写
   });

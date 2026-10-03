@@ -55,26 +55,18 @@
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">公布模式</label>
-                <select
-                  v-model="config.publishMode"
-                  class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @change="handleUpdate"
-                >
-                  <option value="AUTO">实时公布(边打边显示)</option>
-                  <option value="MANUAL">手动公布(导播台确认后公布)</option>
-                  <option value="BATCH">全部完成后一次性公布</option>
-                </select>
+                <el-select v-model="config.publishMode" class="w-full" @change="handleUpdate">
+                  <el-option value="AUTO" label="实时公布(边打边显示)" />
+                  <el-option value="MANUAL" label="手动公布(导播台确认后公布)" />
+                  <el-option value="BATCH" label="全部完成后一次性公布" />
+                </el-select>
               </div>
               <div v-if="config.publishMode === 'BATCH'">
                 <label class="text-xs text-neutral-600 mb-1 block">公布范围</label>
-                <select
-                  v-model="config.publishScope"
-                  class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @change="handleUpdate"
-                >
-                  <option value="ALL">公布全部排名</option>
-                  <option value="TOP_N">只公布前 {{ config.advanceCount }} 名晋级名单</option>
-                </select>
+                <el-select v-model="config.publishScope" class="w-full" @change="handleUpdate">
+                  <el-option value="ALL" label="公布全部排名" />
+                  <el-option value="TOP_N" :label="`只公布前 ${config.advanceCount} 名晋级名单`" />
+                </el-select>
               </div>
             </div>
             <label class="flex items-center gap-2 cursor-pointer">
@@ -83,14 +75,10 @@
             </label>
             <div v-if="config.showScore">
               <label class="text-xs text-neutral-600 mb-1 block">分数显示方式</label>
-              <select
-                v-model="config.scoreDisplay"
-                class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                @change="handleUpdate"
-              >
-                <option value="TOTAL">只显示总分</option>
-                <option value="DETAIL">总分 + 维度分</option>
-              </select>
+              <el-select v-model="config.scoreDisplay" class="w-full" @change="handleUpdate">
+                <el-option value="TOTAL" label="只显示总分" />
+                <el-option value="DETAIL" label="总分 + 维度分" />
+              </el-select>
             </div>
           </div>
 
@@ -154,33 +142,23 @@
             <div v-if="scoring.dimensions.length > 0" class="grid grid-cols-2 gap-4 mt-3">
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">裁判间汇总</label>
-                <select
-                  v-if="canEditDimensions"
-                  v-model="scoring.refereeAggregateRule"
-                  class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @change="handleUpdate"
-                >
-                  <option value="AVG">平均</option>
-                  <option value="SUM">求和</option>
-                  <option value="TRIMMED_MEAN">去极值平均</option>
-                </select>
+                <el-select v-if="canEditDimensions" v-model="scoring.refereeAggregateRule" class="w-full" @change="handleUpdate">
+                  <el-option value="AVG" label="平均" />
+                  <el-option value="SUM" label="求和" />
+                  <el-option value="TRIMMED_MEAN" label="去极值平均" />
+                </el-select>
                 <div v-else class="bg-black border border-neutral-800 rounded p-2 text-sm text-neutral-300">
                   {{ aggregateLabel(scoring.refereeAggregateRule) }}
                 </div>
               </div>
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">维度间汇总</label>
-                <select
-                  v-if="canEditDimensions"
-                  v-model="scoring.aggregateRule"
-                  class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @change="handleUpdate"
-                >
-                  <option value="SUM">求和</option>
-                  <option value="AVG">平均</option>
-                  <option value="WEIGHTED">加权(按维度权重)</option>
-                  <option value="TRIMMED_MEAN">去极值平均</option>
-                </select>
+                <el-select v-if="canEditDimensions" v-model="scoring.aggregateRule" class="w-full" @change="handleUpdate">
+                  <el-option value="SUM" label="求和" />
+                  <el-option value="AVG" label="平均" />
+                  <el-option value="WEIGHTED" label="加权(按维度权重)" />
+                  <el-option value="TRIMMED_MEAN" label="去极值平均" />
+                </el-select>
                 <div v-else class="bg-black border border-neutral-800 rounded p-2 text-sm text-neutral-300">
                   {{ aggregateLabel(scoring.aggregateRule) }}
                 </div>

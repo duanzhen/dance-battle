@@ -129,13 +129,24 @@
       </Transition>
     </div>
 
-    <!-- 编辑模式:仅配置背景图 -->
+    <!-- 编辑模式:绑定赛段 + 显示选项 + 背景图 -->
     <div v-else class="space-y-4 px-2 py-4">
       <section>
         <span class="section-title">当前场次属性</span>
         <!-- <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 mb-3">
           <p class="text-[10px] text-amber-400">仅淘汰赛赛段显示，自动关联当前进行(GAMING)的场次，无需手动绑定；SSE 实时刷新。</p>
         </div> -->
+        <div class="mb-3">
+          <StageSelector
+            label="绑定赛段(不选=跟随当前进行中)"
+            :model-value="(stageId as any) ?? null"
+            only-mode="KNOCKOUT"
+            @update:model-value="$emit('update:stageId', $event)"
+          />
+          <p class="text-[10px] text-neutral-600 mt-1">
+            多赛段同时进行时,绑定赛段让本控件只跟随该赛段的场次;不绑定则跟随链上第一个进行中赛段(保持旧行为)。
+          </p>
+        </div>
         <div>
           <AssetUpload
             label="背景图片"
@@ -187,6 +198,7 @@ import { Ban } from 'lucide-vue-next';
 import AssetUpload from './common/AssetUpload.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
 import ColorInput from './common/ColorInput.vue';
+import StageSelector from '../stages/StageSelector.vue';
 import { getStageFlow, getMatch, listCompetitor, getTournament } from '@/api/game/screen';
 import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
@@ -198,6 +210,8 @@ const props = defineProps<{
   bgImage?: string;
   mode?: 'view' | 'edit';
   tournamentId?: string | number | null;
+  /** 绑定的赛段ID:非空时只跟随该赛段的当前场次;为空则跟随链上第一个进行中赛段(全局兜底) */
+  stageId?: string | number | null;
   /** 是否显示底部裁判判罚明细(默认关闭,在组件属性里开启) */
   showVotePanel?: boolean;
   /** 选手照片背景颜色:空字符串 = 透明(默认) */
@@ -206,6 +220,7 @@ const props = defineProps<{
 /** 事件:编辑面板的选项开关统一走 update:<key>,由 PropertyPanel 写回 dataConfig */
 const emit = defineEmits<{
   'update:bgImage': [v: string];
+  'update:stageId': [v: string | number | null];
   'update:showVotePanel': [v: boolean];
   'update:avatarBgColor': [v: string];
 }>();
@@ -310,8 +325,9 @@ const loadData = async () => {
   }
   await loadColorConfig();
   try {
-    // 用赛程流转接口定位当前进行中赛段及其场次(大屏投射窗口没有路由 id,依赖组件注入)
-    const flow: any = await getStageFlow(tournamentId.value);
+    // 用赛程流转接口定位当前进行中赛段及其场次(大屏投射窗口没有路由 id,依赖组件注入)。
+    // 绑定了 stageId 时只跟随该赛段;未绑定则跟随链上第一个进行中赛段。
+    const flow: any = await getStageFlow(tournamentId.value, props.stageId);
     const data = flow.data;
     const currentStage = (data?.stages || []).find((s: any) => s.id === data?.currentStageId);
     lastStageId = currentStage?.id != null ? String(currentStage.id) : null;
@@ -399,6 +415,12 @@ watch(tournamentId, (newTid, oldTid) => {
   loadData();
 });
 
+// 绑定赛段变化:重新定位该赛段的当前场次
+watch(
+  () => props.stageId,
+  () => loadData()
+);
+
 /** 事件回调:重连补偿(null)或事件涉及当前进行中的赛段/场次时才刷新 */
 const handleTournamentEvent = (data: any) => {
   if (!data) {
@@ -407,6 +429,10 @@ const handleTournamentEvent = (data: any) => {
   }
   const sid = data.stageId != null ? String(data.stageId) : null;
   const mid = data.matchId != null ? String(data.matchId) : null;
+  // 绑定了赛段:其它赛段的事件与本次展示无关,直接忽略(避免并行时被别段刷屏)
+  if (props.stageId != null && sid != null && sid !== String(props.stageId)) {
+    return;
+  }
   // 尚未定位当前赛段/场次(如首屏加载时比赛未开始):任何赛事事件都尝试刷新,避免首屏未就绪后永远不显示
   if (!lastStageId && !lastMatchId) {
     loadData();

@@ -110,11 +110,12 @@ export const getStageParticipants = (stageId: string | number) => {
   });
 };
 
-/** 全赛事赛段流程 */
-export const getStageFlow = (tournamentId: string | number) => {
+/** 全赛事赛段流程;stageId 可选:绑定后"当前"跟随该赛段,不传则跟随链上第一个进行中赛段 */
+export const getStageFlow = (tournamentId: string | number, stageId?: string | number | null) => {
   return screenRequest({
     url: '/tournament/screen/flow/' + tournamentId,
-    method: 'get'
+    method: 'get',
+    params: stageId != null && stageId !== '' ? { stageId } : undefined
   });
 };
 

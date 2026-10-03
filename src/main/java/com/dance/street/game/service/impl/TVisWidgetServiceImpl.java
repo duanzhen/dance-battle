@@ -116,6 +116,59 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
         notifySceneUpdate(widget.getSceneId());
     }
 
+    /** 视频播放状态允许回写的键(videoPlaying/videoStartedAt/videoPositionMs) */
+    private static final List<String> VIDEO_STATE_KEYS =
+        List.of("videoPlaying", "videoStartedAt", "videoPositionMs");
+
+    /**
+     * 按 JSON 补丁合并进视频组件的 dataConfig(白名单键:videoPlaying / videoStartedAt / videoPositionMs)。
+     *
+     * <p>与管理端倒计时同一套思路:大屏只读,播放/暂停/结束都在管理端画布操作,落库后广播
+     * sceneUpdate 让所有正在投射该场景的大屏重载配置,从而播放进度保持同步。</p>
+     */
+    @Override
+    public void updateVideoState(Long widgetId, Map<String, Object> patch) {
+        TVisWidget widget = baseMapper.selectById(widgetId);
+        if (widget == null) {
+            throw new ServiceException("组件不存在");
+        }
+        if (!"VIDEO".equals(widget.getType())) {
+            throw new ServiceException("仅视频组件支持回写播放状态");
+        }
+        ObjectMapper mapper = SnowflakeJson.mapper();
+        Map<String, Object> config = new LinkedHashMap<>();
+        String raw = widget.getDataConfig();
+        if (StringUtils.isNotBlank(raw)) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parsed = mapper.readValue(raw, Map.class);
+                if (parsed != null) {
+                    config.putAll(parsed);
+                }
+            } catch (Exception e) {
+                log.warn("视频组件[{}]配置解析失败,按空配置重建: {}", widgetId, e.getMessage());
+            }
+        }
+        if (patch != null) {
+            for (String key : VIDEO_STATE_KEYS) {
+                if (patch.containsKey(key)) {
+                    config.put(key, patch.get(key));
+                }
+            }
+        }
+        TVisWidget upd = new TVisWidget();
+        upd.setId(widgetId);
+        try {
+            upd.setDataConfig(mapper.writeValueAsString(config));
+        } catch (Exception e) {
+            throw new ServiceException("视频播放状态序列化失败: {}", e.getMessage());
+        }
+        baseMapper.updateById(upd);
+
+        // 管理端改的播放状态要同步到正在投射该场景的大屏(sceneUpdate → 大屏重载配置并跟随播放)
+        notifySceneUpdate(widget.getSceneId());
+    }
+
     /**
      * 分页查询场景控件元素列表
      *

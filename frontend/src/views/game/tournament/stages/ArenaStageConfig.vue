@@ -97,28 +97,20 @@
             <!-- 基本信息 -->
             <div>
               <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
-              <select
-                v-model="config.format"
-                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                @change="handleUpdate"
-              >
-                <option value="BO1">BO1 (单局决胜)</option>
-                <option value="BO3">BO3 (三局两胜)</option>
-                <option value="BO5">BO5 (五局三胜)</option>
-              </select>
+              <el-select v-model="config.format" class="w-full" @change="handleUpdate">
+                <el-option value="BO1" label="BO1 (单局决胜)" />
+                <el-option value="BO3" label="BO3 (三局两胜)" />
+                <el-option value="BO5" label="BO5 (五局三胜)" />
+              </el-select>
             </div>
 
             <!-- 判罚方式:与淘汰赛同一套 publishMode 机制 -->
             <div>
               <label class="text-xs text-neutral-500 mb-2 block">判罚方式</label>
-              <select
-                v-model="config.publishMode"
-                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                @change="handleUpdate"
-              >
-                <option value="AUTO">裁判判罚（裁判端录入，判完即结算）</option>
-                <option value="DIRECTOR">导播台直接判定（MC 在导播台选胜负/平局）</option>
-              </select>
+              <el-select v-model="config.publishMode" class="w-full" @change="handleUpdate">
+                <el-option value="AUTO" label="裁判判罚（裁判端录入，判完即结算）" />
+                <el-option value="DIRECTOR" label="导播台直接判定（MC 在导播台选胜负/平局）" />
+              </el-select>
               <p class="text-[11px] text-neutral-500 mt-2">
                 导播台判定：擂台赛裁判端不再显示场次，每场由 MC 在手机导播台点「左胜 / 平 / 右胜」直接判定；判完再点「开始下一场」，
                 胜者守擂、败者排到队尾。
@@ -128,14 +120,10 @@
             <!-- 积分规则 -->
             <div>
               <label class="text-xs text-neutral-500 mb-2 block">平局计分</label>
-              <select
-                v-model="config.drawBothScore"
-                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                @change="handleUpdate"
-              >
-                <option :value="true">平局双方各 +1 分（默认）</option>
-                <option :value="false">平局不加分（只有胜场记 1 分）</option>
-              </select>
+              <el-select v-model="config.drawBothScore" class="w-full" @change="handleUpdate">
+                <el-option :value="true" label="平局双方各 +1 分（默认）" />
+                <el-option :value="false" label="平局不加分（只有胜场记 1 分）" />
+              </el-select>
               <p class="text-[11px] text-neutral-500 mt-2">
                 平局时擂主与挑战者都要下场排队尾,本项只决定是否给双方各记 1 分
               </p>

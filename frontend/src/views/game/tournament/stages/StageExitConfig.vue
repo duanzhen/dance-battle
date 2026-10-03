@@ -83,33 +83,33 @@
       <div class="grid grid-cols-2 gap-2">
         <div>
           <label class="text-[11px] text-neutral-600 block mb-1">去向赛段</label>
-          <select v-model="form.targetStageId" :disabled="editing" class="cfg-select w-full">
-            <option v-for="t in targetOptions" :key="String(t.id)" :value="t.id">{{ t.name }}</option>
-          </select>
+          <el-select v-model="form.targetStageId" :disabled="editing" class="w-full" placeholder="请选择去向赛段">
+            <el-option v-for="t in targetOptions" :key="String(t.id)" :label="t.name" :value="t.id" />
+          </el-select>
         </div>
         <div>
           <label class="text-[11px] text-neutral-600 block mb-1">结果</label>
-          <select v-model="form.resultFilter" class="cfg-select w-full">
-            <option value="ADVANCE">{{ knockoutMode ? '胜者' : '晋级' }}</option>
-            <option value="ELIMINATED">{{ knockoutMode ? '败者' : '落选' }}</option>
-            <option v-if="!knockoutMode" value="ANY">不限</option>
-          </select>
+          <el-select v-model="form.resultFilter" class="w-full">
+            <el-option value="ADVANCE" :label="knockoutMode ? '胜者' : '晋级'" />
+            <el-option value="ELIMINATED" :label="knockoutMode ? '败者' : '落选'" />
+            <el-option v-if="!knockoutMode" value="ANY" label="不限" />
+          </el-select>
         </div>
       </div>
       <div v-if="isAudition && !editing">
         <label class="text-[11px] text-neutral-600 block mb-1">圈</label>
-        <select v-model="form.zone" class="cfg-select w-full">
-          <option value="__all__">全部 {{ circleCount }} 圈（同样规则）</option>
-          <option v-for="z in zoneOptions" :key="z" :value="z">第 {{ z.replace('ZONE-', '') }} 圈</option>
-        </select>
+        <el-select v-model="form.zone" class="w-full">
+          <el-option value="__all__" :label="`全部 ${circleCount} 圈（同样规则）`" />
+          <el-option v-for="z in zoneOptions" :key="z" :value="z" :label="`第 ${z.replace('ZONE-', '')} 圈`" />
+        </el-select>
       </div>
       <!-- 淘汰赛(晋级赛)只分胜负,不涉及名次匹配 -->
       <div v-if="!knockoutMode">
         <label class="text-[11px] text-neutral-600 block mb-1">名次</label>
-        <select v-model="form.rankMode" class="cfg-select w-full">
-          <option value="none">不限名次（全部）</option>
-          <option value="range">指定名次段</option>
-        </select>
+        <el-select v-model="form.rankMode" class="w-full">
+          <el-option value="none" label="不限名次（全部）" />
+          <el-option value="range" label="指定名次段" />
+        </el-select>
       </div>
       <div v-if="form.rankMode === 'range'" class="grid grid-cols-2 gap-2">
         <input v-model.number="form.rankStart" type="number" min="1" class="cfg-input w-full" placeholder="起，如 9" />

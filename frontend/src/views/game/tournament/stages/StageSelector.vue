@@ -1,20 +1,20 @@
 <template>
   <div class="w-full">
     <label v-if="label" class="text-xs text-neutral-500 mb-2 block">{{ label }}</label>
-    <div class="relative">
-      <select
-        :value="modelValue ?? ''"
-        @change="onChange"
-        class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none appearance-none disabled:opacity-50"
-        :disabled="loading || stages.length === 0"
-      >
-        <option value="" disabled>请选择赛段</option>
-        <option v-for="s in filteredStages" :key="s.id" :value="s.id">
-          {{ s.name }} · {{ modeLabel(s.stageMode) }} · {{ statusLabel(s.status) }}
-        </option>
-      </select>
-      <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
-    </div>
+    <el-select
+      :model-value="modelValue ?? null"
+      class="w-full"
+      placeholder="请选择赛段"
+      :disabled="loading || stages.length === 0"
+      @change="onChange"
+    >
+      <el-option
+        v-for="s in filteredStages"
+        :key="s.id"
+        :label="`${s.name} · ${modeLabel(s.stageMode)} · ${statusLabel(s.status)}`"
+        :value="s.id"
+      />
+    </el-select>
     <p v-if="!loading && filteredStages.length === 0" class="text-[10px] text-neutral-600 mt-1">
       {{ stages.length === 0 ? '该赛事暂无赛段' : `该赛事暂无${modeLabel(onlyMode) || '符合条件的'}赛段` }}
     </p>
@@ -24,7 +24,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { ChevronDown } from 'lucide-vue-next';
 import { listStage } from '@/api/game/stage';
 
 /**
@@ -61,10 +60,9 @@ const load = async () => {
   }
 };
 
-const onChange = (e: Event) => {
-  const v = (e.target as HTMLSelectElement).value;
+const onChange = (v: string | number | null) => {
   // 保留原始字符串:后端 Long/雪花ID 序列化为 string,Number 化会精度丢失导致回显与查询双双失败
-  emit('update:modelValue', v === '' ? null : v);
+  emit('update:modelValue', v ?? null);
 };
 
 const modeMap: Record<string, string> = {

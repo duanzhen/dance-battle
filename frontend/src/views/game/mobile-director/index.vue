@@ -1669,30 +1669,6 @@ onUnmounted(() => {
 });
 </script>
 
-<style>
-/* 下拉面板 teleport 到 body,需要非 scoped 样式才能命中 */
-.director-select-popper.el-popper {
-  background: #171717;
-  border: 1px solid #404040;
-}
-.director-select-popper .el-select-dropdown__item {
-  color: #e5e5e5;
-  font-size: 13px;
-}
-.director-select-popper .el-select-dropdown__item.is-hovering,
-.director-select-popper .el-select-dropdown__item:hover {
-  background: #262626;
-  color: #f59e0b;
-}
-.director-select-popper .el-select-dropdown__item.is-disabled {
-  color: #525252;
-}
-.director-select-popper .el-select-dropdown__empty {
-  color: #737373;
-  font-size: 12px;
-}
-</style>
-
 <style scoped>
 /* 不显示任何滚动条(仍可滚动) */
 :deep(*) {
@@ -1700,23 +1676,6 @@ onUnmounted(() => {
   -ms-overflow-style: none;
 }
 
-/* 自由对抗选手下拉:沿用全局深色表单控件(.cfg-select)的观感 */
-.director-select :deep(.el-select__wrapper) {
-  background-color: #0a0a0a;
-  border: 1px solid #404040;
-  border-radius: 8px;
-  min-height: 36px;
-  box-shadow: none;
-  font-size: 13px;
-  color: #f5f5f5;
-}
-.director-select :deep(.el-select__wrapper.is-focused) {
-  border-color: #f59e0b;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
-}
-.director-select :deep(.el-select__placeholder) {
-  color: #737373;
-}
 :deep(*)::-webkit-scrollbar {
   display: none;
 }

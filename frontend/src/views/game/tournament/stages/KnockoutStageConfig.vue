@@ -42,15 +42,11 @@
           <!-- 结果公布模式:赛段开始后仍可修改(自动/手动/导播台判定) -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <label class="text-xs text-neutral-500 mb-2 block">结果公布模式</label>
-            <select
-              v-model="config.publishMode"
-              class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-              @change="handleUpdate"
-            >
-              <option value="AUTO">自动公布(裁判判完即公布)</option>
-              <option value="MANUAL">手动公布(导播台确认后公布)</option>
-              <option value="DIRECTOR">导播台判定(裁判不判罚,导播台选胜负)</option>
-            </select>
+            <el-select v-model="config.publishMode" class="w-full" @change="handleUpdate">
+              <el-option value="AUTO" label="自动公布(裁判判完即公布)" />
+              <el-option value="MANUAL" label="手动公布(导播台确认后公布)" />
+              <el-option value="DIRECTOR" label="导播台判定(裁判不判罚,导播台选胜负)" />
+            </el-select>
             <p class="text-[10px] text-neutral-600 mt-1.5">赛段开始后仍可修改,新场次按新模式生效</p>
           </div>
 
@@ -58,7 +54,7 @@
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-2">赛制概览</div>
             <div class="text-sm text-neutral-300">{{ config.teamsCount }} 名选手 → 单败淘汰 → {{ config.advanceCount }} 名选手晋级</div>
-            <div class="text-xs text-neutral-500 mt-1">共需 {{ Math.ceil(Math.log2(config.teamsCount)) }} 轮比赛</div>
+            <div class="text-xs text-neutral-500 mt-1">打分机制：判胜负平</div>
           </div>
 
           <!-- 出口去向:赛段已开始/已结束时只读展示 -->
@@ -192,15 +188,16 @@
             <!-- 基本信息 -->
             <div>
               <label class="text-xs text-neutral-500 mb-2 block">比赛格式</label>
-              <select
-                v-model="config.format"
-                class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                @change="handleUpdate"
-              >
-                <option value="BO1">BO1 (单局决胜)</option>
-                <option value="BO3">BO3 (三局两胜)</option>
-                <option value="BO5">BO5 (五局三胜)</option>
-              </select>
+              <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
+                <div>
+                  <label class="text-xs text-neutral-500 mb-2 block">ROUND数量</label>
+                  <el-select v-model="config.format" class="w-full" @change="handleUpdate">
+                    <el-option value="BO1" label="BO1 (单局决胜)" />
+                    <el-option value="BO3" label="BO3 (三局两胜)" />
+                    <el-option value="BO5" label="BO5 (五局三胜)" />
+                  </el-select>
+                </div>
+              </div>
             </div>
 
             <!-- 晋级规则 -->
@@ -209,40 +206,25 @@
               <div class="bg-black border border-neutral-700 rounded-lg p-4 space-y-3">
                 <!-- 季军仅在半决赛(4 队)出现;GUEST/种子相关配置在中间态处理 -->
                 <label v-if="config.teamsCount === 4" class="flex items-center justify-between">
-                  <span class="text-sm text-neutral-300">季军赛</span>
+                  <span class="text-xs text-neutral-500">季军赛</span>
                   <input type="checkbox" v-model="config.playThirdPlace" class="accent-amber-500 w-4 h-4" @change="handleUpdate" />
                 </label>
                 <div>
-                  <span class="text-sm text-neutral-300 block mb-2">结果公布模式</span>
-                  <select
-                    v-model="config.publishMode"
-                    class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 focus:outline-none"
-                    @change="handleUpdate"
-                  >
-                    <option value="AUTO">自动公布(裁判判完即公布)</option>
-                    <option value="MANUAL">手动公布(导播台确认后公布)</option>
-                    <option value="DIRECTOR">导播台判定(裁判不判罚,导播台选胜负)</option>
-                  </select>
+                  <label class="text-xs text-neutral-500 mb-2 block">结果公布模式</label>
+                  <el-select v-model="config.publishMode" class="w-full" @change="handleUpdate">
+                    <el-option value="AUTO" label="自动公布(裁判判完即公布)" />
+                    <el-option value="MANUAL" label="手动公布(导播台确认后公布)" />
+                    <el-option value="DIRECTOR" label="导播台判定(裁判不判罚,导播台选胜负)" />
+                  </el-select>
                 </div>
               </div>
             </div>
-
-            <!-- 打分与转场配置 -->
-            <ScoringTransitionConfig
-              :scoring="config.scoring"
-              @update:scoring="
-                (v) => {
-                  config.scoring = v;
-                  handleUpdate();
-                }
-              "
-            />
 
             <!-- 预览 -->
             <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
               <div class="text-xs text-neutral-500 mb-2">赛制预览</div>
               <div class="text-sm text-neutral-300">{{ config.teamsCount }} 名选手 → 单败淘汰 → {{ config.advanceCount }} 名选手晋级</div>
-              <div class="text-xs text-neutral-500 mt-1">共需 {{ Math.ceil(Math.log2(config.teamsCount)) }} 轮比赛</div>
+              <div class="text-xs text-neutral-500 mt-1">打分机制：判胜负平</div>
             </div>
 
             <!-- 出口去向:胜者/败者送到哪个下游赛段(不配则默认胜者进下一赛段) -->
@@ -258,7 +240,6 @@
 import { ref, watch, onMounted, computed } from 'vue';
 import { Trophy } from 'lucide-vue-next';
 import { KnockoutTemplate, KnockoutConfig, StageData, ConfigMode } from './types';
-import ScoringTransitionConfig from './ScoringTransitionConfig.vue';
 import StageExitConfig from './StageExitConfig.vue';
 
 // Props
@@ -341,7 +322,8 @@ const parseConfig = () => {
     config.value.pairingMode = ko.pairingMode !== undefined ? ko.pairingMode : '';
     if (ko.publishMode !== undefined) config.value.publishMode = ko.publishMode;
     if (ko.thirdPlaceMatch !== undefined) config.value.playThirdPlace = ko.thirdPlaceMatch;
-    if (parsed.scoring) config.value.scoring = parsed.scoring;
+    // 打分机制由赛制决定(淘汰赛=判胜负平),不是配置项:读回时也强制回正
+    if (parsed.scoring) config.value.scoring = { ...parsed.scoring, type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' };
   } catch (e) {
     console.warn('Failed to parse ruleConfig:', e);
   }
@@ -371,7 +353,8 @@ const serializeConfig = () => {
       publishMode: config.value.publishMode,
       thirdPlaceMatch: config.value.playThirdPlace
     },
-    scoring: config.value.scoring
+    // 打分机制由赛制决定(淘汰赛=判胜负平),不作为用户配置项
+    scoring: { ...config.value.scoring, type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' }
     // 不写 transition:下一赛段以赛段链 next 为唯一事实源,后端对
     // "链 next 与 transition.targetStageId 不一致"会直接报错。
     // 前端无该字段的编辑入口,保留并回写只会让历史脏值永久存续、且界面上无法修复,
@@ -387,6 +370,12 @@ const defaultPairing = computed(() => 'SEQUENTIAL');
 const effectivePairingMode = computed(() => config.value.pairingMode || defaultPairing.value);
 
 const pairingLabel = computed(() => (effectivePairingMode.value === 'SEED' ? '头尾交叉' : '顺序配对'));
+
+/** 单败淘汰总轮数:按参赛人数取对数(如 32 人 → 5 轮) */
+const roundCount = computed(() => {
+  const teams = Number(config.value.teamsCount) || 0;
+  return teams > 1 ? Math.ceil(Math.log2(teams)) : 0;
+});
 
 const pairingHint = computed(() => {
   return '默认顺序相邻(1-2、3-4…);需要强种子分散(如 1 对 16)时选择种子交叉。' + '注意:这里的选择只属于本赛段,和其他赛段的配置无关。';

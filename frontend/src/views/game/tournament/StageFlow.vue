@@ -752,6 +752,37 @@ const completeCreate = () => {
   handleCreateStage(selectedCreateMode.value, newStageData.value.name, 'DRAFT', tempStage.value.ruleConfig);
 };
 
+/**
+ * 赛段人数(本段/晋级)在各赛制配置里的位置不同,统一在这里解析,避免只读顶层写成 0:
+ *   KNOCKOUT → knockout.teamsCount / knockout.advanceCount
+ *   GROUP    → (group 段或顶层).groupCount × teamsPerGroup / × advancePerGroup
+ *   AUDITION → 入口不限(start=0) / advanceCount
+ *   RANK     → scale / advanceCount;  ARENA → scale / 1;  FREE_MATCH → 动态
+ */
+const resolveStageSize = (stageMode: StageMode, config: any): { start: number; end: number } => {
+  const c = config || {};
+  const ko = c.knockout ?? {};
+  const grp = c.group ?? c;
+  const num = (v: any) => Number(v) || 0;
+  switch (stageMode) {
+    case StageMode.AUDITION:
+      return { start: 0, end: num(c.advanceCount ?? c.advanceQuota) };
+    case StageMode.GROUP:
+      return {
+        start: num(grp.groupCount) * num(grp.teamsPerGroup),
+        end: num(grp.groupCount) * num(grp.advancePerGroup)
+      };
+    case StageMode.ARENA:
+      return { start: num(c.scale), end: 1 };
+    case StageMode.KNOCKOUT:
+      return { start: num(ko.teamsCount ?? c.teamsCount), end: num(ko.advanceCount ?? c.advanceCount) };
+    case StageMode.RANK:
+      return { start: num(c.scale), end: num(c.advanceCount ?? c.advanceQuota) };
+    default:
+      return { start: 0, end: 0 };
+  }
+};
+
 // 处理新建赛段
 const handleCreateStage = async (stageMode: StageMode, name: string, status: string, ruleConfig?: string) => {
   // 解析配置(如果有)或使用默认配置
@@ -812,14 +843,16 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
 
   try {
     // 构建表单数据 - 只在值存在时才传递指针字段
+    const size = resolveStageSize(stageMode, config);
     const formData: StageForm = {
       tournamentId: String(tournamentId.value),
       name: name,
       stageMode: stageMode,
       // 海选为打分制,无 BO1/BO3;其余赛制按配置
       format: stageMode === StageMode.AUDITION ? '' : config.format || 'BO3',
-      teamCountStart: stageMode === StageMode.AUDITION ? 0 : config.teamsCount || config.scale || 0,
-      teamCountEnd: config.advanceCount || config.advanceQuota || 0,
+      // 人数按赛制解析(见 resolveStageSize):各赛制配置里字段位置不同,只读顶层会写成 0
+      teamCountStart: size.start,
+      teamCountEnd: size.end,
       status: status,
       ruleConfig: ruleConfig || JSON.stringify(config),
       // 不传 isInitialized:该字段表示"名单已锁定/已排种子",由后端在开赛/落圈时写入,

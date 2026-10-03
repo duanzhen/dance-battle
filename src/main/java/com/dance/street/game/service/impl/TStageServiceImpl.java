@@ -498,25 +498,78 @@ public class TStageServiceImpl implements ITStageService {
             }
             boolean changed = false;
             if (StageModeEnum.KNOCKOUT.getCode().equals(mode)) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> ko = (Map<String, Object>) rc.get("knockout");
-                if (ko == null) {
-                    ko = new HashMap<>();
-                    rc.put("knockout", ko);
+                Map<String, Object> ko = nestedMap(rc, "knockout");
+                // 反向兜底:赛段权威字段(team_count_start/end)缺失或为 0,但配置里有 → 用配置回填,
+                // 避免"客户端只传了 rule_config、没传字段"落出「配置 16/8、字段 0」的不一致。
+                Long rcTeams = asLong(ko.get("teamsCount"));
+                Long rcAdvance = asLong(ko.get("advanceCount"));
+                if (isBlankCount(teamCountStart) && rcTeams != null && rcTeams > 0) {
+                    stage.setTeamCountStart(rcTeams);
+                    teamCountStart = rcTeams;
                 }
-                if (teamCountStart != null && ko.get("teamsCount") == null) {
+                if (isBlankCount(teamCountEnd) && rcAdvance != null && rcAdvance > 0) {
+                    stage.setTeamCountEnd(rcAdvance);
+                    teamCountEnd = rcAdvance;
+                }
+                if (teamCountStart != null && teamCountStart > 0 && ko.get("teamsCount") == null) {
                     ko.put("teamsCount", teamCountStart);
                     changed = true;
                 }
-                if (teamCountEnd != null && ko.get("advanceCount") == null) {
+                if (teamCountEnd != null && teamCountEnd > 0 && ko.get("advanceCount") == null) {
                     ko.put("advanceCount", teamCountEnd);
                     changed = true;
                 }
-            } else if (StageModeEnum.AUDITION.getCode().equals(mode)
-                || StageModeEnum.RANK.getCode().equals(mode)) {
-                if (teamCountEnd != null && rc.get("advanceCount") == null) {
+            } else if (StageModeEnum.GROUP.getCode().equals(mode)) {
+                // 小组赛:本段人数 = 组数 × 每组人数;晋级数 = 组数 × 每组晋级数。
+                // 配置可能包裹在 group 段(前端 serializeConfig),也可能是顶层(建段向导默认)。
+                Map<String, Object> grp = rc.get("group") instanceof Map
+                    ? nestedMap(rc, "group") : rc;
+                Long gc = firstLong(grp, rc, "groupCount");
+                Long tpg = firstLong(grp, rc, "teamsPerGroup");
+                Long apg = firstLong(grp, rc, "advancePerGroup");
+                if (isBlankCount(teamCountStart) && gc != null && tpg != null && gc * tpg > 0) {
+                    stage.setTeamCountStart(gc * tpg);
+                    teamCountStart = gc * tpg;
+                }
+                if (isBlankCount(teamCountEnd) && gc != null && apg != null && gc * apg > 0) {
+                    stage.setTeamCountEnd(gc * apg);
+                    teamCountEnd = gc * apg;
+                }
+            } else if (StageModeEnum.AUDITION.getCode().equals(mode)) {
+                Long rcAdvance = asLong(rc.get("advanceCount"));
+                if (isBlankCount(teamCountEnd) && rcAdvance != null && rcAdvance > 0) {
+                    stage.setTeamCountEnd(rcAdvance);
+                    teamCountEnd = rcAdvance;
+                }
+                if (teamCountEnd != null && teamCountEnd > 0 && rc.get("advanceCount") == null) {
                     rc.put("advanceCount", teamCountEnd);
                     changed = true;
+                }
+            } else if (StageModeEnum.RANK.getCode().equals(mode)) {
+                Long scale = asLong(rc.get("scale"));
+                Long rcAdvance = asLong(rc.get("advanceCount"));
+                if (isBlankCount(teamCountStart) && scale != null && scale > 0) {
+                    stage.setTeamCountStart(scale);
+                    teamCountStart = scale;
+                }
+                if (isBlankCount(teamCountEnd) && rcAdvance != null && rcAdvance > 0) {
+                    stage.setTeamCountEnd(rcAdvance);
+                    teamCountEnd = rcAdvance;
+                }
+                if (teamCountEnd != null && teamCountEnd > 0 && rc.get("advanceCount") == null) {
+                    rc.put("advanceCount", teamCountEnd);
+                    changed = true;
+                }
+            } else if (StageModeEnum.ARENA.getCode().equals(mode)) {
+                Long scale = asLong(rc.get("scale"));
+                if (isBlankCount(teamCountStart) && scale != null && scale > 0) {
+                    stage.setTeamCountStart(scale);
+                    teamCountStart = scale;
+                }
+                // 擂台赛最终只决出 1 个胜者
+                if (isBlankCount(teamCountEnd)) {
+                    stage.setTeamCountEnd(1L);
+                    teamCountEnd = 1L;
                 }
             }
             if (rc.get("mode") == null) {
@@ -529,6 +582,30 @@ public class TStageServiceImpl implements ITStageService {
         } catch (Exception e) {
             log.warn("赛段[{}] ruleConfig 归一化失败,保留原配置: {}", stage.getId(), e.getMessage());
         }
+    }
+
+    private static Long asLong(Object v) {
+        return v instanceof Number n ? n.longValue() : null;
+    }
+
+    private static boolean isBlankCount(Long v) {
+        return v == null || v == 0L;
+    }
+
+    private static Long firstLong(Map<String, Object> a, Map<String, Object> b, String key) {
+        Long v = asLong(a == null ? null : a.get(key));
+        return v != null ? v : asLong(b == null ? null : b.get(key));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> nestedMap(Map<String, Object> rc, String key) {
+        Object v = rc.get(key);
+        if (v instanceof Map) {
+            return (Map<String, Object>) v;
+        }
+        Map<String, Object> m = new HashMap<>();
+        rc.put(key, m);
+        return m;
     }
 
     /**

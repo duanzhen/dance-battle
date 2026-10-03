@@ -3,6 +3,9 @@ package com.dance.street.game.service;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.RefereeMatchVo;
+import com.dance.street.game.domain.vo.RefereeMatchVo.RefereeParticipantInfo;
+
+import java.util.List;
 
 /**
  * 裁判端比赛信息服务接口。
@@ -39,4 +42,10 @@ public interface IRefereeMatchService {
      */
     MatchResultVo submitScore(Long matchId, Long tournamentId, Long refereeId, String refereeName,
                               SubmitResultBo bo);
+
+    /**
+     * 轻量取"当前场次各参赛方的累计分/名次"(仅打分事件触发的局部刷新用)。
+     * 只查场次/赛段/参赛方,不拼整个赛段的场次总览,替代每次打分都全量拉 my-match。
+     */
+    List<RefereeParticipantInfo> matchScores(Long matchId, Long tournamentId, Long refereeId);
 }

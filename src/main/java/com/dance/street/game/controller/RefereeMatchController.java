@@ -3,6 +3,7 @@ package com.dance.street.game.controller;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.vo.RefereeMatchVo;
+import com.dance.street.game.domain.vo.RefereeMatchVo.RefereeParticipantInfo;
 import com.dance.street.game.domain.vo.TRefereeVo;
 import com.dance.street.game.interceptor.RefereeAuthInterceptor;
 import com.dance.street.game.service.IRefereeMatchService;
@@ -18,6 +19,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.util.List;
 
 /**
  * 裁判端接口:authKey 即认证凭证,由 RefereeAuthInterceptor 校验。
@@ -65,6 +68,16 @@ public class RefereeMatchController {
         TRefereeVo referee = currentReferee();
         return R.ok(refereeMatchService.submitScore(matchId, referee.getTournamentId(),
             referee.getId(), referee.getName(), bo));
+    }
+
+    /**
+     * 轻量取当前场次各参赛方的累计分/名次:打分事件触发的局部刷新用,
+     * 不再每次全量拉 my-match。
+     */
+    @GetMapping("/{matchId}/scores")
+    public R<List<RefereeParticipantInfo>> matchScores(@PathVariable Long matchId) {
+        TRefereeVo referee = currentReferee();
+        return R.ok(refereeMatchService.matchScores(matchId, referee.getTournamentId(), referee.getId()));
     }
 
     /** 当前请求携带的裁判凭证(由 RefereeAuthInterceptor 校验后写入) */

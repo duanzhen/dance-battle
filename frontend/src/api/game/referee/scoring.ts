@@ -49,3 +49,14 @@ export function submitRefereeScore(matchId: string | number, data: any) {
     data
   });
 }
+
+/**
+ * 轻量取当前场次各参赛方的累计分/名次:打分事件的局部刷新用,
+ * 替代每次打分都全量拉 my-match。
+ */
+export function getRefereeMatchScores(matchId: string | number) {
+  return refereeRequest({
+    url: `/game/referee-match/${matchId}/scores`,
+    method: 'get'
+  });
+}

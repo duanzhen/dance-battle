@@ -54,6 +54,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -179,20 +181,20 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                                                     ScoringConfig sc, SubmitResultBo bo,
                                                     List<Long> competitorIds) {
         boolean isAudition = profile(stage).result().writeBackSubmittedOnly();
-        writePerCompetitorScores(match, rc, sc, bo, competitorIds, isAudition);
+        Map<Long, Long> touchedRounds = writePerCompetitorScores(match, rc, sc, bo, competitorIds, isAudition);
         if (isAudition) {
-            // 只回写本次真正提交了的选手:此前对整圈参赛方逐个 UPDATE,
-            // 36 人的圈子点一次提交就要写 36 行(纯属放大写锁与往返)
-            accumulateAuditionScores(match, touchedCompetitorIds(bo, competitorIds));
-        } else {
-            accumulateRankScores(match, stage, competitorIds);
+            // 海选:名次/晋级只认 t_round_score;participant.score_value 只是给裁判端显示的缓存总分。
+            // 所以这里只重算"本次真的提交了分"的那几个选手,绝不重算整圈。
+            List<MatchScoreResult> touched = accumulateAuditionScores(match, touchedRounds);
+            refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
+            tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
+            return buildVo(match.getId(), StageConstants.MATCH_GAMING, touched);
         }
+        accumulateRankScores(match, stage, competitorIds);
         List<MatchScoreResult> accumulated = loadAuditionResults(match, competitorIds);
         refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
-        if (!isAudition) {
-            maybeAutoPublishRankStage(stage);
-        }
+        maybeAutoPublishRankStage(stage);
         return buildVo(match.getId(), StageConstants.MATCH_GAMING, accumulated);
     }
 
@@ -200,10 +202,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
      * 逐 (轮次, 选手) 覆盖写本轮打分:同一选手多个维度一次删除再批量插入,
      * 避免逐条「先删后插」导致同一次提交的多维度分互相覆盖。
      */
-    private void writePerCompetitorScores(TMatch match, RuleConfigHolder rc, ScoringConfig sc,
-                                          SubmitResultBo bo, List<Long> competitorIds, boolean isAudition) {
+    private Map<Long, Long> writePerCompetitorScores(TMatch match, RuleConfigHolder rc, ScoringConfig sc,
+                                                     SubmitResultBo bo, List<Long> competitorIds, boolean isAudition) {
         if (bo.getScores() == null || bo.getScores().isEmpty()) {
-            return;
+            return Map.of();
         }
         Map<Long, TMatchRound> roundByCompetitor = new HashMap<>();
         List<TMatchRound> rounds = matchRoundMapper.selectList(
@@ -214,6 +216,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
         }
         Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
+        // 参赛方用 Set 做越界校验(此前 List.contains 线性查找,O(人数×维度))
+        Set<Long> competitorIdSet = new HashSet<>(competitorIds);
+        // 无专属轮次时的兜底轮:整批只解析一次(此前循环里每个选手都重查一次全部轮次 → N+1)
+        TMatchRound fallbackRound = null;
         // 按 (轮次,选手) 分组:同一选手多个维度一次删除再批量插入,
         // 避免逐条「先删后插」导致同一次提交的多维度分互相覆盖
         Map<String, List<ScoreEntryBo>> byRoundCompetitor = new java.util.LinkedHashMap<>();
@@ -233,29 +239,49 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
             // 越界校验:只能给本场参赛方打分(海选/排名赛逐选手轮次);
             // 加赛场次等单轮共评场景无选手专属轮次,回退到当前轮
-            if (!competitorIds.contains(se.getCompetitorId())) {
+            if (!competitorIdSet.contains(se.getCompetitorId())) {
                 throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
             }
             TMatchRound target = roundByCompetitor.get(se.getCompetitorId());
             if (target == null) {
-                target = matchRoundLocator.current(match);
+                if (fallbackRound == null) {
+                    fallbackRound = matchRoundLocator.current(match);
+                }
+                target = fallbackRound;
             }
             byRoundCompetitor
                 .computeIfAbsent(target.getId() + ":" + se.getCompetitorId(), k -> new ArrayList<>())
                 .add(se);
         }
+        if (byRoundCompetitor.isEmpty()) {
+            return Map.of();
+        }
+        // 一条 DELETE 覆盖本次全部 (轮次,选手):非本次的组合本就没有行,不会误删。
+        // 此前每个 (轮次,选手) 一条 DELETE,整圈提交 = O(人数) 条删除。
+        // 同时记下"选手 → 其轮次",供海选只重算这几个人。
+        Map<Long, Long> touchedRoundByCompetitor = new LinkedHashMap<>();
+        for (String key : byRoundCompetitor.keySet()) {
+            String[] parts = key.split(":");
+            touchedRoundByCompetitor.put(Long.valueOf(parts[1]), Long.valueOf(parts[0]));
+        }
+        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+            .in(TRoundScore::getRoundId, touchedRoundByCompetitor.values())
+            .eq(TRoundScore::getRefereeId, refId)
+            .in(TRoundScore::getCompetitorId, touchedRoundByCompetitor.keySet()));
+        // 批量插入:此前逐条 insert,整圈提交 = O(人数×维度) 条插入
+        List<TRoundScore> newScores = new ArrayList<>();
         for (Map.Entry<String, List<ScoreEntryBo>> e : byRoundCompetitor.entrySet()) {
             String[] key = e.getKey().split(":");
             Long roundId = Long.valueOf(key[0]);
             Long competitorId = Long.valueOf(key[1]);
-            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                .eq(TRoundScore::getRoundId, roundId)
-                .eq(TRoundScore::getRefereeId, refId)
-                .eq(TRoundScore::getCompetitorId, competitorId));
             for (ScoreEntryBo se : e.getValue()) {
-                writeScoreEntry(match, roundId, competitorId, refId, se);
+                newScores.add(buildScoreEntry(match, roundId, competitorId, refId, se));
             }
         }
+        if (!newScores.isEmpty()) {
+            roundScoreMapper.insertBatch(newScores);
+        }
+        return touchedRoundByCompetitor;
     }
 
     /**
@@ -408,7 +434,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
      * 裁判端无登录租户上下文,需显式带租户,否则 tenant_id 插入报错;
      * 未带裁判 ID(管理端录入)记为 0,避免 referee_id 为 null 时唯一键判重失效、重复提交各自留下多行。
      */
-    private TRoundScore writeScoreEntry(TMatch match, Long roundId, Long competitorId, Long refereeId,
+    /** 组装一条轮次打分(不落库,由调用方批量插入) */
+    private TRoundScore buildScoreEntry(TMatch match, Long roundId, Long competitorId, Long refereeId,
                                         ScoreEntryBo se) {
         TRoundScore rs = new TRoundScore();
         rs.setTournamentId(match.getTournamentId());
@@ -419,6 +446,13 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         rs.setScore(se.getScore());
         rs.setDimension(StringUtils.isNotBlank(se.getDimension()) ? se.getDimension() : StageConstants.DIMENSION_MAIN);
         rs.setAction(StringUtils.isNotBlank(se.getAction()) ? se.getAction() : StageConstants.SCORE_ACTION_SCORE);
+        return rs;
+    }
+
+    /** 组装并立即插入一条轮次打分(单场判定路径逐条写用) */
+    private TRoundScore writeScoreEntry(TMatch match, Long roundId, Long competitorId, Long refereeId,
+                                        ScoreEntryBo se) {
+        TRoundScore rs = buildScoreEntry(match, roundId, competitorId, refereeId, se);
         roundScoreMapper.insert(rs);
         return rs;
     }
@@ -906,54 +940,36 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         return buildVo(match.getId(), StageConstants.MATCH_GAMING, results);
     }
 
-    /** 本次提交涉及的参赛方(去重);无有效明细时返回空列表(表示不需回写) */
-    private List<Long> touchedCompetitorIds(SubmitResultBo bo, List<Long> allCompetitorIds) {
-        if (bo.getScores() == null || bo.getScores().isEmpty()) {
-            return List.of();
-        }
-        java.util.LinkedHashSet<Long> touched = new java.util.LinkedHashSet<>();
-        for (ScoreEntryBo se : bo.getScores()) {
-            if (se.getCompetitorId() != null && se.getScore() != null
-                && allCompetitorIds.contains(se.getCompetitorId())) {
-                touched.add(se.getCompetitorId());
-            }
-        }
-        return new ArrayList<>(touched);
-    }
-
     /**
-     * 海选赛累计打分:从已写入的 TRoundScore 重新汇总每个参赛方的总分并回写 participant。
-     * 比赛场次保持 GAMING,不结算。管理员最终通过 completeStage 结算排名。
+     * 海选:只重算"本次提交了的选手"的显示用缓存总分(participant.score_value)。
+     *
+     * <p>每个选手的总分 = 他自己轮次里所有裁判的分之和——只查他一个人的行、只更新他一行。
+     * 名次/晋级不在这里算:结算器({@code AuditionStageSettler})直接按 {@code t_round_score}
+     * 现算,所以这里不需要、也不应该重算整圈。</p>
      */
-    private void accumulateAuditionScores(TMatch match, List<Long> competitorIds) {
-        if (competitorIds == null || competitorIds.isEmpty()) {
-            return;
-        }
-        // 逐选手打分后分数分布在各自轮次,需跨本场全部轮次汇总
-        List<Long> roundIds = matchRoundMapper.selectList(
-                Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
-            .stream().map(TMatchRound::getId).toList();
-        if (roundIds.isEmpty()) {
-            return;
-        }
-        List<TRoundScore> allScores = roundScoreMapper.selectList(
-            Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds));
-
-        Map<Long, java.math.BigDecimal> totals = new HashMap<>();
-        for (TRoundScore rs : allScores) {
-            if (rs.getCompetitorId() == null || rs.getScore() == null) {
-                continue;
-            }
-            totals.merge(rs.getCompetitorId(), rs.getScore(), java.math.BigDecimal::add);
-        }
-
-        for (Long cid : competitorIds) {
-            java.math.BigDecimal sum = totals.getOrDefault(cid, java.math.BigDecimal.ZERO);
+    private List<MatchScoreResult> accumulateAuditionScores(TMatch match, Map<Long, Long> touchedRoundByCompetitor) {
+        List<MatchScoreResult> results = new ArrayList<>();
+        for (Map.Entry<Long, Long> e : touchedRoundByCompetitor.entrySet()) {
+            Long competitorId = e.getKey();
+            Long roundId = e.getValue();
+            java.math.BigDecimal sum = roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                    .eq(TRoundScore::getRoundId, roundId)
+                    .eq(TRoundScore::getCompetitorId, competitorId)
+                    .select(TRoundScore::getScore))
+                .stream()
+                .map(TRoundScore::getScore)
+                .filter(Objects::nonNull)
+                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
             participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
                 .set(TMatchParticipant::getScoreValue, sum)
                 .eq(TMatchParticipant::getMatchId, match.getId())
-                .eq(TMatchParticipant::getCompetitorId, cid));
+                .eq(TMatchParticipant::getCompetitorId, competitorId));
+            MatchScoreResult r = new MatchScoreResult();
+            r.setCompetitorId(competitorId);
+            r.setScoreValue(sum);
+            results.add(r);
         }
+        return results;
     }
 
     /**

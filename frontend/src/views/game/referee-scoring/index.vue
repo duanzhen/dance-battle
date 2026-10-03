@@ -625,7 +625,7 @@ import { useRoute } from 'vue-router';
 import { Plus, Minus } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import logo from '@/assets/logo/logo.png';
-import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore } from '@/api/game/referee/scoring';
+import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore, getRefereeMatchScores } from '@/api/game/referee/scoring';
 import { subscribeChannel } from '@/utils/sseChannel';
 import type { SseStatus } from '@/utils/sseChannel';
 import SseLiveBadge from '@/components/SseLiveBadge/index.vue';
@@ -985,13 +985,13 @@ const confirmKeypad = async () => {
   }
   keypadSubmitting.value = true;
   try {
-    await submitRefereeScore(matchId.value, {
+    const resp = await submitRefereeScore(matchId.value, {
       scores: [{ competitorId: target.competitorId, dimension: 'MAIN', action: 'SCORE', score }]
     });
     // 提交成功后本地回显并跳下一位,不再 await 整页刷新:
-    // 后端已回写权威分数,SSE 的 scores 事件也会异步触发 refresh 校正,
-    // 让按钮转圈只等于一次提交往返(此前还要再等一次 my-match 全量刷新)。
+    // 用提交响应里的权威累计分直接校正(SSE 的 scores 事件只做轻量合并)。
     applyLocalScore(target.competitorId, 'MAIN', score);
+    applyServerParticipants(payloadOf<any>(resp)?.participants);
     autoSelectNext(target);
   } catch (e: any) {
     console.error('提交打分失败:', e);
@@ -1027,9 +1027,10 @@ const confirmRankTarget = async () => {
   }
   keypadSubmitting.value = true;
   try {
-    await submitRefereeScore(matchId.value, { scores });
-    // 本地回显并跳下一位,不再 await 整页刷新(SSE 的 scores 事件会后台校正)
+    const resp = await submitRefereeScore(matchId.value, { scores });
+    // 本地回显并跳下一位,不再 await 整页刷新;用提交响应校正累计分
     scores.forEach((s: any) => applyLocalScore(s.competitorId, s.dimension, s.score));
+    applyServerParticipants(payloadOf<any>(resp)?.participants);
     autoSelectNext(target);
   } catch (e: any) {
     console.error('提交维度打分失败:', e);
@@ -1167,6 +1168,18 @@ const applyLocalScore = (competitorId: number, dimension: string, score: number)
     ...myScores.value.filter((s) => !(s.competitorId === competitorId && (s.dimension || 'MAIN') === dim)),
     { competitorId, dimension: dim, score } as MyScore
   ];
+};
+
+/** 用提交响应的权威累计分/名次校正本地列表(不再等 SSE 全量刷新) */
+const applyServerParticipants = (list: any[]) => {
+  if (!Array.isArray(list) || list.length === 0) return;
+  const byCid = new Map(list.map((r: any) => [String(r.competitorId), r]));
+  participants.value.forEach((p: any) => {
+    const r = byCid.get(String(p.competitorId));
+    if (!r) return;
+    p.currentScore = Number(r.scoreValue) || 0;
+    p.rankInMatch = r.rankInMatch;
+  });
 };
 
 /** 海选逐选手打分:本场所有选手是否已被当前裁判评完(二海/加赛同样适用;0 分也算评完) */
@@ -1497,6 +1510,36 @@ const loadData = async (stageIdParam?: number, matchIdParam?: number, selectAfte
 };
 
 let unsubSse: (() => void) | null = null;
+let sseRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let sseScoresTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 合并 150ms 内的多次全量刷新(跨赛段/场次切换等非打分事件) */
+const scheduleFullRefresh = () => {
+  if (sseRefreshTimer) return;
+  sseRefreshTimer = setTimeout(() => {
+    sseRefreshTimer = null;
+    refresh();
+  }, 150);
+};
+
+/** 打分事件:只拉当前场次的累计分并合并,不再全量 my-match */
+const mergeCurrentMatchScores = async () => {
+  if (submitting.value || matchId.value == null) return;
+  try {
+    const resp = await getRefereeMatchScores(matchId.value);
+    mergeLive({ participants: payloadOf<any>(resp) });
+  } catch (e) {
+    // 轻量刷新失败不打断打分;断线重连的 onRefresh 会做全量校正
+  }
+};
+
+const scheduleScoresMerge = () => {
+  if (sseScoresTimer) return;
+  sseScoresTimer = setTimeout(() => {
+    sseScoresTimer = null;
+    mergeCurrentMatchScores();
+  }, 150);
+};
 
 /**
  * 裁判 SSE 长连接:复用赛事事件通道,按 authKey 身份订阅,只收命中自己的定向事件。
@@ -1512,10 +1555,15 @@ const connectRefereeSse = (authKey: string) => {
   unsubSse = subscribeChannel({
     key: `referee:${authKey}`,
     buildUrl: () => `${baseUrl}/tournament/event/sse?authKey=${encodeURIComponent(authKey)}&clientid=${clientId}`,
-    onMessage: () => {
-      // 所有广播都触发 refresh:refresh 内部按上下文变化决定整页应用或仅合并累计分,
-      // 保证下一赛段场次开始/赛段切换等跨赛段事件也能被裁判端感知
-      refresh();
+    onMessage: (data: any) => {
+      // 打分事件且就是当前场次:只拉轻量累计分合并,避免每次打分都全量 my-match;
+      // 其余事件(开赛/换场/换赛段)仍走全量 refresh,保证上下文能被裁判端感知
+      const evtMatchId = data?.matchId;
+      if (data?.type === 'scores' && evtMatchId != null && String(evtMatchId) === String(matchId.value)) {
+        scheduleScoresMerge();
+      } else {
+        scheduleFullRefresh();
+      }
     },
     // 断线重连成功后全量刷新,补回错过的事件
     onRefresh: () => refresh(),

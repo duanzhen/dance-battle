@@ -8,6 +8,7 @@ import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.vo.MatchResultVo;
@@ -27,6 +28,7 @@ import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.service.IRefereeMatchService;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITRefereeStageService;
@@ -71,6 +73,7 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
     private final TCompetitorMapper competitorMapper;
     private final TRoundScoreMapper roundScoreMapper;
     private final TMatchRefereeMapper matchRefereeMapper;
+    private final TRefereeStageMapper refereeStageMapper;
     private final ITMatchResultService matchResultService;
     private final ITRefereeStageService refereeStageService;
     private final ITStageLifecycleService stageLifecycleService;
@@ -518,22 +521,91 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         if (!StageConstants.MATCH_GAMING.equals(match.getStatus())) {
             throw new ServiceException("场次状态不允许提交判罚");
         }
-        // 越权防护:裁判只能提交本人所在赛事的场次,且必须已被分配该赛段
+        // 越权防护:裁判只能提交本人所在赛事的场次,且必须已被分配该赛段/该圈
         if (tournamentId != null && !tournamentId.equals(match.getTournamentId())) {
             throw new ServiceException("无权提交该场次的判罚");
         }
-        if (!refereeStageService.getStageIdsByRefereeId(refereeId).contains(match.getStageId())) {
-            throw new ServiceException("未分配该赛段的判罚权限");
-        }
-        // 分圈海选:只能判罚自己绑定的圈
-        Set<Long> allowed = allowedMatchIds(match.getStageId(), refereeId);
-        if (allowed != null && !allowed.contains(matchId)) {
-            throw new ServiceException("未分配该圈(场次)的判罚权限");
-        }
+        assertScoringPermission(match.getStageId(), matchId, refereeId);
 
         MatchResultVo result = matchResultService.submitResult(bo);
         log.info("裁判[{}](id={})提交场次[{}]判罚结果", refereeName, refereeId, matchId);
         return result;
+    }
+
+    @Override
+    public List<RefereeParticipantInfo> matchScores(Long matchId, Long tournamentId, Long refereeId) {
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在");
+        }
+        if (tournamentId != null && !tournamentId.equals(match.getTournamentId())) {
+            throw new ServiceException("无权查看该场次");
+        }
+        assertScoringPermission(match.getStageId(), matchId, refereeId);
+        // 排名赛未公布时隐藏汇总分/排名(与 my-match 同一口径),避免轻量接口提前泄露
+        TStage stage = stageMapper.selectById(match.getStageId());
+        boolean rankResultHidden = false;
+        if (stage != null && StageModeProfiles.of(stage.getStageMode()).rank()
+            && !StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
+            RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+            rankResultHidden = rc != null && StringUtils.isNotBlank(rc.getPublishMode())
+                && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
+        }
+        List<TMatchParticipant> participants = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, matchId)
+            .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+        List<RefereeParticipantInfo> out = new ArrayList<>();
+        for (TMatchParticipant p : participants) {
+            if (p.getCompetitorId() == null) {
+                continue;
+            }
+            RefereeParticipantInfo pi = new RefereeParticipantInfo();
+            pi.setCompetitorId(p.getCompetitorId());
+            pi.setDisplaySlotIndex(p.getDisplaySlotIndex());
+            pi.setCurrentScore(rankResultHidden ? null : p.getScoreValue());
+            pi.setRankInMatch(rankResultHidden ? null : p.getRankInMatch());
+            out.add(pi);
+        }
+        return out;
+    }
+
+    /**
+     * 一次算清"裁判能不能判这一场":赛段级分配 + 圈级绑定。
+     * 合并成 3 条查询(场次 / 场次裁判绑定 / 赛段分配),
+     * 替代此前 getStageIdsByRefereeId(3 条)+ allowedMatchIds(2 条)共 5 条。
+     */
+    private void assertScoringPermission(Long stageId, Long matchId, Long refereeId) {
+        List<TMatch> stageMatches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stageId)
+            .select(TMatch::getId, TMatch::getDisplayZone));
+        List<Long> stageMatchIds = stageMatches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        List<TMatchReferee> bindings = stageMatchIds.isEmpty() ? List.of()
+            : matchRefereeMapper.selectList(Wrappers.<TMatchReferee>lambdaQuery()
+                .in(TMatchReferee::getMatchId, stageMatchIds)
+                .select(TMatchReferee::getMatchId, TMatchReferee::getRefereeId));
+        Set<Long> mine = bindings.stream()
+            .filter(r -> Objects.equals(r.getRefereeId(), refereeId))
+            .map(TMatchReferee::getMatchId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        boolean stageAssigned = refereeStageMapper.selectCount(Wrappers.<TRefereeStage>lambdaQuery()
+            .eq(TRefereeStage::getStageId, stageId)
+            .eq(TRefereeStage::getRefereeId, refereeId)) > 0;
+        if (!stageAssigned && mine.isEmpty()) {
+            throw new ServiceException("未分配该赛段的判罚权限");
+        }
+        // 存在圈级绑定:只能判自己绑定的圈(同圈加赛场次整体可见)
+        if (!bindings.isEmpty() && !mine.contains(matchId)) {
+            Set<String> myZones = stageMatches.stream()
+                .filter(m -> mine.contains(m.getId()) && StringUtils.isNotBlank(m.getDisplayZone()))
+                .map(TMatch::getDisplayZone)
+                .collect(Collectors.toSet());
+            boolean allowed = stageMatches.stream().anyMatch(m -> Objects.equals(m.getId(), matchId)
+                && StringUtils.isNotBlank(m.getDisplayZone()) && myZones.contains(m.getDisplayZone()));
+            if (!allowed) {
+                throw new ServiceException("未分配该圈(场次)的判罚权限");
+            }
+        }
     }
 
     /** 参赛号码转数值用于排序:空/非数字号码排最后 */

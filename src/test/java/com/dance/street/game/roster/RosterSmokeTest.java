@@ -149,6 +149,7 @@ class RosterSmokeTest {
         // 2) 源赛段产生两名晋级者并结算
         insertCompetitor(tournament.getId(), stage1.getId(), "选手A", "1", 1L);
         insertCompetitor(tournament.getId(), stage1.getId(), "选手B", "2", 2L);
+        placeAuditionAdvancersInZone1(tournament.getId(), stage1.getId());
         TStage settled = new TStage();
         settled.setId(stage1.getId());
         settled.setStatus(StageConstants.STAGE_SETTLED);
@@ -263,6 +264,7 @@ class RosterSmokeTest {
         loser.setFinalRank(3L);
         loser.setOutcomeStatus(OutcomeStatusEnum.ELIMINATED.getCode());
         competitorMapper.insert(loser);
+        placeAuditionAdvancersInZone1(tournament.getId(), stageA.getId());
 
         // 源结算 → 两来源组就绪 → 整单装配:2 主晋级 + 1 复活
         TStage settled = new TStage();
@@ -312,6 +314,14 @@ class RosterSmokeTest {
         // 去掉建段自动补的默认衔接边(按行 ID 定位)
         rosterService.removeGroup(reviveRoster.getId(), defaultGroupIdOf(reviveRoster.getId()));
 
+        // 决赛先接收"预选晋级直入"来源(跨级来源),之后还会接收复活赛胜者 —— 开赛前配好
+        TStageRosterBo directRoster = new TStageRosterBo();
+        directRoster.setSourceStageId(pre.getId());
+        directRoster.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
+        directRoster.setFillMode(RosterConstants.FILL_AUTO);
+        directRoster.setQuota(0);
+        rosterService.addGroups(finals.getId(), directRoster);
+
         // 预选:两名待赛选手 → 开赛 → 判一场 → 完成(产出 1 晋级 + 1 落选)
         insertPendingCompetitor(tournament.getId(), pre.getId(), "正赛A", "1");
         insertPendingCompetitor(tournament.getId(), pre.getId(), "正赛B", "2");
@@ -321,14 +331,6 @@ class RosterSmokeTest {
         assertEquals(StageConstants.STAGE_SETTLED, stageMapper.selectById(pre.getId()).getStatus());
         assertEquals(1, countOutcome(pre.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
         assertEquals(1, countOutcome(pre.getId(), OutcomeStatusEnum.ELIMINATED.getCode()));
-
-        // 决赛先接收"预选晋级直入"来源(跨级来源),之后还会接收复活赛胜者
-        TStageRosterBo directRoster = new TStageRosterBo();
-        directRoster.setSourceStageId(pre.getId());
-        directRoster.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
-        directRoster.setFillMode(RosterConstants.FILL_AUTO);
-        directRoster.setQuota(0);
-        rosterService.addGroups(finals.getId(), directRoster);
 
         // 复活海选:落选者经复活名单进入 → 打分 → 完成
         assertEquals(1, rosterService.applyRoster(revive.getId(), null), "复活名单应带入 1 名落选者");
@@ -392,6 +394,7 @@ class RosterSmokeTest {
         TCompetitor a = insertCompetitorWithReturn(tournament.getId(), stage1.getId(), "晋级A", "1", 1L);
         TCompetitor b = insertCompetitorWithReturn(tournament.getId(), stage1.getId(), "晋级B", "2", 2L);
         TCompetitor c = insertCompetitorWithReturn(tournament.getId(), stage1.getId(), "晋级C", "3", 3L);
+        placeAuditionAdvancersInZone1(tournament.getId(), stage1.getId());
         TStage settled = new TStage();
         settled.setId(stage1.getId());
         settled.setStatus(StageConstants.STAGE_SETTLED);
@@ -469,6 +472,7 @@ class RosterSmokeTest {
         loser.setFinalRank(3L);
         loser.setOutcomeStatus(OutcomeStatusEnum.ELIMINATED.getCode());
         competitorMapper.insert(loser);
+        placeAuditionAdvancersInZone1(tournament.getId(), stageA.getId());
 
         // 16 强名单 = 默认晋级组 + 复活来源组(海选落选)
         TStageRosterBo revive = new TStageRosterBo();
@@ -496,17 +500,32 @@ class RosterSmokeTest {
         assertEquals(2, bySource.get(0).getGroups().size());
         assertTrue(bySource.get(0).getGroups().stream()
             .allMatch(g -> stageA.getId().equals(g.getSourceStageId())));
+    }
 
-        // 编辑来源组规则(出口自定义配置)
+    /**
+     * 规划中(DRAFT)可编辑出口规则;编辑默认边后它降级为人工边(generated=0)。
+     * 上游开赛/结束后不允许再编辑它的出口(见 StageExitConfig/服务守卫)。
+     */
+    @Test
+    void editGroupRuleWhileDraftIsAllowedAndDemotesGenerated() {
+        TTournament t = new TTournament();
+        t.setName("出口编辑");
+        tournamentMapper.insert(t);
+        TStageVo a = stageService.insertByBo(baseStage(t.getId(), "海选", "AUDITION", 0L, 3L, null));
+        TStageVo b = stageService.insertByBo(
+            baseStage(t.getId(), "16强", "KNOCKOUT", 3L, 1L, a.getId()));
+
+        Long gid = rosterService.groupsOfStage(b.getId()).get(0).getId();
         com.dance.street.game.domain.bo.TStageRosterGroupBo edited = new com.dance.street.game.domain.bo.TStageRosterGroupBo();
-        edited.setSourceStageId(stageA.getId());
-        edited.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
+        edited.setSourceStageId(a.getId());
+        edited.setResultFilter(OutcomeStatusEnum.ELIMINATED.getCode());
         edited.setFillMode(RosterConstants.FILL_AUTO);
         edited.setQuota(0);
-        Long secondGroupId = rosterService.groupsOfStage(stageB.getId()).get(1).getId();
-        rosterService.updateGroup(bySource.get(0).getId(), secondGroupId, edited);
-        assertEquals(OutcomeStatusEnum.ADVANCE.getCode(),
-            rosterService.listByTarget(stageB.getId()).get(0).getGroups().get(1).getResultFilter());
+        rosterService.updateGroup(b.getId(), gid, edited);
+
+        TStageRosterGroupBo updated = rosterService.listByTarget(b.getId()).get(0).getGroups().get(0);
+        assertEquals(OutcomeStatusEnum.ELIMINATED.getCode(), updated.getResultFilter());
+        assertEquals(Integer.valueOf(0), updated.getGenerated(), "编辑默认边后应降级为人工边");
     }
 
     /** 规则+覆盖+快照:REMOVE/SEED/ADD_GUEST 只影响名单,不写源;覆盖在 reset 后保留 */
@@ -542,6 +561,7 @@ class RosterSmokeTest {
         f.setFinalRank(6L);
         f.setOutcomeStatus(OutcomeStatusEnum.ELIMINATED.getCode());
         competitorMapper.insert(f);
+        placeAuditionAdvancersInZone1(tournament.getId(), audition.getId());
 
         TStage settled = new TStage();
         settled.setId(audition.getId());
@@ -703,7 +723,9 @@ class RosterSmokeTest {
         List<TStageRosterGroupBo> defaultGroups = rosterService.groupsOfStage(stage2.getId());
         assertEquals(1, defaultGroups.size(), "建段应自动补一条默认衔接边");
         assertEquals(stage1.getId(), defaultGroups.get(0).getSourceStageId(), "默认衔接应指向上一赛段");
-        assertEquals(Integer.valueOf(1), defaultGroups.get(0).getGenerated(), "默认衔接应标记为系统生成");
+        // 海选来源的默认出口是"按圈固定边"(generated=0),不随链自动改挂
+        assertEquals(Integer.valueOf(0), defaultGroups.get(0).getGenerated(), "海选来源的默认出口应按圈生成固定边");
+        assertEquals("ZONE-1", defaultGroups.get(0).getZone(), "单圈海选默认出口应绑第 1 圈");
         assertEquals(0L, stageRow.getRosterApplied().longValue());
         assertEquals(0L, stageRow.getRosterSkipped().longValue());
 
@@ -720,6 +742,7 @@ class RosterSmokeTest {
         // apply 成功后 roster_applied=1;reset 后回 0
         insertCompetitorWithReturn(tournament.getId(), stage1.getId(), "晋级A", "1", 1L);
         insertCompetitorWithReturn(tournament.getId(), stage1.getId(), "晋级B", "2", 2L);
+        placeAuditionAdvancersInZone1(tournament.getId(), stage1.getId());
         TStage settled = new TStage();
         settled.setId(stage1.getId());
         settled.setStatus(StageConstants.STAGE_SETTLED);
@@ -792,9 +815,9 @@ class RosterSmokeTest {
         assertEquals(s0.getId(), after.get(0).getSourceStageId(), "剩下的应是人工配置的跨级来源");
     }
 
-    /** 中间插段(A→Z→B)后:B 的 prev 变为 Z,名单默认来源应从 A 迁移到 Z */
+    /** 中间插段:海选按圈固定边不随链迁移 —— 16强 仍接着海选(自动边才会跟随,见 RosterGroupTableTest) */
     @Test
-    void chainInsertMigratesDownstreamDefaultSource() {
+    void chainInsertKeepsAuditionCircleExitPinned() {
         TTournament tournament = new TTournament();
         tournament.setName("插段名单对账赛事");
         tournamentMapper.insert(tournament);
@@ -814,8 +837,9 @@ class RosterSmokeTest {
         assertNotNull(prevId);
         assertEquals("复活赛", stageMapper.selectById(prevId).getName());
         List<TStageRosterGroupBo> groups = rosterService.listByTarget(round16.getId()).get(0).getGroups();
-        assertTrue(groups.stream().anyMatch(g -> prevId.equals(g.getSourceStageId())));
-        assertTrue(groups.stream().noneMatch(g -> audition.getId().equals(g.getSourceStageId())));
+        assertTrue(groups.stream().anyMatch(g -> audition.getId().equals(g.getSourceStageId())
+                && Integer.valueOf(0).equals(g.getGenerated())),
+            "海选按圈固定边不随链迁移,16强 仍接海选,实际=" + groups);
     }
 
     /** 手工名单:C 拖到首位 → 移出 A → 补落选者 F → 加外卡 G,顺序即出场次序 */
@@ -848,6 +872,7 @@ class RosterSmokeTest {
         f.setFinalRank(9L);
         f.setOutcomeStatus(OutcomeStatusEnum.ELIMINATED.getCode());
         competitorMapper.insert(f);
+        placeAuditionAdvancersInZone1(tournament.getId(), audition.getId());
 
         TStage settled = new TStage();
         settled.setId(audition.getId());
@@ -1032,6 +1057,7 @@ class RosterSmokeTest {
 
         insertCompetitorWithReturn(tournament.getId(), audition.getId(), "晋级A", "1", 1L);
         insertCompetitorWithReturn(tournament.getId(), audition.getId(), "晋级B", "2", 2L);
+        placeAuditionAdvancersInZone1(tournament.getId(), audition.getId());
         TStage settled = new TStage();
         settled.setId(audition.getId());
         settled.setStatus(StageConstants.STAGE_SETTLED);
@@ -1056,10 +1082,37 @@ class RosterSmokeTest {
         assertEquals(audition.getId(), stageService.queryById(fin.getId()).getPrevStageId(),
             "配置入口不得按客户端指针改链");
 
-        // 真的改链走意图接口(移到另一个入口之后):名单已装配时才要求先重置该赛段
-        assertThrows(ServiceException.class, () -> stageService.moveStageAfter(fin.getId(), anotherAudition.getId()));
-        // 拦截必须整单回滚:链路保持原样,不能出现「报错了但链已改」的中间状态
-        assertEquals(audition.getId(), stageService.queryById(fin.getId()).getPrevStageId());
+        // 注:该段来源是海选(按圈固定边 generated=0),移动它不会重写名单来源,所以这里不涉及"锁定拦截";
+        // 「锁定名单 + 自动边真改链必须拦」由 movingStageWithLockedRosterAndAutoEdgeThrows 覆盖。
+    }
+
+    /**
+     * 真改链 + 名单已装配 + 该段来源是<b>自动边</b>:移动会重写名单来源,必须要求先重置(整单拦截并回滚)。
+     */
+    @Test
+    void movingStageWithLockedRosterAndAutoEdgeThrows() {
+        TTournament tournament = new TTournament();
+        tournament.setName("锁定名单改链赛事");
+        tournamentMapper.insert(tournament);
+
+        TStageVo a = stageService.insertByBo(baseStage(tournament.getId(), "预选A", "KNOCKOUT", 2L, 1L, null));
+        TStageVo b = stageService.insertByBo(baseStage(tournament.getId(), "预选B", "KNOCKOUT", 2L, 1L, a.getId()));
+        TStageVo fin = stageService.insertByBo(baseStage(tournament.getId(), "决赛", "KNOCKOUT", 2L, 1L, b.getId()));
+
+        // 决赛的来源是 B(自动边 generated=1)
+        insertCompetitorWithReturn(tournament.getId(), b.getId(), "晋级A", "1", 1L);
+        insertCompetitorWithReturn(tournament.getId(), b.getId(), "晋级B", "2", 2L);
+        TStage settled = new TStage();
+        settled.setId(b.getId());
+        settled.setStatus(StageConstants.STAGE_SETTLED);
+        stageMapper.updateById(settled);
+        assertEquals(2, rosterService.applyRoster(fin.getId(), null));
+
+        // 把决赛移到 A 之后 → 前驱从 B 变 A → 自动边要改挂 → 名单已装配,应拦下
+        assertThrows(ServiceException.class,
+            () -> stageService.moveStageAfter(fin.getId(), a.getId()));
+        assertEquals(b.getId(), stageService.queryById(fin.getId()).getPrevStageId(),
+            "拦截必须整单回滚,链保持原样");
     }
 
     /** 入口赛段(仅签到 STREAM 组)也接受显式外卡:覆盖是人工决定,不依赖来源组 */
@@ -1110,6 +1163,47 @@ class RosterSmokeTest {
         return bo;
     }
 
+    /**
+     * 测试用:给海选段建一个 ZONE-1 圈场次,并把它的晋级者按 finalRank 落进圈里。
+     * "按圈出口"取人依赖 {@code participant.rank_in_match},只插 competitor 是取不到人的。
+     */
+    private void placeAuditionAdvancersInZone1(Long tournamentId, Long auditionStageId) {
+        Long matchId = matchMapper.selectList(
+                com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+                    .eq(TMatch::getStageId, auditionStageId))
+            .stream().filter(m -> "ZONE-1".equals(m.getDisplayZone()))
+            .map(TMatch::getId).findFirst().orElse(null);
+        if (matchId == null) {
+            TMatch m = new TMatch();
+            m.setTournamentId(tournamentId);
+            m.setStageId(auditionStageId);
+            m.setName("海选赛-1圈");
+            m.setDisplayZone("ZONE-1");
+            m.setDisplayRow(0L);
+            m.setStatus(StageConstants.MATCH_GAMING);
+            m.setMatchMode("VOTING");
+            matchMapper.insert(m);
+            matchId = m.getId();
+        }
+        List<TCompetitor> comps = competitorMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, auditionStageId)
+                .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
+        long slot = 0;
+        for (TCompetitor c : comps) {
+            TMatchParticipant p = new TMatchParticipant();
+            p.setTournamentId(tournamentId);
+            p.setMatchId(matchId);
+            p.setCompetitorId(c.getId());
+            p.setDisplaySlotIndex(slot);
+            p.setSlotKind(StageConstants.SLOT_PLAYER);
+            p.setRankInMatch(c.getFinalRank() == null ? slot + 1 : c.getFinalRank());
+            p.setScoreValue(java.math.BigDecimal.TEN);
+            participantMapper.insert(p);
+            slot++;
+        }
+    }
+
     private void insertCompetitor(Long tournamentId, Long stageId, String name,
                                   String number, Long finalRank) {
         TCompetitor c = new TCompetitor();
@@ -1143,6 +1237,7 @@ class RosterSmokeTest {
 
         // 源赛段产生 1 名晋级者并结算
         insertCompetitor(tid, source.getId(), "选手A", "1", 1L);
+        placeAuditionAdvancersInZone1(tid, source.getId());
         TStage settled = new TStage();
         settled.setId(source.getId());
         settled.setStatus(StageConstants.STAGE_SETTLED);

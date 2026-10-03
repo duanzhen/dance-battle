@@ -29,7 +29,10 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * 自定义出口配置与中间层名单的一致性:改出口规则后,中间层必须立刻跟着变。
+ * 自定义出口配置与中间层名单的一致性。
+ *
+ * <p>严格规则:上游赛段一旦开赛/结束,它的出口就锁定(不允许再改)。
+ * 因此出口一律在<b>上游仍是 DRAFT</b> 时配置,结算后中间层按该规则取人、并随改链重建。</p>
  */
 @SpringBootTest(properties = {"app.redis.enabled=false", "app.schema-init.enabled=true"})
 class ExitConfigConsistencyTest {
@@ -55,45 +58,46 @@ class ExitConfigConsistencyTest {
     @Autowired private ITStageService stageService;
     @Autowired private ITStageRosterService rosterService;
 
-    /** 出口面板的操作序列:追加按名次段的自定义出口 → 摘掉"整单晋级"默认组 → 中间层立刻收敛。 */
+    /** 开赛前把出口改成「第 1~2 名」并摘掉整单默认:结算后中间层按该规则取人收敛到 2 人。 */
     @Test
-    void customExitRebuildsMiddleLayerImmediately() {
+    void customExitConfiguredBeforeStartIsHonored() {
         Long tid = newTournament("exit-config");
         TStageVo audition = newStage(tid, "海选", "AUDITION", 0L, 2L, null);
         insertCompetitors(tid, audition.getId(), 4);
-        settle(audition.getId());
+        // 上游还是 DRAFT 时配好下游出口(上游开赛后不允许再改它的出口)
         TStageVo round16 = newStage(tid, "16强", "KNOCKOUT", 4L, 2L, audition.getId());
-        assertEquals(4, playerRows(round16.getId()));
-
         rosterService.addGroups(round16.getId(), customExit(audition.getId(), 1, 2));
         removeGeneratedDefault(round16.getId(), audition.getId());
+        settle(audition.getId());
 
-        assertEquals(2, playerRows(round16.getId()), "自定义出口(第 1~2 名)应立刻把中间层收敛到 2 人");
+        assertEquals(2, playerRows(round16.getId()), "自定义出口(第 1~2 名)应把中间层收敛到 2 人");
         assertEquals(4, rosterService.entriesOf(round16.getId()).size(),
             "座位数仍按计划规模,空位照占号");
     }
 
-    /** 改链顺序后,出口规则变了 —— 中间层必须跟着变(不允许留着按旧规则算出来的行)。 */
+    /** 改链后默认边原地跟随新前驱 —— 中间层必须按新来源重建。 */
     @Test
     void linkChangeRebuildsMiddleLayerAfterExitRulesChanged() {
         Long tid = newTournament("exit-config-move");
         TStageVo audition = newStage(tid, "海选", "AUDITION", 0L, 2L, null);
         insertCompetitors(tid, audition.getId(), 4);
-        settle(audition.getId());
         TStageVo round16 = newStage(tid, "16强", "KNOCKOUT", 4L, 2L, audition.getId());
         insertCompetitors(tid, round16.getId(), 4);
-        settle(round16.getId());
         TStageVo revival = newStage(tid, "复活赛", "KNOCKOUT", 8L, 2L, round16.getId());
-
-        // 复活赛:默认整单接 16强(4 人) + 自定义出口"海选第 1~2 名"(2 人)= 6 人
+        // 开赛前给复活赛加自定义出口(来源=海选),此时海选仍是 DRAFT
         rosterService.addGroups(revival.getId(), customExit(audition.getId(), 1, 2));
+        settle(audition.getId());
+        settle(round16.getId());
+
+        // 复活赛:默认整单接 16强(4 人) + 自定义出口"海选第 1~2 名"(2 人,不同参赛方)= 6 人
         assertEquals(6, playerRows(revival.getId()));
 
-        // 把 16强 移到复活赛之后:复活赛的直接前驱变成海选,"16强整单晋级"默认组被摘掉
+        // 把 16强 移到复活赛之后:复活赛的默认边原地跟随新前驱(海选),
+        // 与"海选第 1~2 名"取的是同一批人 → 并集收敛到海选的晋级者
         stageService.moveStageAfter(round16.getId(), revival.getId());
 
-        assertEquals(2, playerRows(revival.getId()),
-            "改链后复活赛只剩「海选第 1~2 名」这一条出口,中间层必须同步重建");
+        assertEquals(4, playerRows(revival.getId()),
+            "改链后默认边接海选,与自定义出口并集 = 海选的晋级者");
     }
 
     // ===== 工具 =====

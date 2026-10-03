@@ -126,6 +126,10 @@ export interface StageData {
   tournamentId?: string | number; // 赛事ID
   prevStageId?: string | number | null;
   nextStageId?: string | number | null;
+  /** 来源已全部结束但晋级者尚未确认(需先确认名单才能开始);开赛按钮依赖以此为准 */
+  awaitingAdvancement?: boolean;
+  /** 赛事开启「跳过中间态确认」:待确认时点击开始会弹窗自动确认后再开始 */
+  skipConfirm?: boolean;
 }
 
 // 赛段类型选择器事件

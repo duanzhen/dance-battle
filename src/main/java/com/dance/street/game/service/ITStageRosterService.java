@@ -116,8 +116,11 @@ public interface ITStageRosterService {
     /** 删段后为存活但丢失名单的赛段补建默认名单 */
     void ensureRosterForSurvivors(Collection<Long> tournamentIds);
 
-    /** 删除赛段后:摘除其余赛段名单中引用被删赛段的来源组 */
-    void removeSourceRefs(Collection<Long> deletedStageIds);
+    /** 删除守卫:赛段含任何自定义(固定)边(作为来源或目标)时不允许直接删除 */
+    void assertStagesDeletable(Collection<Long> stageIds);
+
+    /** 删除赛段后的边收口:被删段的出边删除、入边原地改挂到链上后继 */
+    void reattachEdgesOnStageDelete(Collection<Long> deletedStageIds, Map<Long, Long> successorByStage);
 
     /** 删除赛段后:清掉以这些赛段为目标的中间层名单行 */
     void removeEntriesOfTargets(Collection<Long> targetStageIds);

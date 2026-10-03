@@ -93,10 +93,11 @@ class RosterGroupTableTest {
             "人工配的出口必须保留(不能按长相当过期默认组删掉),实际=" + after);
         assertTrue(after.stream().noneMatch(g -> Integer.valueOf(1).equals(g.getGenerated())
                 && b.getId().equals(g.getSourceStageId())),
-            "系统自动补的旧默认衔接应被清理(它指向的已经不是链上前驱),实际=" + after);
-        // 还剩一条来源 → 不再自动补默认衔接:补默认衔接只在"一条来源都不剩"时兜底
-        assertTrue(after.stream().noneMatch(g -> z.getId().equals(g.getSourceStageId())),
-            "还有人工来源时不应再自动补链式衔接,实际=" + after);
+            "系统默认衔接的 source 应跟随链前驱,不能再指向旧的 b,实际=" + after);
+        // 默认边原地跟随新链前驱 Z(不删除、不重补)
+        assertTrue(after.stream().anyMatch(g -> Integer.valueOf(1).equals(g.getGenerated())
+                && z.getId().equals(g.getSourceStageId())),
+            "系统默认衔接应原地跟随新链前驱 Z,实际=" + after);
     }
 
     /** 多出口取人顺序:调整 sortOrder 后,中间层里先落的是另一条出口的人 */
@@ -133,6 +134,37 @@ class RosterGroupTableTest {
         rosterService.reorderGroups(target.getId(), List.of(groupB, groupA));
         rosterService.rebuildEntries(target.getId());
         assertEquals(second, firstSeatSourceId(target.getId()), "调整顺序后乙坐 1 号位");
+    }
+
+    /**
+     * 加了一条人工出口后,应能删掉默认(链式)出口 —— 即便那条默认出口是目标赛段的唯一来源。
+     *
+     * <p>回归:此前 {@code removeGroup} 有"名单至少需要保留一组来源"的守卫,删最后一条会报错,
+     * 且提示的"删除整个来源"操作在 UI 上并不存在,分叉/改线时无法先删旧出口再加新出口。</p>
+     */
+    @Test
+    void removesDefaultExitEvenWhenItIsTheOnlySource() {
+        Long tid = newTournament("删默认出口");
+        TStageVo source = newStage(tid, "上游", null);
+        TStageVo target = newStage(tid, "下游", source.getId());
+        TStageVo other = newStage(tid, "另一去向", target.getId());
+
+        // 下游赛段当前只有一条建段自动补的默认衔接(source → target)
+        List<TStageRosterGroupBo> groups = rosterService.groupsOfStage(target.getId());
+        assertEquals(1, groups.size(), "新赛段应只有一条默认衔接");
+        Long generated = groups.get(0).getId();
+
+        // 先加一条非默认出口:source → 另一去向
+        addRankGroup(tid, other.getId(), source.getId(), 1, 1);
+
+        // 再删默认出口:下游赛段变成"零来源",应被允许(删掉就是删掉)
+        rosterService.removeGroup(target.getId(), generated);
+        assertTrue(rosterService.groupsOfStage(target.getId()).isEmpty(),
+            "删掉唯一来源后,目标赛段应没有来源组");
+        // 另一去向的人工出口不受影响
+        assertTrue(rosterService.groupsOfStage(other.getId()).stream()
+                .anyMatch(g -> Integer.valueOf(1).equals(g.getRankStart())),
+            "另一去向的人工出口应保留");
     }
 
     // ===== 工具 =====

@@ -5,6 +5,7 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TStageRosterEntry;
+import com.dance.street.game.domain.TStageRosterGroup;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.vo.RosterCandidatesVo;
@@ -12,8 +13,12 @@ import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TStageRosterOverrideVo;
 import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.engine.common.RosterConstants;
+import com.dance.street.game.engine.common.RuleConfigHolder;
+import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TStageMapper;
@@ -140,47 +145,47 @@ public class RosterGroupService {
         if (stage == null || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
             return;
         }
-        List<TStageRosterGroupBo> kept = new ArrayList<>();
-        boolean changed = false;
-        boolean streamSeen = false;
         // 前驱以 next 链推导:改链后本方法在事务内被调用,读到的已是新链
         TStage prevStage = stageChain.prevOf(stage);
         Long prevId = prevStage == null ? null : prevStage.getId();
-        boolean entry = prevId == null;
+
+        // 自动边(链式默认)最多一条;固定边(人工 / 海选按圈)一条都不动。
+        TStageRosterGroupBo auto = null;
+        List<TStageRosterGroupBo> kept = new ArrayList<>();
+        boolean changed = false;
         for (TStageRosterGroupBo g : rosterGroupStore.groupsOf(stage)) {
-            boolean stream = RosterConstants.FILL_STREAM.equals(g.getFillMode())
-                || (g.getSourceStageId() == null && g.getFillMode() == null);
-            if (entry) {
-                if (stream) {
-                    if (streamSeen) {
-                        changed = true;
-                        continue;
-                    }
-                    streamSeen = true;
-                } else {
-                    changed = true;
-                    continue;
-                }
-            } else {
-                if (stream) {
-                    changed = true;
-                    continue;
-                }
-                // 系统自动补的链式衔接:只有它引用的不是当前直接前驱时才清掉。
-                // 按 generated 出处判断,不再看字段长相——出口面板配出来的自定义出口
-                // 长得和默认组一模一样,按长相判断会把真实的分支依赖静默删掉。
-                if (isGenerated(g) && !Objects.equals(g.getSourceStageId(), prevId)) {
-                    changed = true;
-                    continue;
-                }
+            if (!isGenerated(g)) {
+                kept.add(g);
+                continue;
             }
-            kept.add(g);
+            if (auto == null) {
+                auto = g;
+                kept.add(g);
+            } else {
+                // 多条自动边只留一条
+                changed = true;
+            }
         }
-        // 只要还剩任意一条来源,就不再自动补默认衔接(删掉就是删掉)
-        boolean hasCurrentDefault = !kept.isEmpty();
-        // 链路没有实际变化(例如只是保存赛段/生命周期状态回写)= 名单无需对账,
-        // 直接返回,不受"名单已装配"锁定影响。
-        if (!changed && hasCurrentDefault) {
+
+        // 自动边的来源跟随链前驱(原地改,保留行 id / 规则);赛段变成链头则转为签到来源。
+        if (auto != null) {
+            if (prevId == null) {
+                if (auto.getSourceStageId() != null
+                    || !RosterConstants.FILL_STREAM.equals(auto.getFillMode())) {
+                    auto.setSourceStageId(null);
+                    auto.setFillMode(RosterConstants.FILL_STREAM);
+                    auto.setResultFilter(RosterConstants.FILTER_ANY);
+                    changed = true;
+                }
+            } else if (!Objects.equals(auto.getSourceStageId(), prevId)
+                || !RosterConstants.FILL_AUTO.equals(auto.getFillMode())) {
+                auto.setSourceStageId(prevId);
+                auto.setFillMode(RosterConstants.FILL_AUTO);
+                changed = true;
+            }
+        }
+        // 没有任何自动边需要调整(固定边原样保留)= 名单无需对账,直接返回。
+        if (!changed) {
             return;
         }
         // 确实要改名单时才要求未装配(装配后规则冻结,需先重置)
@@ -188,17 +193,9 @@ public class RosterGroupService {
             throw new ServiceException("赛段[{}]名单已装配,请先重置该赛段后再调整赛段链路",
                 stage.getName());
         }
-        if (changed) {
-            rosterGroupStore.saveGroups(stage, kept);
-        }
-        if (!hasCurrentDefault) {
-            // 一条来源都不剩:补一条带 generated=1 的默认衔接(ensureRosterForStage 内部会重建)
-            ensureRosterForStage(stage);
-        } else if (changed) {
-            // 来源组本身变了(例如跨级自定义出口的另一条被摘掉):
-            // 规则变了就必须重建,否则中间层留着按旧出口算出来的人。
-            rosterEntryStore.rebuildEntries(stage.getId());
-        }
+        rosterGroupStore.saveGroups(stage, kept);
+        // 来源组变了 → 中间层作废重建(与"上游一变就全部重新来"同一口径)
+        rosterEntryStore.rebuildEntries(stage.getId());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -223,44 +220,67 @@ public class RosterGroupService {
         return rosterGroupStore.groupsOf(stage).isEmpty();
     }
 
+    /**
+     * 删除守卫:待删赛段只要含有"固定边"(人工边 / 海选按圈边,{@code autoGenerated=0}),
+     * 无论它是作为来源还是目标,都<b>不允许直接删除</b>——必须先把这些自定义边处理掉。
+     * 只有纯自动(链式默认)边的赛段才可删,删时由 {@link #reattachEdgesOnStageDelete} 自动收口。
+     */
+    public void assertStagesDeletable(Collection<Long> stageIds) {
+        if (stageIds == null || stageIds.isEmpty()) {
+            return;
+        }
+        if (rosterGroupStore.hasFixedEdgeTouching(stageIds)) {
+            throw new ServiceException("赛段含有自定义的出口/来源边,不能直接删除;请先删除这些边(或重置赛段)后再删");
+        }
+    }
+
+    /**
+     * 删除赛段后的边收口(只处理自动边,固定边已被守卫拦住):
+     * <ul>
+     *   <li>被删赛段的<b>出边</b>(source=被删段)→ 删除;</li>
+     *   <li>以被删段为目标的<b>入边</b>(target=被删段)→ <b>原地改挂到其后继</b>;
+     *       无后继(删链尾)或后继也在被删集合里 → 删除。</li>
+     * </ul>
+     *
+     * @param deletedStageIds 被删赛段ID
+     * @param successorByStage 被删段ID → 链上后继ID(删除前捕获;无后继不放入)
+     */
     @Transactional(rollbackFor = Exception.class)
-    public void removeSourceRefs(Collection<Long> deletedStageIds) {
+    public void reattachEdgesOnStageDelete(Collection<Long> deletedStageIds, Map<Long, Long> successorByStage) {
         if (deletedStageIds == null || deletedStageIds.isEmpty()) {
             return;
         }
         Set<Long> deleted = new HashSet<>(deletedStageIds);
-        // 只处理"引用了被删赛段"的目标:一次查询定位,不再扫全表逐个解析 JSON
-        Set<Long> affected = rosterGroupStore.targetsReferencing(deleted);
-        if (affected.isEmpty()) {
-            return;
+        // 名单已装配/已跳过的下游不允许被静默改写(与旧口径一致:先重置再删)
+        Set<Long> affected = new HashSet<>(rosterGroupStore.targetsReferencing(deleted));
+        for (TStageRosterGroup row : rosterGroupStore.edgesByTarget(deleted)) {
+            Long succ = successorByStage == null ? null : successorByStage.get(row.getTargetStageId());
+            if (succ != null && !deleted.contains(succ)) {
+                affected.add(succ);
+            }
         }
-        for (TStage stage : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
-            .in(TStage::getId, affected))) {
-            // 已取消的赛段不再参与流转,与 reconcileAfterLinkChange 一致直接跳过
-            if (deleted.contains(stage.getId())
-                || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
-                continue;
-            }
-            List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(stage);
-            int before = groups.size();
-            groups.removeIf(g -> g.getSourceStageId() != null && deleted.contains(g.getSourceStageId()));
-            if (groups.size() == before) {
-                continue;
-            }
-            // 与 reconcileAfterLinkChange 同一把锁:已装配/已跳过的名单不允许被静默改写。
-            // 否则会留下「来源组被摘空、rosterApplied 仍为 1」的假 CONFIRMED——
-            // 名单状态显示已带入,参赛行却还指向被删除的赛段,开赛守卫还会放行。
-            if (isLocked(stage)) {
+        for (Long tid : affected) {
+            TStage t = tid == null ? null : stageMapper.selectById(tid);
+            if (t != null && isLocked(t)) {
                 throw new ServiceException(
                     "赛段[{}]名单已装配/已跳过,删除上游赛段会破坏其名单来源;请先重置该赛段后再删除",
-                    stage.getName());
+                    t.getName());
             }
-            rosterGroupStore.saveGroups(stage, groups);
-            log.info("赛段删除:摘除赛段[{}]名单中引用已删赛段的来源组,剩余 {} 组",
-                stage.getId(), groups.size());
-            // 来源组变了 → 中间层作废重建(与"上游一变就全部重新来"同一口径)
-            rosterEntryStore.rebuildEntries(stage.getId());
         }
+        // 出边:整条删除
+        int removed = rosterGroupStore.deleteEdgesBySource(deleted);
+        // 入边:改挂到后继
+        int moved = 0;
+        for (TStageRosterGroup row : rosterGroupStore.edgesByTarget(deleted)) {
+            Long succ = successorByStage == null ? null : successorByStage.get(row.getTargetStageId());
+            if (succ == null || deleted.contains(succ)) {
+                rosterGroupStore.deleteEdge(row.getId());
+            } else {
+                rosterGroupStore.retarget(row.getId(), succ);
+                moved++;
+            }
+        }
+        log.info("赛段删除边收口:出边删除 {} 条,入边改挂后继 {} 条", removed, moved);
     }
 
     // ------------------------------------------------------------------
@@ -315,19 +335,63 @@ public class RosterGroupService {
             return;
         }
         TStage prevStage = stageChain.prevOf(stage);
-        Long prevId = prevStage == null ? null : prevStage.getId();
-        if (prevId == null) {
+        if (prevStage == null) {
             TStageRosterGroupBo stream = externalGroup();
             stream.setGenerated(1);
             groups.add(stream);
             log.info("入口赛段[{}]未配置来源,已补签到来源组", stage.getId());
             return;
         }
-        TStageRosterGroupBo chain = defaultGroup(prevId);
+        // 海选来源:出口按圈绑定 —— 按当前圈数逐圈生成固定边(generated=0,不随链自动改挂/删除)
+        if (StageModeEnum.AUDITION.getCode().equals(prevStage.getStageMode())) {
+            List<TStageRosterGroupBo> circleExits = buildAuditionCircleExits(prevStage);
+            groups.addAll(circleExits);
+            log.info("赛段[{}]的上游是海选,已按 {} 个圈生成固定出口", stage.getId(), circleExits.size());
+            return;
+        }
+        TStageRosterGroupBo chain = defaultGroup(prevStage.getId());
         chain.setGenerated(1);
         groups.add(chain);
         log.info("赛段[{}]未配置出口,已补链式默认衔接:上一赛段[{}]晋级者进入本赛段",
-            stage.getId(), prevId);
+            stage.getId(), prevStage.getId());
+    }
+
+    /**
+     * 海选来源的按圈固定出口:每圈一条 {@code ZONE-k},取该圈名次 1..晋级人数。
+     * 虽然是系统按圈配置生成的,但标记为 {@code generated=0}(固定边)——不随链自动改挂/删除。
+     * 未配置圈数时按 1 圈(circles=1,即 {@code ZONE-1})生成。
+     */
+    private List<TStageRosterGroupBo> buildAuditionCircleExits(TStage audition) {
+        RuleConfigHolder rc = RuleConfigParser.parse(audition.getRuleConfig());
+        int circles = 1;
+        List<Integer> quotas = null;
+        if (rc != null) {
+            if (rc.getCircles() != null && rc.getCircles() > 0) {
+                circles = rc.getCircles();
+            }
+            quotas = rc.getCircleAdvanceCounts();
+        }
+        int advance = audition.getTeamCountEnd() == null ? 0 : audition.getTeamCountEnd().intValue();
+        int perCircle = circles > 0 ? advance / circles : advance;
+        List<TStageRosterGroupBo> out = new ArrayList<>();
+        for (int k = 1; k <= circles; k++) {
+            int quota = quotas != null && quotas.size() >= k ? Math.max(0, quotas.get(k - 1)) : perCircle;
+            if (quota <= 0) {
+                continue;
+            }
+            TStageRosterGroupBo g = new TStageRosterGroupBo();
+            g.setSourceStageId(audition.getId());
+            g.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
+            g.setFillMode(RosterConstants.FILL_AUTO);
+            g.setQuota(0);
+            g.setZone(StageFlowSupport.circleZone(k));
+            g.setRankByZone(true);
+            g.setRankStart(1);
+            g.setRankEnd(quota);
+            g.setGenerated(0);
+            out.add(g);
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------
@@ -511,6 +575,7 @@ public class RosterGroupService {
                 if (source == null || !Objects.equals(source.getTournamentId(), target.getTournamentId())) {
                     throw new ServiceException("来源赛段不存在或不属于同一赛事");
                 }
+                assertSourceEditable(source);
                 assertSourceBeforeTarget(target, source);
             }
             if (merged.stream().noneMatch(m -> sameGroup(m, g))) {
@@ -548,9 +613,14 @@ public class RosterGroupService {
         if (index < 0) {
             throw new ServiceException("来源组不存在或不属于本赛段: {}", groupId);
         }
-        if (groups.size() <= 1) {
-            throw new ServiceException("名单至少需要保留一组来源;如需清空请删除整个来源");
+        // 出边删除守卫:来源段进行中/已结束时不允许删它的出口
+        TStageRosterGroupBo removing = groups.get(index);
+        if (removing.getSourceStageId() != null) {
+            assertSourceEditable(stageMapper.selectById(removing.getSourceStageId()));
         }
+        // 允许删到一条不剩:依赖以边表为准,"删掉就是删掉"。
+        // 目标赛段没有来源 = 本段不从任何上游取人(纯签到/人工名单),引擎按"无候选"处理;
+        // 分叉/改线时也必须能先删旧出口、再加新出口,不能卡在"至少要留一条"上。
         groups.remove(index);
         rosterGroupStore.saveGroups(target, groups);
         rosterEntryStore.rebuildEntries(stageId);
@@ -575,6 +645,7 @@ public class RosterGroupService {
             if (source == null || !Objects.equals(source.getTournamentId(), target.getTournamentId())) {
                 throw new ServiceException("来源赛段不存在或不属于同一赛事");
             }
+            assertSourceEditable(source);
             assertSourceBeforeTarget(target, source);
         }
         List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(target);
@@ -588,14 +659,11 @@ public class RosterGroupService {
         if (index < 0) {
             throw new ServiceException("来源组不存在或不属于本赛段: {}", groupId);
         }
-        TStageRosterGroupBo old = groups.get(index);
         // 保持行 ID 不变:更新的是同一行,不再依赖数组下标
         group.setId(groupId);
-        // 出处标记只在服务端维护:前端不传 generated 时保留原值,
-        // 否则"编辑系统自动补的默认衔接"会被静默降级成人工出口(链变更时就不再清理它了)
-        if (group.getGenerated() == null) {
-            group.setGenerated(old.getGenerated());
-        }
+        // 编辑即降级:默认(链式)边一旦被编辑,就当作人工固定边(generated=0),
+        // 之后不再随链自动改挂/删除(与"编辑默认边后就不算了"一致)。
+        group.setGenerated(0);
         if (group.getResultFilter() == null) {
             group.setResultFilter(OutcomeStatusEnum.ADVANCE.getCode());
         }
@@ -852,6 +920,19 @@ public class RosterGroupService {
      * 分支/汇合(一个来源连多个目标、多个来源连同一个目标)都不受影响:
      * 它们的方向始终是往后。</p>
      */
+    /**
+     * 出边编辑守卫:来源段也必须处于规划中(DRAFT)。
+     * 进行中/已结束的赛段已经在跑或已出结果,不允许再调整它的出口。
+     */
+    private void assertSourceEditable(TStage source) {
+        if (source == null) {
+            return;
+        }
+        if (!StageConstants.STAGE_DRAFT.equals(source.getStatus())) {
+            throw new ServiceException("来源赛段[{}]已开始或已结束,不能调整它的出口", source.getName());
+        }
+    }
+
     private void assertSourceBeforeTarget(TStage target, TStage source) {
         if (Objects.equals(source.getId(), target.getId())) {
             throw new ServiceException("来源赛段不能是目标赛段自身");

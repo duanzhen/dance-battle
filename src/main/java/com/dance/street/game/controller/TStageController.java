@@ -55,7 +55,16 @@ public class TStageController extends BaseController {
     @SaCheckPermission("game:stage:list")
     @GetMapping("/list")
     public TableDataInfo<TStageVo> list(TStageBo bo, PageQuery pageQuery) {
-        return tStageService.queryPageList(bo, pageQuery);
+        TableDataInfo<TStageVo> page = tStageService.queryPageList(bo, pageQuery);
+        // 与导播台口径一致:补「待确认晋级(awaitingAdvancement)」与「跳过中间态确认(skipConfirm)」,
+        // 供「开始赛段」按钮按名单来源(出口配置)判断依赖是否就绪,而不是看链上的"上一赛段"。
+        List<TStageVo> stages = page.getData();
+        if (bo.getTournamentId() != null && stages != null && !stages.isEmpty()) {
+            boolean skipConfirm = tStageLifecycleService.isAutoConfirmAdvancement(bo.getTournamentId());
+            stages.forEach(s -> s.setSkipConfirm(skipConfirm));
+            tStageService.fillAwaitingAdvancement(stages);
+        }
+        return page;
     }
 
     /**

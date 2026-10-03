@@ -77,9 +77,10 @@ class ArenaPreBracketTest {
     void arenaPreBracketShowsAdvancersBeforeRosterConfirmed() {
         Long tid = newTournament("擂台预排");
         TStageVo prev = newStage(tid, "16强", "KNOCKOUT", 16L, 8L, null);
-        prev = settleWithAdvancers(tid, prev.getId(), 16, 8);
+        // 开赛前配好下游来源(上游开赛后不允许再改它的出口)
         TStageVo arena = newStage(tid, "擂台赛", "ARENA", 8L, 1L, prev.getId());
         wireRosterFrom(arena.getId(), prev.getId());
+        prev = settleWithAdvancers(tid, prev.getId(), 16, 8);
 
         PreBracketVo vo = stageService.getPreBracket(arena.getId());
 

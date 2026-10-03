@@ -100,8 +100,14 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void removeSourceRefs(Collection<Long> deletedStageIds) {
-        rosterGroupService.removeSourceRefs(deletedStageIds);
+    public void assertStagesDeletable(Collection<Long> stageIds) {
+        rosterGroupService.assertStagesDeletable(stageIds);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void reattachEdgesOnStageDelete(Collection<Long> deletedStageIds, Map<Long, Long> successorByStage) {
+        rosterGroupService.reattachEdgesOnStageDelete(deletedStageIds, successorByStage);
     }
 
     @Override

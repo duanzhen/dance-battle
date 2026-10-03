@@ -5,11 +5,13 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageConfigBo;
+import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageService;
+import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.impl.StageChain;
 import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
@@ -73,6 +75,8 @@ class StageConfigSaveIsolationTest {
     private TStageMapper stageMapper;
     @Autowired
     private ITStageService stageService;
+    @Autowired
+    private ITStageRosterService rosterService;
     @Autowired
     private StageChain stageChain;
 
@@ -196,6 +200,10 @@ class StageConfigSaveIsolationTest {
         TStageVo z = newStage(tid, "32强", "KNOCKOUT", a.getId());
         TStageVo b = newStage(tid, "16强", "KNOCKOUT", z.getId());
 
+        // z 的来源是海选(按圈固定边):按新规则先移除它,才能删除下游赛段
+        for (TStageRosterGroupBo g : rosterService.groupsOfStage(z.getId())) {
+            rosterService.removeGroup(z.getId(), g.getId());
+        }
         stageService.deleteWithValidByIds(List.of(z.getId()), true);
 
         assertEquals(List.of(a.getId(), b.getId()), chainIds(tid), "删除中间赛段后链应被前后邻居跨过");

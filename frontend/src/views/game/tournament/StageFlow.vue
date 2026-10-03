@@ -309,6 +309,10 @@ interface Stage {
   isInitialized?: boolean; // 名单是否已锁定(已初始化/已排种子);空赛段不代表锁定
   tournamentId?: string; // 赛事ID
   incoming?: RosterVO[]; // 名单摘要(roster)
+  /** 来源已全部结束但晋级者尚未确认(开赛按钮依赖以此为准,替代旧的"链上前驱是否结束") */
+  awaitingAdvancement?: boolean;
+  /** 赛事开启「跳过中间态确认」 */
+  skipConfirm?: boolean;
 }
 
 // 通知父页面赛段链已变化(删除赛段后需要刷新大屏组件绑定)
@@ -411,7 +415,9 @@ const loadStages = async (keepSelection: boolean = false) => {
       remark: item.remark,
       isInitialized: item.isInitialized === 1,
       tournamentId: String(item.tournamentId || ''),
-      incoming: item.incoming
+      incoming: item.incoming,
+      awaitingAdvancement: item.awaitingAdvancement,
+      skipConfirm: item.skipConfirm
     }));
 
     // 按照双向链表顺序排序

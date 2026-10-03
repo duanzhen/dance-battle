@@ -219,7 +219,11 @@ class FullLifecycleE2ETest {
             assertGuardRejectsCheckInWithoutCircle(tid, plan);
         }
 
-        // ---------- 7. 开赛 + 开赛后签到锁定守卫 ----------
+        // ---------- 7. 出口按圈配(必须在海选开赛前 —— 开赛后不允许再改海选出口) ----------
+        TStageVo firstKo = knockouts.get(0);
+        configurePerCircleExit(audition, firstKo, plan, advance);
+
+        // ---------- 7b. 开赛 + 开赛后签到锁定守卫 ----------
         lifecycleService.startStage(audition.getId());
         assertEquals(StageConstants.STAGE_GAMING, statusOf(audition.getId()), "海选开赛后应进行中");
         if (withGuards) {
@@ -229,10 +233,11 @@ class FullLifecycleE2ETest {
 
         // ---------- 8. 打分(可能触发二海)→ 完成海选 ----------
         runAudition(plan, audition, circles, referees, rng, advance);
+        assertEquals(advance, rosterService.candidates(firstKo.getId()).getGroups().stream()
+                .mapToLong(g -> g.getCompetitors().size()).sum(),
+            "按圈出口的候选数应等于各圈名额之和");
 
-        // ---------- 9. 首段淘汰:出口按圈配、中间态增减、撤销重来 ----------
-        TStageVo firstKo = knockouts.get(0);
-        configurePerCircleExit(audition, firstKo, plan, advance);
+        // ---------- 9b. 中间态增减、撤销重来 ----------
         RosterEditOutcome edited = null;
         if (withRosterEdit && advance < firstKo.getTeamCountStart()) {
             edited = editMiddleState(firstKo, plan, rng);
@@ -359,28 +364,14 @@ class FullLifecycleE2ETest {
             g.setQuota(0);
             groups.add(g);
         }
+        // 海选来源的默认出口是"按圈固定边":先清空原有出口,再按计划重配(避免与自动生成的重复取人)
+        for (TStageRosterGroupBo g : rosterService.groupsOfStage(target.getId())) {
+            if (audition.getId().equals(g.getSourceStageId())) {
+                rosterService.removeGroup(target.getId(), g.getId());
+            }
+        }
         bo.setGroups(groups);
         rosterService.addGroups(target.getId(), bo);
-        // 移除默认的「全场名次」出口,避免与按圈出口重复取人
-        Long generatedGroupId = null;
-        for (TStageRosterVo roster : rosterService.listByTarget(target.getId())) {
-            if (roster.getGroups() == null) {
-                continue;
-            }
-            for (TStageRosterGroupBo g : roster.getGroups()) {
-                if (audition.getId().equals(g.getSourceStageId())
-                    && g.getZone() == null && g.getRankStart() == null && g.getRankEnd() == null) {
-                    generatedGroupId = g.getId();
-                    break;
-                }
-            }
-        }
-        if (generatedGroupId != null) {
-            rosterService.removeGroup(target.getId(), generatedGroupId);
-        }
-        assertEquals(advance, rosterService.candidates(target.getId()).getGroups().stream()
-                .mapToLong(g -> g.getCompetitors().size()).sum(),
-            "按圈出口的候选数应等于各圈名额之和");
     }
 
     // ==================================================================

@@ -109,6 +109,11 @@ class AuditionChainedTiebreakerTest {
         Long tid = newTournament("连环加赛");
         TStageVo stage = newAuditionStage(tid, "海选", 16);
         lifecycleService.ensureAuditionCircles(stage.getId());
+        // 开赛前配好下游出口(上游开赛后不允许再改它的出口)
+        TStageVo round16 = createStage(tid, "16强", "KNOCKOUT", 16L, 8L, stage.getId(),
+            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":16,\"advanceCount\":8,"
+                + "\"format\":\"BO1\",\"pairingMode\":\"SEED\"},\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+        addAuditionExitGroup(round16.getId(), stage.getId(), 16);
         Long refereeId = insertReferee(tid, "裁判A");
         Long circleId = circlesOf(stage.getId()).get(0).getId();
         bindRefereeToCircle(circleId, refereeId, tid);
@@ -206,10 +211,6 @@ class AuditionChainedTiebreakerTest {
             "加赛全部决出后赛段应可结束");
 
         // 下一赛段按海选配置的「圈内第 1~16 名」取人(与 AuditionStageConfig/TTournamentServiceImpl 同一套规则)
-        TStageVo round16 = createStage(tid, "16强", "KNOCKOUT", 16L, 8L, stage.getId(),
-            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":16,\"advanceCount\":8,"
-                + "\"format\":\"BO1\",\"pairingMode\":\"SEED\"},\"scoring\":{\"matchMode\":\"STANDARD\"}}");
-        addAuditionExitGroup(round16.getId(), stage.getId(), 16);
         assertEquals(16, rosterService.applyRoster(round16.getId(), null),
             "二海直接晋级的 2 人必须被带入下一赛段(否则就是现场看到的「二海晋级的人没掉了」)");
         List<String> brought = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()

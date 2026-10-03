@@ -564,10 +564,21 @@ public class TStageServiceImpl implements ITStageService {
         }
         // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
         List<Long> stageIds = ids.stream().map(Long::valueOf).toList();
-        // 名单清理:清掉以这些赛段为目标的中间层行;其余赛段名单摘除引用被删赛段的来源组
+        // 名单清理与边收口
         if (!stageIds.isEmpty()) {
+            // 删除守卫:赛段含任何自定义(固定)边(作为来源或目标)时不允许直接删除
+            rosterService.assertStagesDeletable(stageIds);
+            // 删除前捕获链上后继(删完就读不到了),供入边改挂使用
+            Map<Long, Long> successorByStage = new HashMap<>();
+            for (TStage st : deletingStages) {
+                if (st.getNextStageId() != null) {
+                    successorByStage.put(st.getId(), st.getNextStageId());
+                }
+            }
+            // 清掉以这些赛段为目标的中间层名单行
             rosterService.removeEntriesOfTargets(stageIds);
-            rosterService.removeSourceRefs(stageIds);
+            // 边收口:被删段的出边删除、入边原地改挂到链上后继(只可能是自动边,固定边已被守卫拦下)
+            rosterService.reattachEdgesOnStageDelete(stageIds, successorByStage);
         }
         List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
                 .in(TMatch::getStageId, stageIds)
@@ -611,9 +622,7 @@ public class TStageServiceImpl implements ITStageService {
         for (Long tid : affectedTournamentIds) {
             stageChain.realignPointers(tid);
         }
-        // 删除后为存活赛段补齐名单行:被删赛段的后续赛段若原名单整行失效,
-        // 按新 prev 补默认组;新入口(无前驱)补签到 STREAM 组
-        rosterService.ensureRosterForSurvivors(affectedTournamentIds);
+        // 注:删段后不再自动补默认边——依赖以边表为准,"删掉就是删掉"(入边已在上面改挂到后继)
         // 自动解绑引用被删赛段/其场次的场景组件,避免大屏刷新后报"赛段不存在"
         clearWidgetStageBindings(deletingStages, matchIds);
         return deleted;

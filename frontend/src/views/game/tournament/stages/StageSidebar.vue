@@ -60,15 +60,17 @@
           v-if="localStage.status === 'DRAFT'"
           @click="doStart"
           :disabled="lifecycleLoading || !canStartStage"
-          :title="!canStartStage ? '上一赛段结束后方可开始本赛段' : '将自动初始化并生成对阵'"
+          :title="canStartStage ? '将自动初始化并生成对阵' : '晋级者尚未确认，请先在中间态确认名单'"
           class="w-full py-2.5 text-sm font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50"
         >
           开始赛段
         </button>
         <p v-if="localStage.status === 'DRAFT' && !canStartStage" class="text-[10px] text-neutral-500 leading-relaxed">
-          上一赛段「{{ prevStage?.name || '未知' }}」尚未结束，结束后方可开始本赛段。
+          名单来源已全部结束，晋级者尚未确认。请先在「中间态」确认晋级，确认后「开始赛段」将自动可用。
         </p>
-        <p v-else-if="localStage.status === 'DRAFT'" class="text-[10px] text-neutral-500 leading-relaxed">点击「开始赛段」将自动初始化并生成对阵。</p>
+        <p v-else-if="localStage.status === 'DRAFT'" class="text-[10px] text-neutral-500 leading-relaxed">
+          点击「开始赛段」将自动初始化并生成对阵；依赖按名单来源(出口配置)判定，来源未结束时会提示还差哪几段。
+        </p>
         <button
           v-if="localStage.status === 'GAMING'"
           @click="doComplete"
@@ -198,7 +200,17 @@ const prevStage = computed(() => {
   if (!cur?.prevStageId) return null;
   return props.stages?.find((s) => String(s.id) === String(cur.prevStageId)) || null;
 });
-const canStartStage = computed(() => !prevStage.value || prevStage.value.status === 'SETTLED');
+/**
+ * 能否开始本赛段:依赖以名单来源(出口配置)为准,不再看链上的"上一赛段"。
+ * 来源已全部结束但晋级者未确认时 awaitingAdvancement 为真,需先在中间态确认名单;
+ * 赛事开启「跳过中间态确认」时点击会弹窗自动确认后再开始。来源未结束时按钮可点,
+ * 由后端拦下并点名还差哪几段(与手机导播台同一口径)。
+ */
+const canStartStage = computed(() => {
+  if (localStage.value.status !== 'DRAFT') return false;
+  if (localStage.value.awaitingAdvancement && !localStage.value.skipConfirm) return false;
+  return true;
+});
 /** 入口赛段(链上第一个):没有中间态,撤销时人不变、只清比赛与判罚数据 */
 const isEntryStage = computed(() => !prevStage.value);
 

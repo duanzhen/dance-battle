@@ -304,7 +304,7 @@ CREATE TABLE `t_stage` (
   -- 名单来源组已搬到独立边表 t_stage_roster_group(赛段间依赖的边+取人规则)
   `roster_applied` tinyint DEFAULT '0' COMMENT '名单快照已物化(apply成功置1)',
   `roster_skipped` tinyint DEFAULT '0' COMMENT '名单显式跳过(不带人)',
-  `status` enum('DRAFT','GAMING','SETTLED','DISCARD') DEFAULT 'DRAFT' COMMENT '状态(赛段无 PENDING:初始化只锁名单,状态保持 DRAFT)',
+  `status` enum('DRAFT','GAMING','SETTLED','DISCARD') DEFAULT 'DRAFT' COMMENT '状态',
   `team_count_start` int DEFAULT '0' COMMENT '起始队伍数量',
   `team_count_end` int DEFAULT '0' COMMENT '晋级队伍数量',
   `is_initialized` tinyint DEFAULT '0' COMMENT '是否完成初始化配置：0-否 1-是',

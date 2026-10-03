@@ -76,6 +76,12 @@ export interface StageVO {
    */
   incoming?: RosterVO[];
 
+  /** 来源已全部结束但晋级者尚未确认(管理端列表下发,供开始赛段按钮判断依赖就绪) */
+  awaitingAdvancement?: boolean;
+
+  /** 赛事开启「跳过中间态确认」 */
+  skipConfirm?: boolean;
+
   /**
    * 视觉配置：{"color": "#f59e0b", "icon": "trophy"}
    */

@@ -107,6 +107,11 @@ class AuditionZeroScoreTest {
         Long tid = newTournament("0分不晋级");
         TStageVo stage = newAuditionStage(tid, "海选", 16);
         lifecycleService.ensureAuditionCircles(stage.getId());
+        // 开赛前配好下游出口(上游开赛后不允许再改它的出口)
+        TStageVo round16 = createStage(tid, "16强", "KNOCKOUT", 16L, 8L, stage.getId(),
+            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":16,\"advanceCount\":8,"
+                + "\"format\":\"BO1\",\"pairingMode\":\"SEED\"},\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+        addAuditionExitGroup(round16.getId(), stage.getId(), 16);
         Long refereeId = insertReferee(tid, "裁判A");
         Long circleId = circlesOf(stage.getId()).get(0).getId();
         bindRefereeToCircle(circleId, refereeId, tid);
@@ -137,10 +142,6 @@ class AuditionZeroScoreTest {
         }
 
         // 下一赛段按海选出口「圈内第 1~16 名(结果不限)」取人:0 分的一个都不能带进来
-        TStageVo round16 = createStage(tid, "16强", "KNOCKOUT", 16L, 8L, stage.getId(),
-            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":16,\"advanceCount\":8,"
-                + "\"format\":\"BO1\",\"pairingMode\":\"SEED\"},\"scoring\":{\"matchMode\":\"STANDARD\"}}");
-        addAuditionExitGroup(round16.getId(), stage.getId(), 16);
         assertEquals(15, rosterService.applyRoster(round16.getId(), null),
             "0 分不晋级:下一赛段只能带上 15 人");
         assertEquals(15, competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
@@ -163,6 +164,11 @@ class AuditionZeroScoreTest {
         Long tid = newTournament("加赛0分");
         TStageVo stage = newAuditionStage(tid, "海选", 16);
         lifecycleService.ensureAuditionCircles(stage.getId());
+        // 开赛前配好下游出口(上游开赛后不允许再改它的出口)
+        TStageVo round16 = createStage(tid, "16强", "KNOCKOUT", 16L, 8L, stage.getId(),
+            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":16,\"advanceCount\":8,"
+                + "\"format\":\"BO1\",\"pairingMode\":\"SEED\"},\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+        addAuditionExitGroup(round16.getId(), stage.getId(), 16);
         Long refereeId = insertReferee(tid, "裁判A");
         Long circleId = circlesOf(stage.getId()).get(0).getId();
         bindRefereeToCircle(circleId, refereeId, tid);
@@ -215,10 +221,6 @@ class AuditionZeroScoreTest {
         }
 
         // 出口按圈内名次取人:0 分的 4 个(16-19)加一海的 0 分(20)一个都不能带进来
-        TStageVo round16 = createStage(tid, "16强", "KNOCKOUT", 16L, 8L, stage.getId(),
-            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":16,\"advanceCount\":8,"
-                + "\"format\":\"BO1\",\"pairingMode\":\"SEED\"},\"scoring\":{\"matchMode\":\"STANDARD\"}}");
-        addAuditionExitGroup(round16.getId(), stage.getId(), 16);
         assertEquals(15, rosterService.applyRoster(round16.getId(), null),
             "加赛打 0 分的人也一个都不能进下一赛段");
         List<String> brought = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()

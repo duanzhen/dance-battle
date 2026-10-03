@@ -41,6 +41,7 @@
 
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue';
+import { circleLabel } from '@/utils/circleLabel';
 
 const props = defineProps<{
   stages: any[];
@@ -102,10 +103,10 @@ const rosterText = (p: any): string =>
     } · ${fillLabel(g.fillMode)}`)
     .join('\n');
 
-/** ZONE-2 → 第2圈 */
+/** ZONE-2 → A圈 */
 const zoneText = (zone?: string | null): string => {
   const m = /^ZONE-(\d+)$/.exec(zone || '');
-  return m ? `第${m[1]}圈` : (zone || '');
+  return m ? circleLabel(m[1]) : (zone || '');
 };
 
 const openTarget = (stage: any) => {

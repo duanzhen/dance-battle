@@ -242,8 +242,8 @@ import { setStageSeedOrder } from '@/api/game/stage';
 import { exportAuditionResult, getAuditionResult } from '@/api/game/stage';
 import { withdrawArenaCompetitor } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
-import { listMatchReferee } from '@/api/game/matchReferee';
+import { listParticipantsByStage } from '@/api/game/matchParticipant';
+import { circleLabel } from '@/utils/circleLabel';
 import { isTiebreakerMatch } from '@/utils/tiebreaker';
 import { CompetitorVO } from '@/api/game/competitor/types';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
@@ -616,7 +616,7 @@ const loadScores = async () => {
 const circleLabelOf = (competitorId?: string | number | null) => (competitorId == null ? '' : circleLabels.value[String(competitorId)] || '');
 const inTiebreaker = (competitorId?: string | number | null) => competitorId != null && tiebreakerCompetitorIds.value.has(String(competitorId));
 
-// 加载「参赛方 -> 所在圈」映射(圈名以裁判命名,无裁判回退第N圈)
+// 加载「参赛方 -> 所在圈」映射(圈名统一为 A圈/B圈…)
 const loadCircleLabels = async () => {
   circleLabels.value = {};
   circleZones.value = {};
@@ -633,15 +633,6 @@ const loadCircleLabels = async () => {
     if (zones.length < 2) {
       return;
     }
-    const refRes: any = await listMatchReferee(props.stageId);
-    const refRows: any[] = refRes?.data || [];
-    const namesByMatch: Record<string, string[]> = {};
-    refRows.forEach((r) => {
-      if (r.matchId != null && r.refereeName) {
-        const key = String(r.matchId);
-        (namesByMatch[key] = namesByMatch[key] || []).push(r.refereeName);
-      }
-    });
     const map: Record<string, string> = {};
     const zoneMap: Record<string, string> = {};
     const rankMap: Record<string, number> = {};
@@ -655,8 +646,7 @@ const loadCircleLabels = async () => {
     }
     zones.forEach((m: any) => {
       const zoneKey = String(m.displayZone);
-      const refNames = namesByMatch[String(m.id)];
-      const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneKey.replace('ZONE-', '')}圈`;
+      const label = circleLabel(zoneKey.replace('ZONE-', ''));
       options.push({ key: zoneKey, label });
       (partsByMatch[String(m.id)] || []).forEach((p: any) => {
         if (p.competitorId != null) {

@@ -57,9 +57,25 @@ public final class StageFlowSupport {
         return "ZONE-" + circleNo;
     }
 
-    /** 海选圈场次名:单圈沿用「海选赛」,多圈为「海选赛-N圈」(仅展示文案,不参与任何判定) */
+    /**
+     * 海选圈展示名(全站唯一口径):第 1 圈 = {@code A圈}、第 2 圈 = {@code B圈}…
+     * 超过 26 圈按 {@code AA圈} / {@code AB圈} 继续。仅展示文案,不参与任何判定;
+     * 内部存储/判定的分区名仍是 {@link #circleZone(int)}({@code ZONE-k})。
+     */
+    public static String circleLabel(int circleNo) {
+        int n = Math.max(1, circleNo);
+        StringBuilder sb = new StringBuilder();
+        while (n > 0) {
+            int rem = (n - 1) % 26;
+            sb.insert(0, (char) ('A' + rem));
+            n = (n - 1) / 26;
+        }
+        return sb + "圈";
+    }
+
+    /** 海选圈场次名:统一为「A圈 / B圈 / …」(仅展示文案,不参与任何判定) */
     public static String circleName(int totalCircles, int circleNo) {
-        return totalCircles <= 1 ? "海选赛" : "海选赛-" + circleNo + "圈";
+        return circleLabel(circleNo);
     }
 
     /**

@@ -46,13 +46,13 @@
 
             <div v-if="circleCount === 0" class="rounded-lg border border-dashed border-neutral-700 bg-black/30 px-4 py-6 text-center">
               <p class="text-sm text-neutral-400">尚未配置圈</p>
-              <p class="text-[11px] text-neutral-600 mt-1">点击下方按钮新增第 1 圈（裁判 / 去向）</p>
+              <p class="text-[11px] text-neutral-600 mt-1">点击下方按钮新增 A圈（裁判 / 去向）</p>
             </div>
 
             <div v-else class="space-y-3">
               <div v-for="i in circleCount" :key="i" class="rounded-lg border border-neutral-800 bg-black/40 p-4 space-y-2">
                 <div class="flex items-center justify-between">
-                  <span class="text-sm font-bold text-amber-500">第 {{ i }} 圈</span>
+                  <span class="text-sm font-bold text-amber-500">{{ circleLabel(i) }}</span>
                   <div class="flex items-center gap-2">
                     <span class="text-[11px] text-neutral-500">
                       晋级 <span class="text-white font-mono">{{ circleQuota(i - 1) }}</span> 人 · 裁判 {{ circleRefereeText(i - 1) }}
@@ -149,7 +149,7 @@
         >
           <div class="flex-none px-5 py-4 border-b border-neutral-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-white">
-              {{ editingCircleIndex === null ? `新增第 ${wizardCircleNo} 圈` : `编辑第 ${editingCircleIndex + 1} 圈` }}
+              {{ editingCircleIndex === null ? `新增 ${circleLabel(wizardCircleNo)}` : `编辑 ${circleLabel(editingCircleIndex + 1)}` }}
             </h3>
             <div class="flex items-center gap-2 text-[11px]">
               <span :class="wizardStep === 1 ? 'text-amber-400' : 'text-neutral-600'">1 裁判</span>
@@ -339,6 +339,7 @@ import { listRostersBySource, addRosterGroups, removeRosterGroup, updateRosterGr
 import { listMatchReferee } from '@/api/game/matchReferee';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
+import { circleLabel } from '@/utils/circleLabel';
 
 const props = defineProps<{
   stage: StageData;
@@ -729,7 +730,7 @@ const confirmAddCircle = async () => {
     } else {
       await syncCircleExits(idx, advance);
       await dropGenericAdvanceGroup(wizard.defaultTargetId as string | number);
-      ElMessage.success(editing ? `第 ${idx + 1} 圈已更新` : `第 ${idx + 1} 圈已新增`);
+      ElMessage.success(editing ? `${circleLabel(idx + 1)}已更新` : `${circleLabel(idx + 1)}已新增`);
     }
     closeWizard();
     await loadExits();

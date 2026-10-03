@@ -281,6 +281,7 @@ import { listStage, addStage as addStageApi, updateStageConfig as updateStageCon
 import { StageVO, StageForm, StageConfigForm } from '@/api/game/stage/types';
 import { RosterVO } from '@/api/game/stage/rosterTypes';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
+import { circleLabel } from '@/utils/circleLabel';
 import StageSidebar from './stages/StageSidebar.vue';
 import TransitionConfig from './TransitionConfig.vue';
 import KnockoutStageConfig from './stages/KnockoutStageConfig.vue';
@@ -378,10 +379,10 @@ const incomingTooltip = (stage: Stage): string => {
     .join('\n');
 };
 
-/** ZONE-2 → 第2圈(无法识别时原样返回) */
+/** ZONE-2 → A圈(无法识别时原样返回) */
 const zoneText = (zone?: string | null): string => {
   const m = /^ZONE-(\d+)$/.exec(zone || '');
-  return m ? `第${m[1]}圈` : zone || '';
+  return m ? circleLabel(m[1]) : zone || '';
 };
 
 // --- 加载赛段数据 ---

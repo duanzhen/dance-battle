@@ -345,7 +345,7 @@
           <!-- 排名赛:圈分配预览 -->
           <div v-else-if="targetMode === 'RANK'" class="grid grid-cols-2 gap-2">
             <div v-for="(ccl, ci) in circlePreview" :key="ci" class="rounded-lg bg-black border border-neutral-800 p-2">
-              <div class="text-[10px] font-bold text-amber-500 mb-1">ZONE-{{ ci + 1 }}</div>
+              <div class="text-[10px] font-bold text-amber-500 mb-1">{{ circleLabel(ci + 1) }}</div>
               <div v-for="c in ccl" :key="c.id" class="text-xs text-neutral-300 truncate py-0.5">
                 {{ c.name }}<span v-if="entryTagLabel(c.entryTag)" class="text-neutral-500"> ·{{ entryTagLabel(c.entryTag) }}</span>
               </div>
@@ -664,6 +664,7 @@ import {
   setRosterOrder
 } from '@/api/game/stage/roster';
 import { seedLayout } from '@/utils/seedLayout';
+import { circleLabel } from '@/utils/circleLabel';
 import { listCompetitor } from '@/api/game/competitor';
 import { listPlayer } from '@/api/game/player';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
@@ -760,10 +761,10 @@ const rankTextOf = (g: any): string => {
   return g.rankByZone ? `圈内${range}` : `全场${range}`;
 };
 
-/** ZONE-2 → 第2圈 */
+/** ZONE-2 → A圈 */
 const zoneTextOf = (zone?: string | null): string => {
   const m = /^ZONE-(\d+)$/.exec(zone || '');
-  return m ? `第${m[1]}圈` : zone || '';
+  return m ? circleLabel(m[1]) : zone || '';
 };
 
 const groupText = (g: any): string => {

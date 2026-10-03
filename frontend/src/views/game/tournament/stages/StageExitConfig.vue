@@ -100,7 +100,7 @@
         <label class="text-[11px] text-neutral-600 block mb-1">圈</label>
         <el-select v-model="form.zone" class="w-full">
           <el-option value="__all__" :label="`全部 ${circleCount} 圈（同样规则）`" />
-          <el-option v-for="z in zoneOptions" :key="z" :value="z" :label="`第 ${z.replace('ZONE-', '')} 圈`" />
+          <el-option v-for="z in zoneOptions" :key="z" :value="z" :label="circleLabel(z.replace('ZONE-', ''))" />
         </el-select>
       </div>
       <!-- 淘汰赛(晋级赛)只分胜负,不涉及名次匹配 -->
@@ -116,7 +116,7 @@
         <input v-model.number="form.rankEnd" type="number" min="1" class="cfg-input w-full" placeholder="止，如 24（空=末名）" />
       </div>
       <p v-if="isAudition && form.rankMode === 'range'" class="text-[11px] text-amber-500/80">
-        海选按「{{ form.zone === '__all__' ? '各圈' : '第' + String(form.zone).replace('ZONE-', '') + '圈' }}内名次」取人
+        海选按「{{ form.zone === '__all__' ? '各圈' : circleLabel(String(form.zone).replace('ZONE-', '')) }}内名次」取人
       </p>
       <div class="flex justify-end gap-2">
         <button
@@ -151,6 +151,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { StageData } from './types';
 import { listStage } from '@/api/game/stage';
 import { listRostersBySource, addRosterGroups, removeRosterGroup, updateRosterGroup, reorderRosterGroups } from '@/api/game/stage/roster';
+import { circleLabel } from '@/utils/circleLabel';
 
 const props = defineProps<{
   stage: StageData;
@@ -278,7 +279,7 @@ const ruleText = (g: any): string => {
   if (knockoutMode.value) {
     return result;
   }
-  const zone = isAudition.value && g.zone ? `第${String(g.zone).replace('ZONE-', '')}圈 · ` : '';
+  const zone = isAudition.value && g.zone ? `${circleLabel(String(g.zone).replace('ZONE-', ''))} · ` : '';
   return `${zone}${result} · ${rankText(g)}`;
 };
 

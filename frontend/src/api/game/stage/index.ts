@@ -182,3 +182,15 @@ export const exportAuditionResult = (stageId: string | number) => {
     responseType: 'blob'
   });
 };
+
+/**
+ * 赛段「参赛方 → 所在圈」标签(海选阵容页专用只读接口)。
+ * 一次返回赛段模式/状态、圈数与 `{ competitorId: 'A圈' }` 映射,
+ * 替代此前"取赛段 + 确保圈 + 列场次 + 列圈裁判 + 列参赛方"5 个串行请求。
+ */
+export const getStageCircleLabels = (stageId: string | number) => {
+  return request({
+    url: '/game/stage/' + stageId + '/circle-labels',
+    method: 'get'
+  });
+};

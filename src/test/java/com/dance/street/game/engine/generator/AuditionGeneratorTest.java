@@ -1,6 +1,7 @@
 package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.RuleConfigHolder;
+import com.dance.street.game.engine.common.StageFlowSupport;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -33,7 +34,7 @@ class AuditionGeneratorTest {
 
         assertEquals(1, plan.getMatches().size());
         MatchPlan m = plan.getMatches().get(0);
-        assertEquals("海选赛", m.getName());
+        assertEquals("A圈", m.getName());
         // 圈编号与单/多圈无关:单圈就是第 1 圈(此前单圈另起 CENTER,导致加圈后圈集合分叉)
         assertEquals("ZONE-1", m.getDisplayZone());
         assertEquals(1, m.getRound());
@@ -49,7 +50,7 @@ class AuditionGeneratorTest {
         assertEquals(3, plan.getMatches().size());
         for (int c = 0; c < 3; c++) {
             MatchPlan m = plan.getMatches().get(c);
-            assertEquals("海选赛-" + (c + 1) + "圈", m.getName());
+            assertEquals(StageFlowSupport.circleLabel(c + 1), m.getName());
             assertEquals("ZONE-" + (c + 1), m.getDisplayZone());
             assertEquals(c, m.getMatchIndex());
             assertEquals(c, m.getDisplayRow(), "圈序号决定展示行");

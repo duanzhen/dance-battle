@@ -24,6 +24,7 @@ import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
+import com.dance.street.game.domain.vo.StageCircleLabelsVo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageConfigBo;
 import com.dance.street.game.domain.bo.AssignCircleBo;
@@ -32,6 +33,7 @@ import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
+import com.dance.street.game.service.impl.flow.CircleLabelService;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 
 /**
@@ -48,6 +50,8 @@ public class TStageController extends BaseController {
 
     private final ITStageService tStageService;
     private final ITStageLifecycleService tStageLifecycleService;
+    /** 海选圈标签只读视图(一次批量算好,替代前端 5 个串行请求) */
+    private final CircleLabelService circleLabelService;
 
     /**
      * 查询赛段流程列表
@@ -88,6 +92,18 @@ public class TStageController extends BaseController {
     public R<TStageVo> getInfo(@NotNull(message = "主键不能为空")
                                      @PathVariable Long id) {
         return R.ok(tStageService.queryById(id));
+    }
+
+    /**
+     * 赛段「参赛方 → 所在圈」标签(海选阵容页专用只读接口)。
+     *
+     * <p>圈标签统一为 A圈/B圈…;非海选赛段只返回赛段模式/状态、圈标签为空。
+     * 只读、不建圈;建圈/绑裁判由配置保存与签到环节负责。</p>
+     */
+    @SaCheckPermission("game:stage:query")
+    @GetMapping("/{id}/circle-labels")
+    public R<StageCircleLabelsVo> circleLabels(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        return R.ok(circleLabelService.labels(id));
     }
 
     /**

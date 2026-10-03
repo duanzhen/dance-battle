@@ -178,7 +178,7 @@
             <span
               v-if="player.competitorId && circleLabelOf(player.competitorId)"
               class="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-400"
-              title="所在圈(以裁判命名)"
+              title="所在圈"
             >
               {{ circleLabelOf(player.competitorId) }}
             </span>
@@ -226,7 +226,7 @@
             <span
               v-if="circleLabelOf(competitor.id)"
               class="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-400"
-              title="所在圈(以裁判命名)"
+              title="所在圈"
             >
               {{ circleLabelOf(competitor.id) }}
             </span>
@@ -340,11 +340,9 @@ import { download } from '@/utils/request';
 import { PlayerVO, PlayerForm as PlayerFormType } from '@/api/game/player/types';
 import { listCompetitor } from '@/api/game/competitor';
 import { CompetitorVO } from '@/api/game/competitor/types';
-import { getFirstStage, getStage } from '@/api/game/stage';
+import { getFirstStage, getStage, getStageCircleLabels } from '@/api/game/stage';
 import { ensureAuditionCircles } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
-import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
-import { listMatchReferee } from '@/api/game/matchReferee';
 import { isTiebreakerMatch } from '@/utils/tiebreaker';
 import PlayerForm from './PlayerForm.vue';
 import CheckInDialog from './CheckInDialog.vue';
@@ -371,7 +369,7 @@ const currentCheckInPlayer = ref<PlayerVO | null>(null);
 // 首个赛段信息(判断海选进行中提示)
 const firstStageInfo = ref<{ stageMode?: string; status?: string } | null>(null);
 
-// 参赛方 -> 所在圈标签(以圈裁判命名;无裁判回退「第N圈」)
+// 参赛方 -> 所在圈标签(A圈/B圈…,由后端 /stage/{id}/circle-labels 统一下发)
 const circleLabels = ref<Record<string, string>>({});
 const circleLabelOf = (competitorId?: string | number | null) => (competitorId == null ? '' : circleLabels.value[String(competitorId)] || '');
 
@@ -509,54 +507,20 @@ const loadCompetitors = async () => {
   }
 };
 
-// 加载「参赛方 -> 所在圈」映射:圈名以该圈裁判命名(无裁判回退第N圈)
-const loadCircleLabels = async () => {
+/**
+ * 一次拉回"赛段模式/状态 + 参赛方→所在圈标签":替代此前 5 个串行请求
+ * (取赛段 → 确保圈 → 列场次 → 列圈裁判 → 列参赛方),且不在读取路径上建圈/绑裁判。
+ * 圈标签统一为 A圈/B圈…,由后端算好。
+ */
+const loadStageCircles = async () => {
   circleLabels.value = {};
+  firstStageInfo.value = null;
   if (!props.tournamentId || !firstStageId.value) return;
   try {
-    const stageRes = await getStage(firstStageId.value);
-    const stage: any = stageRes.data || (stageRes as any).data;
-    if (!stage || stage.stageMode !== 'AUDITION') return;
-    // 圈 = 真实 match:确保已按配置建齐,再统计各圈人数归属
-    try {
-      await ensureAuditionCircles(firstStageId.value);
-    } catch {
-      // 幂等接口,失败时按现有场次继续(可能尚未配置分圈)
-    }
-    const matchRes: any = await listMatch({ stageId: firstStageId.value, pageNum: 1, pageSize: 99 } as any);
-    const matches: any[] = Array.isArray(matchRes?.data) ? matchRes.data : matchRes?.data?.data || [];
-    const zones = matches.filter((m) => m.displayZone && String(m.displayZone).startsWith('ZONE-'));
-    if (zones.length === 0) {
-      return;
-    }
-    const refRes: any = await listMatchReferee(firstStageId.value);
-    const refRows: any[] = refRes?.data || [];
-    const namesByMatch: Record<string, string[]> = {};
-    refRows.forEach((r) => {
-      if (r.matchId != null && r.refereeName) {
-        const key = String(r.matchId);
-        (namesByMatch[key] = namesByMatch[key] || []).push(r.refereeName);
-      }
-    });
-    const map: Record<string, string> = {};
-    // 参赛方按赛段一次取回再分组(此前逐圈一次请求)
-    let partsByMatch: Record<string, any[]> = {};
-    try {
-      partsByMatch = await listParticipantsByStage(firstStageId.value);
-    } catch {
-      partsByMatch = {};
-    }
-    zones.forEach((m) => {
-      const zoneNo = String(m.displayZone).replace('ZONE-', '');
-      const refNames = namesByMatch[String(m.id)];
-      const label = refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneNo}圈`;
-      (partsByMatch[String(m.id)] || []).forEach((p) => {
-        if (p.competitorId != null) {
-          map[String(p.competitorId)] = label;
-        }
-      });
-    });
-    circleLabels.value = map;
+    const res: any = await getStageCircleLabels(firstStageId.value);
+    const data = res?.data || {};
+    firstStageInfo.value = { stageMode: data.stageMode, status: data.stageStatus };
+    circleLabels.value = data.labels || {};
   } catch (error) {
     console.warn('加载圈标签失败:', error);
     circleLabels.value = {};
@@ -607,10 +571,8 @@ const refreshAll = async () => {
         firstStageId.value = null;
       }
     }
-    await loadFirstStageInfo();
-
-    // 同时加载选手、参赛选手与圈归属
-    await Promise.all([loadPlayers(), loadCompetitors(), loadCircleLabels()]);
+    // 同时加载选手、参赛选手与圈归属(圈标签接口顺带返回赛段模式/状态,不必再单独取赛段)
+    await Promise.all([loadPlayers(), loadCompetitors(), loadStageCircles()]);
   } catch (error) {
     console.error('加载数据失败:', error);
   } finally {
@@ -765,22 +727,6 @@ const maxCompetitorNumber = () => {
     }
   }
   return max;
-};
-
-// 加载首个赛段信息(海选进行中提示用)
-const loadFirstStageInfo = async () => {
-  firstStageInfo.value = null;
-  if (!firstStageId.value) return;
-  try {
-    const resp = await getStage(firstStageId.value);
-    const data = resp.data as any;
-    firstStageInfo.value = {
-      stageMode: data.stageMode,
-      status: data.status
-    };
-  } catch (e) {
-    console.error('加载赛段信息失败:', e);
-  }
 };
 
 // 解析tags

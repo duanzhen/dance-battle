@@ -91,6 +91,8 @@ public class AuditionCircleSupport {
         if (anyStarted) {
             return;
         }
+        // 圈名归一化:历史单圈场次名可能是「海选赛」(没有编号),统一改回 A圈/B圈…
+        normalizeCircleNames(stage);
         List<TMatch> zones = circles(stage);
         int planned = plannedCircleCount(stage);
         if (zones.isEmpty()) {
@@ -114,6 +116,38 @@ public class AuditionCircleSupport {
         List<List<Long>> cfg = rc != null ? rc.getCircleRefereeIds() : null;
         if (cfg != null && cfg.size() == zones.size()) {
             assignCircleReferees(stage);
+        }
+    }
+
+    /**
+     * 圈名归一化:按 displayZone 的 ZONE-k 编号把场次名写成统一的 A圈/B圈…
+     * 用于把历史「单个没编号的圈」(名=海选赛)在加圈/保存配置时改成 A圈。
+     */
+    private void normalizeCircleNames(TStage stage) {
+        for (TMatch m : circles(stage)) {
+            Integer no = zoneNo(m.getDisplayZone());
+            if (no == null) {
+                continue;
+            }
+            String expected = StageFlowSupport.circleLabel(no);
+            if (!expected.equals(m.getName())) {
+                TMatch upd = new TMatch();
+                upd.setId(m.getId());
+                upd.setName(expected);
+                matchMapper.updateById(upd);
+            }
+        }
+    }
+
+    /** 解析分区的圈序号:ZONE-k → k;非圈分区返回 null */
+    private static Integer zoneNo(String displayZone) {
+        if (displayZone == null || !displayZone.startsWith("ZONE-")) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(displayZone.substring("ZONE-".length()));
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

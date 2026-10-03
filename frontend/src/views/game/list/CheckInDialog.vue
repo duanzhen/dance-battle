@@ -226,8 +226,8 @@ import { getStage } from '@/api/game/stage';
 import { ensureAuditionCircles } from '@/api/game/stage/lifecycle';
 import { listMatch } from '@/api/game/match';
 import { listMatchParticipant, listParticipantsByStage } from '@/api/game/matchParticipant';
-import { listMatchReferee } from '@/api/game/matchReferee';
 import { isTiebreakerMatch } from '@/utils/tiebreaker';
+import { circleLabel } from '@/utils/circleLabel';
 import PortraitMatting from './PortraitMatting.vue';
 import GameDialog from '@/components/GameDialog/index.vue';
 
@@ -315,20 +315,6 @@ const loadCircleInfo = async () => {
     } catch (error) {
       console.warn('确保海选圈场次失败,按配置展示占位圈:', error);
     }
-    // 圈名优先用该圈裁判名(如「张三」),无裁判时回退「第N圈」
-    const refereeNamesByMatch: Record<string, string[]> = {};
-    try {
-      const refRes: any = await listMatchReferee(props.stageId);
-      const refRows: any[] = refRes?.data || [];
-      refRows.forEach((r) => {
-        if (r.matchId != null && r.refereeName) {
-          const key = String(r.matchId);
-          (refereeNamesByMatch[key] = refereeNamesByMatch[key] || []).push(r.refereeName);
-        }
-      });
-    } catch {
-      // 裁判绑定读取失败时圈名回退第N圈
-    }
     // 未生成对阵时 matches 为空,顶部按配置圈数展示实时预估
     const matchRes = await listMatch({ stageId: props.stageId } as any);
     const matches = (matchRes.data || (matchRes as any).data || []) as any[];
@@ -351,7 +337,6 @@ const loadCircleInfo = async () => {
         continue;
       }
       const zoneNo = String(m.displayZone).replace('ZONE-', '');
-      const refNames = refereeNamesByMatch[String(m.id)];
       const participants = partsByMatch[String(m.id)] || [];
       participants.forEach((p: any) => {
         if (p.competitorId != null) {
@@ -360,7 +345,7 @@ const loadCircleInfo = async () => {
       });
       list.push({
         matchId: m.id,
-        name: refNames && refNames.length > 0 ? refNames.join(' / ') : `第${zoneNo}圈`,
+        name: circleLabel(zoneNo),
         count: participants.length,
         quota: quotas.length > zoneCursor && quotas[zoneCursor] >= 0 ? quotas[zoneCursor] : null
       });
@@ -501,7 +486,7 @@ const circleBar = computed(() => {
     items.push({
       key: actual ? String(actual.matchId) : `cfg-${i}`,
       matchId: actual ? actual.matchId : null,
-      name: actual ? actual.name : `第${i + 1}圈`,
+      name: actual ? actual.name : circleLabel(i + 1),
       // 未生成真圈时人数未知(圈位一律手动指定,不再按号码预估)
       count: actual ? actual.count : null,
       quota: actual ? actual.quota : (circleQuotaList.value[i] ?? null)

@@ -80,6 +80,7 @@ import {
   listMatchReferee
 } from '@/api/game/screen';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
+import { circleLabel } from '@/utils/circleLabel';
 
 const props = defineProps<{
   stageId?: string | number | null;
@@ -261,7 +262,7 @@ const loadData = async () => {
         .sort((a: any, b: any) => numOf(a) - numOf(b));
       return {
         zone,
-        title: order.length > 1 ? `第${idx + 1}圈` : '海选',
+        title: order.length > 1 ? circleLabel(idx + 1) : '海选',
         matchId: zoneMatches[0]?.id ?? null,
         advancers
       };

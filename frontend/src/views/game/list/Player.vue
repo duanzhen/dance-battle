@@ -482,7 +482,7 @@ const loadPlayers = async () => {
     players.value = response.data || [];
   } catch (error) {
     console.error('加载选手列表失败:', error);
-    ElMessage.error('加载选手列表失败');
+    notifyError(error, '加载选手列表失败');
     players.value = [];
   }
 };
@@ -504,7 +504,7 @@ const loadCompetitors = async () => {
     competitors.value = response.data || [];
   } catch (error) {
     console.error('加载参赛选手失败:', error);
-    ElMessage.error('加载参赛选手失败');
+    notifyError(error, '加载参赛选手失败');
     competitors.value = [];
   }
 };
@@ -749,7 +749,7 @@ const handleBulkCheckIn = async () => {
       );
     }
   } catch (e: any) {
-    ElMessage.error(e?.msg || e?.message || '一键全签到失败');
+    notifyError(e, '一键全签到失败');
   } finally {
     bulkCheckingIn.value = false;
   }
@@ -825,7 +825,7 @@ const handleSubmit = async (data: any) => {
     }
   } catch (error) {
     console.error('操作失败:', error);
-    ElMessage.error(data.id ? '更新失败' : '添加失败');
+    notifyError(error, data.id ? '更新失败' : '添加失败');
   }
 };
 

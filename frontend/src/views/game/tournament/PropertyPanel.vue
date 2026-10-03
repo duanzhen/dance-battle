@@ -538,7 +538,7 @@ const handleUpdateProp = async (key, value) => {
       await store.updateWidget(targetId, { dataConfig });
       emit('widgetUpdated');
     } catch (e) {
-      ElMessage.error(e?.msg || e?.message || '属性更新失败');
+      notifyError(e, '属性更新失败');
     }
   });
   return propCommitChain;
@@ -619,7 +619,7 @@ const moveLayer = async (w, dir) => {
     emit('widgetUpdated');
   } catch (e: any) {
     console.error('图层排序失败', e);
-    ElMessage.error(e?.msg || e?.message || '图层排序失败');
+    notifyError(e, '图层排序失败');
   }
 };
 
@@ -741,7 +741,7 @@ const onDrop = async () => {
     emit('widgetUpdated');
   } catch (e: any) {
     console.error('拖动排序失败', e);
-    ElMessage.error('拖动排序失败');
+    notifyError(e, '拖动排序失败');
     return;
   }
 };
@@ -781,7 +781,7 @@ const handleDeleteScene = async () => {
     await store.deleteScene(scene.value.id);
   } catch (error) {
     console.error('删除场景失败:', error);
-    ElMessage.error('删除场景失败,请稍后重试');
+    notifyError(error, '删除场景失败,请稍后重试');
   }
 };
 </script>

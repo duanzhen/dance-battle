@@ -71,6 +71,7 @@
     "mapWritableState": true,
     "markRaw": true,
     "nextTick": true,
+    "notifyError": true,
     "onActivated": true,
     "onBeforeMount": true,
     "onBeforeRouteLeave": true,

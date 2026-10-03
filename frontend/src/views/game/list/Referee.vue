@@ -240,7 +240,7 @@ const resetRefereeQr = async () => {
     ElMessage.success('二维码已重置，旧二维码立即失效');
   } catch (error) {
     console.error('重置裁判密钥失败:', error);
-    ElMessage.error('重置裁判密钥失败');
+    notifyError(error, '重置裁判密钥失败');
   } finally {
     resettingRefereeQr.value = false;
   }
@@ -281,7 +281,7 @@ const handleAvatarFile = async (e: Event) => {
     }
   } catch (error) {
     console.error('头像上传失败:', error);
-    ElMessage.error('头像上传失败');
+    notifyError(error, '头像上传失败');
   } finally {
     uploadingAvatar.value = false;
     if (avatarInput.value) {
@@ -309,7 +309,7 @@ const submitAddReferee = async () => {
     await loadReferees();
   } catch (error) {
     console.error('添加裁判失败:', error);
-    ElMessage.error('添加裁判失败');
+    notifyError(error, '添加裁判失败');
   } finally {
     submitting.value = false;
   }
@@ -330,7 +330,7 @@ const loadReferees = async () => {
     referees.value.forEach((r) => refereeNameBackup.set(r.id, r.name || ''));
   } catch (error) {
     console.error('加载裁判列表失败:', error);
-    ElMessage.error('加载裁判列表失败');
+    notifyError(error, '加载裁判列表失败');
     referees.value = [];
   } finally {
     loading.value = false;
@@ -374,7 +374,7 @@ const saveRefereeName = async (referee: RefereeVO) => {
   } catch (error) {
     console.error('更新裁判名字失败:', error);
     referee.name = prevName;
-    ElMessage.error('保存失败，名字已还原');
+    notifyError(error, '保存失败，名字已还原');
   } finally {
     savingRefereeId.value = null;
   }

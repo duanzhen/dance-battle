@@ -97,7 +97,7 @@ const handleFileChange = async (e: Event) => {
       ElMessage.error(res?.msg || '上传失败');
     }
   } catch (e: any) {
-    ElMessage.error('上传失败');
+    notifyError(e, '上传失败');
   } finally {
     uploading.value = false;
     if (fileInputRef.value) {

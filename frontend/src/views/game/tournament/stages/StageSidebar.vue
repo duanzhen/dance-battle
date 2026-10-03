@@ -69,7 +69,7 @@
           名单来源已全部结束，晋级者尚未确认。请先在「中间态」确认晋级，确认后「开始赛段」将自动可用。
         </p>
         <p v-else-if="localStage.status === 'DRAFT'" class="text-[10px] text-neutral-500 leading-relaxed">
-          点击「开始赛段」将自动初始化并生成对阵；依赖按名单来源(出口配置)判定，来源未结束时会提示还差哪几段。
+          点击「开始赛段」将根据初始化并生成对阵；依赖按名单来源(出口配置)判定。
         </p>
         <button
           v-if="localStage.status === 'GAMING'"
@@ -292,7 +292,7 @@ const runLifecycle = async (fn: () => Promise<any>, successStatus?: string, succ
     emit('update', localStage.value);
     emit('refresh');
   } catch (e: any) {
-    ElMessage.error(e?.msg || e?.message || '操作失败');
+    notifyError(e, '操作失败');
   } finally {
     lifecycleLoading.value = false;
   }
@@ -337,7 +337,7 @@ const doComplete = async () => {
     emit('update', localStage.value);
     emit('refresh');
   } catch (e: any) {
-    ElMessage.error(e?.msg || e?.message || '操作失败');
+    notifyError(e, '操作失败');
   } finally {
     lifecycleLoading.value = false;
   }
@@ -435,7 +435,7 @@ const saveRefereeAssignment = async () => {
     originalRefereeIds.value = [...selectedRefereeIds.value];
     ElMessage.success('裁判分配已保存');
   } catch (e: any) {
-    ElMessage.error(e?.msg || e?.message || '保存失败');
+    notifyError(e, '保存失败');
   } finally {
     savingReferees.value = false;
   }

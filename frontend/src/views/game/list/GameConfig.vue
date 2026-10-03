@@ -202,7 +202,7 @@ const loadTournamentData = async () => {
     };
   } catch (error) {
     console.error('加载赛事数据失败:', error);
-    ElMessage.error('加载赛事数据失败');
+    notifyError(error, '加载赛事数据失败');
   } finally {
     loading.value = false;
   }
@@ -224,7 +224,7 @@ const saveConfig = async () => {
     ElMessage.success('保存成功');
   } catch (error) {
     console.error('保存失败:', error);
-    ElMessage.error('保存失败');
+    notifyError(error, '保存失败');
   } finally {
     loading.value = false;
   }
@@ -266,7 +266,7 @@ const openDirectorQr = async () => {
     showDirectorQr.value = true;
   } catch (error) {
     console.error('获取赛事凭证失败:', error);
-    ElMessage.error('获取赛事凭证失败');
+    notifyError(error, '获取赛事凭证失败');
   }
 };
 
@@ -308,7 +308,7 @@ const resetDirectorQr = async () => {
     ElMessage.success('二维码已重置，旧二维码立即失效');
   } catch (error) {
     console.error('重置赛事凭证失败:', error);
-    ElMessage.error('重置赛事凭证失败');
+    notifyError(error, '重置赛事凭证失败');
   } finally {
     resettingQr.value = false;
   }

@@ -83,7 +83,7 @@ const handleAddWidget = async (type) => {
     await store.addWidget(type);
   } catch (error) {
     console.error('添加组件失败:', error);
-    ElMessage.error(error.message || '添加组件失败，请稍后重试');
+    notifyError(error, '添加组件失败，请稍后重试');
   }
 };
 </script>

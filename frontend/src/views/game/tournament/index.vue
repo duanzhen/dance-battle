@@ -141,7 +141,7 @@ const runUndoOrRedo = async (isRedo) => {
     const ok = isRedo ? await directorStore.redo() : await directorStore.undo();
     if (ok) ElMessage.success(isRedo ? '已重做' : '已撤销');
   } catch (e) {
-    ElMessage.error(e?.message || (isRedo ? '重做失败' : '撤销失败'));
+    notifyError(e, isRedo ? '重做失败' : '撤销失败');
   }
 };
 

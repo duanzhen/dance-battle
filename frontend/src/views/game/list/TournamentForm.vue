@@ -402,7 +402,7 @@ const handleFile = async (file) => {
     }
   } catch (error) {
     console.error('封面上传失败:', error);
-    ElMessage.error('封面上传失败');
+    notifyError(error, '封面上传失败');
     previewUrl.value = null;
   } finally {
     isUploadingCover.value = false;
@@ -542,7 +542,7 @@ const submitForm = async () => {
     resetForm();
   } catch (error) {
     console.error('提交失败:', error);
-    ElMessage.error(props.tournament ? '更新赛事失败' : '创建赛事失败');
+    notifyError(error, props.tournament ? '更新赛事失败' : '创建赛事失败');
   } finally {
     isSubmitting.value = false;
   }

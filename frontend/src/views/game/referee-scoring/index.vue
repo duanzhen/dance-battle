@@ -995,7 +995,7 @@ const confirmKeypad = async () => {
     autoSelectNext(target);
   } catch (e: any) {
     console.error('提交打分失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
+    notifyError(e, '提交失败');
   } finally {
     keypadSubmitting.value = false;
   }
@@ -1033,7 +1033,7 @@ const confirmRankTarget = async () => {
     autoSelectNext(target);
   } catch (e: any) {
     console.error('提交维度打分失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
+    notifyError(e, '提交失败');
   } finally {
     keypadSubmitting.value = false;
   }
@@ -1063,7 +1063,7 @@ const submitKnockout = async (side: 'LEFT' | 'DRAW' | 'RIGHT') => {
     await loadData(stageId.value ?? undefined, matchId.value ?? undefined, undefined, true);
   } catch (e: any) {
     console.error('提交判罚失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
+    notifyError(e, '提交失败');
   } finally {
     submitting.value = false;
     // 提交后清除按钮 focus:避免下一场仍停留在旧按钮上,导致红/蓝高亮丢失显示为灰色
@@ -1215,7 +1215,7 @@ const handleSubmit = async () => {
     (payload.scores || []).forEach((s: any) => applyLocalScore(s.competitorId, s.dimension, s.score));
   } catch (e: any) {
     console.error('提交打分失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '提交失败');
+    notifyError(e, '提交失败');
   } finally {
     submitting.value = false;
   }

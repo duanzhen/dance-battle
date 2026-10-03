@@ -451,7 +451,7 @@ const loadCompetitors = async () => {
     }
   } catch (error) {
     console.error('加载参赛选手失败:', error);
-    ElMessage.error('加载参赛选手失败');
+    notifyError(error, '加载参赛选手失败');
   } finally {
     loading.value = false;
     scrollToFirstFreeSlot();
@@ -659,7 +659,7 @@ const handleSubmit = async () => {
     handleClose();
   } catch (error) {
     console.error('签到失败:', error);
-    ElMessage.error((error as any)?.message || '签到失败');
+    notifyError(error, '签到失败');
   } finally {
     submitting.value = false;
   }
@@ -689,7 +689,7 @@ const handleCancelCheckIn = async () => {
     handleClose();
   } catch (error) {
     console.error('解除签到失败:', error);
-    ElMessage.error((error as any)?.message || '解除签到失败');
+    notifyError(error, '解除签到失败');
   } finally {
     submitting.value = false;
   }

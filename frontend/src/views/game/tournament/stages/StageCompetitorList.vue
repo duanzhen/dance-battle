@@ -521,7 +521,7 @@ const saveRename = async () => {
     await loadCompetitors();
   } catch (error) {
     console.error('修改名称失败:', error);
-    ElMessage.error((error as any)?.msg || (error as any)?.message || '修改名称失败');
+    notifyError(error, '修改名称失败');
   } finally {
     savingRename.value = false;
   }
@@ -544,7 +544,7 @@ const handleWithdraw = async (competitor: CompetitorVO) => {
     await loadCompetitors();
   } catch (e) {
     console.error('弃权失败:', e);
-    ElMessage.error((e as any)?.msg || (e as any)?.message || '弃权失败');
+    notifyError(e, '弃权失败');
   } finally {
     withdrawingId.value = null;
   }
@@ -562,7 +562,7 @@ const saveSeedOrder = async () => {
     await loadCompetitors();
   } catch (error) {
     console.error('保存种子顺序失败:', error);
-    ElMessage.error((error as any)?.msg || (error as any)?.message || '保存顺序失败');
+    notifyError(error, '保存顺序失败');
     await loadCompetitors();
   } finally {
     savingOrder.value = false;
@@ -696,7 +696,7 @@ const handleExportAudition = async () => {
     ElMessage.success('导出成功');
   } catch (e) {
     console.error('导出海选结果失败:', e);
-    ElMessage.error('导出失败');
+    notifyError(e, '导出失败');
   } finally {
     exporting.value = false;
   }

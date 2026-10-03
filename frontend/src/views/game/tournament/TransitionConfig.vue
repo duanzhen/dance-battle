@@ -849,7 +849,7 @@ const handleSkipRoster = async (roster: any) => {
     ElMessage.success('已跳过名单');
     await loadRosters();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '跳过失败');
+    notifyError(e, '跳过失败');
   }
 };
 
@@ -951,7 +951,7 @@ const persistOrder = async () => {
     if (status === 404 || status === 405) {
       ElMessage.error('保存顺序失败:后端未更新该接口,请重启后端服务后重试');
     } else {
-      ElMessage.error(e?.response?.data?.msg || e?.message || '顺序保存失败');
+      notifyError(e, '顺序保存失败');
     }
   }
 };
@@ -1010,7 +1010,7 @@ const removeItem = async (item: any, fillGap = false) => {
     await persistOrder();
     await loadRosters();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '移出失败');
+    notifyError(e, '移出失败');
     await loadRosters();
   }
 };
@@ -1375,7 +1375,7 @@ const submitAdd = async () => {
     ElMessage.success(addPlacement.value === 'INSERT' ? `已插入第 ${replacedSeed} 位,后面的人依次后移` : '已替换入名单');
     addDialogVisible.value = false;
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '加入名单失败');
+    notifyError(e, '加入名单失败');
   } finally {
     addSubmitting.value = false;
   }
@@ -1471,7 +1471,7 @@ const saveAdvancement = async () => {
     await loadRosters();
   } catch (e: any) {
     console.error('保存同分晋级调整失败:', e);
-    ElMessage.error(e?.response?.data?.msg || '保存失败');
+    notifyError(e, '保存失败');
   } finally {
     advSaving.value = false;
   }
@@ -1693,7 +1693,7 @@ const clearRosterOrder = async () => {
     ElMessage.success('已恢复自动顺序');
     await loadRosters();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '恢复失败');
+    notifyError(e, '恢复失败');
   }
 };
 
@@ -1764,7 +1764,7 @@ const handleConfirmAdvancement = async () => {
     await loadAll();
   } catch (e: any) {
     console.error('名单装配失败:', e);
-    ElMessage.error(e?.response?.data?.msg || '名单装配失败');
+    notifyError(e, '名单装配失败');
   } finally {
     confirmingAdvancement.value = false;
   }

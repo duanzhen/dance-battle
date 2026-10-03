@@ -734,7 +734,7 @@ const confirmAddCircle = async () => {
     closeWizard();
     await loadExits();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || (editing ? '更新圈失败' : '新增圈失败'));
+    notifyError(e, editing ? '更新圈失败' : '新增圈失败');
   } finally {
     saving.value = false;
   }
@@ -806,7 +806,7 @@ const removeExit = async (e: ExitEntry) => {
     ElMessage.success('出口已移除');
     await loadExits();
   } catch (err: any) {
-    ElMessage.error(err?.response?.data?.msg || err?.message || '移除失败');
+    notifyError(err, '移除失败');
   }
 };
 

@@ -1216,7 +1216,7 @@ const handleStartStage = async () => {
     await loadMatchesForStage(stage.id);
   } catch (e: any) {
     console.error('开始赛段失败:', e);
-    ElMessage.error(e?.message || '开始赛段失败');
+    notifyError(e, '开始赛段失败');
   }
 };
 
@@ -1257,7 +1257,7 @@ const handleComplete = async () => {
     }
   } catch (e: any) {
     console.error('完成赛段失败:', e);
-    ElMessage.error(e?.message || '完成赛段失败');
+    notifyError(e, '完成赛段失败');
   }
 };
 
@@ -1272,7 +1272,7 @@ const handleMarkCurrent = async (match: MatchInfo, round: any) => {
     currentCompetitorByMatch.value[String(match.id)] = next;
   } catch (e: any) {
     console.error('标记当前上场失败:', e);
-    ElMessage.error(e?.message || '标记失败');
+    notifyError(e, '标记失败');
   }
 };
 
@@ -1285,7 +1285,7 @@ const handleStartMatch = async (match: MatchInfo) => {
     await loadStages();
   } catch (e: any) {
     console.error('开始场次失败:', e);
-    ElMessage.error(e?.message || '开始场次失败');
+    notifyError(e, '开始场次失败');
   }
 };
 
@@ -1298,7 +1298,7 @@ const handleCancelStartMatch = async (match: MatchInfo) => {
     await loadStages();
   } catch (e: any) {
     console.error('取消开始失败:', e);
-    ElMessage.error(e?.message || '取消开始失败');
+    notifyError(e, '取消开始失败');
   }
 };
 
@@ -1320,7 +1320,7 @@ const handleArenaNext = async () => {
     await loadStages();
   } catch (e: any) {
     console.error('开始下一场对决失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '开始下一场对决失败');
+    notifyError(e, '开始下一场对决失败');
   }
 };
 
@@ -1383,7 +1383,7 @@ const handleCreateFreeMatch = async () => {
     await loadMatchesForStage(String(stageId));
   } catch (e: any) {
     console.error('添加对战失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '添加对战失败');
+    notifyError(e, '添加对战失败');
   } finally {
     addMatchSubmitting.value = false;
   }
@@ -1398,7 +1398,7 @@ const handleDeleteFreeMatch = async (match: any) => {
     if (stageId) await loadMatchesForStage(String(stageId));
   } catch (e: any) {
     console.error('删除对战失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '删除对战失败');
+    notifyError(e, '删除对战失败');
   }
 };
 
@@ -1424,7 +1424,7 @@ const handleSaveAdvancers = async () => {
     await loadFreeMatchCompetitors(String(stageId));
   } catch (e: any) {
     console.error('保存晋级名单失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '保存晋级名单失败');
+    notifyError(e, '保存晋级名单失败');
   } finally {
     advanceSubmitting.value = false;
   }
@@ -1450,7 +1450,7 @@ const openTempWithdraw = async () => {
     tempWithdrawVisible.value = true;
   } catch (e: any) {
     console.error('加载擂台队列失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '加载擂台队列失败');
+    notifyError(e, '加载擂台队列失败');
   }
 };
 
@@ -1467,7 +1467,7 @@ const confirmTempWithdraw = async () => {
     await loadStages();
   } catch (e: any) {
     console.error('临时弃权失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '临时弃权失败');
+    notifyError(e, '临时弃权失败');
   }
 };
 
@@ -1479,7 +1479,7 @@ const handleRestartMatch = async (match: MatchInfo) => {
     await refreshMatches();
   } catch (e: any) {
     console.error('重启场次失败:', e);
-    ElMessage.error(e?.message || '重启场次失败');
+    notifyError(e, '重启场次失败');
   }
 };
 
@@ -1598,7 +1598,7 @@ const handleDirectorJudge = async (match: MatchInfo, side: 'LEFT' | 'DRAW' | 'RI
     await loadStages();
   } catch (e: any) {
     console.error('导播台判定失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '判定失败');
+    notifyError(e, '判定失败');
   } finally {
     actionLoading.value = false;
   }
@@ -1613,7 +1613,7 @@ const handlePublish = async (match: MatchInfo) => {
     await loadStages();
   } catch (e: any) {
     console.error('公布结果失败:', e);
-    ElMessage.error(e?.response?.data?.msg || e?.message || '公布失败');
+    notifyError(e, '公布失败');
   }
 };
 

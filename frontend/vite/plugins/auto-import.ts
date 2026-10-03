@@ -3,8 +3,8 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers';
 
 export default (path: any) => {
   return AutoImport({
-    // 自动导入 Vue 相关函数
-    imports: ['vue', 'vue-router', '@vueuse/core', 'pinia'],
+    // 自动导入 Vue 相关函数;notifyError 是本项目的统一错误提示(见 utils/request.ts)
+    imports: ['vue', 'vue-router', '@vueuse/core', 'pinia', { '@/utils/request': ['notifyError'] }],
     eslintrc: {
       enabled: true,
       filepath: './.eslintrc-auto-import.json',

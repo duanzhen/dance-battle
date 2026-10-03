@@ -106,7 +106,7 @@ const openDirectorQr = async () => {
     showDirectorQr.value = true;
   } catch (error) {
     console.error('获取赛事凭证失败:', error);
-    ElMessage.error('获取赛事凭证失败');
+    notifyError(error, '获取赛事凭证失败');
   }
 };
 
@@ -147,7 +147,7 @@ const resetDirectorQr = async () => {
     ElMessage.success('二维码已重置，旧二维码立即失效');
   } catch (error) {
     console.error('重置赛事凭证失败:', error);
-    ElMessage.error('重置赛事凭证失败');
+    notifyError(error, '重置赛事凭证失败');
   } finally {
     resettingQr.value = false;
   }

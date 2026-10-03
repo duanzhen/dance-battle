@@ -358,7 +358,7 @@ const handleUndo = async () => {
     const ok = await store.undo();
     if (ok) ElMessage.success(`已撤销：${store.redoLabel || '上一步'}`);
   } catch (e) {
-    ElMessage.error(e?.message || '撤销失败');
+    notifyError(e, '撤销失败');
   }
 };
 
@@ -367,7 +367,7 @@ const handleRedo = async () => {
     const ok = await store.redo();
     if (ok) ElMessage.success(`已重做：${store.undoLabel || '下一步'}`);
   } catch (e) {
-    ElMessage.error(e?.message || '重做失败');
+    notifyError(e, '重做失败');
   }
 };
 
@@ -556,7 +556,7 @@ const deleteScreen = async (screenId) => {
     await store.deleteScreen(screenId);
   } catch (error) {
     console.error('删除屏幕失败:', error);
-    ElMessage.error(error.message || '删除屏幕失败，请稍后重试');
+    notifyError(error, '删除屏幕失败，请稍后重试');
   }
 };
 
@@ -645,7 +645,7 @@ const createNewScene = async () => {
   } catch (error) {
     console.error('创建场景失败:', error);
     // 显示错误提示
-    ElMessage.error(error.message || '创建场景失败，请稍后重试');
+    notifyError(error, '创建场景失败，请稍后重试');
   }
 };
 

@@ -28,6 +28,31 @@ const isPublicPage = () => {
   return PUBLIC_PAGES.some((p) => path === p || path.startsWith(p + '/'));
 };
 
+/**
+ * 「拦截器已弹过提示」的标记。响应拦截器在弹完错误提示后给被 reject 的错误打上它,
+ * 调用方 catch 里用 {@link notifyError} 时会据此跳过,避免同一错误弹两次。
+ */
+const NOTIFIED_FLAG = '__notified';
+function markNotified<T>(err: T): T {
+  if (err && (typeof err === 'object' || typeof err === 'function')) {
+    (err as any)[NOTIFIED_FLAG] = true;
+  }
+  return err;
+}
+
+/**
+ * 统一错误提示,业务 catch 里用它替代 `ElMessage.error(...)`:
+ * 拦截器已经弹过的(带 {@link NOTIFIED_FLAG})直接跳过;未被提示的(如公共页 401)在这里兜底。
+ * 这样既保留拦截器对"没人 catch 的请求"的兜底,又不会出现"拦截器弹一次、catch 再弹一次"。
+ */
+export function notifyError(e: any, fallback = '操作失败'): void {
+  if (e && e[NOTIFIED_FLAG]) {
+    return;
+  }
+  const msg = e?.response?.data?.msg || e?.msg || e?.message || fallback;
+  ElMessage.error(msg);
+}
+
 export const globalHeaders = () => {
   const token = getToken();
   return token ? { Authorization: 'Bearer ' + token } : {};
@@ -142,6 +167,7 @@ service.interceptors.response.use(
       // 公共现场页(大屏/裁判/手机导播台)不弹管理端"重新登录",避免打断现场;
       // 这些页面本就靠 authKey 工作,漏出来的管理端 401 交给调用方处理。
       if (isPublicPage()) {
+        // 未标记:调用方仍要能提示(此处故意不弹)
         return Promise.reject(new Error(msg));
       }
       // prettier-ignore
@@ -165,16 +191,17 @@ service.interceptors.response.use(
           isRelogin.show = false;
         });
       }
-      return Promise.reject('无效的会话，或者会话已过期，请重新登录。');
+      // 已用重新登录弹窗提示过,标记后调用方不再重复弹
+      return Promise.reject(markNotified(new Error('无效的会话，或者会话已过期，请重新登录。')));
     } else if (code === HttpStatus.SERVER_ERROR) {
       ElMessage({ message: msg, type: 'error' });
-      return Promise.reject(new Error(msg));
+      return Promise.reject(markNotified(new Error(msg)));
     } else if (code === HttpStatus.WARN) {
       ElMessage({ message: msg, type: 'warning' });
-      return Promise.reject(new Error(msg));
+      return Promise.reject(markNotified(new Error(msg)));
     } else if (code !== HttpStatus.SUCCESS) {
       ElNotification.error({ title: msg });
-      return Promise.reject('error');
+      return Promise.reject(markNotified(new Error(msg)));
     } else {
       return Promise.resolve(res.data);
     }
@@ -189,7 +216,7 @@ service.interceptors.response.use(
       message = '系统接口' + message.substr(message.length - 3) + '异常';
     }
     ElMessage({ message: message, type: 'error', duration: 5 * 1000 });
-    return Promise.reject(error);
+    return Promise.reject(markNotified(error));
   }
 );
 // 通用下载方法

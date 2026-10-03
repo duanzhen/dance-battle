@@ -308,7 +308,7 @@ const load = async () => {
       entries.value = [];
     }
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '出口加载失败');
+    notifyError(e, '出口加载失败');
   } finally {
     loading.value = false;
   }
@@ -391,7 +391,7 @@ const save = async () => {
     formVisible.value = false;
     await load();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || '出口保存失败');
+    notifyError(e, '出口保存失败');
   } finally {
     saving.value = false;
   }
@@ -423,7 +423,7 @@ const moveExit = async (e: ExitEntry, delta: number) => {
     ElMessage.success('取人顺序已调整');
     await load();
   } catch (err: any) {
-    ElMessage.error(err?.response?.data?.msg || err?.message || '顺序调整失败');
+    notifyError(err, '顺序调整失败');
   }
 };
 
@@ -448,7 +448,7 @@ const removeExit = async (e: ExitEntry) => {
     ElMessage.success('出口已移除');
     await load();
   } catch (err: any) {
-    ElMessage.error(err?.response?.data?.msg || err?.message || '移除失败');
+    notifyError(err, '移除失败');
   }
 };
 

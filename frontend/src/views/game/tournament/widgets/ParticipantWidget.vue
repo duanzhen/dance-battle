@@ -1,8 +1,7 @@
 <template>
   <div class="w-full h-full">
-    <!-- 查看模式:赛段参赛选手(未落位的人也在) -->
+    <!-- 查看模式:赛段参赛选手 -->
     <div v-if="mode !== 'edit'" ref="viewRef" class="w-full h-full rounded-lg overflow-hidden relative">
-      <div class="absolute inset-0 rounded-lg bg-neutral-950" :style="maskStyle"></div>
       <div v-if="loading" class="relative w-full h-full flex items-center justify-center text-white/50" :style="fz(15)">加载中...</div>
       <div v-else-if="error" class="relative w-full h-full flex items-center justify-center text-white/40 px-4 text-center" :style="fz(13)">
         {{ error }}
@@ -13,40 +12,48 @@
         <div class="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-2 flex-none">
           <span class="text-white font-bold truncate" :style="fz(15)">{{ stageName || '参赛选手' }}</span>
           <div class="flex items-center gap-2 flex-none">
-            <span v-if="holdingCount > 0" class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold" :style="fz(11)">
-              待落位 {{ holdingCount }}
-            </span>
             <span class="text-white/50 font-mono" :style="fz(11)">{{ items.length }} 人</span>
           </div>
         </div>
 
-        <!-- 选手列表:一行多人,按座位号排列,未落位的排在最后并标注 -->
+        <!-- 选手列表:一行多人,按座位号排列 -->
         <div class="flex-1 min-h-0 overflow-y-auto p-2 scrollbar-hide">
-          <div class="grid gap-1.5" :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }">
+          <!-- 显示头像:卡片模式(中间圆形头像、下方人名) -->
+          <div
+            v-if="showAvatar"
+            class="grid gap-3"
+            :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }"
+          >
+            <div v-for="(p, idx) in items" :key="itemKey(p, idx)" class="participant-card" :style="cardStyle">
+              <img
+                v-if="p.avatar"
+                :src="p.avatar"
+                class="participant-avatar"
+                :style="{ width: avatarPx, height: avatarPx }"
+                alt=""
+                @error="onAvatarError"
+              />
+              <span v-else class="participant-avatar participant-avatar-empty" :style="{ width: avatarPx, height: avatarPx }"></span>
+              <span class="participant-card-name" :style="fz(13)" :title="p.name || '待定'">{{ p.name || '待定' }}</span>
+            </div>
+          </div>
+          <!-- 默认:一行多人(座位号 + 名字 + 号码) -->
+          <div v-else class="grid gap-1.5" :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }">
             <div
               v-for="(p, idx) in items"
               :key="itemKey(p, idx)"
-              class="flex items-center gap-2 px-2 py-1.5 rounded bg-white/5 border"
-              :class="p.holding ? 'border-dashed border-amber-500/40' : 'border-white/10'"
+              class="flex items-center gap-2 px-2 py-1.5 rounded bg-white/5 border border-white/10"
+              :style="cardStyle"
             >
               <span
                 v-if="showSeat"
-                class="font-mono flex-none w-7 text-right"
-                :class="p.holding ? 'text-amber-400/80' : 'text-white/45'"
+                class="font-mono flex-none w-7 text-right text-white/45"
                 :style="fz(11)"
               >
-                {{ p.holding ? '—' : p.seedRank }}
+                {{ p.seedRank ?? '' }}
               </span>
-              <img
-                v-if="showAvatar && p.avatar"
-                :src="p.avatar"
-                class="rounded object-cover flex-none"
-                :style="{ width: fz(28).fontSize, height: fz(28).fontSize }"
-                alt=""
-              />
               <span class="flex-1 min-w-0 truncate text-white" :style="fz(13)">{{ p.name || '待定' }}</span>
               <span v-if="showNumber && p.number" class="flex-none font-mono text-white/40" :style="fz(10)">#{{ p.number }}</span>
-              <span v-if="p.holding" class="flex-none text-amber-400/80" :style="fz(10)">待落位</span>
             </div>
           </div>
           <p v-if="!items.length" class="text-center text-white/30 py-4" :style="fz(12)">该赛段暂无参赛选手</p>
@@ -104,23 +111,24 @@
           </div>
         </div>
         <div class="mt-3">
-          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">遮罩透明度</label>
-          <div class="flex items-center gap-3">
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              :value="maskTransparency"
-              class="flex-1 accent-amber-500"
-              @change="$emit('update:opacity', 100 - Number(($event.target as HTMLInputElement).value))"
-            />
-            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ maskTransparency }}%</span>
+          <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">卡片背景颜色</span>
+          <div class="flex items-center gap-1.5">
+            <div class="flex-1 min-w-0">
+              <ColorInput :model-value="bgColor ?? ''" @update:model-value="$emit('update:bgColor', $event)" />
+            </div>
+            <button
+              class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
+              :class="bgColor === '' ? 'text-amber-400 bg-amber-500/10' : 'text-neutral-500 hover:text-amber-400 hover:bg-neutral-800'"
+              title="设为透明"
+              @click="$emit('update:bgColor', '')"
+            >
+              <Ban class="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
         <p class="text-[10px] text-neutral-600 mt-2">
-          绑定任意赛段展示参赛选手:名单还没确认时读中间态名单(刚晋级/还没落位的人都在,待落位的会标注),
-          确认名单后自动切换成该赛段的真实参赛选手。遮罩透明度仅作用于深色背景,不影响文字内容。
+          绑定任意赛段展示参赛选手:名单还没确认时读中间态名单(刚晋级/还没落位的人都在),
+          确认名单后自动切换成该赛段的真实参赛选手。背景颜色作用于卡片(列表/头像卡),可设为透明。
         </p>
       </section>
     </div>
@@ -130,7 +138,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
+import { Ban } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
+import ColorInput from './common/ColorInput.vue';
 import { getStageParticipants } from '@/api/game/screen';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
@@ -138,7 +148,8 @@ const props = defineProps<{
   stageId?: string | number | null;
   mode?: 'view' | 'edit';
   tournamentId?: string | number | null;
-  opacity?: number;
+  /** 背景颜色;空字符串 = 透明,未配置 = 默认深色底 */
+  bgColor?: string;
   showSeat?: boolean;
   showNumber?: boolean;
   showAvatar?: boolean;
@@ -146,7 +157,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   'update:stageId': [v: string | number | null];
-  'update:opacity': [v: number];
+  'update:bgColor': [v: string];
   'update:showSeat': [v: boolean];
   'update:showNumber': [v: boolean];
   'update:showAvatar': [v: boolean];
@@ -168,6 +179,14 @@ const fz = (base: number) => ({
   lineHeight: `${Math.round(base * scale.value * 1.4)}px`
 });
 
+/** 卡片模式头像尺寸:随组件缩放联动 */
+const avatarPx = computed(() => fz(48).fontSize);
+
+/** 头像加载失败时隐藏,避免裂图 */
+const onAvatarError = (e: Event) => {
+  (e.target as HTMLImageElement).style.display = 'none';
+};
+
 const startObserve = () => {
   resizeObserver?.disconnect();
   if (!viewRef.value) return;
@@ -186,27 +205,27 @@ const showNumber = computed(() => props.showNumber !== false);
 const showAvatar = computed(() => props.showAvatar === true);
 const columns = computed(() => Math.max(1, Math.min(8, Number(props.columns) || 2)));
 
-/** 遮罩不透明度 0-100(dataConfig.opacity),默认 85,与其它赛事控件一致 */
-const maskOpacity = computed(() => {
-  const v = Number.isFinite(Number(props.opacity)) ? Number(props.opacity) : 85;
-  return Math.max(0, Math.min(100, v));
+/**
+ * 卡片背景颜色(作用于列表行 / 头像卡,不是整个组件底):
+ * 空字符串=透明,已配置=该颜色,未配置=沿用卡片默认浅色。
+ */
+const cardStyle = computed(() => {
+  if (props.bgColor === '') return { backgroundColor: 'transparent' };
+  if (props.bgColor) return { backgroundColor: props.bgColor };
+  return {};
 });
-const maskTransparency = computed(() => Math.round(100 - maskOpacity.value));
-const maskStyle = computed(() => ({ opacity: maskOpacity.value / 100 }));
 
 const loading = ref(false);
 const loadedOnce = ref(false);
 const error = ref('');
 const stageName = ref('');
 const items = ref<any[]>([]);
-const holdingCount = ref(0);
 
 const itemKey = (p: any, idx: number) => `${p.refType}-${p.seedRank ?? 'h'}-${p.name ?? ''}-${idx}`;
 
 const loadData = async () => {
   if (!props.stageId) {
     items.value = [];
-    holdingCount.value = 0;
     error.value = '';
     return;
   }
@@ -222,23 +241,26 @@ const loadData = async () => {
     }
     stageName.value = data.stageName || '';
     items.value = data.items || [];
-    holdingCount.value = Number(data.holdingCount) || 0;
   } catch (e) {
     console.error('ParticipantWidget 加载失败', e);
     error.value = '加载失败,请检查赛段绑定';
     items.value = [];
-    holdingCount.value = 0;
   } finally {
     loading.value = false;
     loadedOnce.value = true;
   }
 };
 
-/** 事件回调:重连补偿(null)或事件属于本赛段时才刷新 */
+/**
+ * 事件回调:重连补偿(null)或非打分事件都刷新。
+ * "加人/名单确认"这类事件的 stageId 口径可能与绑定赛段不完全一致(如签到广播带的是首个赛段),
+ * 只按 stageId 过滤会漏刷新;打分事件不改变名单构成,直接跳过。
+ */
 const handleTournamentEvent = (data: any) => {
-  if (!data || data.stageId == null || String(data.stageId) === String(props.stageId)) {
-    loadData();
+  if (data && data.type === 'scores') {
+    return;
   }
+  loadData();
 };
 
 onMounted(() => {
@@ -279,5 +301,32 @@ watch(
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+/* 头像卡模式:中间圆形头像,下面人名 */
+.participant-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.participant-avatar {
+  border-radius: 9999px;
+  object-fit: cover;
+  flex: none;
+  background: rgba(255, 255, 255, 0.1);
+}
+.participant-avatar-empty {
+  display: block;
+}
+.participant-card-name {
+  color: #fff;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

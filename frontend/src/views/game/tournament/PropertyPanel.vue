@@ -167,6 +167,8 @@
                   @update:borderColor="handleUpdateProp('borderColor', $event)"
                   @update:bgColor="handleUpdateProp('bgColor', $event)"
                   @update:showAvatar="handleUpdateProp('showAvatar', $event)"
+                  @update:showWinner="handleUpdateProp('showWinner', $event)"
+                  @update:listMode="handleUpdateProp('listMode', $event)"
                   @update:showSeat="handleUpdateProp('showSeat', $event)"
                   @update:showNumber="handleUpdateProp('showNumber', $event)"
                   @update:columns="handleUpdateProp('columns', $event)"

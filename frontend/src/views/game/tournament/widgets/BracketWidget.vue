@@ -3,6 +3,42 @@
     <!-- 查看模式:对阵树(按 displayZone 分左右两列) -->
     <div v-if="mode !== 'edit'" class="w-full h-full overflow-hidden flex">
       <div v-if="loading" class="w-full flex items-center justify-center text-neutral-500 text-xs">加载中...</div>
+      <!-- 列表模式(优先于决赛/半决赛特殊布局):按场次顺序一列展示,两名选手在同一张长条卡片里 -->
+      <div
+        v-else-if="listMode"
+        class="w-full h-full overflow-y-auto custom-scrollbar-y px-2 py-2 flex flex-col justify-between gap-1.5"
+      >
+        <div v-if="listRows.length === 0" class="w-full flex items-center justify-center text-neutral-600 text-xs text-center px-2">
+          {{ emptyHint }}
+        </div>
+        <div v-for="row in listRows" :key="row.match.id" class="bracket-list-row">
+          <div class="bracket-list-card">
+            <span class="bracket-list-side" :class="{ 'winner-gold': showWinner && isWinner(row.left) }">
+              <img
+                v-if="showAvatar && row.left && avatarOf(row.left.competitorId)"
+                :src="avatarOf(row.left.competitorId)"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
+              <span class="name" :style="fz(1)" :title="listName(row.left)">{{ listName(row.left) || BLANK_NAME }}</span>
+            </span>
+            <span class="bracket-list-vs" :style="fz(0.8)">VS</span>
+            <span class="bracket-list-side" :class="{ 'winner-gold': showWinner && isWinner(row.right) }">
+              <img
+                v-if="showAvatar && row.right && avatarOf(row.right.competitorId)"
+                :src="avatarOf(row.right.competitorId)"
+                class="bracket-avatar"
+                :style="avatarStyle"
+                alt=""
+                @error="onAvatarError"
+              />
+              <span class="name" :style="fz(1)" :title="listName(row.right)">{{ listName(row.right) || BLANK_NAME }}</span>
+            </span>
+          </div>
+        </div>
+      </div>
       <!-- 决赛:左半区晋级 | 冠军 | 右半区晋级 三框布局 -->
       <div v-else-if="isFinal" class="w-full h-full flex flex-col items-center justify-between gap-3 px-2 py-2">
         <!-- 冠军卡:顶部,窄宽度 -->
@@ -15,7 +51,7 @@
             alt=""
             @error="onAvatarError"
           />
-          <span class="name" :style="fz(1)">{{ champion?.name || '' }}</span>
+          <span class="name" :class="{ 'winner-gold': showWinner && !!champion }" :style="fz(1)">{{ champion?.name || '' }}</span>
         </div>
         <!-- 左右半区:下方 -->
         <div class="flex items-center justify-between min-h-0 w-full">
@@ -28,7 +64,7 @@
               alt=""
               @error="onAvatarError"
             />
-            <span class="name" :style="fz(1)" :title="finalists.left?.name || ''">{{ finalists.left?.name || '' }}</span>
+            <span class="name" :class="{ 'winner-gold': showWinner && champion && champion.competitorId === finalists.left?.competitorId }" :style="fz(1)" :title="finalists.left?.name || ''">{{ finalists.left?.name || '' }}</span>
           </div>
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.right?.competitorId }">
             <img
@@ -39,7 +75,7 @@
               alt=""
               @error="onAvatarError"
             />
-            <span class="name" :style="fz(1)" :title="finalists.right?.name || ''">{{ finalists.right?.name || '' }}</span>
+            <span class="name" :class="{ 'winner-gold': showWinner && champion && champion.competitorId === finalists.right?.competitorId }" :style="fz(1)" :title="finalists.right?.name || ''">{{ finalists.right?.name || '' }}</span>
           </div>
         </div>
       </div>
@@ -56,7 +92,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
+              <span class="name" :class="{ 'winner-gold': showWinner && semi.left?.top?.win }" :style="fz(1)" :title="semi.left?.top?.name || ''">{{ semi.left?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
               <img
@@ -67,7 +103,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
+              <span class="name" :class="{ 'winner-gold': showWinner && semi.left?.bottom?.win }" :style="fz(1)" :title="semi.left?.bottom?.name || ''">{{ semi.left?.bottom?.name || '' }}</span>
             </div>
           </div>
           <div style="flex: 1; min-width: 0"></div>
@@ -81,7 +117,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
+              <span class="name" :class="{ 'winner-gold': showWinner && semi.right?.top?.win }" :style="fz(1)" :title="semi.right?.top?.name || ''">{{ semi.right?.top?.name || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
               <img
@@ -92,7 +128,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
+              <span class="name" :class="{ 'winner-gold': showWinner && semi.right?.bottom?.win }" :style="fz(1)" :title="semi.right?.bottom?.name || ''">{{ semi.right?.bottom?.name || '' }}</span>
             </div>
           </div>
         </div>
@@ -122,7 +158,7 @@
           <template v-for="(s, i) in leftSlots" :key="'l' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
               <img v-if="showAvatar && s.leftAvatar" :src="s.leftAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
-              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
+              <span class="name" :class="{ 'winner-gold': showWinner && s.leftWin }" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
               <img
@@ -133,7 +169,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
+                <span class="name" :class="{ 'winner-gold': showWinner && s.rightWin }" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
             </div>
           </template>
         </div>
@@ -186,6 +222,24 @@
             :checked="showAvatar"
             class="accent-amber-500 w-4 h-4"
             @change="$emit('update:showAvatar', ($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+        <label class="flex items-center justify-between mt-2 cursor-pointer">
+          <span class="text-xs text-neutral-300">展示胜利者(名字金色)</span>
+          <input
+            type="checkbox"
+            :checked="showWinner"
+            class="accent-amber-500 w-4 h-4"
+            @change="$emit('update:showWinner', ($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+        <label class="flex items-center justify-between mt-2 cursor-pointer">
+          <span class="text-xs text-neutral-300">列表模式</span>
+          <input
+            type="checkbox"
+            :checked="listMode"
+            class="accent-amber-500 w-4 h-4"
+            @change="$emit('update:listMode', ($event.target as HTMLInputElement).checked)"
           />
         </label>
       </section>
@@ -269,6 +323,10 @@ const props = defineProps<{
   fontSize?: number;
   /** 是否在名字前显示选手头像(默认不显示) */
   showAvatar?: boolean;
+  /** 展示胜利者:胜者名字显示为金色 */
+  showWinner?: boolean;
+  /** 列表模式:按场次顺序一列展示,每场两名选手在同一张长条卡片里 */
+  listMode?: boolean;
 }>();
 const emit = defineEmits<{
   'update:stageId': [value: string | number | null];
@@ -277,6 +335,8 @@ const emit = defineEmits<{
   'update:bgColor': [value: string];
   'update:fontSize': [value: number];
   'update:showAvatar': [value: boolean];
+  'update:showWinner': [value: boolean];
+  'update:listMode': [value: boolean];
 }>();
 
 // 样式配置:通过 CSS 变量作用于全部对战卡;未配置时回退默认样式(白字/灰边/透明底)
@@ -483,6 +543,10 @@ const nameOf = (cid: any) => {
 
 /** 是否显示头像:配置项默认关闭 */
 const showAvatar = computed(() => props.showAvatar === true);
+/** 是否高亮胜者名字为金色 */
+const showWinner = computed(() => props.showWinner === true);
+/** 列表模式:按场次顺序一列展示 */
+const listMode = computed(() => props.listMode === true);
 
 /** 参赛方头像:取该参赛方关联选手中第一个有头像的(与当前场次/大屏组件同一口径) */
 const avatarOf = (cid: any): string => {
@@ -526,6 +590,20 @@ const participantsBySlot = (matchId: any): { left: any; right: any } => {
   }
   return { left, right };
 };
+
+/**
+ * 列表模式行数据:按场次顺序一列展示(后端返回即 id 升序,与 MC 导播台场次列表同一顺序),
+ * 每场两名选手放进同一张长条卡片里。
+ */
+const listRows = computed(() =>
+  matches.value.map((m: any) => {
+    const { left, right } = participantsBySlot(m.id);
+    return { match: m, left, right };
+  })
+);
+
+/** 列表模式:选手名(BYE/空位返回空) */
+const listName = (p: any) => (p?.competitorId != null ? nameOf(p.competitorId) : '');
 
 /**
  * 擂台赛段展示:按「座位」列出进入擂台赛的人,按出场顺序两两成对(1-2 / 3-4 …)排成 4 对(左 2 右 2),仅供展示。
@@ -1011,6 +1089,50 @@ const handleTournamentEvent = (data: any) => {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.7;
+}
+/* 展示胜利者:胜者名字金色 */
+.winner-gold {
+  color: #f59e0b;
+  font-weight: 700;
+}
+/* 列表模式:一场一张长条卡片,两名选手在同一卡片内 */
+.bracket-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bracket-list-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--bracket-border, #404040);
+  background: var(--bracket-bg, transparent);
+  color: var(--bracket-text, #000000);
+  border-radius: 8px;
+}
+.bracket-list-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bracket-list-side:last-child {
+  justify-content: flex-end;
+  text-align: right;
+}
+.bracket-list-side .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bracket-list-vs {
+  flex: none;
+  opacity: 0.45;
+  font-weight: 700;
 }
 .custom-scrollbar-y::-webkit-scrollbar {
   width: 4px;

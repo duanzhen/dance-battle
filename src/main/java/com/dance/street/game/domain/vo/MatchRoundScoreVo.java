@@ -31,6 +31,9 @@ public class MatchRoundScoreVo implements Serializable {
     /** 本轮选手名称 */
     private String competitorName;
 
+    /** 本轮选手的参赛号码(号牌):导播台按号喊人/对号时用 */
+    private String competitorNumber;
+
     /** 本轮累计总分(所有裁判合计;未打分时为 null) */
     private BigDecimal score;
 

@@ -270,6 +270,13 @@
                 >
                   <div class="flex items-center justify-between gap-2">
                     <span class="text-[9px] text-neutral-500 w-12 flex-none">第{{ r.roundSequence }}轮</span>
+                    <!-- 号牌:海选现场靠号码喊人/对号,放在名字前面一眼可见 -->
+                    <span
+                      class="text-[10px] font-mono px-1.5 py-0.5 rounded flex-none"
+                      :class="r.competitorNumber ? 'bg-amber-500/10 text-amber-400' : 'text-neutral-700'"
+                    >
+                      {{ r.competitorNumber || '—' }}
+                    </span>
                     <span
                       class="text-xs font-bold flex-1 truncate"
                       :class="
@@ -912,6 +919,8 @@ interface MatchRoundScore {
   roundSequence: number;
   competitorId?: string | number | null;
   competitorName?: string;
+  /** 号牌(海选按号喊人用) */
+  competitorNumber?: string;
   score?: number | null;
   outcomeStatus?: string | null;
   refereeScores?: { refereeId?: string | number; refereeName?: string; score?: number }[];

@@ -382,37 +382,29 @@ public class StageCheckInService {
         long newSlot = insertIdx + 1L;
         long newRound = insertIdx + 1L;
 
-        // 插入点及之后的参赛方 slot 顺延 +1
+        // 插入点及之后的座位/轮次顺延 +1。
+        // 用一条集合式 UPDATE 代替"逐行 updateById":一个圈里签到第 K+1 个人时,
+        // 逐行写法要发 2K 条写语句,人多时签到会明显变慢(现场表现:人越多越卡)。
         if (newcomer != null) {
-            for (TMatchParticipant p : parts) {
-                TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
-                if (c != null
-                    && parseCompetitorNumber(c.getNumber()) >= parseCompetitorNumber(newcomer.getNumber())) {
-                    TMatchParticipant upd = new TMatchParticipant();
-                    upd.setId(p.getId());
-                    upd.setDisplaySlotIndex((p.getDisplaySlotIndex() == null ? 0L : p.getDisplaySlotIndex()) + 1L);
-                    participantMapper.updateById(upd);
-                }
-            }
-            // 插入点及之后的轮次 sequence 顺延 +1(每个参赛方一个独立轮次,按 competitorId 对齐)
-            Set<Long> shiftRoundCompetitorIds = parts.stream()
+            Set<Long> shiftCompetitorIds = parts.stream()
                 .filter(p -> {
                     TCompetitor c = p.getCompetitorId() == null ? null : compById.get(p.getCompetitorId());
                     return c != null
                         && parseCompetitorNumber(c.getNumber()) >= parseCompetitorNumber(newcomer.getNumber());
                 })
                 .map(TMatchParticipant::getCompetitorId)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-            List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                .eq(TMatchRound::getMatchId, target.getId())
-                .orderByAsc(TMatchRound::getRoundSequence));
-            for (TMatchRound r : rounds) {
-                if (r.getCompetitorId() != null && shiftRoundCompetitorIds.contains(r.getCompetitorId())) {
-                    TMatchRound upd = new TMatchRound();
-                    upd.setId(r.getId());
-                    upd.setRoundSequence((r.getRoundSequence() == null ? 0L : r.getRoundSequence()) + 1L);
-                    matchRoundMapper.updateById(upd);
-                }
+            if (!shiftCompetitorIds.isEmpty()) {
+                participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                    .eq(TMatchParticipant::getMatchId, target.getId())
+                    .in(TMatchParticipant::getCompetitorId, shiftCompetitorIds)
+                    .setSql("display_slot_index = display_slot_index + 1"));
+                // 逐选手赛制里每个参赛方一个独立轮次,按 competitorId 对齐顺延
+                matchRoundMapper.update(null, Wrappers.<TMatchRound>lambdaUpdate()
+                    .eq(TMatchRound::getMatchId, target.getId())
+                    .in(TMatchRound::getCompetitorId, shiftCompetitorIds)
+                    .setSql("round_sequence = round_sequence + 1"));
             }
         }
 

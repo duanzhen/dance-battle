@@ -721,28 +721,15 @@ public class TStageServiceImpl implements ITStageService {
      */
     @Override
     public TStageVo getFirstStageByTournamentId(Long tournamentId) {
-        TStageBo query = new TStageBo();
-        query.setTournamentId(tournamentId);
-        List<TStageVo> all = this.queryList(query);
-        all.removeIf(s -> StageConstants.STAGE_DISCARD.equals(s.getStatus()));
-        if (all.isEmpty()) {
+        // 链头 = 没有任何赛段以 next 指向它(排除 DISCARD),由 StageChain 统一推导。
+        // 刻意不走 queryList:那会把全赛事每个赛段的中间层名单(全量行)都读出来做 VO 装配,
+        // 而签到等热路径只用 id / 赛制 / 状态 / 成员数——人一多,"顺手读全量"就成了签到的延迟来源。
+        TStage head = stageChain.headOf(tournamentId);
+        if (head == null) {
             log.warn("赛事[{}]未找到任何赛段(已排除 DISCARD)", tournamentId);
             return null;
         }
-        log.debug("赛事[{}]找到{}个赛段:{}", tournamentId, all.size(),
-            all.stream().map(s -> s.getId() + "(" + s.getStatus() + ",prev=" + s.getPrevStageId() + ")").toList());
-        // 链头以 next 链推导(StageChain);prev 只存在于 VO 展示字段,库里没有这一列
-        TStage head = stageChain.headOf(tournamentId);
-        if (head != null) {
-            TStageVo chainHead = all.stream()
-                .filter(s -> Objects.equals(s.getId(), head.getId()))
-                .findFirst().orElse(null);
-            if (chainHead != null) {
-                return chainHead;
-            }
-        }
-        log.warn("赛事[{}]未找到链表头,回退到列表首个赛段", tournamentId);
-        return all.get(0);
+        return MapstructUtils.convert(head, TStageVo.class);
     }
 
     /**

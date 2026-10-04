@@ -1,7 +1,7 @@
 <template>
   <div class="w-full h-full">
     <!-- 查看模式 -->
-    <div v-if="mode !== 'edit'" ref="viewRef" class="w-full h-full relative overflow-hidden">
+    <div v-if="mode !== 'edit'" ref="viewRef" class="w-full h-full relative overflow-hidden" :style="bgStyle">
       <div v-if="loading" class="w-full h-full flex items-center justify-center text-white/50" :style="{ fontSize: sz(14) + 'px' }">加载中...</div>
       <div
         v-else-if="error"
@@ -148,6 +148,24 @@
           关闭:9 列 grid 占满整个屏幕展示选手名单;开启:只显示顶部一排,横向自动滚动,当前选手居中高亮。分数不展示。
         </p>
       </section>
+
+      <section>
+        <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">背景颜色</span>
+        <div class="flex items-center gap-1.5">
+          <div class="flex-1 min-w-0">
+            <ColorInput :model-value="bgColor ?? ''" @update:model-value="$emit('update:bgColor', $event)" />
+          </div>
+          <button
+            class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
+            :class="bgColor === '' ? 'text-amber-400 bg-amber-500/10' : 'text-neutral-500 hover:text-amber-400 hover:bg-neutral-800'"
+            title="设为透明"
+            @click="$emit('update:bgColor', '')"
+          >
+            <Ban class="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <p class="text-[10px] text-neutral-600 mt-2 leading-relaxed">不设置 = 透明(沿用场景底色);选颜色后名单区域铺该底色,适合大屏上单独出块。</p>
+      </section>
     </div>
   </div>
 </template>
@@ -155,7 +173,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
+import { Ban } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
+import ColorInput from './common/ColorInput.vue';
 import { listMatch, listMatchParticipant, listCompetitor, listPlayer, getMatchCurrentCompetitor } from '@/api/game/screen';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 
@@ -165,11 +185,14 @@ const props = defineProps<{
   mode?: 'view' | 'edit';
   showCurrent?: boolean;
   tournamentId?: string | number | null;
+  /** 背景颜色;不设置=透明,空字符串=显式透明,已配置=该颜色 */
+  bgColor?: string;
 }>();
 const emit = defineEmits<{
   'update:stageId': [v: string | number | null];
   'update:matchId': [v: string | number | null];
   'update:showCurrent': [v: boolean];
+  'update:bgColor': [v: string];
 }>();
 
 const route = useRoute();
@@ -190,6 +213,9 @@ const chipEls = new Map<string, HTMLElement>();
 let resizeObserver: ResizeObserver | null = null;
 const scale = ref(1);
 const sz = (base: number) => Math.round(base * scale.value);
+
+/** 名单区域背景:不设置 / 空字符串 = 透明(沿用场景底色),已配置 = 该颜色 */
+const bgStyle = computed(() => (props.bgColor ? { backgroundColor: props.bgColor } : {}));
 
 const setChipRef = (cid: string | number) => (el: unknown) => {
   const key = String(cid);

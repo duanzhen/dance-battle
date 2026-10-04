@@ -1403,40 +1403,69 @@ const applyData = (data: any) => {
 };
 
 /** 定时跟随:上下文不变时只更新累计分数/排名,不打断编辑 */
+/**
+ * 轻量合并:只覆盖调用方真的带了的字段。
+ *
+ * <p>打分后的 SSE `scores` 事件只拉 `/referee-match/{id}/scores`,返回的是 participants 数组;
+ * 以前这里把 `data` 当完整响应处理,会把没带的字段一律写成空 ——
+ * 海选「本圈晋级 N 人 / 本赛段共晋级 M 人」正是这样在裁判一打分后就整行消失的
+ * (模板是 `v-if="advanceCount > 0"`),顺带还会清空 stages/matches 列表。</p>
+ */
 const mergeLive = (data: any) => {
-  stages.value = (data?.stages || []).map((s: any) => ({
-    id: s.id,
-    name: s.name,
-    stageMode: s.stageMode,
-    status: s.status
-  }));
-  matches.value = (data?.matches || []).map((m: any) => ({
-    id: m.id,
-    name: fmtMatchName(m.name),
-    status: m.status,
-    matchMode: m.matchMode
-  }));
-  stageMatches.value = (data?.stageMatches || data?.matches || []).map((m: any) => ({
-    id: m.id,
-    name: fmtMatchName(m.name),
-    status: m.status,
-    matchMode: m.matchMode
-  }));
-  stageOverview.value = (data?.stageOverview || []).map((m: any) => ({
-    id: m.id,
-    name: fmtMatchName(m.name),
-    status: m.status,
-    matchMode: m.matchMode,
-    rounds: m.rounds || [],
-    participants: m.participants || [],
-    winnerName: m.winnerName || ''
-  }));
-  voteProgress.value = data?.voteProgress || '';
-  publishMode.value = data?.publishMode || 'AUTO';
-  pendingPublish.value = !!data?.pendingPublish;
-  advanceCount.value = Number(data?.advanceCount) || 0;
-  stageAdvanceCount.value = Number(data?.stageAdvanceCount) || 0;
-  tiebreakerRound.value = data?.tiebreakerRound || '';
+  if (data?.stages) {
+    stages.value = (data.stages || []).map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      stageMode: s.stageMode,
+      status: s.status
+    }));
+  }
+  if (data?.matches) {
+    matches.value = (data.matches || []).map((m: any) => ({
+      id: m.id,
+      name: fmtMatchName(m.name),
+      status: m.status,
+      matchMode: m.matchMode
+    }));
+  }
+  if (data?.stageMatches || data?.matches) {
+    stageMatches.value = (data?.stageMatches || data?.matches || []).map((m: any) => ({
+      id: m.id,
+      name: fmtMatchName(m.name),
+      status: m.status,
+      matchMode: m.matchMode
+    }));
+  }
+  if (data?.stageOverview) {
+    stageOverview.value = (data.stageOverview || []).map((m: any) => ({
+      id: m.id,
+      name: fmtMatchName(m.name),
+      status: m.status,
+      matchMode: m.matchMode,
+      rounds: m.rounds || [],
+      participants: m.participants || [],
+      winnerName: m.winnerName || ''
+    }));
+  }
+  if (data?.voteProgress !== undefined) {
+    voteProgress.value = data.voteProgress || '';
+  }
+  if (data?.publishMode !== undefined) {
+    publishMode.value = data.publishMode || 'AUTO';
+  }
+  if (data?.pendingPublish !== undefined) {
+    pendingPublish.value = !!data.pendingPublish;
+  }
+  // 海选晋级人数:只有完整响应(my-match)才带这两个字段,轻量 scores 合并不能把它们清零
+  if (data?.advanceCount !== undefined) {
+    advanceCount.value = Number(data.advanceCount) || 0;
+  }
+  if (data?.stageAdvanceCount !== undefined) {
+    stageAdvanceCount.value = Number(data.stageAdvanceCount) || 0;
+  }
+  if (data?.tiebreakerRound !== undefined) {
+    tiebreakerRound.value = data.tiebreakerRound || '';
+  }
   const liveParts = new Map<number, any>((data?.participants || []).map((p: any) => [p.competitorId, p]));
   participants.value.forEach((p) => {
     const lp = p.competitorId !== null ? liveParts.get(p.competitorId) : undefined;

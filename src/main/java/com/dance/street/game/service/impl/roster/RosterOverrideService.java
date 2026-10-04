@@ -26,7 +26,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -394,18 +393,13 @@ public class RosterOverrideService {
 
     /** 把座位号 >= fromSlot 的行整体挪 delta(插入时 +1,压缩时 -1) */
     private void shiftSeatsFrom(Long stageId, long fromSlot, long delta) {
-        // 座位号相邻,批量 +1 必须从大到小、-1 从小到大,避免中间态出现同座两行
-        List<TStageRosterEntry> rows = rosterEntryStore.entriesOf(stageId).stream()
-            .filter(r -> r.getSlot() != null && r.getSlot() >= fromSlot)
-            .sorted(delta > 0
-                ? Comparator.comparingLong(TStageRosterEntry::getSlot).reversed()
-                : Comparator.comparingLong(TStageRosterEntry::getSlot))
-            .toList();
-        for (TStageRosterEntry r : rows) {
-            entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
-                .eq(TStageRosterEntry::getId, r.getId())
-                .set(TStageRosterEntry::getSlot, r.getSlot() + delta));
-        }
+        // 一条集合式 UPDATE 代替逐行 updateById:插入后移/移出压缩时,
+        // 逐行写法在人多时是 O(行数) 次库往返(与签到落圈的顺延同一类问题)
+        entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+            .eq(TStageRosterEntry::getTargetStageId, stageId)
+            .isNotNull(TStageRosterEntry::getSlot)
+            .ge(TStageRosterEntry::getSlot, fromSlot)
+            .setSql("slot = slot + " + delta));
     }
 
     /**

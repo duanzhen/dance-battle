@@ -228,12 +228,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-[11px] text-neutral-400 flex-none">第 1~{{ wizard.advance || '?' }} 名 →</span>
-                  <el-select
-                    v-model="wizard.defaultTargetId"
-                    class="flex-1 min-w-0"
-                    placeholder="请选择去向"
-                    clearable
-                  >
+                  <el-select v-model="wizard.defaultTargetId" class="flex-1 min-w-0" placeholder="请选择去向" clearable>
                     <el-option v-for="t in wizardTargetOptions" :key="'d' + String(t.id)" :label="t.name" :value="t.id" />
                   </el-select>
                 </div>
@@ -653,10 +648,17 @@ const syncCircleExits = async (idx: number, advance: number) => {
     }
   }
 
-  // 2) 保留的原地更新,缺的新增
+  // 2) 保留的原地更新,缺的新增;改了去向的必须"删旧建新"——
+  //    出口组是挂在目标赛段上的,拿旧组 ID 去新目标段更新会报「来源组不存在或不属于本赛段」
+  const originalTargetOf = new Map(wizard.originalExits.map((o) => [String(o.groupId), o.targetStageId]));
   for (const d of desired) {
     const rule = buildExitRule(idx, d.rankStart, d.rankEnd);
-    if (d.keepId == null) {
+    const originalTarget = d.keepId == null ? null : originalTargetOf.get(String(d.keepId));
+    const movedToOtherStage = d.keepId != null && originalTarget != null && String(originalTarget) !== String(d.targetStageId);
+    if (movedToOtherStage) {
+      await removeRosterGroup(originalTarget as string | number, d.keepId as string | number);
+    }
+    if (d.keepId == null || movedToOtherStage) {
       await addRosterGroups(d.targetStageId, {
         sourceStageId: props.stage.id,
         resultFilter: 'ANY',

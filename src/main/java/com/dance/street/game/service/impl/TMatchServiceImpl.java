@@ -134,9 +134,13 @@ public class TMatchServiceImpl implements ITMatchService {
                 .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
         List<Long> competitorIds = participants.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
-        Map<Long, String> nameById = competitorIds.isEmpty() ? Map.of()
-            : competitorMapper.selectByIds(competitorIds).stream()
-                .collect(Collectors.toMap(TCompetitor::getId, TCompetitor::getName, (a, b) -> a));
+        List<TCompetitor> competitors = competitorIds.isEmpty() ? List.of()
+            : competitorMapper.selectByIds(competitorIds);
+        Map<Long, String> nameById = competitors.stream()
+            .collect(Collectors.toMap(TCompetitor::getId, c -> c.getName() == null ? "" : c.getName(), (a, b) -> a));
+        // 号码牌:导播台在海选赛段要按号喊人/对号(与名字同源,不多查一次)
+        Map<Long, String> numberById = competitors.stream()
+            .collect(Collectors.toMap(TCompetitor::getId, c -> c.getNumber() == null ? "" : c.getNumber(), (a, b) -> a));
 
         Map<Long, List<TMatchParticipant>> byMatch = participants.stream()
             .collect(Collectors.groupingBy(TMatchParticipant::getMatchId));
@@ -174,7 +178,7 @@ public class TMatchServiceImpl implements ITMatchService {
         }
 
         // 海选赛段:补充每轮(每名选手)的评分明细
-        fillAuditionRoundScores(matches, byMatch, nameById);
+        fillAuditionRoundScores(matches, byMatch, nameById, numberById);
 
         // 公布模式 + 实时判罚投票
         fillPublishInfo(matches, byMatch);
@@ -201,7 +205,8 @@ public class TMatchServiceImpl implements ITMatchService {
      */
     private void fillAuditionRoundScores(List<TMatchVo> matches,
                                          Map<Long, List<TMatchParticipant>> byMatch,
-                                         Map<Long, String> nameById) {
+                                         Map<Long, String> nameById,
+                                         Map<Long, String> numberById) {
         List<Long> stageIds = matches.stream().map(TMatchVo::getStageId).filter(Objects::nonNull).distinct().toList();
         if (stageIds.isEmpty()) {
             return;
@@ -262,7 +267,7 @@ public class TMatchServiceImpl implements ITMatchService {
                     .filter(s -> Objects.equals(s.getCompetitorId(), r.getCompetitorId()))
                     .toList();
                 roundScores.add(buildAuditionRoundItem(r, r.getCompetitorId(), rs,
-                    nameById, participantByCid, refereeNameById));
+                    nameById, numberById, participantByCid, refereeNameById));
             }
             vo.setRoundScores(roundScores);
         }
@@ -275,6 +280,7 @@ public class TMatchServiceImpl implements ITMatchService {
     private MatchRoundScoreVo buildAuditionRoundItem(TMatchRound r, Long competitorId,
                                                      List<TRoundScore> scores,
                                                      Map<Long, String> nameById,
+                                                     Map<Long, String> numberById,
                                                      Map<Long, TMatchParticipant> participantByCid,
                                                      Map<Long, String> refereeNameById) {
         MatchRoundScoreVo item = new MatchRoundScoreVo();
@@ -282,6 +288,7 @@ public class TMatchServiceImpl implements ITMatchService {
         item.setRoundSequence(r.getRoundSequence());
         item.setCompetitorId(competitorId);
         item.setCompetitorName(competitorId == null ? null : nameById.get(competitorId));
+        item.setCompetitorNumber(competitorId == null ? null : numberById.get(competitorId));
 
         List<MatchRoundScoreVo.RefereeScore> refScores = new ArrayList<>();
         BigDecimal sum = BigDecimal.ZERO;

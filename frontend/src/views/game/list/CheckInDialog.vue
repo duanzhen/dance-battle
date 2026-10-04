@@ -332,8 +332,7 @@ const loadCircleInfo = async () => {
     for (let i = 0; i < ordered.length; i++) {
       const m = ordered[i];
       // 只展示圈场次:分区名恒为 ZONE-k;同分加赛场次复用原圈分区,不算独立的一圈
-      if (!String(m.displayZone || '').startsWith('ZONE-')
-        || isTiebreakerMatch(m)) {
+      if (!String(m.displayZone || '').startsWith('ZONE-') || isTiebreakerMatch(m)) {
         continue;
       }
       const zoneNo = String(m.displayZone).replace('ZONE-', '');
@@ -394,15 +393,22 @@ const scrollToFirstFreeSlot = async () => {
 const loadCompetitors = async () => {
   loading.value = true;
   try {
-    // 阵容列表人数:随机取号的上限、以及号码列表范围(人数+20)都以它为基准
+    // 阵容列表人数:随机取号的上限、以及号码列表范围(人数+20)都以它为基准。
+    // 只要人数就用分页 total —— 之前拉 pageSize=10000 把全部选手(连带 competitorVo)取回来数长度,
+    // 人一多单是打开签到弹窗就要等好几秒。
     try {
       const pResp: any = await listPlayer({
         tournamentId: props.tournamentId,
         pageNum: 1,
-        pageSize: 10000
+        pageSize: 1
       } as any);
-      const players = pResp?.data ?? [];
-      playerCount.value = Array.isArray(players) ? players.length : 0;
+      const total = Number(pResp?.total);
+      if (Number.isFinite(total) && total >= 0) {
+        playerCount.value = total;
+      } else {
+        const players = pResp?.data ?? [];
+        playerCount.value = Array.isArray(players) ? players.length : 0;
+      }
     } catch (e) {
       console.warn('加载选手总数失败:', e);
       playerCount.value = 0;

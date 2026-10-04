@@ -13,6 +13,7 @@ import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.bo.TStageRosterOrderBo;
+import com.dance.street.game.domain.bo.TStageRosterOverrideBo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.StageParticipantsVo;
 import com.dance.street.game.engine.common.RosterConstants;
@@ -163,6 +164,52 @@ class MergePreAdvanceSeatTest {
         assertTrue(post.getItems().stream()
                 .allMatch(i -> i.getSeedRank() != null && !Boolean.TRUE.equals(i.getHolding())),
             "物化后每个人都应有座位号");
+    }
+
+    /**
+     * 把待落座的人"钉"到某个座位(SEED):目标座位是空位时直接换进来,不能留下同座两行。
+     *
+     * <p>回归:P1-2 —— 被钉的人在待落座(slot=null)时,空位占位者的 slot 被设成 null,
+     * 而 updateById 跳过 null 字段,占位者仍占着原座位,于是同一座位出现两行。</p>
+     */
+    @Test
+    void pinHoldingPersonToSeatDoesNotDuplicateSlot() {
+        Long tid = newTournament("pin-holding");
+        TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
+        insertCompetitors(tid, semiA.getId(), 2);
+        TStageVo semiB = newStage(tid, "半决赛B", 2L, 1L, semiA.getId());
+        insertCompetitors(tid, semiB.getId(), 2);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semiB.getId());
+        addAdvanceGroup(finals.getId(), semiA.getId());
+
+        initializeAndGenerate(semiA.getId());
+        initializeAndGenerate(semiB.getId());
+        matchResultService.startMatch(matchesOf(semiA.getId()).get(0).getId());
+        matchResultService.startMatch(matchesOf(semiB.getId()).get(0).getId());
+        Long winnerA = submitLeftWin(matchesOf(semiA.getId()).get(0));
+        Long winnerB = submitLeftWin(matchesOf(semiB.getId()).get(0));
+        lifecycleService.completeStage(semiA.getId());
+        lifecycleService.completeStage(semiB.getId());
+        assertEquals(2, holdingCompetitorIds(finals.getId()).size(), "两人先在待落座");
+
+        // 把 B 钉到 1 号位(该座位此时是空位实体行)
+        TStageRosterOverrideBo bo = new TStageRosterOverrideBo();
+        bo.setOp(RosterConstants.OVERRIDE_SEED);
+        bo.setSourceCompetitorId(winnerB);
+        bo.setSeedRank(1L);
+        rosterService.addOverride(finals.getId(), bo);
+
+        assertEquals(List.of(winnerB),
+            rosterService.entriesOf(finals.getId()).stream()
+                .filter(e -> Long.valueOf(1L).equals(e.getSlot()))
+                .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+                .map(TStageRosterEntry::getSourceCompetitorId).toList(),
+            "钉座位后 1 号位就是被钉的人");
+        List<Long> slots = rosterService.entriesOf(finals.getId()).stream()
+            .map(TStageRosterEntry::getSlot).filter(Objects::nonNull).toList();
+        assertEquals(slots.size(), new HashSet<>(slots).size(), "不能出现同一座位两行:" + slots);
+        assertEquals(List.of(winnerA), holdingCompetitorIds(finals.getId()),
+            "另一个人仍在待落座");
     }
 
     /**

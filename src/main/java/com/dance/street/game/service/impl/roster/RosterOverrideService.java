@@ -147,8 +147,23 @@ public class RosterOverrideService {
                 TStageRosterEntry occupant = entryOfSlot(stageId, bo.getSeedRank());
                 if (occupant != null && !Objects.equals(occupant.getId(), row.getId())) {
                     Long rowSlot = row.getSlot();
-                    occupant.setSlot(rowSlot);
-                    entryMapper.updateById(occupant);
+                    boolean occupantEmpty = occupant.getSourceCompetitorId() == null
+                        && occupant.getPlayerId() == null
+                        && (occupant.getGuestName() == null || occupant.getGuestName().isBlank());
+                    if (occupantEmpty) {
+                        // 占的是空位:空位行直接删掉,人坐进来即可(与"加人占空位"同一口径)
+                        entryMapper.deleteById(occupant.getId());
+                    } else if (rowSlot == null) {
+                        // 被钉的人原来在待落座(没有座位号):占位者要被挪回待落座。
+                        // updateById 默认跳过 null 字段,必须显式 SET slot = NULL,否则占位者还占着
+                        // 原座位,而钉进来的人也用这个座号 → 同一座位两行。
+                        entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                            .eq(TStageRosterEntry::getId, occupant.getId())
+                            .set(TStageRosterEntry::getSlot, null));
+                    } else {
+                        occupant.setSlot(rowSlot);
+                        entryMapper.updateById(occupant);
+                    }
                 }
                 row.setSlot(bo.getSeedRank());
                 entryMapper.updateById(row);

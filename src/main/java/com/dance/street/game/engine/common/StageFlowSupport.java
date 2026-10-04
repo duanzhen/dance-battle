@@ -26,12 +26,15 @@ public final class StageFlowSupport {
     }
 
     /**
-     * 赛段晋级名额:取 ruleConfig.knockout.advanceCount,顶层 advanceCount 覆盖之。
-     * 未配置或解析失败时回退 1。
+     * 赛段晋级名额(唯一口径):取 ruleConfig.knockout.advanceCount,顶层 advanceCount 覆盖之;
+     * ruleConfig 里没有时回退到赛段列 {@code teamCountEnd};都拿不到时回退 1。
+     *
+     * <p>回退赛段列是必须的:建段时若 ruleConfig 为空(或旧数据没有该字段),
+     * "按圈出口取多少人"与"结算晋级多少人"都读这里,才不会一个按 teamCountEnd、一个按 1。</p>
      */
     public static int readStageAdvanceCount(TStage stage) {
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        int advanceCount = 1;
+        Integer advanceCount = null;
         if (rc != null && rc.getKnockout() != null && rc.getKnockout().getAdvanceCount() != null) {
             advanceCount = rc.getKnockout().getAdvanceCount();
         }
@@ -42,6 +45,10 @@ public final class StageFlowSupport {
             }
         } catch (Exception ignored) {
             // 保持已解析到的名额
+        }
+        if (advanceCount == null) {
+            Long end = stage.getTeamCountEnd();
+            advanceCount = end != null && end > 0 ? end.intValue() : 1;
         }
         return advanceCount;
     }

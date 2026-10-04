@@ -483,14 +483,16 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .toList());
 
         // 淘汰特有:填下游占位 / 标决赛胜者晋级下一赛段
+        boolean stageResultChanged = false;
         if (profile(stage).knockout()) {
-            resolveKnockoutDownstream(match, results);
+            stageResultChanged = resolveKnockoutDownstream(match, results);
         }
-        // 结果一变就推下游中间态,与赛制无关:座位/名次由来源赛段给出,投影出谁就落谁。
-        // 海选/排名赛此时通常还没有 ADVANCE,投影为空、是无害的幂等调用;
-        // 淘汰赛每场判完即把胜者落进下一赛段对应座位,不必等整个赛段结算。
-        // 只同步"本场参赛方",写入范围就是本场对应那几行;不整表重建,人工调整不会被冲掉。
-        rosterService.syncPreAdvance(stage.getId(), competitorIds);
+        // 只有本次真的写入了赛段级结果(晋级/淘汰/名次)才推下游中间态:
+        // 座位/名次由来源赛段给出,投影出谁就落谁;只同步"本场参赛方",不整表重建。
+        // 擂台等"结算了但还没产生赛段级结果"的场次不推,避免空对账把下游白铺一遍。
+        if (stageResultChanged) {
+            rosterService.syncPreAdvance(stage.getId(), competitorIds);
+        }
 
         // 场次与全部轮次(含平局加赛轮)一并结算
         matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_SETTLED);
@@ -729,7 +731,13 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         matchStateWriter.setStatus(matchId, targetStatus);
     }
 
-    private void resolveKnockoutDownstream(TMatch match, List<MatchScoreResult> results) {
+    /**
+     * 淘汰赛路由:败者标淘汰、胜者填下游占位/标晋级。
+     *
+     * @return 本次是否写入了赛段级结果(晋级/淘汰);只有 true 才需要推下游中间态
+     */
+    private boolean resolveKnockoutDownstream(TMatch match, List<MatchScoreResult> results) {
+        boolean wroteStageResult = false;
         // 淘汰赛单败:非胜者(败者)赛段级结果标记为淘汰
         for (MatchScoreResult r : results) {
             if (r.getCompetitorId() == null) {
@@ -737,6 +745,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
             if (r.getRankInMatch() == null || r.getRankInMatch() > 1) {
                 downstreamRouter.markEliminated(r.getCompetitorId());
+                wroteStageResult = true;
             }
         }
 
@@ -745,9 +754,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 1)
             .findFirst().orElse(null);
         if (winner == null || winner.getCompetitorId() == null) {
-            return;
+            return wroteStageResult;
         }
         downstreamRouter.routeWinner(match, winner.getCompetitorId());
+        wroteStageResult = true;
 
         // 季军赛:本场第 2 名(败者)路由到败者组场次(半决赛败者互争季军)
         MatchScoreResult loser = results.stream()
@@ -755,7 +765,9 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .findFirst().orElse(null);
         if (loser != null && loser.getCompetitorId() != null) {
             downstreamRouter.routeLoser(match, loser.getCompetitorId());
+            wroteStageResult = true;
         }
+        return wroteStageResult;
     }
 
     /**

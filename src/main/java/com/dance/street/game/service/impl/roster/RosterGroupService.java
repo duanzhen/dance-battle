@@ -372,7 +372,8 @@ public class RosterGroupService {
             }
             quotas = rc.getCircleAdvanceCounts();
         }
-        int advance = audition.getTeamCountEnd() == null ? 0 : audition.getTeamCountEnd().intValue();
+        // 晋级人数与结算(circleQuotaContext)共用同一个口径,避免"按圈出口取的人数 ≠ 结算晋级的人数"
+        int advance = StageFlowSupport.readStageAdvanceCount(audition);
         int perCircle = circles > 0 ? advance / circles : advance;
         List<TStageRosterGroupBo> out = new ArrayList<>();
         for (int k = 1; k <= circles; k++) {

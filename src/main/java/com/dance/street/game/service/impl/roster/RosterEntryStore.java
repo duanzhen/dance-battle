@@ -564,46 +564,69 @@ public class RosterEntryStore {
     }
 
     /**
-     * 单来源(含同一来源的多条边)的对账:投影就是权威座位表。
-     * 人工行不动;座位变了先摘掉再落座;不再晋级的人还原成空位;待落位行直接删除。
+     * 单入边的对账:投影就是权威座位表。
+     *
+     * <p><b>按 {@code source_slot}(来源给的原座号)定位原行</b>:上游改了某个位置的结果时,
+     * 找到原来代表这个位置的那一行,把新的人/新的座号写进去;这个位置上没人了才还原成空位。
+     * 人工行不动;显示与物化一律只看 {@code slot}(新座号)。</p>
      */
     private int reconcileSeats(TStage target, Long sourceStageId, RosterAssembler.Projection projection,
                                List<TStageRosterEntry> rows, String rowStatus, String emptySlotKind,
                                Set<Long> only) {
-        Map<Long, Long> expectedSlot = new HashMap<>();
-        projection.bySlot().forEach((slot, r) -> {
-            if (r.source != null && r.source.getId() != null) {
-                expectedSlot.putIfAbsent(r.source.getId(), slot);
+        // 来源位置(finalRank) → 投影给出的新座号;人 → 它现在占的来源位置
+        Map<Long, Long> seatBySourceSlot = new LinkedHashMap<>();
+        Map<Long, Long> sourceSlotByCompetitor = new HashMap<>();
+        projection.bySlot().forEach((seat, r) -> {
+            if (r.source == null || r.source.getId() == null) {
+                return;
             }
+            long src = r.source.getFinalRank() != null ? r.source.getFinalRank() : seat;
+            seatBySourceSlot.putIfAbsent(src, seat);
+            sourceSlotByCompetitor.putIfAbsent(r.source.getId(), src);
         });
-        Map<Long, TStageRosterEntry> rowBySlot = rows.stream()
-            .filter(e -> e.getSlot() != null)
-            .collect(Collectors.toMap(TStageRosterEntry::getSlot, e -> e, (a, b) -> a));
+        // 原行索引:来源位置 / 座号 / 人
+        Map<Long, TStageRosterEntry> rowBySourceSlot = new HashMap<>();
+        Map<Long, TStageRosterEntry> rowBySlot = new HashMap<>();
+        Map<Long, TStageRosterEntry> rowByHolder = new HashMap<>();
+        for (TStageRosterEntry row : rows) {
+            if (row.getSlot() != null) {
+                rowBySlot.putIfAbsent(row.getSlot(), row);
+            }
+            if (row.getSourceSlot() != null) {
+                rowBySourceSlot.putIfAbsent(row.getSourceSlot(), row);
+            }
+            if (row.getSourceCompetitorId() != null) {
+                rowByHolder.putIfAbsent(row.getSourceCompetitorId(), row);
+            }
+        }
         // 有人的座位还没铺开(计划规模小于名次):整表重建兜底,重建后即是对账结果
-        for (Long slot : expectedSlot.values()) {
-            if (!rowBySlot.containsKey(slot)) {
+        for (Long seat : seatBySourceSlot.values()) {
+            if (!rowBySlot.containsKey(seat)) {
                 return rebuildEntries(target.getId()) ? 1 : 0;
             }
         }
         int changed = 0;
-        // 1) 与投影不符的行先还原:座号变了 → 先摘掉,第 2 步按新座号重新落座;
-        //    本来源已不再晋级(判错重判/重置)→ 还原成空位。
-        //    显示与物化一律只看新座号;原座号(sourceSlot)只作备份,不参与这里的判定。
+        // 1) 先还原:某个来源位置已经没有结果、或这个人换了座位 → 把旧行摘掉,第 2 步重新写。
         for (TStageRosterEntry row : rows) {
             Long holder = row.getSourceCompetitorId();
             if (holder == null || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
                 continue;
             }
-            Long slot = expectedSlot.get(holder);
-            if (slot != null) {
-                if (Objects.equals(slot, row.getSlot())) {
-                    continue;   // 已经坐在投影给出的新座号上:原地不动
+            Long src = row.getSourceSlot();
+            if (src != null && seatBySourceSlot.containsKey(src)) {
+                continue;   // 这个来源位置还有结果:第 2 步按新数据更新这一行
+            }
+            Long expectedSeat = sourceSlotByCompetitor.containsKey(holder)
+                ? seatBySourceSlot.get(sourceSlotByCompetitor.get(holder)) : null;
+            if (expectedSeat != null) {
+                if (Objects.equals(expectedSeat, row.getSlot())) {
+                    continue;   // 人已在目标座位(只是原座号没对上,例如历史行)
                 }
                 dropRow(row, emptySlotKind, rowStatus);
                 changed++;
                 continue;
             }
-            // 不在投影里的人:只处理本来源、且在本批次范围内的人(别的来源的行不动)
+            // 人已不在投影里:只处理本来源、且在本批次范围内的人(别的来源的行不动)
             if (!Objects.equals(row.getSourceStageId(), sourceStageId)
                 || (only != null && !only.contains(holder))) {
                 continue;
@@ -611,18 +634,28 @@ public class RosterEntryStore {
             dropRow(row, emptySlotKind, rowStatus);
             changed++;
         }
-        // 2) 投影里的人坐到投影给出的新座号上(上一步之后,目标座位要么空着,要么坐的就是同一个人)
-        for (Map.Entry<Long, RosterAssembler.AssembledRow> e : projection.bySlot().entrySet()) {
-            RosterAssembler.AssembledRow expected = e.getValue();
-            TStageRosterEntry row = rowBySlot.get(e.getKey());
+        // 2) 还有结果的位置:按 source_slot 找到原行,写上新的人与新的座号
+        for (Map.Entry<Long, Long> e : seatBySourceSlot.entrySet()) {
+            long src = e.getKey();
+            long seat = e.getValue();
+            RosterAssembler.AssembledRow expected = projection.bySlot().get(seat);
+            TCompetitor advancer = expected.source;
+            TStageRosterEntry row = rowBySourceSlot.get(src);
+            if (row == null) {
+                row = rowByHolder.get(advancer.getId());   // 位置上还没有原行(新晋级的人)
+            }
+            if (row == null) {
+                row = rowBySlot.get(seat);                 // 再兜底:目标座位行
+            }
             if (row == null) {
                 continue;
             }
             if (StageConstants.SLOT_PLAYER.equals(row.getSlotKind())
-                && Objects.equals(row.getSourceCompetitorId(), expected.source.getId())) {
+                && Objects.equals(row.getSourceCompetitorId(), advancer.getId())
+                && Objects.equals(row.getSlot(), seat)) {
                 continue;   // 已经在位
             }
-            placeAdvancer(target, row, expected, rowStatus);
+            placeAdvancer(target, row, expected, rowStatus, seat);
             changed++;
         }
         return changed;
@@ -687,8 +720,9 @@ public class RosterEntryStore {
      * 它是对账的定位键:上游改了某个位置的结果时,按这个位置找到原来那一行做变更。</p>
      */
     private void placeAdvancer(TStage target, TStageRosterEntry row,
-                               RosterAssembler.AssembledRow expected, String rowStatus) {
+                               RosterAssembler.AssembledRow expected, String rowStatus, long seat) {
         TCompetitor advancer = expected.source;
+        long sourceSlot = advancer.getFinalRank() != null ? advancer.getFinalRank() : seat;
         if (RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
             log.info("赛段[{}]座位[{}]原本是人工调整,按上游晋级结果覆盖", target.getId(), row.getSlot());
         }
@@ -698,12 +732,13 @@ public class RosterEntryStore {
         // 显式 set:该座位原来是外卡/人工行时,外卡字段要一起清掉,否则会留下"有名字的源行"
         entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
             .eq(TStageRosterEntry::getId, row.getId())
+            .set(TStageRosterEntry::getSlot, seat)
             .set(TStageRosterEntry::getSlotKind, StageConstants.SLOT_PLAYER)
             .set(TStageRosterEntry::getRefType, "SOURCE")
             .set(TStageRosterEntry::getSourceCompetitorId, advancer.getId())
             .set(TStageRosterEntry::getSourceStageId, advancer.getStageId())
             .set(TStageRosterEntry::getSourceGroupId, expected.sourceGroupId)
-            .set(TStageRosterEntry::getSourceSlot, advancer.getFinalRank())
+            .set(TStageRosterEntry::getSourceSlot, sourceSlot)
             .set(TStageRosterEntry::getPlayerId, null)
             .set(TStageRosterEntry::getGuestName, null)
             .set(TStageRosterEntry::getGuestNumber, null)
@@ -711,12 +746,13 @@ public class RosterEntryStore {
             .set(TStageRosterEntry::getEntryTag, tag)
             .set(TStageRosterEntry::getStatus, rowStatus));
         // 同步内存对象:同一轮后续判断读的是这份快照,不同步会重复写或漏写
+        row.setSlot(seat);
         row.setSlotKind(StageConstants.SLOT_PLAYER);
         row.setRefType("SOURCE");
         row.setSourceCompetitorId(advancer.getId());
         row.setSourceStageId(advancer.getStageId());
         row.setSourceGroupId(expected.sourceGroupId);
-        row.setSourceSlot(advancer.getFinalRank());
+        row.setSourceSlot(sourceSlot);
         row.setPlayerId(null);
         row.setGuestName(null);
         row.setGuestNumber(null);
@@ -724,7 +760,7 @@ public class RosterEntryStore {
         row.setEntryTag(tag);
         row.setStatus(rowStatus);
         log.info("赛段[{}]中间层座位[{}]实时写入名单行[{}](来源名次 {}),来源赛段[{}]",
-            target.getId(), row.getSlot(), advancer.getName(), advancer.getFinalRank(), advancer.getStageId());
+            target.getId(), seat, advancer.getName(), advancer.getFinalRank(), advancer.getStageId());
     }
 
 }

@@ -39,6 +39,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -207,26 +208,36 @@ class PreAdvanceRealtimeTest {
         assertEquals(rightWinner, competitorMapper.selectById(rightWinner).getId());
     }
 
-    /** 上一赛段还没结束:中间态只读 —— 能实时看到已晋级的人,但不能加人/拖位。 */
+    /**
+     * 中间态按来源边放行:来源还没结算时,来自该来源的行与新加人都不能动;
+     * 结算后立刻放开(不必等别的来源)。
+     */
     @Test
-    void middleStateStaysReadonlyWhileSourceStageIsRunning() {
+    void middleStateLocksOnlyRowsFromUnsettledSources() {
         Long tid = newTournament("pre-advance-readonly");
         TStageVo semi = newStage(tid, "半决赛", 4L, 2L, null);
         insertCompetitors(tid, semi.getId(), 4);
         TStageVo finals = newStage(tid, "决赛", 2L, 1L, semi.getId());
         initializeAndGenerate(semi.getId());
         List<TMatch> matches = matchesOf(semi.getId());
-        judgeLeftWin(matches.get(0));
+        Long advanced = judgeLeftWin(matches.get(0));
         assertEquals(1, playerRows(finals.getId()), "实时能看到已晋级的人");
 
+        // 新增行(加外卡)仍要等来源全部结算:这条新行的座位还没定案
         TStageRosterOverrideBo guest = new TStageRosterOverrideBo();
         guest.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
         guest.setGuestName("临时外卡");
         assertThrows(ServiceException.class, () -> rosterService.addOverride(finals.getId(), guest),
-            "上一赛段没结束,不能往中间态加人");
-        assertThrows(ServiceException.class,
-            () -> rosterService.reorderRoster(finals.getId(), List.of()),
-            "上一赛段没结束,不能调中间态顺序");
+            "来源还没结算,不能往中间态加人");
+
+        // 来自未结算来源的选手:按行锁住,移出会被拦下
+        TStageRosterOverrideBo removeAdvancer = new TStageRosterOverrideBo();
+        removeAdvancer.setOp(RosterConstants.OVERRIDE_REMOVE);
+        removeAdvancer.setSourceCompetitorId(advanced);
+        ServiceException blocked = assertThrows(ServiceException.class,
+            () -> rosterService.addOverride(finals.getId(), removeAdvancer),
+            "来自还没结束的赛段的人不能调整");
+        assertTrue(blocked.getMessage().contains("还没结束"), "报错应说明来源未结束:" + blocked.getMessage());
 
         // 来源结算后放开
         judgeLeftWin(matches.get(1));
@@ -234,6 +245,12 @@ class PreAdvanceRealtimeTest {
         assertEquals(StageConstants.STAGE_SETTLED, statusOf(semi.getId()));
         rosterService.addOverride(finals.getId(), guest);
         assertEquals(1, rosterService.listOverrides(finals.getId()).size(), "结算后可以正常加人");
+        rosterService.addOverride(finals.getId(), removeAdvancer);
+        TStageRosterEntry removed = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> Objects.equals(e.getSourceCompetitorId(), advanced))
+            .findFirst().orElse(null);
+        assertEquals(StageConstants.SLOT_BYE, removed == null ? null : removed.getSlotKind(),
+            "结算后也能把该来源的人移出(座位还原成空位)");
     }
 
     /**

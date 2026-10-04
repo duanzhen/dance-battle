@@ -57,4 +57,12 @@ public class RosterPreviewItemVo implements Serializable {
 
     /** 预览种子位(装配顺序,含 SEED 覆盖) */
     private Long seedRank;
+
+    /**
+     * 这一行现在能不能在中间态调整。
+     *
+     * <p>来自<b>未结算</b>来源赛段的人还没定案(座位/名次随后续判罚还会被投影覆盖),
+     * 先锁着;已结算来源的人、人工行/外卡、空位行都可以调——所以不用等所有来源边跑完。</p>
+     */
+    private Boolean adjustable;
 }

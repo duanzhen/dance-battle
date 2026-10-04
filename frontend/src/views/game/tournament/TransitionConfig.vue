@@ -56,7 +56,7 @@
           <span class="text-[12px] font-bold text-neutral-500 uppercase tracking-wider"> 本赛段名单 · {{ listItems.length }} 人 </span>
           <div class="flex items-center gap-2">
             <span v-if="overridePreview?.capacity" class="text-[11px] text-neutral-600"> 计划 {{ overridePreview.capacity }} 人 </span>
-            <template v-if="targetMode === 'KNOCKOUT' && isSeedKnockoutTransition && !rosterReadonly">
+            <template v-if="targetMode === 'KNOCKOUT' && isSeedKnockoutTransition && !rosterReadonly && !anyRowLocked">
               <button
                 @click="clearRosterOrder"
                 class="px-2 py-1 text-[12px] rounded border border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors flex items-center gap-1"
@@ -78,7 +78,7 @@
         <div class="px-1 text-[11px]">
           <span v-if="overridePreview?.applied" class="text-green-500">名单已确认</span>
           <span v-else-if="overridePreview?.skipped" class="text-neutral-500">已跳过(本赛段不带人)</span>
-          <span v-else-if="overridePreview?.ready === false" class="text-orange-400"> 来源赛段还没结束,以下是预期名单 </span>
+          <span v-else-if="rosterWaitingSource" class="text-orange-400"> 还有来源赛段没结束:来自它们的选手先锁定,已结算来源的选手现在就能调整 </span>
           <span v-else class="text-neutral-500">
             {{
               targetMode === 'KNOCKOUT'
@@ -93,15 +93,13 @@
         </div>
         <p v-for="(w, wi) in overridePreview?.warnings || []" :key="'w' + wi" class="text-orange-400/90 px-1">⚠ {{ w }}</p>
 
-        <!-- 已确认/已跳过/赛段已开始/上一赛段还没结束:只能看不能改 -->
+        <!-- 已确认/已跳过/赛段已开始:整单只能看不能改 -->
         <div v-if="rosterReadonly" class="px-2 py-1.5 rounded bg-neutral-900/50 border border-neutral-800 text-[11px] text-neutral-500">
-          {{
-            rosterWaitingSource
-              ? '上一赛段还没结束:名单只读,已晋级的选手会实时出现,等来源赛段结算后再调整。'
-              : targetLocked
-                ? '赛段已开始,名单已锁定,只能查看;如需调整请先重置赛段。'
-                : '名单已定,如需调整请先在下方「重置赛段」。'
-          }}
+          {{ targetLocked ? '赛段已开始,名单已锁定,只能查看;如需调整请先重置赛段。' : '名单已定,如需调整请先在下方「重置赛段」。' }}
+        </div>
+        <!-- 部分来源还没结算:带锁标记的行不能动,其余可调 -->
+        <div v-else-if="anyRowLocked" class="px-2 py-1.5 rounded bg-amber-500/5 border border-amber-600/30 text-[11px] text-amber-400/90">
+          带「未结算」标记的选手来自还没打完的赛段,先锁着(等这段结束再调);其余选手现在就能拖动或移出。
         </div>
 
         <!-- 待落位区:多入口汇合的人先到这里(没有座位号),拖到座位才算落位。
@@ -122,16 +120,22 @@
             <div
               v-for="(it, idx) in holdingItems"
               :key="itemKeyOf(it)"
-              :draggable="!rosterReadonly"
+              :draggable="rowAdjustable(it)"
               @dragstart="onHoldingDragStart(idx, $event)"
               @dragend="onDragEnd"
               class="px-2 py-1 rounded bg-neutral-900 border border-neutral-700 text-[11px] text-neutral-300"
-              :class="rosterReadonly ? '' : 'cursor-grab hover:border-amber-600/50'"
+              :class="rowAdjustable(it) ? 'cursor-grab hover:border-amber-600/50' : 'opacity-70'"
             >
               {{ it.name || '未命名' }}
               <span v-if="it.finalRank" class="text-[10px] text-neutral-600 ml-1">#{{ it.finalRank }}</span>
+              <span
+                v-if="it.adjustable === false"
+                class="ml-1 px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500"
+                title="来源赛段还没结束,这名选手还没定案"
+                >未结算</span
+              >
               <button
-                v-if="!rosterReadonly"
+                v-if="rowAdjustable(it)"
                 @click.stop="askRemoveItem(it)"
                 title="从待落位区移出"
                 class="ml-1.5 px-1 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors"
@@ -141,9 +145,7 @@
             </div>
           </div>
           <p v-else class="px-1 pb-0.5 text-[10px] text-neutral-500">空置位:把名单里的选手拖到这里可取消落位(这个人不再占座位号)。</p>
-          <p class="px-1 text-[10px] text-neutral-500">
-            多入口汇合不自动排座:把每个人拖到座位;有待落位的人时不能确认名单。
-          </p>
+          <p class="px-1 text-[10px] text-neutral-500">多入口汇合不自动排座:把每个人拖到座位;有待落位的人时不能确认名单。</p>
         </div>
 
         <!-- 淘汰赛:左半区/右半区对战树(名单即对阵框架,空位照常占位) -->
@@ -161,25 +163,28 @@
                     :class="[
                       bracketDragItem === p[side] ? 'border-amber-500/60 bg-amber-500/10 opacity-60' : 'border-neutral-800',
                       bracketDropKey === slotKeyOf(p, side) ? 'border-amber-500 ring-1 ring-amber-500/50' : '',
-                      bracketEditable ? 'cursor-grab active:cursor-grabbing' : ''
+                      rowAdjustable(p[side]) ? 'cursor-grab active:cursor-grabbing' : 'opacity-70'
                     ]"
-                    :draggable="bracketEditable"
+                    :draggable="rowAdjustable(p[side])"
                     @dragstart="onBracketSlotDragStart(p[side], p, side, $event)"
                     @dragend="onBracketSlotDragEnd"
                     @dragover.prevent="onBracketSlotDragOver(p, side)"
                     @dragleave="onBracketSlotDragLeave(p, side)"
                     @drop.stop.prevent="onBracketSlotDrop(p, side)"
-                    :title="bracketEditable ? '拖到另一个位置即可交换' : ''"
+                    :title="rowAdjustable(p[side]) ? '拖到另一个位置即可交换' : '来源赛段还没结束,这名选手还没定案'"
                   >
                     <span class="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold bg-neutral-800 text-neutral-400 flex-none">
                       {{ slotSeedAt(p, side) }}
                     </span>
                     <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p[side].name || '未命名' }}</span>
+                    <span v-if="p[side].adjustable === false" class="text-[9px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-500 flex-none"
+                      >未结算</span
+                    >
                     <span v-if="entryTagLabel(p[side].entryTag)" class="text-[10px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-400 flex-none">{{
                       entryTagLabel(p[side].entryTag)
                     }}</span>
                     <button
-                      v-if="!rosterReadonly"
+                      v-if="rowAdjustable(p[side])"
                       @click.stop="askRemoveItem(p[side])"
                       class="w-6 h-6 rounded border border-neutral-700 text-neutral-500 hover:text-red-500 hover:border-red-900/40 transition-colors flex items-center justify-center flex-none"
                       title="移出名单"
@@ -232,19 +237,25 @@
             <div
               v-for="(it, idx) in seatItems"
               :key="'r' + idx"
-              draggable="true"
+              :draggable="rowAdjustable(it)"
               @dragstart="onDragStartItem(idx, $event)"
               @dragend="onDragEnd"
               @dragover.prevent="hoverIndex = idx"
               @drop.stop.prevent="onDropToRoster(idx)"
-              class="flex items-center gap-2 px-1.5 h-7 rounded cursor-grab text-[12px]"
+              class="flex items-center gap-2 px-1.5 h-7 rounded text-[12px]"
               :class="dragIndex !== null && hoverIndex === idx ? 'bg-amber-500/10 border-t border-amber-500/50' : 'hover:bg-neutral-800/60'"
             >
               <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank }}</span>
               <span class="flex-1 min-w-0 truncate text-neutral-300">{{ it.name || '未命名' }}</span>
+              <span
+                v-if="it.adjustable === false"
+                class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none"
+                title="来源赛段还没结束,这名选手还没定案"
+                >未结算</span
+              >
               <span class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(it.entryTag) }}</span>
               <button
-                v-if="!rosterReadonly"
+                v-if="rowAdjustable(it)"
                 @click.stop="askRemoveItem(it)"
                 class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
               >
@@ -274,14 +285,15 @@
             <div
               v-for="(c, idx) in rosterRows"
               :key="itemKeyOf(c)"
-              draggable="true"
+              :draggable="rowAdjustable(c)"
               @dragstart="onArenaDragStart(idx, $event)"
               @dragend="onDragEnd"
               @dragover.prevent="arenaHoverIndex = idx"
               @drop.stop.prevent="onDropToArena(idx)"
-              class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border cursor-grab"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black border"
               :class="[
                 idx === 0 ? 'border-amber-500/40' : 'border-neutral-800',
+                rowAdjustable(c) ? 'cursor-grab' : 'opacity-70',
                 arenaDragIndex !== null && arenaHoverIndex === idx ? 'border-amber-500 ring-1 ring-amber-500/50' : ''
               ]"
             >
@@ -291,9 +303,15 @@
                 >{{ idx + 1 }}</span
               >
               <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
+              <span
+                v-if="c.adjustable === false"
+                class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none"
+                title="来源赛段还没结束,这名选手还没定案"
+                >未结算</span
+              >
               <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(c.entryTag) }}</span>
               <button
-                v-if="!rosterReadonly"
+                v-if="rowAdjustable(c)"
                 @click.stop="askRemoveItem(c)"
                 class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
                 title="移出擂台赛名单"
@@ -331,7 +349,7 @@
               <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
               <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(c.entryTag) }}</span>
               <button
-                v-if="!rosterReadonly"
+                v-if="rowAdjustable(c)"
                 @click.stop="askRemoveItem(c)"
                 class="px-1.5 text-[11px] rounded border border-neutral-700 text-neutral-500 hover:text-red-400 hover:border-red-900/40 transition-colors flex-none"
                 title="移出名单"
@@ -656,12 +674,12 @@ import {
   getStageRoster,
   skipStageRoster,
   getRosterCandidates,
-  addRosterOverride,
-  deleteRosterOverride,
   deleteRosterOverrides,
   getRosterPreview,
   rebuildStageRoster,
-  setRosterOrder
+  moveRosterRow,
+  addRosterRow,
+  removeRosterRows
 } from '@/api/game/stage/roster';
 import { seedLayout } from '@/utils/seedLayout';
 import { circleLabel } from '@/utils/circleLabel';
@@ -859,16 +877,20 @@ const arenaHoverIndex = ref<number | null>(null);
 /** 名单已确认/已跳过:只能看不能改 */
 const rosterSealed = computed(() => !!overridePreview.value?.applied || !!overridePreview.value?.skipped);
 
-/**
- * 上一赛段还没结束:中间态只读。
- *
- * <p>此时列表里是"打到这里为止已晋级的人"(后端每判完一场就实时落座),加人/拖位没有意义 ——
- * 后面每场都会按上游名次覆盖对应座位。等来源赛段全部结算后才放开调整。</p>
- */
+/** 还有来源边没结算(部分行锁定):只影响提示文案,不再整单只读 */
 const rosterWaitingSource = computed(() => !rosterSealed.value && overridePreview.value != null && overridePreview.value.ready === false);
 
-/** 中间态是否只读(已确认/已跳过、赛段已开赛、上一赛段还没结束) */
-const rosterReadonly = computed(() => rosterSealed.value || targetLocked.value || rosterWaitingSource.value);
+/** 中间态是否整单只读(已确认/已跳过、赛段已开赛) */
+const rosterReadonly = computed(() => rosterSealed.value || targetLocked.value);
+
+/**
+ * 行级可调整:来自"未结算来源赛段"的人还被上游结果左右(后端每判完一场会覆盖对应座位),
+ * 先锁着;已结算来源的人、人工行/外卡、空位行现在就能拖/能移出 —— 不用等所有来源边跑完。
+ */
+const rowAdjustable = (it: any) => !rosterReadonly.value && it?.adjustable !== false;
+
+/** 是否存在被锁住的行(用于批量操作按钮的可用性) */
+const anyRowLocked = computed(() => listItems.value.some((it) => it?.adjustable === false));
 
 /**
  * 已落位的人(有座位号)。
@@ -919,32 +941,6 @@ const onDragEnd = () => {
   bracketDropKey.value = '';
 };
 
-/** 保存当前顺序:位置即出场次序 */
-const persistOrder = async () => {
-  const p = firstRoster.value;
-  if (!p) return;
-  try {
-    await setRosterOrder(
-      p.id,
-      listItems.value.map((i) => ({
-        sourceCompetitorId: i.sourceCompetitorId ?? undefined,
-        overrideId: i.overrideId ?? undefined,
-        // 显式带种子位:删掉的人原来的位置留空,后面的不顶上
-        seedRank: i.seedRank ?? undefined,
-        // 待落位的人没有座位号:必须显式告诉后端"留在待落位区",否则会被补到最小空闲位
-        holding: Number(i.seedRank) > 0 ? undefined : true
-      }))
-    );
-  } catch (e: any) {
-    const status = e?.response?.status;
-    if (status === 404 || status === 405) {
-      ElMessage.error('保存顺序失败:后端未更新该接口,请重启后端服务后重试');
-    } else {
-      notifyError(e, '顺序保存失败');
-    }
-  }
-};
-
 /** 移出名单:人工补入/外卡=撤销该条调整,来源带入=记一条移出 */
 /** 移出确认弹窗:可选「后续的人顶上」或「留下空位」 */
 const removeDialogVisible = ref(false);
@@ -953,7 +949,7 @@ const removeDialogItem = ref<any>(null);
 const removeDialogSeed = computed(() => Number(removeDialogItem.value?.seedRank) || 0);
 
 const askRemoveItem = async (item: any) => {
-  if (!item || rosterReadonly.value) return;
+  if (!item || !rowAdjustable(item)) return;
   // 待落位的人没有座位号,"后续的人顶上 / 留下空位"都无从谈起:直接确认移出,不再弹两个选项
   if (!(Number(item.seedRank) > 0)) {
     try {
@@ -981,26 +977,17 @@ const askRemoveItem = async (item: any) => {
 const removeItem = async (item: any, fillGap = false) => {
   const p = firstRoster.value;
   if (!p || !item) return;
-  const seed = Number(item.seedRank) || 0;
-  const rest = listItems.value.filter((x) => x !== item);
-  listItems.value =
-    fillGap && seed > 0
-      ? rest.map((x) => {
-          const s = Number(x.seedRank) || 0;
-          return s > seed ? { ...x, seedRank: s - 1 } : x;
-        })
-      : rest;
   try {
-    if (item.overrideId) {
-      await deleteRosterOverride(p.id, item.overrideId);
-    } else {
-      await addRosterOverride(p.id, { op: 'REMOVE', sourceCompetitorId: item.sourceCompetitorId });
-    }
-    await persistOrder();
-    await loadRosters();
+    // 移出意图:谁被移出、要不要"后面的人顶上一位"由后端处理,返回最新名单
+    const resp: any = await removeRosterRows(p.id, {
+      ids: item.overrideId != null ? [item.overrideId] : undefined,
+      sourceCompetitorIds: item.overrideId == null && item.sourceCompetitorId != null ? [item.sourceCompetitorId] : undefined,
+      fillGap: fillGap && Number(item.seedRank) > 0
+    });
+    applyPreview(resp?.data);
   } catch (e: any) {
     notifyError(e, '移出失败');
-    await loadRosters();
+    await refreshOverrideTargets();
   }
 };
 
@@ -1011,37 +998,34 @@ const confirmRemoveItem = async (fillGap: boolean) => {
   await removeItem(item, fillGap);
 };
 
-/** 落到座位列表:既支持列表内排序,也支持从待落位区拖进来(插到该位置) */
+/** 落到座位列表:把拖动的行移到目标行的座位(占位者对调);从待落位区拖进来则落到该座位 */
 const onDropToRoster = async (idx: number) => {
   if (rosterReadonly.value) return;
   if (dragHoldingIndex.value != null) {
     await dropHoldingIntoSeat(idx);
     return;
   }
-  if (dragIndex.value != null) {
-    const from = dragIndex.value;
-    onDragEnd();
-    if (from === idx) return;
-    const arr = [...seatItems.value];
-    const [moved] = arr.splice(from, 1);
-    arr.splice(idx > from ? idx - 1 : idx, 0, moved);
-    // 列表拖动 = 重新排序:按新的行序重新编号(1..N)
-    listItems.value = [...arr.map((it, i) => ({ ...it, seedRank: i + 1 })), ...holdingItems.value.map((it) => ({ ...it, seedRank: null }))];
-    await persistOrder();
-    await loadRosters();
+  if (dragIndex.value == null) return;
+  const moved = seatItems.value[dragIndex.value];
+  const target = seatItems.value[idx];
+  onDragEnd();
+  if (!moved || !target || moved === target) return;
+  if (!rowAdjustable(target)) {
+    ElMessage.warning(`「${target.name || '该选手'}」来自还没结束的赛段,现在不能挪动`);
+    return;
   }
+  await submitMove(moved, Number(target.seedRank));
 };
 
 /** 把待落位的人放到指定座位号:原占位者回待落位区,其他人的座位号保持不变。 */
 const placeHoldingAtSeed = async (moved: any, seed: number) => {
   if (!moved || !(seed > 0)) return;
-  listItems.value = listItems.value.map((it) => {
-    if (it === moved) return { ...it, seedRank: seed };
-    if (Number(it.seedRank) === seed) return { ...it, seedRank: null };
-    return it;
-  });
-  await persistOrder();
-  await loadRosters();
+  const occupant = listItems.value.find((it) => Number(it.seedRank) === seed && it !== moved);
+  if (occupant && !rowAdjustable(occupant)) {
+    ElMessage.warning(`第 ${seed} 位的「${occupant.name || '选手'}」来自还没结束的赛段,现在不能挪动`);
+    return;
+  }
+  await submitMove(moved, seed);
 };
 
 /** 待落位的人拖到座位列表的某一行 → 落到该行的座位号 */
@@ -1073,11 +1057,8 @@ const onDropToHolding = async () => {
   const moved = fromSeat != null ? seatItems.value[fromSeat] : fromArena != null ? rosterRows.value[fromArena] : bracketDragItem.value;
   onDragEnd();
   if (!moved) return;
-  // 只摘掉被拖这个人的座位号,其他人的座位号保持不变(空出来的座位由后端补成空位行);
-  // 否则每拖一个人回待落位区,后面的人都会被整体往前顶一位,打乱已经排好的顺序。
-  listItems.value = listItems.value.map((it) => (it === moved ? { ...it, seedRank: null } : it));
-  await persistOrder();
-  await loadRosters();
+  // 拖回待落位区 = 摘掉座位号;空出来的座位由后端补成空位行(其他座位不动)
+  await submitMove(moved, null);
 };
 
 // ---- 擂台赛出场队列:拖动调整出场顺序(1 号位=擂主) ----
@@ -1104,12 +1085,15 @@ const onDropToArena = async (idx: number) => {
   if (from == null || from === idx || rosterReadonly.value) {
     return;
   }
-  const arr = [...rosterRows.value];
-  const [moved] = arr.splice(from, 1);
-  arr.splice(idx > from ? idx - 1 : idx, 0, moved);
-  listItems.value = [...arr.map((it, i) => ({ ...it, seedRank: i + 1 })), ...holdingItems.value.map((it) => ({ ...it, seedRank: null }))];
-  await persistOrder();
-  await loadRosters();
+  const moved = rosterRows.value[from];
+  const target = rosterRows.value[idx];
+  if (!moved || !target || moved === target) return;
+  if (!rowAdjustable(target)) {
+    ElMessage.warning(`「${target.name || '该选手'}」来自还没结束的赛段,现在不能挪动`);
+    return;
+  }
+  // 出场顺序 = 座位号:移到目标行的座位,占位者换到原座位
+  await submitMove(moved, Number(target.seedRank));
 };
 
 // ---- 加人弹窗:输入姓名(外卡) / 从其他赛段选人 ----
@@ -1283,84 +1267,55 @@ const submitAdd = async () => {
         : addPlacement.value === 'INSERT' && rosterFull.value
           ? bySeedDesc[0]
           : null;
+    // 被顶掉的人:走"移出意图"(不压缩,后面的人先不动;插入的后移由后端在加人时统一算)
     if (outItem) {
-      if (outItem.overrideId) {
-        await deleteRosterOverride(p.id, outItem.overrideId);
-      } else {
-        await addRosterOverride(p.id, { op: 'REMOVE', sourceCompetitorId: outItem.sourceCompetitorId });
-      }
+      const rm: any = await removeRosterRows(p.id, {
+        ids: outItem.overrideId != null ? [outItem.overrideId] : undefined,
+        sourceCompetitorIds: outItem.overrideId == null && outItem.sourceCompetitorId != null ? [outItem.sourceCompetitorId] : undefined,
+        fillGap: false
+      });
+      applyPreview(rm?.data);
     }
 
-    // 2) 加人
-    let newOverrideId: string | number | null = null;
+    // 2) 加人 + 落位:座位与"插入后移"都由后端算,直接把返回的最新名单铺上
+    const body: any = {};
     if (addMode.value === 'name') {
-      const created: any = await addRosterOverride(p.id, {
-        // 不再区分个人/选手:选手就是一个参赛方,选手只是多几个成员
-        op: 'ADD_GUEST',
-        guestName: addName.value.trim(),
-        guestType: 0
-      });
-      newOverrideId = created?.data?.id ?? created?.id ?? null;
+      // 不再区分个人/选手:选手就是一个参赛方,选手只是多几个成员
+      body.op = 'ADD_GUEST';
+      body.guestName = addName.value.trim();
+      body.guestType = 0;
     } else {
       // 从其他赛段选人:直接引用那个参赛方。
       // 从选手库选人:该选手有参赛记录(=签到过)就按参赛方加,否则按外卡挂到他的选手档案上。
       const picked = selectedPlayer.value;
       const sourceCompetitorId = addMode.value === 'stage' ? addPersonId.value : (picked?.competitorId ?? '');
       if (sourceCompetitorId) {
-        // 之前被手工移出过的人:加回来 = 撤销那条移出
+        // 之前被手工移出过的人:加回来 = 撤销那条移出(先撤销,再按新座位落位)
         const removed = overridesOf(p).filter(
           (o) => o.op === 'REMOVE' && o.sourceCompetitorId != null && String(o.sourceCompetitorId) === String(sourceCompetitorId)
         );
         if (removed.length > 0) {
-          // 一次批量撤销,替代逐条 DELETE
-          await deleteRosterOverrides(p.id, removed.map((o) => o.id));
-        } else {
-          const created: any = await addRosterOverride(p.id, {
-            op: 'ADD_SOURCE',
-            sourceCompetitorId
-          });
-          newOverrideId = created?.data?.id ?? created?.id ?? null;
+          await deleteRosterOverrides(
+            p.id,
+            removed.map((o) => o.id)
+          );
         }
+        body.op = 'ADD_SOURCE';
+        body.sourceCompetitorId = sourceCompetitorId;
       } else {
-        const created: any = await addRosterOverride(p.id, {
-          op: 'ADD_GUEST',
-          playerId: picked?.id ?? null,
-          guestName: picked?.name ?? '',
-          guestType: 0
-        });
-        newOverrideId = created?.data?.id ?? created?.id ?? null;
+        body.op = 'ADD_GUEST';
+        body.playerId = picked?.id ?? null;
+        body.guestName = picked?.name ?? '';
+        body.guestType = 0;
       }
     }
-
-    // 3) 落位:按显式种子位摆放(删人/换位后原来的位置保持空白,不自动顶上)
+    if (replacedSeed > 0) {
+      body.seedRank = replacedSeed;
+      body.placement = addPlacement.value === 'INSERT' ? 'INSERT' : 'REPLACE';
+    }
+    const resp: any = await addRosterRow(p.id, body);
+    applyPreview(resp?.data);
     await loadRosters();
-    {
-      const arr = [...listItems.value];
-      let idx = newOverrideId != null ? arr.findIndex((it) => String(it.overrideId) === String(newOverrideId)) : -1;
-      if (idx < 0) {
-        idx = arr.length - 1;
-      }
-      if (idx >= 0) {
-        const newItem = arr[idx];
-        const others = arr.filter((_, i) => i !== idx);
-        const bySeed = (a: any, b: any) => (Number(a.seedRank) || 0) - (Number(b.seedRank) || 0);
-        if (addPlacement.value === 'INSERT') {
-          // 插入:新人占目标位,目标位及其后所有人 +1
-          const shifted = others.map((it) => {
-            const s = Number(it.seedRank) || 0;
-            return s >= replacedSeed ? { ...it, seedRank: s + 1 } : it;
-          });
-          newItem.seedRank = replacedSeed;
-          listItems.value = [...shifted, newItem].sort(bySeed);
-        } else {
-          // 替换:新人顶替被替换者原来的位置
-          newItem.seedRank = replacedSeed || Number(newItem.seedRank) || 0;
-          listItems.value = [...others, newItem].sort(bySeed);
-        }
-        await persistOrder();
-        await loadRosters();
-      }
-    }
     ElMessage.success(addPlacement.value === 'INSERT' ? `已插入第 ${replacedSeed} 位,后面的人依次后移` : '已替换入名单');
     addDialogVisible.value = false;
   } catch (e: any) {
@@ -1388,10 +1343,38 @@ const refreshOverrideTargets = async () => {
   }
   try {
     const resp: any = await getRosterPreview(p.id);
-    overridePreview.value = resp?.data || null;
-    listItems.value = (resp?.data?.items || []).map((i: any) => ({ ...i }));
+    applyPreview(resp?.data);
   } catch {
     listItems.value = [];
+  }
+};
+
+/** 用后端返回的名单预览整份替换本地状态(移动接口的返回值就是它) */
+const applyPreview = (data: any) => {
+  overridePreview.value = data || null;
+  listItems.value = (data?.items || []).map((i: any) => ({ ...i }));
+};
+
+/**
+ * 移动意图:告诉后端"把谁移到哪个座位"(targetSeed 为空 = 移到待落位区),
+ * 座位计算、占位者换位、空位补全由后端做,再用返回的最新名单整份刷新。
+ * 前端不再自己算种子位、也不整单回传。
+ */
+const submitMove = async (item: any, targetSeed: number | null) => {
+  const p = firstRoster.value;
+  if (!p || !item) return;
+  const seed = Number(targetSeed) > 0 ? Number(targetSeed) : null;
+  try {
+    const resp: any = await moveRosterRow(p.id, {
+      overrideId: item.overrideId ?? undefined,
+      sourceCompetitorId: item.sourceCompetitorId ?? undefined,
+      targetSeed: seed ?? undefined,
+      toHolding: seed == null
+    });
+    applyPreview(resp?.data);
+  } catch (e: any) {
+    notifyError(e, '移动失败');
+    await refreshOverrideTargets();
   }
 };
 
@@ -1560,14 +1543,13 @@ const bracketPairs = computed<any[]>(() =>
 const bracketPairsOf = (zone: string) => bracketPairs.value.filter((p) => p.zone === zone);
 
 /** 对战树换位:拖一个位置到另一个位置即交换(名单锁定后不可拖) */
-const bracketEditable = computed(() => !rosterReadonly.value);
 const bracketDragItem = ref<any>(null);
 const bracketDropKey = ref('');
 
 const slotKeyOf = (pair: any, side: 'left' | 'right') => `${pair.zone}-${pair.position}-${side}`;
 
 const onBracketSlotDragStart = (item: any, pair: any, side: 'left' | 'right', e: DragEvent) => {
-  if (!bracketEditable.value || !item) {
+  if (!rowAdjustable(item)) {
     e.preventDefault();
     return;
   }
@@ -1603,10 +1585,8 @@ const moveRosterSeed = async (item: any, seed: number) => {
     ElMessage.warning(`第 ${seed} 位超出赛段计划人数(${cap})`);
     return;
   }
-  item.seedRank = seed;
-  listItems.value = [...listItems.value].sort((x, y) => (Number(x.seedRank) || 0) - (Number(y.seedRank) || 0));
-  await persistOrder();
-  await loadRosters();
+  // 目标座位有人 → 后端把占位者换到原座位;是空位 → 搬过去(原座位留空)
+  await submitMove(item, seed);
 };
 
 /** 放到另一个选手上:交换两人的出场位置;放到空位上:搬过去(原位置空着) */
@@ -1649,12 +1629,12 @@ const dropHoldingIntoBracketSlot = async (pair: any, side: 'left' | 'right') => 
 /** 交换两人的出场位置:交换次序后整份顺序落库(位置即出场次序) */
 const swapRosterSeeds = async (a: any, b: any) => {
   if (!a || !b || a.seedRank == null || b.seedRank == null) return;
-  const t = a.seedRank;
-  a.seedRank = b.seedRank;
-  b.seedRank = t;
-  listItems.value = [...listItems.value].sort((x, y) => (x.seedRank ?? Number.MAX_SAFE_INTEGER) - (y.seedRank ?? Number.MAX_SAFE_INTEGER));
-  await persistOrder();
-  await loadRosters();
+  if (!rowAdjustable(b)) {
+    ElMessage.warning(`「${b.name || '该选手'}」来自还没结束的赛段,现在不能挪动`);
+    return;
+  }
+  // "交换"就是一次移动:把 a 移到 b 的座位,后端会把 b 换回 a 原来的座位
+  await submitMove(a, Number(b.seedRank));
 };
 
 /**

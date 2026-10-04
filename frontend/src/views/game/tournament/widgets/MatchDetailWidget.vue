@@ -332,7 +332,7 @@ const loadData = async () => {
     const currentStage = (data?.stages || []).find((s: any) => s.id === data?.currentStageId);
     lastStageId = currentStage?.id != null ? String(currentStage.id) : null;
     stageName.value = currentStage?.name || '';
-    // 场次控件仅服务淘汰赛:非淘汰赛赛段(小组/海选/擂台等)保持透明
+    // 场次控件仅服务淘汰赛:非淘汰赛赛段(海选/擂台/排名/自由对抗等)保持透明
     if (currentStage?.stageMode !== StageMode.KNOCKOUT) {
       match.value = null;
       matchDetail.value = null;

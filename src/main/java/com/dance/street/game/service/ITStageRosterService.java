@@ -5,8 +5,10 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.domain.bo.TStageRosterMoveBo;
 import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.bo.TStageRosterOverrideBo;
+import com.dance.street.game.domain.bo.TStageRosterRemoveBo;
 import com.dance.street.game.domain.vo.RosterCandidatesVo;
 import com.dance.street.game.domain.vo.RosterPreviewVo;
 import com.dance.street.game.domain.vo.StageParticipantsVo;
@@ -79,6 +81,25 @@ public interface ITStageRosterService {
 
     /** 编辑一条来源组规则(按行 ID 定位) */
     void updateGroup(Long stageId, Long groupId, TStageRosterGroupBo group);
+
+    /**
+     * 中间态名单的"移动"意图:把某一行移到目标座位(或待落位区),<b>直接返回移动后的最新名单</b>。
+     *
+     * <p>前端只表达"谁移到哪",不再自己算座位、也不再整单回传:占位者由后端换位,
+     * 空位由后端补成实体行。返回结构与 {@link #previewAssembled(Long)} 一致,前端可直接整份替换。</p>
+     */
+    RosterPreviewVo moveRosterRow(Long stageId, TStageRosterMoveBo bo);
+
+    /**
+     * 加人意图:新增一行(外卡 / 手工从别的赛段拉人),可指定 placement=INSERT 插到某座位并让后面的人后移。
+     * 返回加人后的最新名单。
+     */
+    RosterPreviewVo addRosterRow(Long stageId, TStageRosterOverrideBo bo);
+
+    /**
+     * 移出意图:移出若干行,可选"后面的人整体顶上一位"(fillGap)。返回移出后的最新名单。
+     */
+    RosterPreviewVo removeRosterRows(Long stageId, TStageRosterRemoveBo bo);
 
     /** 名单候选(按来源组返回,手动点选/预览) */
     RosterCandidatesVo candidates(Long stageId);

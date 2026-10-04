@@ -47,6 +47,9 @@ public final class RosterConstants {
     /** 覆盖操作:固定某源行/外卡的种子位 */
     public static final String OVERRIDE_SEED = "SEED";
 
+    /** 放置方式:插到该座位,原占位者及后面的人整体 +1 */
+    public static final String PLACEMENT_INSERT = "INSERT";
+
     /** 组排序键:按圈分组、圈内名次升序 */
     public static final String ORDER_ZONE_RANK = "ZONE_RANK";
     /** 组排序键:跨圈按圈内名次轮转交叉(圈1第1、圈2第1、圈1第2…) */

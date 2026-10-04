@@ -92,7 +92,16 @@ export interface RosterOverride {
   guestType?: number | null;
   guestNumber?: string | null;
   seedRank?: number | null;
+  /** 新增行时的放置方式:INSERT = 插到该座位并让后面的人后移;其它/不传 = 替换该座位 */
+  placement?: 'INSERT' | 'REPLACE';
   remark?: string;
+}
+
+/** 移出意图:把若干行从名单里拿掉,可选"后面的人整体顶上一位" */
+export interface RosterRemoveBody {
+  ids?: (string | number)[];
+  sourceCompetitorIds?: (string | number)[];
+  fillGap?: boolean;
 }
 
 export interface RosterOverrideBody {
@@ -117,6 +126,18 @@ export interface RosterPreview {
   warnings?: string[];
 }
 
+/** 中间态名单的移动意图:把某行移到目标座位(不传座位 = 移到待落位区) */
+export interface RosterMoveBody {
+  /** 中间层行 ID(优先) */
+  overrideId?: string | number | null;
+  /** 来源参赛方 ID */
+  sourceCompetitorId?: string | number | null;
+  /** 目标座位号;不传表示移到待落位区 */
+  targetSeed?: number | null;
+  /** 显式声明"移到待落位区" */
+  toHolding?: boolean;
+}
+
 export interface RosterPreviewItem {
   refType: 'SOURCE' | 'GUEST';
   overrideId?: string | number | null;
@@ -130,6 +151,8 @@ export interface RosterPreviewItem {
   outcomeStatus?: string;
   finalRank?: number | null;
   seedRank?: number | null;
+  /** 这一行现在能不能调整:来源赛段还没结算的行会被锁住(后端同口径) */
+  adjustable?: boolean;
 }
 
 export interface RosterCandidates {

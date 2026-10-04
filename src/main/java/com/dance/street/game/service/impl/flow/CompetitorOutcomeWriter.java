@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 /**
  * 赛段级参赛结果的唯一写入口(t_competitor.outcome_status / final_rank)。
  *
- * <p>各赛制结算(海选 / 淘汰 / 小组 / 擂台 / 排名 / 自由对抗)与轮空晋级
+ * <p>各赛制结算(海选 / 淘汰 / 擂台 / 排名 / 自由对抗)与轮空晋级
  * 都要把"谁晋级、谁淘汰、第几名"落库。此前每个结算分支各写一份
  * {@code new TCompetitor() + updateById},字段口径容易分叉;统一走本类后,
  * 结果写入只有一处,新增赛制只需复用。</p>

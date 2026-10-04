@@ -38,9 +38,8 @@ import java.util.stream.Collectors;
 /**
  * 中间层名单(t_stage_roster_entry)的行级读写:构建一行、清空一行、清空整表。
  *
- * <p>从 {@code TStageRosterServiceImpl} 拆出来的第一块。中间层是"两个赛段之间唯一的一份数据",
- * 这里只负责把"规则算出来的一行"落成表行,以及把行清干净;重建与同步的编排仍在上层,
- * 等这一层稳定后再并进来。</p>
+ * <p>中间层是"两个赛段之间唯一的一份数据":整表重建与实时对账都收敛到这里,
+ * 两者共用 {@link RosterAssembler#project} 这一份投影,不再各算一套座位。</p>
  *
  * <p>口径与注释原样保留:空座位是"轮空"还是"待定"取决于名单来源是否已结算(中间态与大屏必须同一口径)。</p>
  *
@@ -175,6 +174,32 @@ public class RosterEntryStore {
     /** 名单就绪度(纯函数):全部内部来源组已结算 */
     public boolean readyByGroups(List<TStageRosterGroupBo> groups) {
         return readyByGroups(groups, prefetchSourceStages(groups));
+    }
+
+    /**
+     * 还没结算的来源赛段 ID(行级门禁用)。
+     *
+     * <p>中间态的人工调整原来是"只要有一条来源没结算就整单只读";现在中间层记了
+     * {@code source_group_id / source_slot},可以按<b>行</b>判断:来自已结算来源的人已经定案、
+     * 随时能调;来自未结算来源的人还会被后续判罚覆盖,先锁着。</p>
+     *
+     * <p>查不到的来源赛段同样算"未结算"(宁可锁住,不要放行之后被覆盖)。</p>
+     */
+    public Set<Long> unsettledSourceStageIds(Collection<Long> sourceStageIds) {
+        if (sourceStageIds == null || sourceStageIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<Long> wanted = sourceStageIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        if (wanted.isEmpty()) {
+            return Set.of();
+        }
+        Set<Long> settled = stageMapper.selectByIds(wanted).stream()
+            .filter(s -> StageConstants.STAGE_SETTLED.equals(s.getStatus()))
+            .map(TStage::getId)
+            .collect(Collectors.toSet());
+        Set<Long> unsettled = new HashSet<>(wanted);
+        unsettled.removeAll(settled);
+        return unsettled;
     }
 
     /** 同上,来源赛段可预取(批量路径一次取回,避免逐组 selectById) */
@@ -557,8 +582,36 @@ public class RosterEntryStore {
         int changed = projection.holding()
             ? reconcileHolding(target, sourceStageId, projection.holdingRows(), rows, rowStatus, only)
             : reconcileSeats(target, sourceStageId, projection, rows, rowStatus, emptySlotKind, only);
+        if (!projection.holding() && !projection.holdingRows().isEmpty()) {
+            // 单来源里"来源座号超出本赛段容量"的人:座位留给计划内的,他们进待落座区
+            changed += insertHoldingRows(target, projection.holdingRows(), rowStatus);
+        }
         if (changed > 0) {
             rosterGroupStore.notifyTarget(target.getId());
+        }
+        return changed;
+    }
+
+    /** 把还没有行的人补进待落座区(已有行的人不动:可能导播已经拖到座位上了) */
+    private int insertHoldingRows(TStage target, List<RosterAssembler.AssembledRow> candidates, String rowStatus) {
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+        Set<Long> existing = selectEntries(target.getId()).stream()
+            .map(TStageRosterEntry::getSourceCompetitorId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        int changed = 0;
+        for (RosterAssembler.AssembledRow c : candidates) {
+            if (c.source == null || c.source.getId() == null || existing.contains(c.source.getId())) {
+                continue;
+            }
+            entryMapper.insert(toHoldingEntry(target, c, RosterConstants.ENTRY_STATUS_READY.equals(rowStatus)));
+            existing.add(c.source.getId());
+            changed++;
+        }
+        if (changed > 0) {
+            log.info("赛段[{}]待落座区补入 {} 人(来源座号超出本赛段容量)", target.getId(), changed);
         }
         return changed;
     }

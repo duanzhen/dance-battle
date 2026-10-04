@@ -4,8 +4,10 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.domain.bo.TStageRosterMoveBo;
 import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.bo.TStageRosterOverrideBo;
+import com.dance.street.game.domain.bo.TStageRosterRemoveBo;
 import com.dance.street.game.domain.vo.RosterCandidatesVo;
 import com.dance.street.game.domain.vo.RosterPreviewVo;
 import com.dance.street.game.domain.vo.StageParticipantsVo;
@@ -174,6 +176,30 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     @Transactional(rollbackFor = Exception.class)
     public void reorderRoster(Long stageId, List<TStageRosterOrderBo.Item> items) {
         rosterOverrideService.reorderRoster(stageId, items);
+    }
+
+    /**
+     * 移动意图 + 返回最新名单:移动与读名单放在同一事务里,前端拿到的一定是移动后的结果。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RosterPreviewVo moveRosterRow(Long stageId, TStageRosterMoveBo bo) {
+        rosterOverrideService.moveRow(stageId, bo);
+        return rosterViewService.previewAssembled(stageId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RosterPreviewVo addRosterRow(Long stageId, TStageRosterOverrideBo bo) {
+        rosterOverrideService.addOverride(stageId, bo);
+        return rosterViewService.previewAssembled(stageId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RosterPreviewVo removeRosterRows(Long stageId, TStageRosterRemoveBo bo) {
+        rosterOverrideService.removeRows(stageId, bo);
+        return rosterViewService.previewAssembled(stageId);
     }
 
     // ------------------------------------------------------------------

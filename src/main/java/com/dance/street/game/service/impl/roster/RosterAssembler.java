@@ -8,9 +8,11 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -34,8 +36,8 @@ import java.util.stream.Collectors;
  * 不依赖任何业务 bean</b>,因此中间层存储(EntryStore)可以依赖它,而它不反向依赖存储 ——
  * 这就是原来"重建要装配、装配要读重建结果"那个循环依赖的解法。</p>
  *
- * <p>口径与注释原样保留:淘汰赛名次要坐回原座位(轮空留下的空洞不许压紧)、
- * 海选按圈名次轮转、来源组配额截断等。</p>
+ * <p>口径:座位来自来源赛段给出的座号(淘汰赛的空洞即下一级的轮空座位,不许压紧);
+ * 入边只有一条时按座号自动落位,多条(汇合/多圈)时全部进待落座;</p>
  *
  * @author duane
  */
@@ -47,6 +49,7 @@ public class RosterAssembler {
     private final TCompetitorMapper competitorMapper;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
+    private final TStageMapper stageMapper;
 
     /** 装配中间结果:或来自某条来源边的人,或一张外卡 */
     public static final class AssembledRow {
@@ -92,9 +95,9 @@ public class RosterAssembler {
      * <p>统一规则(与赛制无关,任何赛段、任何衔接都是这一套):</p>
      * <ol>
      *   <li>按出边规则取人({@link #assembleRows});</li>
-     *   <li><b>来源唯一</b> → 自动落座:每人的座号 = 来源赛段给出的名次
+     *   <li><b>入边只有一条</b> → 自动落座:每人的座号 = 来源赛段给出的名次
      *       ({@link #assignSeeds}),1..N 每个座位都有一行实体,轮空不压塌陷;</li>
-     *   <li><b>来源 ≥2</b>(汇合)→ 不做座位计算,所有人进待落位区,
+     *   <li><b>入边 ≥2 条</b>(汇合/多圈)→ 不做座位计算,所有人进待落位区,
      *       座位 1..N 照铺空位实体,由导播在中间态拖入。</li>
      * </ol>
      */
@@ -106,7 +109,7 @@ public class RosterAssembler {
             int slots = Math.max(plan, rows.size());
             return new Projection(true, slots, Map.of(), rows);
         }
-        assignSeeds(rows, plan, new HashSet<>());
+        assignSeeds(rows, plan, new HashSet<>(), compactSeats(groups));
         int maxAssigned = rows.stream().map(r -> r.seedRank).filter(Objects::nonNull)
             .mapToInt(Long::intValue).max().orElse(0);
         int totalSlots = Math.max(plan, maxAssigned);
@@ -119,7 +122,9 @@ public class RosterAssembler {
                 bySlot.putIfAbsent(r.seedRank, r);
             }
         }
-        return new Projection(false, totalSlots, bySlot, List.of());
+        // 没有座位号的人 = 来源座号超出本赛段容量(或座位已被占满):进待落座区,不占座位
+        List<AssembledRow> overflow = rows.stream().filter(r -> r.seedRank == null).toList();
+        return new Projection(false, totalSlots, bySlot, overflow);
     }
 
     /**
@@ -139,16 +144,104 @@ public class RosterAssembler {
      * 超出计划规模、或该座位已被占用时才退化为"顺延取空位"。</p>
      */
     public void assignSeeds(List<AssembledRow> rows, int plan, Set<Long> occupiedSeeds) {
+        assignSeeds(rows, plan, occupiedSeeds, false);
+    }
+
+    /**
+     * 落座。
+     *
+     * @param compact true = 不复制来源座号,按取人顺序压成 1..N(见 {@link #compactSeats})
+     */
+    public void assignSeeds(List<AssembledRow> rows, int plan, Set<Long> occupiedSeeds, boolean compact) {
         Set<Long> occupied = new HashSet<>(occupiedSeeds);
+        if (compact) {
+            // 海选/排名赛 + 单入口:名次是"按名额累加的全局序号"(如某条出口取 9~24 名),
+            // 不是签表位置 → 整体下移 min-1,把前面的空档压掉;
+            // 中间夹着的空档保留(名次 3/4/7 → 座位 1/2/5),原座号仍记在 source_slot 里。
+            int minRank = rows.stream()
+                .map(r -> r.source == null ? null : r.source.getFinalRank())
+                .filter(Objects::nonNull)
+                .mapToInt(Long::intValue)
+                .min().orElse(1);
+            long shift = Math.max(0L, (long) minRank - 1L);
+            for (AssembledRow r : rows) {
+                Long rank = r.source == null ? null : r.source.getFinalRank();
+                Long seat = rank == null ? null : rank - shift;
+                if (seat != null && seat >= 1L && (plan <= 0 || seat <= plan) && occupied.add(seat)) {
+                    r.seedRank = seat;
+                    continue;
+                }
+                if (rank != null) {
+                    // 压紧后仍然超出本赛段容量(或名次撞座):不占座位,交给待落座区
+                    r.seedRank = null;
+                    continue;
+                }
+                // 名次缺失(来源还没定案):在容量内找空位,满了同样进待落座
+                Long free = nextFreeSeedOrNull(occupied, plan);
+                r.seedRank = free;
+                if (free != null) {
+                    occupied.add(free);
+                }
+            }
+            return;
+        }
         for (AssembledRow r : rows) {
             Long seat = r.source == null ? null : r.source.getFinalRank();
             if (seat != null && seat >= 1L && (plan <= 0 || seat <= plan) && occupied.add(seat)) {
                 r.seedRank = seat;
                 continue;
             }
-            r.seedRank = nextFreeSeed(occupied, plan);
-            occupied.add(r.seedRank);
+            // 来源给的座号超出本赛段容量:不占座位,交给待落座区。
+            // 复制成计划外的座位号会让签表/对阵看不见这个人(签表按计划人数铺)。
+            if (seat != null && seat >= 1L && plan > 0 && seat > plan) {
+                r.seedRank = null;
+                continue;
+            }
+            // 座号缺失或已被占:在本赛段容量内顺延找空位;容量已满同样进待落座区
+            Long free = nextFreeSeedOrNull(occupied, plan);
+            r.seedRank = free;
+            if (free != null) {
+                occupied.add(free);
+            }
         }
+    }
+
+    /**
+     * 是否要把来源座号"压紧"成 1..N。
+     *
+     * <p>只有<b>单入口 + 来源是海选/排名赛</b>才这么做:它们给的名次是按名额累加的全局序号
+     * (例如某条出口取 9~24 名,共 16 人),直接复制会把这 16 人放在目标赛段的 9~24 号座位,
+     * 前面 1~8 号白白空着、后面还会被判成"超出容量"。</p>
+     *
+     * <p>淘汰赛不能压:它的名次就是签表位置,空洞代表下一级的轮空座位。</p>
+     */
+    private boolean compactSeats(List<TStageRosterGroupBo> groups) {
+        if (groups.size() != 1) {
+            return false;
+        }
+        Long sourceStageId = groups.get(0).getSourceStageId();
+        if (sourceStageId == null) {
+            return false;
+        }
+        TStage source = stageMapper.selectById(sourceStageId);
+        if (source == null) {
+            return false;
+        }
+        String mode = source.getStageMode();
+        return StageModeEnum.AUDITION.getCode().equals(mode) || StageModeEnum.RANK.getCode().equals(mode);
+    }
+
+    /** 容量内下一个空座位;容量已满(或计划为 0 以外取不到)时返回 null = 进待落座区 */
+    private Long nextFreeSeedOrNull(Set<Long> occupiedSeeds, int plan) {
+        if (plan > 0) {
+            for (long s = 1; s <= plan; s++) {
+                if (!occupiedSeeds.contains(s)) {
+                    return s;
+                }
+            }
+            return null;
+        }
+        return occupiedSeeds.stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
     }
 
     /** 场次内下一个可用座位号 */

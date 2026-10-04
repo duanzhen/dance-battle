@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -229,6 +230,8 @@ public class RosterViewService {
                 RosterPreviewItemVo item = new RosterPreviewItemVo();
                 item.setSeedRank(c.getSeedRank());
                 item.setEntryTag(c.getEntryTag());
+                // 已确认的名单是快照:整单只读(与前端 rosterSealed 一致)
+                item.setAdjustable(false);
                 item.setName(c.getName());
                 item.setType(c.getType());
                 item.setNumber(c.getNumber());
@@ -255,6 +258,10 @@ public class RosterViewService {
             .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
             .map(TStageRosterEntry::getSourceCompetitorId)
             .filter(Objects::nonNull).distinct().toList();
+        // 行级可调整判定:来自未结算来源赛段的人锁着,其余(已结算来源/人工/外卡/空位)可调
+        Set<Long> unsettledSources = rosterEntryStore.unsettledSourceStageIds(
+            entries.stream().map(TStageRosterEntry::getSourceStageId)
+                .filter(Objects::nonNull).distinct().toList());
         Map<Long, TCompetitor> sourceById = sourceIds.isEmpty() ? Map.of()
             : competitorMapper.selectByIds(sourceIds).stream()
                 .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
@@ -268,6 +275,8 @@ public class RosterViewService {
             item.setOverrideId(e.getId());
             item.setEntryTag(e.getEntryTag());
             item.setSeedRank(e.getSlot());
+            item.setAdjustable(e.getSourceStageId() == null
+                || !unsettledSources.contains(e.getSourceStageId()));
             if ("GUEST".equals(e.getRefType())) {
                 item.setRefType("GUEST");
                 item.setPlayerId(e.getPlayerId());

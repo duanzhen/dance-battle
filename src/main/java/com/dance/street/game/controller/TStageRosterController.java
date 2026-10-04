@@ -3,8 +3,10 @@ package com.dance.street.game.controller;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.domain.bo.TStageRosterMoveBo;
 import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.bo.TStageRosterOverrideBo;
+import com.dance.street.game.domain.bo.TStageRosterRemoveBo;
 import com.dance.street.game.domain.vo.RosterCandidatesVo;
 import com.dance.street.game.domain.vo.RosterPreviewVo;
 import com.dance.street.game.domain.vo.TStageRosterOverrideVo;
@@ -195,6 +197,43 @@ public class TStageRosterController {
     public R<Void> reorder(@PathVariable Long stageId, @RequestBody(required = false) TStageRosterOrderBo bo) {
         rosterService.reorderRoster(stageId, bo == null ? null : bo.getItems());
         return R.ok();
+    }
+
+    /**
+     * 移动一行到目标座位(或待落位区),并<b>返回移动后的最新名单</b>。
+     *
+     * <p>前端只表达意图("把谁移到哪"),座位计算、占位者换位、空位补齐全在后端,
+     * 前端拿到返回值整份替换即可,不再自己算种子位。</p>
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "移动名单行", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{stageId}/roster/move")
+    public R<RosterPreviewVo> move(@PathVariable Long stageId, @RequestBody TStageRosterMoveBo bo) {
+        return R.ok(rosterService.moveRosterRow(stageId, bo));
+    }
+
+    /**
+     * 加人(外卡 / 从其他赛段手工拉人),可带 {@code placement=INSERT} 插到某座位并让后面的人后移;
+     * 返回加人后的最新名单。
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "名单加人", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{stageId}/roster/add")
+    public R<RosterPreviewVo> add(@PathVariable Long stageId, @RequestBody TStageRosterOverrideBo bo) {
+        return R.ok(rosterService.addRosterRow(stageId, bo));
+    }
+
+    /**
+     * 移出名单行(单个/批量),{@code fillGap=true} 表示后面的人整体顶上一位;返回移出后的最新名单。
+     */
+    @SaCheckPermission("game:stage:edit")
+    @Log(title = "名单移出", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/{stageId}/roster/remove")
+    public R<RosterPreviewVo> remove(@PathVariable Long stageId, @RequestBody TStageRosterRemoveBo bo) {
+        return R.ok(rosterService.removeRosterRows(stageId, bo));
     }
 
     @Data

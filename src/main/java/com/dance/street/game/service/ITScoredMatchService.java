@@ -27,7 +27,7 @@ public interface ITScoredMatchService {
 
     /**
      * 结算赛段内所有仍 GAMING 的 VOTING/RANKING 场次:
-     * 用全部裁判分计算最终排名 → 按赛制处理后(淘汰填下游/小组写胜负)→ 场次 SETTLED。
+     * 用全部裁判分计算最终排名 → 按赛制处理后(淘汰填下游/其余写名次)→ 场次 SETTLED。
      */
     void settleScoredMatches(Long stageId);
 

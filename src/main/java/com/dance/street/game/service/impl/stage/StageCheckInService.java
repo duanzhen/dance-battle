@@ -103,7 +103,7 @@ public class StageCheckInService {
 
         // 逐选手模式(AUDITION/RANK)补签到窗口:进行中或规划中均可挂入;
         // 已生成对阵但尚未开赛(DRAFT)同样允许挂入,否则迟到者会从打分中"消失"。
-        // 非逐选手赛制(淘汰/小组/擂台)仍保持原语义,不在生成后追加参赛方。
+        // 非逐选手赛制(淘汰/擂台/自由对抗)仍保持原语义,不在生成后追加参赛方。
         boolean attachable = StageConstants.STAGE_GAMING.equals(stage.getStatus())
             || (StageConstants.STAGE_DRAFT.equals(stage.getStatus())
                 && (auditionSplit || perCompetitor));

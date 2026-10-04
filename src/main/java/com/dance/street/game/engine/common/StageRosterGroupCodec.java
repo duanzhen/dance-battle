@@ -71,8 +71,8 @@ public final class StageRosterGroupCodec {
                 if (n.hasNonNull("quota")) {
                     g.setQuota(n.get("quota").asInt());
                 }
-                // 旧 JSON 里的 priority 已废弃(表化后由 sort_order 决定取人顺序):
-                // 这里读到也不再用,搬迁时按数组顺序写入 sort_order。
+                // 旧 JSON 里的 priority 已废弃:表化后边之间没有先后语义,座位来自来源座号,
+                // 这里读到也不再用。
                 if (n.hasNonNull("orderBy")) {
                     g.setOrderBy(n.get("orderBy").asText());
                 }

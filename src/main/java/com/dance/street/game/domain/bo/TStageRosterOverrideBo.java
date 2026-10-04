@@ -37,6 +37,13 @@ public class TStageRosterOverrideBo implements Serializable {
     /** SEED/ADD_GUEST 指定种子位(空=自动) */
     private Long seedRank;
 
+    /**
+     * 放置方式(仅"新增行"有效):
+     * INSERT = 插到该座位,原占位者及后面的人整体 +1(需配合 seedRank);
+     * 其它/为空 = 替换,直接占用该座位(占位是空位则原地换人)。
+     */
+    private String placement;
+
     /** 备注 */
     private String remark;
 }

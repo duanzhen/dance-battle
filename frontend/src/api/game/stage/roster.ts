@@ -8,6 +8,8 @@ import {
   RosterGroupRule,
   RosterOverride,
   RosterOverrideBody,
+  RosterMoveBody,
+  RosterRemoveBody,
   RosterPreview
 } from './rosterTypes';
 
@@ -79,11 +81,38 @@ export const rebuildStageRoster = (stageId: string | number): AxiosPromise<boole
 };
 
 /** 保存手工名单顺序(中间态两列拖动结果) */
-export const setRosterOrder = (stageId: string | number, items: { sourceCompetitorId?: string | number; overrideId?: string | number }[]) => {
+/**
+ * 移动名单行:把某行移到目标座位(不传座位 = 移到待落位区)。
+ * 座位计算、占位者换位、空位补全都在后端做,接口直接返回移动后的最新名单。
+ */
+export const moveRosterRow = (stageId: string | number, data: RosterMoveBody): AxiosPromise<RosterPreview> => {
   return request({
-    url: `/game/stage/${stageId}/roster/order`,
-    method: 'put',
-    data: { items }
+    url: `/game/stage/${stageId}/roster/move`,
+    method: 'post',
+    data
+  });
+};
+
+/**
+ * 加人(外卡 / 从其他赛段手工拉人):可带 placement=INSERT 插到某座位并让后面的人后移。
+ * 直接返回加人后的最新名单。
+ */
+export const addRosterRow = (stageId: string | number, data: RosterOverrideBody): AxiosPromise<RosterPreview> => {
+  return request({
+    url: `/game/stage/${stageId}/roster/add`,
+    method: 'post',
+    data
+  });
+};
+
+/**
+ * 移出名单行(单个/批量),fillGap=true 表示后面的人整体顶上一位。直接返回移出后的最新名单。
+ */
+export const removeRosterRows = (stageId: string | number, data: RosterRemoveBody): AxiosPromise<RosterPreview> => {
+  return request({
+    url: `/game/stage/${stageId}/roster/remove`,
+    method: 'post',
+    data
   });
 };
 

@@ -285,7 +285,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     }
 
     /**
-     * 单场判胜负路径(淘汰/擂台/小组等 STANDARD 场次):写明细分 → 裁判投票汇聚 → 算分 →
+     * 单场判胜负路径(淘汰/擂台等 STANDARD 场次):写明细分 → 裁判投票汇聚 → 算分 →
      * 平局加赛 / 待公布暂存 / 结算回写与下游路由。
      */
     private MatchResultVo settleMatchResult(TMatch match, TStage stage, MatchModeEnum mode, ScoringConfig sc,

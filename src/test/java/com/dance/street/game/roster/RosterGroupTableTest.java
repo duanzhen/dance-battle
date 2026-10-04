@@ -169,17 +169,6 @@ class RosterGroupTableTest {
 
     // ===== 工具 =====
 
-    /** 1 号座位上的人(取人顺序直接决定谁先落座) */
-    private Long firstSeatSourceId(Long targetStageId) {
-        return rosterService.entriesOf(targetStageId).stream()
-            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
-            .filter(e -> Long.valueOf(1L).equals(e.getSlot()))
-            .map(TStageRosterEntry::getSourceCompetitorId)
-            .filter(java.util.Objects::nonNull)
-            .findFirst()
-            .orElse(null);
-    }
-
     private Long addRankGroup(Long tid, Long targetStageId, Long sourceStageId, int start, int end) {
         TStageRosterGroupBo g = new TStageRosterGroupBo();
         g.setSourceStageId(sourceStageId);

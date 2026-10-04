@@ -919,7 +919,7 @@ public class TStageServiceImpl implements ITStageService {
         // 预排只做"中间态 → 对阵"的视图变换:内容全部来自中间层名单,与赛段链、来源组配置无关
         // (依赖方向/开赛条件那些由开赛守卫与名单就绪度负责,这里不重复判断)。
         // 淘汰赛与擂台赛段要预排(对战树控件绑上去后,名单写入前也能看到"目前谁进来了");
-        // 小组等其他赛制不做对阵预排。
+        // 其余赛制不做对阵预排。
         StageModeProfile targetCap = stageCap(stage);
         boolean targetKnockout = targetCap.knockout();
         boolean targetArena = targetCap.arena();

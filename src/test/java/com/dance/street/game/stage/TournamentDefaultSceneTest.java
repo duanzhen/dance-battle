@@ -114,5 +114,46 @@ class TournamentDefaultSceneTest {
         assertEquals(2, scenes.size(), "模版创建不应被插入额外的默认场景");
         long mainCount = scenes.stream().filter(s -> "主视觉".equals(s.getName())).count();
         assertEquals(1, mainCount, "「主视觉」场景应只有一个");
+        // 未指定分辨率时回退 1920×1080,不能因为改成可变尺寸而丢掉默认值
+        scenes.forEach(s -> {
+            assertEquals(1920L, s.getDesignWidth());
+            assertEquals(1080L, s.getDesignHeight());
+        });
+    }
+
+    @Test
+    void templateCreateUsesChosenResolution() {
+        TTournamentTemplateBo bo = new TTournamentTemplateBo();
+        bo.setName("模板建赛-竖屏分辨率");
+        bo.setTemplateCode("AUDITION_16");
+        bo.setLogicalWidth(1080L);
+        bo.setLogicalHeight(1920L);
+        TTournamentVo tournament = tournamentService.createByTemplate(bo);
+
+        // 赛事记录要保存建赛时选的分辨率(之前模板建赛写死 1920×1080)
+        assertEquals(1080L, tournament.getLogicalWidth(), "赛事记录应保存建赛时选择的分辨率");
+        assertEquals(1920L, tournament.getLogicalHeight());
+
+        List<TVisScene> scenes = visSceneMapper.selectList(Wrappers.<TVisScene>lambdaQuery()
+            .eq(TVisScene::getTournamentId, tournament.getId()));
+        assertEquals(2, scenes.size());
+        for (TVisScene scene : scenes) {
+            assertEquals(1080L, scene.getDesignWidth(), scene.getName() + " 场景宽度应跟随建赛分辨率");
+            assertEquals(1920L, scene.getDesignHeight(), scene.getName() + " 场景高度应跟随建赛分辨率");
+        }
+
+        // 主视觉背景是全屏占位:宽高都要跟随分辨率,否则大屏首屏就会露底/错位
+        TVisScene main = scenes.stream()
+            .filter(s -> "主视觉".equals(s.getName()))
+            .findFirst()
+            .orElseThrow();
+        List<TVisWidget> widgets = visWidgetMapper.selectList(Wrappers.<TVisWidget>lambdaQuery()
+            .eq(TVisWidget::getSceneId, main.getId()));
+        TVisWidget bg = widgets.stream()
+            .filter(w -> "IMAGE".equals(w.getType()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(1080L, bg.getW(), "背景占位控件应铺满场景宽度");
+        assertEquals(1920L, bg.getH(), "背景占位控件应铺满场景高度");
     }
 }

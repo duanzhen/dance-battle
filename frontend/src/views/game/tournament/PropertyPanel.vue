@@ -204,8 +204,8 @@
             <div class="space-y-1">
               <label class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">分辨率</label>
               <div class="grid grid-cols-2 gap-3">
-                <NumberInput label="宽" v-model="scene.width" suffix="px" />
-                <NumberInput label="高" v-model="scene.height" suffix="px" />
+                <NumberInput label="宽" :model-value="scene.width" suffix="px" @update:model-value="(v) => onSceneSize('width', v)" />
+                <NumberInput label="高" :model-value="scene.height" suffix="px" @update:model-value="(v) => onSceneSize('height', v)" />
               </div>
 
               <!-- 常用预设 -->
@@ -561,11 +561,42 @@ const deleteSelected = async () => {
   await store.deleteWidget(store.selectedWidgetId);
 };
 
+// 场景分辨率:本地立即生效(画布实时预览),再防抖落库。
+// 之前只改 store.currentScene 上的 width/height 而不调 updateScene,
+// 导致刷新/重启后从后端读回旧值(一直显示 1920×1080)。
+let sceneSizeTimer = null;
+const persistSceneSize = () => {
+  const targetId = scene.value?.id;
+  if (targetId == null) return;
+  if (sceneSizeTimer) clearTimeout(sceneSizeTimer);
+  sceneSizeTimer = setTimeout(async () => {
+    sceneSizeTimer = null;
+    // 期间切换了场景/离开:放弃这次落库
+    if (!scene.value || String(scene.value.id) !== String(targetId)) return;
+    try {
+      await store.updateScene(targetId, { ...scene.value });
+      emit('widgetUpdated');
+    } catch (e) {
+      notifyError(e, '分辨率保存失败');
+    }
+  }, 300);
+};
+
+// 手动输入宽/高
+const onSceneSize = (field, v) => {
+  if (!scene.value) return;
+  const num = Number(v);
+  if (!Number.isFinite(num) || num <= 0) return;
+  scene.value[field] = Math.round(num);
+  persistSceneSize();
+};
+
 // 快捷设置分辨率
 const setRes = (w, h) => {
   if (scene.value) {
     scene.value.width = w;
     scene.value.height = h;
+    persistSceneSize();
   }
 };
 
@@ -574,6 +605,7 @@ const setAspectRatio = (ratioW, ratioH) => {
   if (scene.value) {
     const currentWidth = scene.value.width || 1920;
     scene.value.height = Math.round(currentWidth * (ratioH / ratioW));
+    persistSceneSize();
   }
 };
 

@@ -48,6 +48,9 @@ export const createTournamentByTemplate = (data: {
   themeConfig?: string;
   coverImage?: string;
   templateCode: string;
+  /** 画布分辨率(设计稿尺寸),不传按 1920×1080 */
+  logicalWidth?: number;
+  logicalHeight?: number;
   remark?: string;
   refereeNames?: string[];
 }) => {

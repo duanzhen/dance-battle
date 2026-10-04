@@ -33,6 +33,16 @@ public class TTournamentTemplateBo {
     private String templateCode;
 
     /**
+     * 设计稿宽度(画布分辨率);空或非正数时按 1920 处理
+     */
+    private Long logicalWidth;
+
+    /**
+     * 设计稿高度(画布分辨率);空或非正数时按 1080 处理
+     */
+    private Long logicalHeight;
+
+    /**
      * 备注
      */
     private String remark;

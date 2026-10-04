@@ -281,8 +281,12 @@ public class TTournamentServiceImpl implements ITTournamentService {
         tb.setName(bo.getName());
         tb.setCoverImage(bo.getCoverImage());
         tb.setStatus(0L);
-        tb.setLogicalWidth(1920L);
-        tb.setLogicalHeight(1080L);
+        // 画布分辨率取建赛时选择的值(缺省 1920×1080);场景、背景图、控件排版都按同一个尺寸铺开,
+        // 否则建赛时选了别的分辨率,进大屏看到的还是 1920×1080
+        long canvasW = bo.getLogicalWidth() != null && bo.getLogicalWidth() > 0 ? bo.getLogicalWidth() : CANVAS_W;
+        long canvasH = bo.getLogicalHeight() != null && bo.getLogicalHeight() > 0 ? bo.getLogicalHeight() : CANVAS_H;
+        tb.setLogicalWidth(canvasW);
+        tb.setLogicalHeight(canvasH);
         tb.setThemeConfig(StringUtils.isNotBlank(bo.getThemeConfig())
             ? bo.getThemeConfig() : "{\"bgColor\":\"#000000\",\"fontFamily\":\"Roboto\"}");
         tb.setRemark(bo.getRemark());
@@ -314,15 +318,15 @@ public class TTournamentServiceImpl implements ITTournamentService {
         }
 
         // 3. 场景:主视觉 + 对战
-        TVisSceneVo mainScene = createScene(tid, "主视觉", 1L, CANVAS_W, CANVAS_H);
-        TVisSceneVo bracketScene = createScene(tid, "对战", 2L, CANVAS_W, CANVAS_H);
+        TVisSceneVo mainScene = createScene(tid, "主视觉", 1L, canvasW, canvasH);
+        TVisSceneVo bracketScene = createScene(tid, "对战", 2L, canvasW, canvasH);
 
         // 3.5 背景图片 widget:主视觉场景一张、对战场景一张。
         //     全屏占位(src 为空,由导播台在大屏编辑器里替换素材);
         //     对战场景在插入对战树之前创建,服务端按 max+1 分配 zIndex,
         //     背景为 1、对战树从 2 起,背景始终位于对战场景最底部图层。
-        insertBackgroundImage(tid, mainScene.getId(), "主视觉背景", CANVAS_W, CANVAS_H);
-        insertBackgroundImage(tid, bracketScene.getId(), "对战背景", CANVAS_W, CANVAS_H);
+        insertBackgroundImage(tid, mainScene.getId(), "主视觉背景", canvasW, canvasH);
+        insertBackgroundImage(tid, bracketScene.getId(), "对战背景", canvasW, canvasH);
 
         // 4. 对战场景:每个淘汰赛赛段一个对战树 widget,统一「大框套小框」居中嵌套排版——
         //    外层(人数最多)最宽,内层逐级缩小,所有 widget 中心对齐画布中心 (960,540),
@@ -334,8 +338,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
                 continue;
             }
             long[] wh = bracketSize(bo.getTemplateCode(), stage.getTeamCountStart());
-            long x = (CANVAS_W - wh[0]) / 2;
-            long y = (CANVAS_H - wh[1]) / 2;
+            long x = (canvasW - wh[0]) / 2;
+            long y = (canvasH - wh[1]) / 2;
             TVisWidgetBo wb = new TVisWidgetBo();
             wb.setTournamentId(tid);
             wb.setSceneId(bracketScene.getId());
@@ -376,8 +380,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
             arenaBracket.setDataConfig("{\"stageId\":\"" + arenaStage.getId()
                 + "\",\"tournamentId\":\"" + tid + "\"}");
             arenaBracket.setRenderConfig("{}");
-            arenaBracket.setX((CANVAS_W - wh[0]) / 2);
-            arenaBracket.setY((CANVAS_H - wh[1]) / 2);
+            arenaBracket.setX((canvasW - wh[0]) / 2);
+            arenaBracket.setY((canvasH - wh[1]) / 2);
             arenaBracket.setW(wh[0]);
             arenaBracket.setH(wh[1]);
             arenaBracket.setZIndex((long) (idx + 1));
@@ -391,7 +395,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
         //     绑定擂台赛段后,16 强结算晋级出的 8 强名单(轮转队列/积分/当前对决)
         //     由 ArenaOverview 实时提供并展示在大屏,避免晋级后看不到是谁进了擂台赛。
         if (arenaStage != null) {
-            TVisSceneVo arenaScene = createScene(tid, "擂台", 3L, CANVAS_W, CANVAS_H);
+            TVisSceneVo arenaScene = createScene(tid, "擂台", 3L, canvasW, canvasH);
             TVisWidgetBo arenaWidget = new TVisWidgetBo();
             arenaWidget.setTournamentId(tid);
             arenaWidget.setSceneId(arenaScene.getId());
@@ -402,8 +406,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
             arenaWidget.setRenderConfig("{}");
             arenaWidget.setX(0L);
             arenaWidget.setY(0L);
-            arenaWidget.setW(CANVAS_W);
-            arenaWidget.setH(CANVAS_H);
+            arenaWidget.setW(canvasW);
+            arenaWidget.setH(canvasH);
             arenaWidget.setZIndex(1L);
             arenaWidget.setVisible(1L);
             arenaWidget.setLocked(0L);
@@ -421,8 +425,8 @@ public class TTournamentServiceImpl implements ITTournamentService {
         currentMatchWidget.setRenderConfig("{}");
         currentMatchWidget.setX(0L);
         currentMatchWidget.setY(0L);
-        currentMatchWidget.setW(CANVAS_W);
-        currentMatchWidget.setH(CANVAS_H);
+        currentMatchWidget.setW(canvasW);
+        currentMatchWidget.setH(canvasH);
         // 对战树 zIndex 从 1 递增,取 idx+1 保证在所有图层之上
         currentMatchWidget.setZIndex((long) idx + 1);
         currentMatchWidget.setVisible(1L);

@@ -524,6 +524,9 @@ const submitForm = async () => {
         themeConfig: JSON.stringify(themeConfig),
         coverImage: form.coverImage,
         templateCode: selectedTemplate.value,
+        // 建赛时选的分辨率要带过去:后端按它建场景/控件,否则进大屏还是 1920×1080
+        logicalWidth: Number(form.logicalWidth) || 1920,
+        logicalHeight: Number(form.logicalHeight) || 1080,
         remark: form.remark,
         refereeNames: form.refereeNames
       });

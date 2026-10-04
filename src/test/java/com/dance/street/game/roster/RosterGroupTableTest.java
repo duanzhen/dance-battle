@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <ul>
  *   <li>人工配置的出口不会因为链变更被当成"过期默认组"删掉(按 generated 出处判断,不看长相);</li>
- *   <li>取人顺序(sortOrder)真正生效——多出口时顺序决定先取谁的人。</li>
+ *   <li>单一来源的多个出口:新座号 = 来源座号(边之间没有先后语义)。</li>
  * </ul>
  */
 @SpringBootTest(properties = {"app.redis.enabled=false", "app.schema-init.enabled=true"})
@@ -100,26 +100,21 @@ class RosterGroupTableTest {
             "系统默认衔接应原地跟随新链前驱 Z,实际=" + after);
     }
 
-    /** 多出口取人顺序:调整 sortOrder 后,中间层里先落的是另一条出口的人 */
+    /**
+     * 多入边(同一个来源按名次段配了两条出口,也算两条入边):全部进待落座区,新座号=NULL。
+     *
+     * <p>按边数判定,而不是按"不同来源赛段数"判定——否则 A/B 两圈各自的座号都从 1 起算,
+     * 复制来源座号时会撞座、把人顶掉。</p>
+     */
     @Test
-    void reorderGroupsChangesPickingOrder() {
-        Long tid = newTournament("取人顺序");
-        // 来源用海选:排座走"按候选顺序填空位",取人顺序才会真正决定谁坐 1 号位
-        // (淘汰赛来源是"名次=座位",顺序不影响落座)
+    void multiInEdgeGoesToHoldingAreaWithNullSeat() {
+        Long tid = newTournament("多入边待落座");
         TStageVo source = newAuditionStage(tid, "海选", null);
         TStageVo target = newStage(tid, "16强", source.getId());
-        // 两条并列出口:按名次段各取一人
         Long first = insertCompetitor(tid, source.getId(), "甲", "1", 1L, OutcomeStatusEnum.ADVANCE.getCode());
         Long second = insertCompetitor(tid, source.getId(), "乙", "2", 2L, OutcomeStatusEnum.ADVANCE.getCode());
-        Long groupA = addRankGroup(tid, target.getId(), source.getId(), 1, 1);
-        Long groupB = addRankGroup(tid, target.getId(), source.getId(), 2, 2);
-        // 去掉建段自动补的默认衔接,避免它把两个人也带进来
-        Long generated = rosterService.groupsOfStage(target.getId()).stream()
-            .filter(g -> Integer.valueOf(1).equals(g.getGenerated()))
-            .map(TStageRosterGroupBo::getId).findFirst().orElse(null);
-        if (generated != null) {
-            rosterService.removeGroup(target.getId(), generated);
-        }
+        addRankGroup(tid, target.getId(), source.getId(), 1, 1);
+        addRankGroup(tid, target.getId(), source.getId(), 2, 2);
 
         // 来源赛段结算,名单就绪
         TStage settled = new TStage();
@@ -128,12 +123,17 @@ class RosterGroupTableTest {
         stageMapper.updateById(settled);
 
         rosterService.rebuildEntries(target.getId());
-        assertEquals(first, firstSeatSourceId(target.getId()), "默认顺序:名次段 1~1 的组先取,甲坐 1 号位");
-
-        // 交换两条出口的取人顺序
-        rosterService.reorderGroups(target.getId(), List.of(groupB, groupA));
-        rosterService.rebuildEntries(target.getId());
-        assertEquals(second, firstSeatSourceId(target.getId()), "调整顺序后乙坐 1 号位");
+        List<TStageRosterEntry> rows = rosterService.entriesOf(target.getId());
+        assertTrue(rows.stream().noneMatch(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind())
+                && e.getSlot() != null),
+            "多入边不做自动落座,所有人都不占座位号");
+        List<Long> holding = rows.stream()
+            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+            .filter(e -> e.getSlot() == null)
+            .map(TStageRosterEntry::getSourceCompetitorId)
+            .toList();
+        assertEquals(2, holding.size(), "两个人都在待落座区");
+        assertTrue(holding.contains(first) && holding.contains(second));
     }
 
     /**

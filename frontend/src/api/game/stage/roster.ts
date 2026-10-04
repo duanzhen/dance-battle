@@ -104,18 +104,6 @@ export const updateRosterGroup = (stageId: string | number, groupId: string | nu
   });
 };
 
-/**
- * 调整取人顺序:按传入的组 ID 顺序重写 sortOrder(1..N)。
- * 取人顺序决定"先取哪条出口的人",多出口时直接影响落位。
- */
-export const reorderRosterGroups = (stageId: string | number, groupIds: (string | number)[]) => {
-  return request({
-    url: `/game/stage/${stageId}/roster/groups/order`,
-    method: 'put',
-    data: groupIds
-  });
-};
-
 /** 名单人工覆盖列表 */
 export const listRosterOverrides = (stageId: string | number): AxiosPromise<RosterOverride[]> => {
   return request({

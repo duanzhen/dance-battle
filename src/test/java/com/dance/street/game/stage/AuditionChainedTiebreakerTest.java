@@ -7,12 +7,14 @@ import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
@@ -38,10 +40,13 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -211,6 +216,7 @@ class AuditionChainedTiebreakerTest {
             "加赛全部决出后赛段应可结束");
 
         // 下一赛段按海选配置的「圈内第 1~16 名」取人(与 AuditionStageConfig/TTournamentServiceImpl 同一套规则)
+        placeAllHolding(round16.getId());
         assertEquals(16, rosterService.applyRoster(round16.getId(), null),
             "二海直接晋级的 2 人必须被带入下一赛段(否则就是现场看到的「二海晋级的人没掉了」)");
         List<String> brought = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
@@ -375,5 +381,30 @@ class AuditionChainedTiebreakerTest {
             .filter(Objects::nonNull)
             .sorted((a, b) -> Integer.compare(Integer.parseInt(a), Integer.parseInt(b)))
             .toList();
+    }
+
+    /** 海选多圈 = 多条入边 → 人先进待落座;模拟导播拖到座位上后再确认名单 */
+    private void placeAllHolding(Long stageId) {
+        List<TStageRosterEntry> rows = rosterService.entriesOf(stageId);
+        Set<Long> used = new HashSet<>();
+        rows.stream().map(TStageRosterEntry::getSlot).filter(Objects::nonNull).forEach(used::add);
+        List<TStageRosterOrderBo.Item> items = new ArrayList<>();
+        long next = 1L;
+        for (TStageRosterEntry row : rows) {
+            if (!StageConstants.SLOT_PLAYER.equals(row.getSlotKind()) || row.getSlot() != null) {
+                continue;
+            }
+            while (used.contains(next)) {
+                next++;
+            }
+            TStageRosterOrderBo.Item it = new TStageRosterOrderBo.Item();
+            it.setOverrideId(row.getId());
+            it.setSeedRank(next);
+            items.add(it);
+            used.add(next);
+        }
+        if (!items.isEmpty()) {
+            rosterService.reorderRoster(stageId, items);
+        }
     }
 }

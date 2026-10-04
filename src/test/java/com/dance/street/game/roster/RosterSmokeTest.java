@@ -272,6 +272,7 @@ class RosterSmokeTest {
         settled.setStatus(StageConstants.STAGE_SETTLED);
         stageMapper.updateById(settled);
 
+        placeAllHolding(stageB.getId());
         int created = rosterService.applyRoster(stageB.getId(), null);
         assertEquals(3, created);
         List<TCompetitor> rows = competitorMapper.selectList(
@@ -487,7 +488,8 @@ class RosterSmokeTest {
         settled.setStatus(StageConstants.STAGE_SETTLED);
         stageMapper.updateById(settled);
 
-        // 预排必须同时含主晋级与复活候选(旧实现只会返回上一赛段 ADVANCE 2 人)
+        // 两条入边 → 待落座;落位后预排必须同时含主晋级与复活候选(旧实现只会返回上一赛段 ADVANCE 2 人)
+        placeAllHolding(stageB.getId());
         com.dance.street.game.domain.vo.PreBracketVo pb = stageService.getPreBracket(stageB.getId());
         assertEquals("PREVIEW", pb.getStatus());
         assertNotNull(pb.getSeededCompetitors());
@@ -747,6 +749,7 @@ class RosterSmokeTest {
         settled.setId(stage1.getId());
         settled.setStatus(StageConstants.STAGE_SETTLED);
         stageMapper.updateById(settled);
+        placeAllHolding(stage2.getId());
         assertEquals(2, rosterService.applyRoster(stage2.getId(), null));
         assertEquals(1L, stageMapper.selectById(stage2.getId()).getRosterApplied().longValue());
         // S2b:快照行 from_roster=1

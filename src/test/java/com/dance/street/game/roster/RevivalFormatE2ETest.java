@@ -164,6 +164,8 @@ class RevivalFormatE2ETest {
         assertEquals(16, revivalCandidates.getGroups().get(0).getCompetitors().size());
         assertEquals(16, revivalCandidates.getGroups().get(1).getCompetitors().size());
 
+        // 复活赛是海选两圈各一条出口(两条入边)→ 全进待落座区,导播拖到座位上后才能确认名单
+        placeAllHolding(revival.getId());
         // 复活:装配 32 名落选者 → 单轮淘汰取 16 胜者
         assertEquals(32, rosterService.applyRoster(revival.getId(), null));
         assertEquals(32, competitorCount(revival.getId()));

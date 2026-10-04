@@ -485,11 +485,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 淘汰特有:填下游占位 / 标决赛胜者晋级下一赛段
         if (profile(stage).knockout()) {
             resolveKnockoutDownstream(match, results);
-            // 本场胜者若已被判为「晋级下一赛段」(名次也写回了),立刻落进下一赛段中间态的对应座位:
-            // 现场就是"判完一场,下一个赛段中间态立刻多一个人",而不是等整个赛段结算才出名单。
-            // 只同步"本场参赛方",写入范围就是本场对应那一行;不整表重建,人工调整不会被冲掉。
-            rosterService.syncPreAdvance(stage.getId(), competitorIds);
         }
+        // 结果一变就推下游中间态,与赛制无关:座位/名次由来源赛段给出,投影出谁就落谁。
+        // 海选/排名赛此时通常还没有 ADVANCE,投影为空、是无害的幂等调用;
+        // 淘汰赛每场判完即把胜者落进下一赛段对应座位,不必等整个赛段结算。
+        // 只同步"本场参赛方",写入范围就是本场对应那几行;不整表重建,人工调整不会被冲掉。
+        rosterService.syncPreAdvance(stage.getId(), competitorIds);
 
         // 场次与全部轮次(含平局加赛轮)一并结算
         matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_SETTLED);

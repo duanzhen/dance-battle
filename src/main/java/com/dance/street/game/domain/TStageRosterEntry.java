@@ -40,6 +40,16 @@ public class TStageRosterEntry extends TenantEntity {
     /** 座位号 1..N,连续不压紧 */
     private Long slot;
 
+    /**
+     * 来源赛段给出的<b>原座号</b>(备份):物化/实时落座时来源给这个人安排的座位,
+     * 人工拖动只改 {@link #slot},不动这里。
+     *
+     * <p>实时对账靠它判断"来源是否真的改了这个人的座号":原座号没变 → 这一行原地不动
+     * (导播拖过也不动);原座号变了(重判/名次变化) → 才把这个人的行摘下来重新落座。
+     * 没有这份备份就只能拿当前座位号比,人工调整过的行会被误判、进而顶替到别人。</p>
+     */
+    private Long sourceSlot;
+
     /** PLAYER=有人 / BYE=轮空空位 / PENDING=等上游填入 */
     private String slotKind;
 
@@ -51,6 +61,14 @@ public class TStageRosterEntry extends TenantEntity {
 
     /** 直接来源赛段 */
     private Long sourceStageId;
+
+    /**
+     * 这个人是从哪条入边进来的({@code t_stage_roster_group.id})。
+     *
+     * <p>同一来源赛段可能有多条平行边(按圈 ZONE-k、按名次段),只知道 {@link #sourceStageId}
+     * 无法区分;记下边 ID 后,汇合段/人工落座/实时对账都能追溯到具体入边。</p>
+     */
+    private Long sourceGroupId;
 
     /** refType=GUEST 时关联的选手 */
     private Long playerId;

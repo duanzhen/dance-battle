@@ -265,6 +265,8 @@ public class RosterOverrideService {
                 .set(TStageRosterEntry::getRefType, null)
                 .set(TStageRosterEntry::getSourceCompetitorId, null)
                 .set(TStageRosterEntry::getSourceStageId, null)
+                .set(TStageRosterEntry::getSourceGroupId, null)
+                .set(TStageRosterEntry::getSourceSlot, null)
                 .set(TStageRosterEntry::getPlayerId, null)
                 .set(TStageRosterEntry::getGuestName, null)
                 .set(TStageRosterEntry::getGuestNumber, null)

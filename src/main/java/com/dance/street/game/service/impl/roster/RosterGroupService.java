@@ -317,7 +317,8 @@ public class RosterGroupService {
             && Objects.equals(a.getRound(), b.getRound())
             && Objects.equals(a.getRankStart(), b.getRankStart())
             && Objects.equals(a.getRankEnd(), b.getRankEnd())
-            && Objects.equals(a.getRankByZone(), b.getRankByZone())
+            // null 与 false 视为同一口径(rankByZone 缺省即 false),否则会建出两条一模一样的边
+            && Objects.equals(Boolean.TRUE.equals(a.getRankByZone()), Boolean.TRUE.equals(b.getRankByZone()))
             && Objects.equals(a.getScoreMin(), b.getScoreMin())
             && Objects.equals(a.getScoreMax(), b.getScoreMax())
             && Objects.equals(a.getOrderBy(), b.getOrderBy());
@@ -677,40 +678,6 @@ public class RosterGroupService {
         rosterGroupStore.saveGroups(target, groups);
         rosterEntryStore.rebuildEntries(stageId);
         log.info("赛段[{}]更新来源组[{}]", stageId, groupId);
-        rosterGroupStore.notifyTarget(stageId);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void reorderGroups(Long stageId, List<Long> groupIds) {
-        TStage target = mustRosterStage(stageId, true);
-        if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
-            throw new ServiceException("仅规划中(DRAFT)的赛段可调整取人顺序,当前: {}", target.getStatus());
-        }
-        if (groupIds == null || groupIds.isEmpty()) {
-            return;
-        }
-        List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(target);
-        // 只接受本赛段现有的组 ID;未出现在列表里的组按原相对顺序接在后面
-        List<TStageRosterGroupBo> ordered = new ArrayList<>();
-        Set<Long> seen = new HashSet<>();
-        for (Long id : groupIds) {
-            for (TStageRosterGroupBo g : groups) {
-                if (Objects.equals(g.getId(), id) && seen.add(id)) {
-                    ordered.add(g);
-                }
-            }
-        }
-        for (TStageRosterGroupBo g : groups) {
-            if (g.getId() == null || !seen.contains(g.getId())) {
-                ordered.add(g);
-            }
-        }
-        if (ordered.size() != groups.size()) {
-            throw new ServiceException("取人顺序列表与现有来源组不匹配,请刷新后重试");
-        }
-        rosterGroupStore.saveGroups(target, ordered);
-        rosterEntryStore.rebuildEntries(stageId);
-        log.info("赛段[{}]来源组取人顺序已更新:{}", stageId, groupIds);
         rosterGroupStore.notifyTarget(stageId);
     }
 

@@ -72,7 +72,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     // 名单来源组(赛段间依赖的边+取人规则)的读写
     //
     // 事实源 = t_stage_roster_group 表;t_stage 上只留 roster_applied/roster_skipped 两个状态位。
-    // 取人顺序按 sort_order 升序,不再依赖 JSON 数组顺序。
+    // 边之间没有先后语义;座位由来源赛段给出的座号决定。
     // ------------------------------------------------------------------
 
     @Override
@@ -196,12 +196,6 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     @Transactional(rollbackFor = Exception.class)
     public void updateGroup(Long stageId, Long groupId, TStageRosterGroupBo group) {
         rosterGroupService.updateGroup(stageId, groupId, group);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void reorderGroups(Long stageId, List<Long> groupIds) {
-        rosterGroupService.reorderGroups(stageId, groupIds);
     }
 
     @Override

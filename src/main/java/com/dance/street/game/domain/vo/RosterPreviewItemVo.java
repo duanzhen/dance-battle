@@ -29,6 +29,12 @@ public class RosterPreviewItemVo implements Serializable {
     /** 来源赛段 */
     private Long sourceStageId;
 
+    /** 入边ID(t_stage_roster_group.id):同一来源有多条平行边时区分这个人从哪条边进来 */
+    private Long sourceGroupId;
+
+    /** 来源赛段给出的原座号(备份;人工拖动后与 seedRank 可能不同) */
+    private Long sourceSlot;
+
     /** 规则来源说明(如 "海选·落选·每圈9~24名") */
     private String groupLabel;
 

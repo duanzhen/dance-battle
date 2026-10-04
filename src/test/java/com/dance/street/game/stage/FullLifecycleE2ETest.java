@@ -8,6 +8,7 @@ import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TStageRosterEntry;
+import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.bo.CheckInBo;
 import com.dance.street.game.domain.bo.CheckInEditBo;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
@@ -53,10 +54,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -556,6 +560,7 @@ class FullLifecycleE2ETest {
 
     /** 装配后回验:人数守恒,被剔除的人不在、外卡在。 */
     private void assertEntrantsAfterApply(TStageVo stage, int advance, RosterEditOutcome edited) {
+        placeAllHolding(stage.getId());
         rosterService.applyRoster(stage.getId(), null);
         List<TCompetitor> entered = competitorsOf(stage.getId());
         assertEquals(advance, entered.size(), "一减一加后人数应与名额一致");
@@ -845,5 +850,30 @@ class FullLifecycleE2ETest {
      */
     private record RoundPlan(int no, int circles, int playersPerCircle, int[] quotas,
                              int[] chain, boolean tiebreak) {
+    }
+
+    /** 多条入边(如海选多圈/汇合)→ 人先进待落座;模拟导播拖到座位上后再确认名单 */
+    private void placeAllHolding(Long stageId) {
+        List<TStageRosterEntry> rows = rosterService.entriesOf(stageId);
+        Set<Long> used = new HashSet<>();
+        rows.stream().map(TStageRosterEntry::getSlot).filter(Objects::nonNull).forEach(used::add);
+        List<TStageRosterOrderBo.Item> items = new ArrayList<>();
+        long next = 1L;
+        for (TStageRosterEntry row : rows) {
+            if (!StageConstants.SLOT_PLAYER.equals(row.getSlotKind()) || row.getSlot() != null) {
+                continue;
+            }
+            while (used.contains(next)) {
+                next++;
+            }
+            TStageRosterOrderBo.Item it = new TStageRosterOrderBo.Item();
+            it.setOverrideId(row.getId());
+            it.setSeedRank(next);
+            items.add(it);
+            used.add(next);
+        }
+        if (!items.isEmpty()) {
+            rosterService.reorderRoster(stageId, items);
+        }
     }
 }

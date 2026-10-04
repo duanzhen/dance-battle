@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -127,45 +128,19 @@ public class RosterEntryStore {
         }
         // 来源已开赛但还没全部结算:行先建出来(status=PENDING),让中间态/大屏实时看到已晋级的人
         boolean sourceReady = readyByGroups(groups);
-        int plan = target.getTeamCountStart() == null || target.getTeamCountStart() <= 0
-            ? 0 : target.getTeamCountStart().intValue();
-        List<RosterAssembler.AssembledRow> rows = rosterAssembler.assembleRows(groups);
-        // 多入口汇合:不做任何自动排座 —— 全部人先落进"待落位区",由导播在中间态拖到真实座位。
-        // 座位号 1..N 照样各占一行(空位实体),只是不带人。
-        if (rosterAssembler.multiEntry(groups)) {
-            int slots = Math.max(plan, rows.size());
-            for (long slot = 1; slot <= slots; slot++) {
-                entryMapper.insert(toEntry(target, slot, null, sourceReady));
-            }
-            for (RosterAssembler.AssembledRow r : rows) {
-                entryMapper.insert(toHoldingEntry(target, r, sourceReady));
-            }
-            rosterGroupStore.notifyTarget(targetStageId);
-            log.info("赛段[{}]中间层已重建:多入口汇合,{} 个座位 + {} 人待落位",
-                targetStageId, slots, rows.size());
-            return true;
+        // 投影 = 唯一算法:单来源自动落座(座号=来源名次)、多来源进待落位区、
+        // 座位 1..N 每个都铺实体行。重建只是"先清空再写这份投影"。
+        RosterAssembler.Projection projection = rosterAssembler.project(target, groups);
+        for (long slot = 1; slot <= projection.slotCount(); slot++) {
+            entryMapper.insert(toEntry(target, slot, projection.bySlot().get(slot), sourceReady));
         }
-        rosterAssembler.assignSeeds(rows, plan, new HashSet<>());
-        // 座位数 = 计划规模;候选比计划多时保留超出计划的行(中间态给超编警告,确认时才拦),
-        // 不能在这里静默丢人——否则"超编"这条守卫永远不会触发。
-        int maxAssigned = rows.stream().map(r -> r.seedRank).filter(Objects::nonNull)
-            .mapToInt(Long::intValue).max().orElse(0);
-        int totalSlots = Math.max(plan, maxAssigned);
-        if (totalSlots <= 0) {
-            totalSlots = rows.size();
-        }
-        Map<Long, RosterAssembler.AssembledRow> rowBySlot = new LinkedHashMap<>();
-        for (RosterAssembler.AssembledRow r : rows) {
-            if (r.seedRank != null && r.seedRank >= 1 && r.seedRank <= totalSlots) {
-                rowBySlot.putIfAbsent(r.seedRank, r);
-            }
-        }
-        for (long slot = 1; slot <= totalSlots; slot++) {
-            entryMapper.insert(toEntry(target, slot, rowBySlot.get(slot), sourceReady));
+        for (RosterAssembler.AssembledRow r : projection.holdingRows()) {
+            entryMapper.insert(toHoldingEntry(target, r, sourceReady));
         }
         rosterGroupStore.notifyTarget(targetStageId);
-        log.info("赛段[{}]中间层名单已重建:{} 个座位,有人 {} 个",
-            targetStageId, totalSlots, rowBySlot.size());
+        log.info("赛段[{}]中间层名单已重建:{} 个座位,有人 {} 个{}",
+            targetStageId, projection.slotCount(), projection.bySlot().size(),
+            projection.holding() ? ",待落位 " + projection.holdingRows().size() + " 人" : "");
         return true;
     }
 
@@ -320,6 +295,8 @@ public class RosterEntryStore {
             return e;
         }
         e.setSlotKind(StageConstants.SLOT_PLAYER);
+        // 原座号 = 来源赛段给出的座号(备份):上游改某个位置的结果时,按它找到原来那一行做变更
+        e.setSourceSlot(row.source == null ? null : row.source.getFinalRank());
         fillPerson(e, row);
         return e;
     }
@@ -344,6 +321,8 @@ public class RosterEntryStore {
             .set(TStageRosterEntry::getRefType, null)
             .set(TStageRosterEntry::getSourceCompetitorId, null)
             .set(TStageRosterEntry::getSourceStageId, null)
+            .set(TStageRosterEntry::getSourceGroupId, null)
+            .set(TStageRosterEntry::getSourceSlot, null)
             .set(TStageRosterEntry::getPlayerId, null)
             .set(TStageRosterEntry::getGuestName, null)
             .set(TStageRosterEntry::getGuestNumber, null)
@@ -353,6 +332,8 @@ public class RosterEntryStore {
         row.setRefType(null);
         row.setSourceCompetitorId(null);
         row.setSourceStageId(null);
+        row.setSourceGroupId(null);
+        row.setSourceSlot(null);
         row.setPlayerId(null);
         row.setGuestName(null);
         row.setGuestNumber(null);
@@ -435,6 +416,7 @@ public class RosterEntryStore {
         e.setRefType("SOURCE");
         e.setSourceCompetitorId(row.source.getId());
         e.setSourceStageId(row.source.getStageId());
+        e.setSourceGroupId(row.sourceGroupId);
         e.setEntryTag(row.entryTag != null ? row.entryTag
             : (OutcomeStatusEnum.ADVANCE.getCode().equals(row.source.getOutcomeStatus())
                 ? RosterConstants.ENTRY_ADVANCE : RosterConstants.ENTRY_REVIVE));
@@ -529,15 +511,6 @@ public class RosterEntryStore {
         if (referencing.isEmpty()) {
             return 0;
         }
-        // 来源赛段"当前"已晋级且有名次的人:淘汰赛每场判完就写一个
-        Map<Long, TCompetitor> advancerById = competitorMapper.selectList(
-                Wrappers.<TCompetitor>lambdaQuery()
-                    .eq(TCompetitor::getStageId, sourceStageId)
-                    .in(only != null, TCompetitor::getId, only == null ? List.of() : only))
-            .stream()
-            .filter(c -> c.getFinalRank() != null && c.getFinalRank() >= 1L
-                && OutcomeStatusEnum.ADVANCE.getCode().equals(c.getOutcomeStatus()))
-            .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
         int changed = 0;
         for (TStage target : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
             .eq(TStage::getTournamentId, source.getTournamentId())
@@ -546,25 +519,19 @@ public class RosterEntryStore {
             if (Objects.equals(target.getId(), sourceStageId)) {
                 continue;
             }
-            changed += syncTargetPreAdvance(target, sourceStageId, advancerById, only);
+            changed += syncTargetPreAdvance(target, sourceStageId, only);
         }
         return changed;
     }
 
     /**
-     * 把一个目标赛段的中间层与来源赛段当前的晋级结果对齐:
-     * 该坐哪就坐哪;不再晋级的(判错重判/重置)座位还原成空位。
-     * 其它来源的行、以及人工加进来的行原样保留。
+     * 把一个目标赛段的中间层与来源赛段当前的结果对齐:整表重建与实时同步共用同一份投影,
+     * 不再有"快路径 / 通用路径 / 待落位路径"三套算法。
      *
-     * <p><b>座位必须按"与整表重建同一套规则"算,不能拿来源赛段内的名次直接当目标座位号。</b>
-     * {@code 名次 == 目标座位} 只在「单一淘汰赛来源、名次没有空洞」时成立。一旦下游的名单来源
-     * 有多条(分圈海选按圈各配一条出口、多条分支汇合到同一赛段),两条来源的名次都从 1 开始,
-     * 按名次落座就会把两个人写进同一个座位、把先坐进去的人挤掉——现场表现是中间态里少人/重复。
-     * 整表重建走的是 {@link RosterAssembler#assembleRows} + {@link RosterAssembler#assignSeeds}
-     * (按来源组顺序排座并顺延空位),实时写入复用同一份映射,两条路径才不会算出两套座位。</p>
+     * <p>座位号由来源赛段给出(见 {@link RosterAssembler#assignSeeds}),这里只做对账:
+     * 该坐哪就坐哪;不再晋级的(判错重判/重置)座位还原成空位;人工调整的行原样保留。</p>
      */
-    private int syncTargetPreAdvance(TStage target, Long sourceStageId,
-                                     Map<Long, TCompetitor> advancerById, Set<Long> only) {
+    private int syncTargetPreAdvance(TStage target, Long sourceStageId, Set<Long> only) {
         if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
             return 0;   // 目标已开赛/已作废:名单锁定
         }
@@ -577,87 +544,151 @@ public class RosterEntryStore {
         if (rows.isEmpty()) {
             return 0;
         }
-        Map<Long, TStageRosterEntry> rowBySlot = rows.stream()
-            .filter(e -> e.getSlot() != null)
-            .collect(Collectors.toMap(TStageRosterEntry::getSlot, e -> e, (a, b) -> a));
-        // 来源组只查一次:readyByGroups / multiEntry / 候选装配都复用这份,避免同一次同步重复查 3 遍
-        List<TStageRosterGroupBo> targetGroups = rosterGroupStore.groupsOf(target);
-        boolean sourceReady = readyByGroups(targetGroups);
+        List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(target);
+        if (groups.isEmpty()) {
+            return 0;
+        }
+        RosterAssembler.Projection projection = rosterAssembler.project(target, groups);
+        boolean sourceReady = readyByGroups(groups);
         String rowStatus = sourceReady
             ? RosterConstants.ENTRY_STATUS_READY : RosterConstants.ENTRY_STATUS_PENDING;
-        // 空座位:来源没打完是"待定",来源结算后没人来才是"轮空"(与 toEntry 同一口径)
         String emptySlotKind = sourceReady
             ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING;
-        int changed = 0;
-        // 多入口汇合:不做座位计算,只负责"把人放进待落位区 / 把人取出",座位由导播在中间态拖
-        if (rosterAssembler.multiEntry(targetGroups)) {
-            return syncHoldingPreAdvance(target, sourceStageId, advancerById, only, sourceReady, targetGroups);
-        }
-        // 候选行(competitorId → 组装行):与整表重建同源,座位已由 assignSeeds 算好。
-        // 没人晋级时不必算,下面只会做清空。
-        // 快路径:单一淘汰赛来源时,晋级者座位 = 来源名次(assignSeeds 对淘汰来源的确定规则)。
-        // 单场判罚只给本批(only)这几个人按名次落座/还原即可,不必装配整份候选、也不必扫描整张表——
-        // 这是消除"每判一场都全量重算下游名单"这个 N+1 的关键。
-        if (only != null && canUseRankSeatFastPath(targetGroups, sourceStageId)) {
-            return syncRankSeatPreAdvance(target, sourceStageId, advancerById, only,
-                rowStatus, emptySlotKind, rows, rowBySlot);
-        }
-        Map<Long, RosterAssembler.AssembledRow> expectedRows = advancerById.isEmpty()
-            ? Map.of() : expectedRowsOf(target, targetGroups);
-        // 映射里有座位还没铺开(计划规模小于名次):整表重建兜底,重建后即是对账结果
-        if (expectedRows.values().stream()
-            .anyMatch(e -> e.seedRank == null || !rowBySlot.containsKey(e.seedRank))) {
-            return rebuildEntries(target.getId()) ? 1 : 0;
-        }
-
-        // 1) 先按"当前映射"把不该有的行还原成空位:
-        //    · 是候选但座位不对(前一条来源进来后座位顺延、名次变了)→ 先摘掉,第 2 步重新落座;
-        //    · 本来源已不再晋级(判错重判/重置)→ 还原成空位。
-        //    这一步必须覆盖所有人的行,不能只处理"本场这一条来源":上游一变,别的来源
-        //    已经坐好的座位也可能顺延;只管自己那几行,第 2 步就会把别人覆盖掉。
-        //    座位本来就对的行走 continue,行 ID 保持不变(单场重判不会牵动其他人)。
-        for (TStageRosterEntry row : rows) {
-            Long holder = row.getSourceCompetitorId();
-            if (holder == null || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
-                continue;
-            }
-            RosterAssembler.AssembledRow expected = expectedRows.get(holder);
-            if (expected != null) {
-                if (Objects.equals(expected.seedRank, row.getSlot())) {
-                    continue;   // 已经坐在规则算出来的座位:原地不动
-                }
-                clearRuleEntry(row, emptySlotKind, rowStatus);
-                changed++;
-                continue;
-            }
-            if (!Objects.equals(row.getSourceStageId(), sourceStageId)
-                || (only != null && !only.contains(holder))) {
-                continue;   // 别的来源的行、以及不在本批次范围内的人不动
-            }
-            clearRuleEntry(row, emptySlotKind, rowStatus);
-            changed++;
-        }
-
-        // 2) 候选坐到规则算出来的座位上(上一步之后,目标座位要么空着,要么坐的就是同一个人)
-        for (RosterAssembler.AssembledRow expected : expectedRows.values()) {
-            TCompetitor advancer = expected.source;
-            TStageRosterEntry row = rowBySlot.get(expected.seedRank);
-            if (StageConstants.SLOT_PLAYER.equals(row.getSlotKind())
-                && Objects.equals(row.getSourceCompetitorId(), advancer.getId())) {
-                continue;   // 已经在位
-            }
-            placeAdvancer(target, row, advancer, rowStatus, sourceStageId);
-            changed++;
-        }
+        int changed = projection.holding()
+            ? reconcileHolding(target, sourceStageId, projection.holdingRows(), rows, rowStatus, only)
+            : reconcileSeats(target, sourceStageId, projection, rows, rowStatus, emptySlotKind, only);
         if (changed > 0) {
             rosterGroupStore.notifyTarget(target.getId());
         }
         return changed;
     }
 
-    /** 把晋级者落到指定座位行(整表对账与"按名次落座"快路径共用同一套字段口径) */
-    private void placeAdvancer(TStage target, TStageRosterEntry row, TCompetitor advancer,
-                               String rowStatus, Long sourceStageId) {
+    /**
+     * 单来源(含同一来源的多条边)的对账:投影就是权威座位表。
+     * 人工行不动;座位变了先摘掉再落座;不再晋级的人还原成空位;待落位行直接删除。
+     */
+    private int reconcileSeats(TStage target, Long sourceStageId, RosterAssembler.Projection projection,
+                               List<TStageRosterEntry> rows, String rowStatus, String emptySlotKind,
+                               Set<Long> only) {
+        Map<Long, Long> expectedSlot = new HashMap<>();
+        projection.bySlot().forEach((slot, r) -> {
+            if (r.source != null && r.source.getId() != null) {
+                expectedSlot.putIfAbsent(r.source.getId(), slot);
+            }
+        });
+        Map<Long, TStageRosterEntry> rowBySlot = rows.stream()
+            .filter(e -> e.getSlot() != null)
+            .collect(Collectors.toMap(TStageRosterEntry::getSlot, e -> e, (a, b) -> a));
+        // 有人的座位还没铺开(计划规模小于名次):整表重建兜底,重建后即是对账结果
+        for (Long slot : expectedSlot.values()) {
+            if (!rowBySlot.containsKey(slot)) {
+                return rebuildEntries(target.getId()) ? 1 : 0;
+            }
+        }
+        int changed = 0;
+        // 1) 与投影不符的行先还原:座号变了 → 先摘掉,第 2 步按新座号重新落座;
+        //    本来源已不再晋级(判错重判/重置)→ 还原成空位。
+        //    显示与物化一律只看新座号;原座号(sourceSlot)只作备份,不参与这里的判定。
+        for (TStageRosterEntry row : rows) {
+            Long holder = row.getSourceCompetitorId();
+            if (holder == null || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
+                continue;
+            }
+            Long slot = expectedSlot.get(holder);
+            if (slot != null) {
+                if (Objects.equals(slot, row.getSlot())) {
+                    continue;   // 已经坐在投影给出的新座号上:原地不动
+                }
+                dropRow(row, emptySlotKind, rowStatus);
+                changed++;
+                continue;
+            }
+            // 不在投影里的人:只处理本来源、且在本批次范围内的人(别的来源的行不动)
+            if (!Objects.equals(row.getSourceStageId(), sourceStageId)
+                || (only != null && !only.contains(holder))) {
+                continue;
+            }
+            dropRow(row, emptySlotKind, rowStatus);
+            changed++;
+        }
+        // 2) 投影里的人坐到投影给出的新座号上(上一步之后,目标座位要么空着,要么坐的就是同一个人)
+        for (Map.Entry<Long, RosterAssembler.AssembledRow> e : projection.bySlot().entrySet()) {
+            RosterAssembler.AssembledRow expected = e.getValue();
+            TStageRosterEntry row = rowBySlot.get(e.getKey());
+            if (row == null) {
+                continue;
+            }
+            if (StageConstants.SLOT_PLAYER.equals(row.getSlotKind())
+                && Objects.equals(row.getSourceCompetitorId(), expected.source.getId())) {
+                continue;   // 已经在位
+            }
+            placeAdvancer(target, row, expected, rowStatus);
+            changed++;
+        }
+        return changed;
+    }
+
+    /**
+     * 多入口汇合的对账:不做任何座位计算,只负责"把人放进待落位区 / 把人取出"。
+     * 已经落位的人不会被挪走:导播拖好的座位要保住,不能因为另一个入口判完一场就被打回待落位区。
+     */
+    private int reconcileHolding(TStage target, Long sourceStageId,
+                                 List<RosterAssembler.AssembledRow> holdingRows,
+                                 List<TStageRosterEntry> rows, String rowStatus, Set<Long> only) {
+        Set<Long> candidateIds = holdingRows.stream().map(r -> r.source.getId())
+            .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, TStageRosterEntry> bySource = rows.stream()
+            .filter(r -> r.getSourceCompetitorId() != null)
+            .collect(Collectors.toMap(TStageRosterEntry::getSourceCompetitorId, r -> r, (a, b) -> a));
+        String emptySlotKind = RosterConstants.ENTRY_STATUS_READY.equals(rowStatus)
+            ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING;
+        int changed = 0;
+        // 1) 本来源已不在这份名单里的(判错重判/重置)→ 取出:待落位行删掉,占座行还原成空位
+        for (TStageRosterEntry row : rows) {
+            Long holder = row.getSourceCompetitorId();
+            if (holder == null
+                || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())
+                || !Objects.equals(row.getSourceStageId(), sourceStageId)
+                || (only != null && !only.contains(holder))
+                || candidateIds.contains(holder)) {
+                continue;
+            }
+            dropRow(row, emptySlotKind, rowStatus);
+            changed++;
+        }
+        // 2) 新进来的候选 → 待落位区(没有座位号)。已经有行的人不动:可能导播已经拖到座位上了。
+        for (RosterAssembler.AssembledRow candidate : holdingRows) {
+            if (bySource.containsKey(candidate.source.getId())) {
+                continue;
+            }
+            entryMapper.insert(toHoldingEntry(target, candidate,
+                RosterConstants.ENTRY_STATUS_READY.equals(rowStatus)));
+            changed++;
+        }
+        if (changed > 0) {
+            log.info("赛段[{}]待落位区同步:{} 行变更(来源赛段[{}])", target.getId(), changed, sourceStageId);
+        }
+        return changed;
+    }
+
+    /** 清掉一行:待落位行(slot=null)直接删,占座行还原成空位实体(座位号保留,不压紧) */
+    private void dropRow(TStageRosterEntry row, String emptySlotKind, String rowStatus) {
+        if (row.getSlot() == null) {
+            entryMapper.deleteById(row.getId());
+        } else {
+            clearRuleEntry(row, emptySlotKind, rowStatus);
+        }
+    }
+
+    /**
+     * 把晋级者落到指定座位行,同时写入"来源原座号"与"入边ID"。
+     *
+     * <p>{@code source_slot} 存的是<b>来源赛段给出的座号</b>(不是投影分到的座位),
+     * 它是对账的定位键:上游改了某个位置的结果时,按这个位置找到原来那一行做变更。</p>
+     */
+    private void placeAdvancer(TStage target, TStageRosterEntry row,
+                               RosterAssembler.AssembledRow expected, String rowStatus) {
+        TCompetitor advancer = expected.source;
         if (RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
             log.info("赛段[{}]座位[{}]原本是人工调整,按上游晋级结果覆盖", target.getId(), row.getSlot());
         }
@@ -671,6 +702,8 @@ public class RosterEntryStore {
             .set(TStageRosterEntry::getRefType, "SOURCE")
             .set(TStageRosterEntry::getSourceCompetitorId, advancer.getId())
             .set(TStageRosterEntry::getSourceStageId, advancer.getStageId())
+            .set(TStageRosterEntry::getSourceGroupId, expected.sourceGroupId)
+            .set(TStageRosterEntry::getSourceSlot, advancer.getFinalRank())
             .set(TStageRosterEntry::getPlayerId, null)
             .set(TStageRosterEntry::getGuestName, null)
             .set(TStageRosterEntry::getGuestNumber, null)
@@ -682,6 +715,8 @@ public class RosterEntryStore {
         row.setRefType("SOURCE");
         row.setSourceCompetitorId(advancer.getId());
         row.setSourceStageId(advancer.getStageId());
+        row.setSourceGroupId(expected.sourceGroupId);
+        row.setSourceSlot(advancer.getFinalRank());
         row.setPlayerId(null);
         row.setGuestName(null);
         row.setGuestNumber(null);
@@ -689,171 +724,7 @@ public class RosterEntryStore {
         row.setEntryTag(tag);
         row.setStatus(rowStatus);
         log.info("赛段[{}]中间层座位[{}]实时写入名单行[{}](来源名次 {}),来源赛段[{}]",
-            target.getId(), row.getSlot(), advancer.getName(), advancer.getFinalRank(), sourceStageId);
+            target.getId(), row.getSlot(), advancer.getName(), advancer.getFinalRank(), advancer.getStageId());
     }
 
-    /**
-     * 目标赛段的候选行(competitorId → 组装行,含来源参赛方与算好的座位):
-     * 与 {@link #rebuildEntries} 物化时用的是同一套规则(来源组取人 → {@link RosterAssembler#assignSeeds} 排座)。
-     * 实时落座据此写入,两条路径不会再算出两套座位。
-     */
-    private Map<Long, RosterAssembler.AssembledRow> expectedRowsOf(TStage target, List<TStageRosterGroupBo> groups) {
-        Map<Long, RosterAssembler.AssembledRow> candidates = candidateRowsOf(groups);
-        if (candidates.isEmpty()) {
-            return candidates;
-        }
-        int plan = target.getTeamCountStart() == null || target.getTeamCountStart() <= 0
-            ? 0 : target.getTeamCountStart().intValue();
-        List<RosterAssembler.AssembledRow> rows = new ArrayList<>(candidates.values());
-        rosterAssembler.assignSeeds(rows, plan, new HashSet<>());
-        Map<Long, RosterAssembler.AssembledRow> byCompetitor = new LinkedHashMap<>();
-        for (RosterAssembler.AssembledRow r : rows) {
-            if (r.source != null && r.source.getId() != null && r.seedRank != null) {
-                byCompetitor.putIfAbsent(r.source.getId(), r);
-            }
-        }
-        return byCompetitor;
-    }
-
-    /** 目标赛段按来源组规则取到的候选(competitorId → 组装行),只取人、不排座 */
-    private Map<Long, RosterAssembler.AssembledRow> candidateRowsOf(List<TStageRosterGroupBo> groups) {
-        if (groups.isEmpty()) {
-            return Map.of();
-        }
-        Map<Long, RosterAssembler.AssembledRow> byCompetitor = new LinkedHashMap<>();
-        for (RosterAssembler.AssembledRow r : rosterAssembler.assembleRows(groups)) {
-            if (r.source != null && r.source.getId() != null) {
-                byCompetitor.putIfAbsent(r.source.getId(), r);
-            }
-        }
-        return byCompetitor;
-    }
-
-    /**
-     * 多入口汇合时的实时同步:只负责"把人放进待落位区 / 把人取出",不做任何座位计算。
-     *
-     * <p>已经落位的人不会被挪走:导播拖好的座位要保住,不能因为另一个入口判完一场就被打回待落位区。</p>
-     */
-    /**
-     * 快路径是否可用:唯一来源就是本次结算的赛段,且它是淘汰赛、按整单晋级。
-     * 此时 {@code assignSeeds} 对每个晋级者的座位就是其来源名次({@code finalRank}),
-     * 与其它候选无关,因此可以按人直接落座,不需要装配整份候选。
-     */
-    private boolean canUseRankSeatFastPath(List<TStageRosterGroupBo> groups, Long sourceStageId) {
-        if (groups.size() != 1) {
-            return false;
-        }
-        TStageRosterGroupBo g = groups.get(0);
-        if (g.getSourceStageId() == null || !Objects.equals(g.getSourceStageId(), sourceStageId)
-            || RosterConstants.FILL_MANUAL.equals(g.getFillMode())) {
-            return false;
-        }
-        if (!OutcomeStatusEnum.ADVANCE.getCode().equals(g.getResultFilter())) {
-            return false;
-        }
-        if (g.getZone() != null || g.getRankStart() != null || g.getRankEnd() != null) {
-            return false;
-        }
-        TStage src = stageMapper.selectById(sourceStageId);
-        return src != null && StageModeEnum.KNOCKOUT.getCode().equals(src.getStageMode());
-    }
-
-    /**
-     * 按名次落座的快路径:只处理本批(only)这几个人——晋级者落到 {@code finalRank} 座位,
-     * 不再是晋级者的还原成空位。不装配整份候选、不扫描整张表,消除单场判罚的 N+1。
-     */
-    private int syncRankSeatPreAdvance(TStage target, Long sourceStageId,
-                                       Map<Long, TCompetitor> advancerById, Set<Long> only,
-                                       String rowStatus, String emptySlotKind,
-                                       List<TStageRosterEntry> rows,
-                                       Map<Long, TStageRosterEntry> rowBySlot) {
-        Map<Long, TStageRosterEntry> rowByHolder = new java.util.HashMap<>();
-        for (TStageRosterEntry r : rows) {
-            if (r.getSourceCompetitorId() != null) {
-                rowByHolder.putIfAbsent(r.getSourceCompetitorId(), r);
-            }
-        }
-        int changed = 0;
-        for (Long cid : only) {
-            TCompetitor advancer = advancerById.get(cid);
-            TStageRosterEntry current = rowByHolder.get(cid);
-            if (advancer == null || advancer.getFinalRank() == null || advancer.getFinalRank() < 1L) {
-                // 本批里不再是晋级者的(重判/未晋级):还原成空位
-                if (current != null && !RosterConstants.ENTRY_ORIGIN_MANUAL.equals(current.getOrigin())) {
-                    clearRuleEntry(current, emptySlotKind, rowStatus);
-                    changed++;
-                }
-                continue;
-            }
-            TStageRosterEntry row = rowBySlot.get(advancer.getFinalRank());
-            if (row == null) {
-                // 座位还没铺开(计划规模小于名次):交给整表重建
-                return rebuildEntries(target.getId()) ? 1 : 0;
-            }
-            if (StageConstants.SLOT_PLAYER.equals(row.getSlotKind())
-                && Objects.equals(row.getSourceCompetitorId(), cid)) {
-                continue;   // 已在位
-            }
-            // 座位变了(重判/名次变化):先把旧行还原成空位
-            if (current != null && current.getId() != null && !current.getId().equals(row.getId())
-                && !RosterConstants.ENTRY_ORIGIN_MANUAL.equals(current.getOrigin())) {
-                clearRuleEntry(current, emptySlotKind, rowStatus);
-                changed++;
-            }
-            placeAdvancer(target, row, advancer, rowStatus, sourceStageId);
-            changed++;
-        }
-        if (changed > 0) {
-            rosterGroupStore.notifyTarget(target.getId());
-        }
-        return changed;
-    }
-
-    private int syncHoldingPreAdvance(TStage target, Long sourceStageId,
-                                      Map<Long, TCompetitor> advancerById, Set<Long> only,
-                                      boolean sourceReady, List<TStageRosterGroupBo> groups) {
-        String rowStatus = sourceReady
-            ? RosterConstants.ENTRY_STATUS_READY : RosterConstants.ENTRY_STATUS_PENDING;
-        String emptySlotKind = sourceReady ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING;
-        List<TStageRosterEntry> rows = entriesOf(target.getId());
-        Map<Long, TStageRosterEntry> bySource = rows.stream()
-            .filter(r -> r.getSourceCompetitorId() != null)
-            .collect(Collectors.toMap(TStageRosterEntry::getSourceCompetitorId, r -> r, (a, b) -> a));
-        // 本目标赛段的候选(全部来源的并集);advancerById 为空表示"这次改动后本来源没人晋级",
-        // 不必再算候选集,下面的清理会把这批人全部取出。
-        Map<Long, RosterAssembler.AssembledRow> candidates = advancerById.isEmpty()
-            ? Map.of() : candidateRowsOf(groups);
-        int changed = 0;
-        // 1) 本来源已不在这份名单里的(判错重判/重置)→ 取出:待落位行删掉,占座行还原成空位
-        for (TStageRosterEntry row : rows) {
-            Long holder = row.getSourceCompetitorId();
-            if (holder == null
-                || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())
-                || !Objects.equals(row.getSourceStageId(), sourceStageId)
-                || (only != null && !only.contains(holder))
-                || candidates.containsKey(holder)) {
-                continue;
-            }
-            if (row.getSlot() == null) {
-                // 待落位行不占座位,留着就是幽灵行,直接删
-                entryMapper.deleteById(row.getId());
-            } else {
-                clearRuleEntry(row, emptySlotKind, rowStatus);
-            }
-            changed++;
-        }
-        // 2) 新进来的候选 → 待落位区(没有座位号)。已经有行的人不动:可能导播已经拖到座位上了。
-        for (RosterAssembler.AssembledRow candidate : candidates.values()) {
-            if (bySource.containsKey(candidate.source.getId())) {
-                continue;
-            }
-            entryMapper.insert(toHoldingEntry(target, candidate, sourceReady));
-            changed++;
-        }
-        if (changed > 0) {
-            rosterGroupStore.notifyTarget(target.getId());
-            log.info("赛段[{}]待落位区同步:{} 行变更(来源赛段[{}])", target.getId(), changed, sourceStageId);
-        }
-        return changed;
-    }
 }

@@ -15,6 +15,8 @@ import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.domain.TStageRosterEntry;
+import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
@@ -38,9 +40,12 @@ import org.springframework.test.context.DynamicPropertySource;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -142,6 +147,7 @@ class AuditionZeroScoreTest {
         }
 
         // 下一赛段按海选出口「圈内第 1~16 名(结果不限)」取人:0 分的一个都不能带进来
+        placeAllHolding(round16.getId());
         assertEquals(15, rosterService.applyRoster(round16.getId(), null),
             "0 分不晋级:下一赛段只能带上 15 人");
         assertEquals(15, competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
@@ -221,6 +227,7 @@ class AuditionZeroScoreTest {
         }
 
         // 出口按圈内名次取人:0 分的 4 个(16-19)加一海的 0 分(20)一个都不能带进来
+        placeAllHolding(round16.getId());
         assertEquals(15, rosterService.applyRoster(round16.getId(), null),
             "加赛打 0 分的人也一个都不能进下一赛段");
         List<String> brought = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
@@ -378,5 +385,30 @@ class AuditionZeroScoreTest {
             .last("limit 1"));
         assertNotNull(c, "找不到号码 " + number + " 的选手");
         return c.getId();
+    }
+
+    /** 海选多圈 = 多条入边 → 人先进待落座;模拟导播拖到座位上后再确认名单 */
+    private void placeAllHolding(Long stageId) {
+        List<TStageRosterEntry> rows = rosterService.entriesOf(stageId);
+        Set<Long> used = new HashSet<>();
+        rows.stream().map(TStageRosterEntry::getSlot).filter(Objects::nonNull).forEach(used::add);
+        List<TStageRosterOrderBo.Item> items = new ArrayList<>();
+        long next = 1L;
+        for (TStageRosterEntry row : rows) {
+            if (!StageConstants.SLOT_PLAYER.equals(row.getSlotKind()) || row.getSlot() != null) {
+                continue;
+            }
+            while (used.contains(next)) {
+                next++;
+            }
+            TStageRosterOrderBo.Item it = new TStageRosterOrderBo.Item();
+            it.setOverrideId(row.getId());
+            it.setSeedRank(next);
+            items.add(it);
+            used.add(next);
+        }
+        if (!items.isEmpty()) {
+            rosterService.reorderRoster(stageId, items);
+        }
     }
 }

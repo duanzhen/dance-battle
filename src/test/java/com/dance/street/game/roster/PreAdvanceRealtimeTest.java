@@ -175,6 +175,38 @@ class PreAdvanceRealtimeTest {
         assertEquals(StageConstants.SLOT_PLAYER, otherSeat.getSlotKind());
     }
 
+    /**
+     * 改判换人:重判后由<b>另一个</b>选手晋级,同一个来源座号(位置)上的人必须换成新的晋级者,
+     * 不能留空、也不能把原来的晋级者留在下一赛段名单里。
+     */
+    @Test
+    void rejudgeReplacesTheAdvancerAtTheSameSeat() {
+        Long tid = newTournament("pre-advance-rejudge");
+        TStageVo semi = newStage(tid, "半决赛", 4L, 2L, null);
+        insertCompetitors(tid, semi.getId(), 4);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semi.getId());
+        initializeAndGenerate(semi.getId());
+
+        TMatch first = matchesOf(semi.getId()).get(0);
+        Long leftWinner = judgeWin(first, 0);
+        assertEquals(leftWinner, holderAtSlot(finals.getId(), 1L), "左槽胜者先坐 1 号位");
+        assertEquals(leftWinner, competitorMapper.selectById(leftWinner).getId());
+
+        // 判错重判:重置这一场,改判为右槽胜
+        matchResultService.resetMatch(first.getId());
+        Long rightWinner = judgeWin(first, 1);
+
+        assertEquals(rightWinner, holderAtSlot(finals.getId(), 1L),
+            "改判后同一个座号应换成新的晋级者");
+        assertTrue(rosterService.entriesOf(finals.getId()).stream()
+                .noneMatch(e -> leftWinner.equals(e.getSourceCompetitorId())),
+            "被改判掉的原晋级者不能留在下一赛段名单里");
+        assertEquals(1, playerRows(finals.getId()), "改判不能留下重复的人");
+        assertEquals(2, rosterService.entriesOf(finals.getId()).size(),
+            "座位数不变(空位照占号)");
+        assertEquals(rightWinner, competitorMapper.selectById(rightWinner).getId());
+    }
+
     /** 上一赛段还没结束:中间态只读 —— 能实时看到已晋级的人,但不能加人/拖位。 */
     @Test
     void middleStateStaysReadonlyWhileSourceStageIsRunning() {
@@ -248,21 +280,41 @@ class PreAdvanceRealtimeTest {
 
     /** 判该场为"左槽胜",返回胜者(左槽选手)ID */
     private Long judgeLeftWin(TMatch match) {
+        return judgeWin(match, 0);
+    }
+
+    /** 判该场指定槽位获胜,返回胜者 ID(重置后场次已是 GAMING,不再重复 start) */
+    private Long judgeWin(TMatch match, int winnerIndex) {
+        List<Long> ids = participantIds(match);
+        assertEquals(2, ids.size(), match.getName() + " 应有两个座位");
+        if (StageConstants.MATCH_PENDING.equals(matchMapper.selectById(match.getId()).getStatus())) {
+            matchResultService.startMatch(match.getId());
+        }
+        SubmitResultBo bo = new SubmitResultBo();
+        bo.setMatchId(match.getId());
+        Map<Long, String> outcomes = new HashMap<>();
+        outcomes.put(ids.get(winnerIndex), "WIN");
+        outcomes.put(ids.get(1 - winnerIndex), "LOSS");
+        bo.setOutcomes(outcomes);
+        matchResultService.submitResult(bo);
+        return ids.get(winnerIndex);
+    }
+
+    private List<Long> participantIds(TMatch match) {
         List<TMatchParticipant> rows = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery()
                 .eq(TMatchParticipant::getMatchId, match.getId())
                 .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
-        List<Long> ids = rows.stream().map(TMatchParticipant::getCompetitorId).toList();
-        assertEquals(2, ids.size(), match.getName() + " 应有两个座位");
-        matchResultService.startMatch(match.getId());
-        SubmitResultBo bo = new SubmitResultBo();
-        bo.setMatchId(match.getId());
-        Map<Long, String> outcomes = new HashMap<>();
-        outcomes.put(ids.get(0), "WIN");
-        outcomes.put(ids.get(1), "LOSS");
-        bo.setOutcomes(outcomes);
-        matchResultService.submitResult(bo);
-        return ids.get(0);
+        return rows.stream().map(TMatchParticipant::getCompetitorId).toList();
+    }
+
+    /** 指定座号上现在是谁(没人返回 null) */
+    private Long holderAtSlot(Long stageId, long slot) {
+        return rosterService.entriesOf(stageId).stream()
+            .filter(e -> e.getSlot() != null && e.getSlot() == slot)
+            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+            .map(TStageRosterEntry::getSourceCompetitorId)
+            .findFirst().orElse(null);
     }
 
     private List<TStageRosterEntry> playedRows(Long stageId) {

@@ -95,20 +95,6 @@ public class TStageRosterController {
         return R.ok();
     }
 
-    /**
-     * 调整取人顺序:按传入的组 ID 顺序重写 {@code sortOrder}(1..N)。
-     *
-     * <p>取人顺序决定"先取哪条出口的人",多出口时是真正影响落位的配置。</p>
-     */
-    @SaCheckPermission("game:stage:edit")
-    @Log(title = "调整名单来源顺序", businessType = BusinessType.UPDATE)
-    @RepeatSubmit()
-    @PutMapping("/{stageId}/roster/groups/order")
-    public R<Void> reorderGroups(@PathVariable Long stageId, @RequestBody List<Long> groupIds) {
-        rosterService.reorderGroups(stageId, groupIds);
-        return R.ok();
-    }
-
     /** 整单装配(快照物化,唯一写库动作) */
     @SaCheckPermission("game:stage:edit")
     @Log(title = "确认名单", businessType = BusinessType.UPDATE)

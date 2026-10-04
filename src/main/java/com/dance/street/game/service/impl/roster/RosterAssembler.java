@@ -7,15 +7,10 @@ import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.engine.common.RosterConstants;
-import com.dance.street.game.engine.common.RuleConfigHolder;
-import com.dance.street.game.engine.common.RuleConfigParser;
-import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
-import com.dance.street.game.mapper.TStageMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -49,7 +44,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RosterAssembler {
 
-    private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
@@ -57,6 +51,8 @@ public class RosterAssembler {
     /** 装配中间结果:或来自某条来源边的人,或一张外卡 */
     public static final class AssembledRow {
         public TCompetitor source;
+        /** 这个人是从哪条入边进来的({@code t_stage_roster_group.id});同一来源有多条边时用于区分 */
+        public Long sourceGroupId;
         public boolean guest;
         public String guestName;
         public Long guestPlayerId;
@@ -67,15 +63,63 @@ public class RosterAssembler {
     }
 
     /**
-     * 多入口汇合判定:两条以上不同的来源边都往同一个赛段送人时,系统没有依据决定谁坐哪,
+     * 多入口判定:<b>入边(来源组行)多于一条</b>时,系统没有依据决定谁坐哪,
      * 于是全部先进"待落位区",由导播在中间态拖到真实座位。
+     *
+     * <p>"多入口"按<b>边的条数</b>算,不是按不同来源赛段数算:同一个海选按圈配了
+     * A圈、B圈两条出口,就是两条入边,两拨人的座号各自从 1 起算、必然重叠
+     * (海选落选者是按圈名额累加编号的),只有整单进待落座才不会撞座。</p>
      */
     public boolean multiEntry(List<TStageRosterGroupBo> groups) {
-        return groups.stream()
-            .map(TStageRosterGroupBo::getSourceStageId)
-            .filter(Objects::nonNull)
-            .distinct()
-            .count() > 1;
+        return groups.size() > 1;
+    }
+
+    /**
+     * 目标赛段中间态的完整投影:整表重建与实时同步共用同一份结果,不再各算一套。
+     *
+     * @param holding    是否走待落位区(多入口汇合)
+     * @param slotCount  座位总数 1..slotCount,每个座位一行实体(BYE/PENDING 也占号)
+     * @param bySlot     有人的座位(seatRank -&gt; 人)
+     * @param holdingRows 待落位的人(slot=null)
+     */
+    public record Projection(boolean holding, int slotCount,
+                             Map<Long, AssembledRow> bySlot, List<AssembledRow> holdingRows) {
+    }
+
+    /**
+     * 把"目标赛段的入边规则 + 来源赛段结果"投影成一份完整的中间态。
+     *
+     * <p>统一规则(与赛制无关,任何赛段、任何衔接都是这一套):</p>
+     * <ol>
+     *   <li>按出边规则取人({@link #assembleRows});</li>
+     *   <li><b>来源唯一</b> → 自动落座:每人的座号 = 来源赛段给出的名次
+     *       ({@link #assignSeeds}),1..N 每个座位都有一行实体,轮空不压塌陷;</li>
+     *   <li><b>来源 ≥2</b>(汇合)→ 不做座位计算,所有人进待落位区,
+     *       座位 1..N 照铺空位实体,由导播在中间态拖入。</li>
+     * </ol>
+     */
+    public Projection project(TStage target, List<TStageRosterGroupBo> groups) {
+        int plan = target.getTeamCountStart() == null || target.getTeamCountStart() <= 0
+            ? 0 : target.getTeamCountStart().intValue();
+        List<AssembledRow> rows = assembleRows(groups);
+        if (multiEntry(groups)) {
+            int slots = Math.max(plan, rows.size());
+            return new Projection(true, slots, Map.of(), rows);
+        }
+        assignSeeds(rows, plan, new HashSet<>());
+        int maxAssigned = rows.stream().map(r -> r.seedRank).filter(Objects::nonNull)
+            .mapToInt(Long::intValue).max().orElse(0);
+        int totalSlots = Math.max(plan, maxAssigned);
+        if (totalSlots <= 0) {
+            totalSlots = rows.size();
+        }
+        Map<Long, AssembledRow> bySlot = new LinkedHashMap<>();
+        for (AssembledRow r : rows) {
+            if (r.seedRank != null && r.seedRank >= 1 && r.seedRank <= totalSlots) {
+                bySlot.putIfAbsent(r.seedRank, r);
+            }
+        }
+        return new Projection(false, totalSlots, bySlot, List.of());
     }
 
     /**
@@ -83,28 +127,23 @@ public class RosterAssembler {
      * 它们直接改中间层的行,只有"全量重建"这一步才会回到这里从规则重新算。
      */
     public List<AssembledRow> assembleRows(List<TStageRosterGroupBo> groups) {
-        List<AssembledRow> rows = new ArrayList<>();
-        Set<Long> seen = new HashSet<>();
-        for (TCompetitor c : autoCandidates(groups)) {
-            if (seen.add(c.getId())) {
-                rows.add(sourceRow(c));
-            }
-        }
-        return rows;
+        return autoCandidateRows(groups);
     }
 
-    /** 落位:淘汰赛名次坐回原座位,其余按占用情况顺延取空位 */
+    /**
+     * 落座:单一入边时,<b>把来源赛段给出的座号原样复制成新座号</b>。
+     *
+     * <p>「每一种赛段都有为输出选手提供座号的义务」:淘汰赛写 {@code displayRow + 1}
+     * (双方轮空留下的空洞即下一级的空座位,签表不塌陷),海选/排名赛按圈名额累加写全局座号,
+     * 擂台赛写最终名次。因此排座层不区分赛制,直接复制来源座号;只有座号缺失、
+     * 超出计划规模、或该座位已被占用时才退化为"顺延取空位"。</p>
+     */
     public void assignSeeds(List<AssembledRow> rows, int plan, Set<Long> occupiedSeeds) {
         Set<Long> occupied = new HashSet<>(occupiedSeeds);
-        // 淘汰赛承接上一轮淘汰赛时:晋级者按来源名次(finalRank)坐回对应座位;
-        // 名次里的空洞来自"双方都轮空"的场次——把座位留空,等于让轮空也晋级到下一赛段对应的座位,
-        // 下一级签表因此不会塌陷/错位(名次 = 场次 displayRow + 1,见 DownstreamRouter.markAdvance)。
-        Map<Long, Boolean> knockoutSourceCache = new HashMap<>();
         for (AssembledRow r : rows) {
-            Long rank = r.source == null ? null : r.source.getFinalRank();
-            if (rank != null && rank >= 1L && (plan <= 0 || rank <= plan)
-                && isKnockoutSource(r.source, knockoutSourceCache) && occupied.add(rank)) {
-                r.seedRank = rank;
+            Long seat = r.source == null ? null : r.source.getFinalRank();
+            if (seat != null && seat >= 1L && (plan <= 0 || seat <= plan) && occupied.add(seat)) {
+                r.seedRank = seat;
                 continue;
             }
             r.seedRank = nextFreeSeed(occupied, plan);
@@ -125,17 +164,6 @@ public class RosterAssembler {
         return occupiedSeeds.stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
     }
 
-    /** 该来源参赛方是否来自淘汰赛赛段(只有淘汰赛的名次才对应"场次座位",含轮空留下的空洞) */
-    private boolean isKnockoutSource(TCompetitor source, Map<Long, Boolean> cache) {
-        if (source == null || source.getStageId() == null) {
-            return false;
-        }
-        return cache.computeIfAbsent(source.getStageId(), id -> {
-            TStage s = stageMapper.selectById(id);
-            return s != null && StageModeEnum.KNOCKOUT.getCode().equals(s.getStageMode());
-        });
-    }
-
     private static AssembledRow sourceRow(TCompetitor c) {
         AssembledRow r = new AssembledRow();
         r.source = c;
@@ -144,15 +172,9 @@ public class RosterAssembler {
         return r;
     }
 
-    private List<TCompetitor> autoCandidates(List<TStageRosterGroupBo> groups) {
-        Map<Long, TCompetitor> merged = new LinkedHashMap<>();
-        // 来源赛段名称一次批量取回,替代逐组 selectById
-        List<Long> sourceStageIds = groups.stream()
-            .map(TStageRosterGroupBo::getSourceStageId)
-            .filter(Objects::nonNull).distinct().toList();
-        Map<Long, TStage> sourceStageById = sourceStageIds.isEmpty() ? Map.of()
-            : stageMapper.selectByIds(sourceStageIds).stream()
-                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
+    /** 按边取人:每个人记住自己来自哪条边(汇合/平行边时中间态要能追溯到入边) */
+    private List<AssembledRow> autoCandidateRows(List<TStageRosterGroupBo> groups) {
+        Map<Long, AssembledRow> merged = new LinkedHashMap<>();
         for (TStageRosterGroupBo g : groups) {
             if (g.getSourceStageId() == null
                 || RosterConstants.FILL_STREAM.equals(g.getFillMode())
@@ -160,10 +182,6 @@ public class RosterAssembler {
                 continue;
             }
             List<TCompetitor> rows = new ArrayList<>(groupRows(g));
-            TStage src = sourceStageById.get(g.getSourceStageId());
-            if (rotateNeeded(g, src)) {
-                reorderByCircleRank(src, rows);
-            }
             int quota = g.getQuota() != null && g.getQuota() > 0 ? g.getQuota() : Integer.MAX_VALUE;
             int n = 0;
             for (TCompetitor c : rows) {
@@ -172,20 +190,12 @@ public class RosterAssembler {
                         g.getSourceStageId(), g.getQuota());
                     break;
                 }
-                merged.putIfAbsent(c.getId(), c);
+                AssembledRow row = sourceRow(c);
+                row.sourceGroupId = g.getId();
+                merged.putIfAbsent(c.getId(), row);
             }
         }
         return new ArrayList<>(merged.values());
-    }
-
-    private boolean rotateNeeded(TStageRosterGroupBo g, TStage source) {
-        if (RosterConstants.ORDER_ZONE_RANK_ROTATE.equals(g.getOrderBy())) {
-            return true;
-        }
-        if (g.getOrderBy() != null && !g.getOrderBy().isBlank()) {
-            return false;
-        }
-        return source != null && StageModeEnum.AUDITION.getCode().equals(source.getStageMode());
     }
 
     private record PartInfo(String zone, Integer row, Integer rankInMatch, BigDecimal score) {
@@ -368,66 +378,4 @@ public class RosterAssembler {
         }
     }
 
-    /**
-     * 海选来源按圈轮转排序:圈1第1、圈2第1、圈1第2…(与结算名次同一口径),
-     * 让各圈靠前的人交替进入下一赛段,而不是一个圈的人挤在一起。
-     */
-    private void reorderByCircleRank(TStage source, List<TCompetitor> advancers) {
-        if (source == null || !StageModeEnum.AUDITION.getCode().equals(source.getStageMode())
-            || advancers == null || advancers.size() < 2) {
-            return;
-        }
-        List<TMatch> srcMatches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, source.getId())
-            .orderByAsc(TMatch::getDisplayRow)
-            .orderByAsc(TMatch::getId));
-        if (srcMatches.size() < 2) {
-            return;
-        }
-        RuleConfigHolder rc = RuleConfigParser.parse(source.getRuleConfig());
-        // 圈序号/名额/全局起点:与海选·排名赛结算共用同一口径(名单取人顺序必须与结算名次一致)
-        Map<String, StageFlowSupport.CircleQuota> quotaCtx =
-            StageFlowSupport.circleQuotaContext(source, srcMatches, "海选");
-        Map<String, Integer> zoneOrdinal = new HashMap<>();
-        Map<String, Integer> zoneBase = new HashMap<>();
-        quotaCtx.forEach((zone, quota) -> {
-            zoneOrdinal.put(zone, quota.ordinal());
-            zoneBase.put(zone, quota.base());
-        });
-        List<Long> srcMatchIds = srcMatches.stream().map(TMatch::getId).toList();
-        Map<Long, String> zoneByCompetitor = new HashMap<>();
-        if (!srcMatchIds.isEmpty()) {
-            Map<Long, String> matchZone = new HashMap<>();
-            for (TMatch m : srcMatches) {
-                matchZone.put(m.getId(), m.getDisplayZone());
-            }
-            participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
-                    .in(TMatchParticipant::getMatchId, srcMatchIds)
-                    .isNotNull(TMatchParticipant::getCompetitorId)
-                    .select(TMatchParticipant::getCompetitorId, TMatchParticipant::getMatchId))
-                .forEach(p -> zoneByCompetitor.putIfAbsent(p.getCompetitorId(),
-                    matchZone.getOrDefault(p.getMatchId(), "")));
-        }
-        advancers.sort((a, b) -> {
-            String za = zoneByCompetitor.get(a.getId());
-            String zb = zoneByCompetitor.get(b.getId());
-            long fa = a.getFinalRank() == null ? Long.MAX_VALUE : a.getFinalRank();
-            long fb = b.getFinalRank() == null ? Long.MAX_VALUE : b.getFinalRank();
-            if (za == null || zb == null || !zoneOrdinal.containsKey(za) || !zoneOrdinal.containsKey(zb)) {
-                int cmp = Long.compare(fa, fb);
-                return cmp != 0 ? cmp : Long.compare(a.getId(), b.getId());
-            }
-            long ra = fa - zoneBase.getOrDefault(za, 0);
-            long rb = fb - zoneBase.getOrDefault(zb, 0);
-            if (ra != rb) {
-                return Long.compare(ra, rb);
-            }
-            int oa = zoneOrdinal.get(za);
-            int ob = zoneOrdinal.get(zb);
-            if (oa != ob) {
-                return Integer.compare(oa, ob);
-            }
-            return Long.compare(a.getId(), b.getId());
-        });
-    }
 }

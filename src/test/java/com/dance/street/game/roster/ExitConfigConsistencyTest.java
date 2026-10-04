@@ -116,13 +116,13 @@ class ExitConfigConsistencyTest {
         return bo;
     }
 
-    /** 模拟出口面板"按名次段出口已覆盖第 1 名 → 摘掉整单晋级默认组" */
+    /** 模拟出口面板"按名次段出口已覆盖第 1 名 → 摘掉系统自动补的默认出口" */
     private void removeGeneratedDefault(Long targetStageId, Long sourceStageId) {
         List<TStageRosterVo> rosters = rosterService.listByTarget(targetStageId);
         List<TStageRosterGroupBo> groups = rosters.get(0).getGroups();
         for (TStageRosterGroupBo g : groups) {
             if (java.util.Objects.equals(g.getSourceStageId(), sourceStageId)
-                && g.getZone() == null && g.getRankStart() == null && g.getRankEnd() == null) {
+                && (Integer.valueOf(1).equals(g.getGenerated()) || g.getZone() != null)) {
                 rosterService.removeGroup(targetStageId, g.getId());
                 return;
             }

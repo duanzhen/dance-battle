@@ -49,9 +49,6 @@ public class TStageRosterGroupBo {
     /** 本组取人上限(0=不限) */
     private Integer quota;
 
-    /** 取人顺序(小者先取);表化后由服务端按列表顺序维护(取代旧 JSON 里的 priority 死字段) */
-    private Integer sortOrder;
-
     /** 1 = 建段时系统自动补的链式衔接(按出处判断,不再看字段长相) */
     private Integer generated;
 

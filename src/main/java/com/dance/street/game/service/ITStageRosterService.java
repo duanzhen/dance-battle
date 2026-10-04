@@ -22,7 +22,7 @@ import java.util.Map;
  * → 目标层(确认名单后物化的 t_competitor)。
  *
  * <p>规则(来源组)存在独立边表 {@code t_stage_roster_group}:一行 = 一条入边
- * (来源赛段 → 目标赛段)+ 取人规则,按 {@code sort_order} 决定取人先后,
+ * (来源赛段 → 目标赛段)+ 取人规则,边之间没有先后语义(座位由来源赛段给出的座号决定),
  * {@code generated=1} 表示系统自动补的链式衔接。确认与否留在
  * {@code t_stage.roster_applied / roster_skipped}。中间层是唯一的事实来源,
  * 所有读路径(中间态预览 / 大屏预排 / 导播台 / 名单页)都只读它。</p>
@@ -41,7 +41,7 @@ public interface ITStageRosterService {
     List<TStageRosterVo> listByTarget(Long targetStageId);
 
     /**
-     * 某赛段的名单来源组(赛段间依赖的边+取人规则),按取人顺序({@code sort_order})升序。
+     * 某赛段的名单来源组(赛段间依赖的边+取人规则),按行 id 稳定顺序。
      *
      * <p>供赛段生命周期里"配对模式/预排口径"等只读判断使用——它们此前直接解析
      * {@code t_stage.roster_config_json},表化后统一走这里。</p>
@@ -79,13 +79,6 @@ public interface ITStageRosterService {
 
     /** 编辑一条来源组规则(按行 ID 定位) */
     void updateGroup(Long stageId, Long groupId, TStageRosterGroupBo group);
-
-    /**
-     * 重排某目标赛段的取人顺序:按传入的组 ID 顺序依次写 {@code sort_order}=1..N。
-     *
-     * <p>取人顺序直接决定"先取哪条出口的人",所以它必须是显式且可调的。</p>
-     */
-    void reorderGroups(Long stageId, List<Long> groupIds);
 
     /** 名单候选(按来源组返回,手动点选/预览) */
     RosterCandidatesVo candidates(Long stageId);

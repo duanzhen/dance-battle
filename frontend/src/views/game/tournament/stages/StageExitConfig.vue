@@ -32,25 +32,6 @@
         >
           默认衔接
         </span>
-        <!-- 取人顺序:只影响同一个目标赛段内部(先取哪条出口的人) -->
-        <button
-          v-if="editable && exitEditable(e)"
-          :disabled="!canMoveExit(e, -1)"
-          class="px-1 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-amber-400 hover:border-amber-500/40 transition-colors flex-none disabled:opacity-30 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700"
-          title="上移(更先取人)"
-          @click="moveExit(e, -1)"
-        >
-          ↑
-        </button>
-        <button
-          v-if="editable && exitEditable(e)"
-          :disabled="!canMoveExit(e, 1)"
-          class="px-1 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-amber-400 hover:border-amber-500/40 transition-colors flex-none disabled:opacity-30 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700"
-          title="下移(更后取人)"
-          @click="moveExit(e, 1)"
-        >
-          ↓
-        </button>
         <button
           v-if="editable && exitEditable(e)"
           class="px-1.5 py-1 text-[11px] rounded border border-neutral-700 text-neutral-400 hover:text-amber-400 hover:border-amber-500/40 transition-colors flex-none"
@@ -150,7 +131,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { StageData } from './types';
 import { listStage } from '@/api/game/stage';
-import { listRostersBySource, addRosterGroups, removeRosterGroup, updateRosterGroup, reorderRosterGroups } from '@/api/game/stage/roster';
+import { listRostersBySource, addRosterGroups, removeRosterGroup, updateRosterGroup } from '@/api/game/stage/roster';
 import { circleLabel } from '@/utils/circleLabel';
 
 const props = defineProps<{
@@ -396,42 +377,6 @@ const save = async () => {
   } finally {
     saving.value = false;
   }
-};
-
-/** 同一目标赛段内、与某条出口相邻的位置(顺序只在该目标内部有意义) */
-const siblingExits = (e: ExitEntry) => entries.value.filter((x) => String(x.targetStageId) === String(e.targetStageId));
-
-const canMoveExit = (e: ExitEntry, delta: number): boolean => {
-  const list = siblingExits(e);
-  const idx = list.findIndex((x) => String(x.groupId) === String(e.groupId));
-  const to = idx + delta;
-  return idx >= 0 && to >= 0 && to < list.length;
-};
-
-/**
- * 调整取人顺序:交换同目标内的相邻两条出口。
- * 顺序决定"先取哪条出口的人",多出口时直接影响谁先落座。
- */
-const moveExit = async (e: ExitEntry, delta: number) => {
-  if (!canMoveExit(e, delta) || rosterLockedFor(e.targetStageId)) return;
-  const list = siblingExits(e);
-  const idx = list.findIndex((x) => String(x.groupId) === String(e.groupId));
-  const ids = list.map((x) => x.groupId);
-  const to = idx + delta;
-  [ids[idx], ids[to]] = [ids[to], ids[idx]];
-  try {
-    await reorderRosterGroups(e.targetStageId, ids);
-    ElMessage.success('取人顺序已调整');
-    await load();
-  } catch (err: any) {
-    notifyError(err, '顺序调整失败');
-  }
-};
-
-/** 目标赛段名单已锁定(已确认/已跳过/已开赛)时不允许调顺序 */
-const rosterLockedFor = (targetStageId: string | number): boolean => {
-  const s = stageOptions.value.find((x) => String(x.id) === String(targetStageId));
-  return !!s && s.status !== 'DRAFT';
 };
 
 const removeExit = async (e: ExitEntry) => {

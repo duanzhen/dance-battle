@@ -7,10 +7,12 @@ import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.bo.TStageRosterOrderBo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
@@ -37,8 +39,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -209,6 +214,7 @@ class AuditionShortfallByeTest {
             "第 2 圈只有 7 人,名额不满也应全部晋级,而不是报错或硬凑");
         assertEquals(15, countOutcome(audition.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
 
+        placeAllHolding(round16.getId());
         assertEquals(15, rosterService.applyRoster(round16.getId(), null));
         lifecycleService.startStage(round16.getId());
         assertEquals(1, matchesOf(round16.getId()).stream()
@@ -386,5 +392,30 @@ class AuditionShortfallByeTest {
         mr.setRefereeId(refereeId);
         mr.setTournamentId(tid);
         matchRefereeMapper.insert(mr);
+    }
+
+    /** 海选多圈 = 多条入边 → 人先进待落座;模拟导播拖到座位上后再确认名单 */
+    private void placeAllHolding(Long stageId) {
+        List<TStageRosterEntry> rows = rosterService.entriesOf(stageId);
+        Set<Long> used = new HashSet<>();
+        rows.stream().map(TStageRosterEntry::getSlot).filter(Objects::nonNull).forEach(used::add);
+        List<TStageRosterOrderBo.Item> items = new ArrayList<>();
+        long next = 1L;
+        for (TStageRosterEntry row : rows) {
+            if (!StageConstants.SLOT_PLAYER.equals(row.getSlotKind()) || row.getSlot() != null) {
+                continue;
+            }
+            while (used.contains(next)) {
+                next++;
+            }
+            TStageRosterOrderBo.Item it = new TStageRosterOrderBo.Item();
+            it.setOverrideId(row.getId());
+            it.setSeedRank(next);
+            items.add(it);
+            used.add(next);
+        }
+        if (!items.isEmpty()) {
+            rosterService.reorderRoster(stageId, items);
+        }
     }
 }

@@ -280,6 +280,8 @@ public class RosterViewService {
                 item.setRefType("SOURCE");
                 item.setSourceCompetitorId(e.getSourceCompetitorId());
                 item.setSourceStageId(e.getSourceStageId());
+                item.setSourceGroupId(e.getSourceGroupId());
+                item.setSourceSlot(e.getSourceSlot());
                 item.setName(src == null ? null : src.getName());
                 item.setType(src == null ? null : src.getType());
                 item.setNumber(src == null ? null : src.getNumber());

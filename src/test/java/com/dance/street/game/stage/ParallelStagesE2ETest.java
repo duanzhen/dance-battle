@@ -11,6 +11,7 @@ import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageRosterBo;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.domain.bo.TStageRosterMoveBo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
@@ -49,6 +50,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -218,6 +220,84 @@ class ParallelStagesE2ETest {
             .collect(java.util.stream.Collectors.toSet());
         assertTrue(sources.containsAll(advancers),
             "已结算来源的晋级者应已进入汇合段待落位区,实际:" + sources);
+    }
+
+    /**
+     * 回归:多入口汇合里,一条来源边结算后导播把它的晋级者拖到座位上,
+     * 另一条来源边再结算时不能把已经排好的位置打回待落位区。
+     *
+     * <p>复现路径:结算会触发下游中间层"整表清空 + 按规则重写";多入口汇合的座位
+     * 本来就是导播拖出来的,于是第二条来源结算时,第一条来源已经拖好的座位被重置。</p>
+     */
+    @Test
+    void keepsManuallyPlacedSeatWhenAnotherSourceSettles() {
+        Long tid = newTournament("多入边先后结算-保留落位");
+        // 链顺序:A → B → 汇合(来源必须在目标之前);两条来源边互相独立,先后结算;汇合段计划 4 人
+        TStageVo sourceA = newKnockoutStage(tid, "来源A", 2, 1, null);
+        TStageVo sourceB = newKnockoutStage(tid, "来源B", 2, 1, sourceA.getId());
+        TStageVo merge = newKnockoutStage(tid, "汇合", 4, 2, sourceB.getId());
+        // 来源B 只是链上排在中间,不应该从 A 取人:清掉它的来源组,让它成为纯报名赛段
+        for (TStageRosterGroupBo g : allGroups(sourceB)) {
+            rosterService.removeGroup(sourceB.getId(), g.getId());
+        }
+        // 汇合段的默认链式衔接是 B→汇合;替换成 A→汇合 再补回 B→汇合,凑成两条入边
+        setOnlySource(merge, sourceA, OutcomeStatusEnum.ADVANCE.getCode());
+        addSource(merge, sourceB);
+
+        // ---- 来源A 先开赛并结算 ----
+        for (int i = 1; i <= 2; i++) {
+            insertPending(tid, sourceA.getId(), "A" + i, String.valueOf(i), i);
+        }
+        lifecycleService.startStage(sourceA.getId());
+        finishByDirector(matchesOf(sourceA.getId()).get(0).getId());
+        lifecycleService.completeStage(sourceA.getId());
+        Long aWinner = advancerOf(sourceA.getId());
+        assertNotNull(aWinner);
+
+        TStageRosterEntry aRow = entriesOf(merge.getId()).stream()
+            .filter(e -> Objects.equals(e.getSourceCompetitorId(), aWinner))
+            .findFirst().orElseThrow();
+        assertNull(aRow.getSlot(), "来源A 结算后,它的晋级者应先在待落位区");
+
+        // ---- 导播把来源A 的晋级者拖到 1 号座位 ----
+        TStageRosterMoveBo move = new TStageRosterMoveBo();
+        move.setOverrideId(aRow.getId());
+        move.setTargetSeed(1L);
+        rosterService.moveRosterRow(merge.getId(), move);
+        assertEquals(1L, entryMapper.selectById(aRow.getId()).getSlot(),
+            "拖到座位后应落在 1 号位");
+
+        // ---- 来源B 再开赛并结算(触发汇合段中间层重建) ----
+        for (int i = 1; i <= 2; i++) {
+            insertPending(tid, sourceB.getId(), "B" + i, String.valueOf(i), i);
+        }
+        lifecycleService.startStage(sourceB.getId());
+        finishByDirector(matchesOf(sourceB.getId()).get(0).getId());
+        lifecycleService.completeStage(sourceB.getId());
+
+        // 另一条入边结算后,已经排好的位置必须原样保留
+        TStageRosterEntry kept = entryMapper.selectById(aRow.getId());
+        assertNotNull(kept, "导播落座的行不应在重建中被删掉");
+        assertEquals(1L, kept.getSlot(), "另一条入边结算后,已落好的座位不能被重置回待落位");
+        assertEquals(StageConstants.SLOT_PLAYER, kept.getSlotKind());
+
+        // 来源B 的晋级者补进待落位区;同一个座位不出现两行,人也不重复
+        Long bWinner = advancerOf(sourceB.getId());
+        assertNotNull(bWinner);
+        List<TStageRosterEntry> after = entriesOf(merge.getId());
+        List<Long> seatedSources = after.stream()
+            .filter(e -> e.getSlot() != null && !StageConstants.SLOT_BYE.equals(e.getSlotKind()))
+            .map(TStageRosterEntry::getSourceCompetitorId)
+            .filter(Objects::nonNull).toList();
+        assertEquals(1, seatedSources.size(), "结算后仍应只有来源A 的 1 人在座位上");
+        assertEquals(aWinner, seatedSources.get(0));
+        assertTrue(after.stream().anyMatch(e -> Objects.equals(e.getSourceCompetitorId(), bWinner)
+                && e.getSlot() == null),
+            "来源B 的晋级者应进入待落位区");
+        long seatedRows = after.stream().filter(e -> e.getSlot() != null).count();
+        assertEquals(seatedRows, after.stream().map(TStageRosterEntry::getSlot)
+                .filter(Objects::nonNull).distinct().count(),
+            "同一个座位号不应出现两行");
     }
 
     // ------------------------------------------------------------------

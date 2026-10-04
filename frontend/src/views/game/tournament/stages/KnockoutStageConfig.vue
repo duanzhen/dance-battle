@@ -269,7 +269,8 @@ const config = ref<
   }
 >({
   template: KnockoutTemplate.ROUND_32,
-  format: 'BO3',
+  // 淘汰赛默认单局决胜(BO1);BO3/BO5 由用户在「比赛格式」里自选
+  format: 'BO1',
   teamsCount: 32,
   advanceCount: 16,
   playThirdPlace: false,

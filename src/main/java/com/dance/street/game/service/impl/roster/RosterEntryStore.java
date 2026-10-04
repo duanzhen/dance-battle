@@ -98,6 +98,11 @@ public class RosterEntryStore {
      * <p>座位数 = 下一赛段计划规模(未配置时退化为候选人数),<b>1..N 每个座位都落一行</b>:
      * 有人=PLAYER、缺人=BYE。空位必须占号,否则读路径按"有人的行"重排会让座位整体前移。</p>
      *
+     * <p><b>多入口汇合不做整表清空</b>:入边不止一条时座位是导播在中间态拖出来的,
+     * 一条入边结算后重建会把另一条入边已经排好的位置全部打回待落位区——这里改为
+     * 保留导播调整过的行(落座/加人/移出),只重算空位与待落位区(见
+     * {@link #rebuildHoldingEntries})。</p>
+     *
      * @return 是否真的重建了(赛段已开赛/来源未结算时为 false)
      */
     @Transactional(rollbackFor = Exception.class)
@@ -117,19 +122,27 @@ public class RosterEntryStore {
         if (isApplied(target)) {
             withdrawRosterSnapshot(target);
         }
-        entryMapper.delete(Wrappers.<TStageRosterEntry>lambdaQuery()
-            .eq(TStageRosterEntry::getTargetStageId, targetStageId));
         List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(target);
         if (groups.isEmpty() || !materializableByGroups(groups)) {
-            // 来源还没开赛(拿不到任何结果):留空表,等来源开赛/结算事件再来重建
+            // 来源还没开赛(拿不到任何结果):清空等待,等来源开赛/结算事件再来重建
+            clearEntries(targetStageId);
             rosterGroupStore.notifyTarget(targetStageId);
             return false;
         }
         // 来源已开赛但还没全部结算:行先建出来(status=PENDING),让中间态/大屏实时看到已晋级的人
         boolean sourceReady = readyByGroups(groups);
         // 投影 = 唯一算法:单来源自动落座(座号=来源名次)、多来源进待落位区、
-        // 座位 1..N 每个都铺实体行。重建只是"先清空再写这份投影"。
+        // 座位 1..N 每个都铺实体行。
         RosterAssembler.Projection projection = rosterAssembler.project(target, groups);
+        if (projection.holding()) {
+            int changed = rebuildHoldingEntries(target, projection, sourceReady);
+            rosterGroupStore.notifyTarget(targetStageId);
+            log.info("赛段[{}]中间层名单已重建(多入口汇合):保留导播调整,{} 行变更,{} 个座位,待落位 {} 人",
+                targetStageId, changed, projection.slotCount(), projection.holdingRows().size());
+            return true;
+        }
+        // 单入口:投影就是权威座位表 —— 先清空再按投影重写
+        clearEntries(targetStageId);
         for (long slot = 1; slot <= projection.slotCount(); slot++) {
             entryMapper.insert(toEntry(target, slot, projection.bySlot().get(slot), sourceReady));
         }
@@ -141,6 +154,97 @@ public class RosterEntryStore {
             targetStageId, projection.slotCount(), projection.bySlot().size(),
             projection.holding() ? ",待落位 " + projection.holdingRows().size() + " 人" : "");
         return true;
+    }
+
+    /**
+     * 多入口汇合的"保留式重建":投影里没有座位号(全靠导播拖),所以重建不能整表清空,
+     * 否则一条入边结算就会把另一条入边已经排好的位置全部打回待落位区。
+     *
+     * <p>保留三类"导播动过"的行,其余(纯空位、待落位规则行)整批重算:</p>
+     * <ul>
+     *   <li>已落座的行(有座位号):规则人拖进座位、外卡/手工加人;</li>
+     *   <li>人工行(origin=MANUAL):与是否落座无关;</li>
+     *   <li>移出标记(空位 + 带来源引用):导播显式把人移出名单,重建不能把他放回来。</li>
+     * </ul>
+     *
+     * <p>只有"来源结果已经不含这个人"(重判/删边)时,保留的行才还原成空位——
+     * 与实时对账 {@code syncTargetPreAdvance} 同一口径。</p>
+     *
+     * @return 变更行数(仅用于日志)
+     */
+    private int rebuildHoldingEntries(TStage target, RosterAssembler.Projection projection,
+                                      boolean sourceReady) {
+        Long targetStageId = target.getId();
+        String rowStatus = sourceReady
+            ? RosterConstants.ENTRY_STATUS_READY : RosterConstants.ENTRY_STATUS_PENDING;
+        String emptySlotKind = sourceReady
+            ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING;
+        Set<Long> candidateIds = projection.holdingRows().stream()
+            .map(r -> r.source == null ? null : r.source.getId())
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        Set<Long> presentSourceIds = new HashSet<>();
+        Set<Long> usedSlots = new HashSet<>();
+        int changed = 0;
+        for (TStageRosterEntry row : selectEntries(targetStageId)) {
+            Long holder = row.getSourceCompetitorId();
+            boolean manual = RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin());
+            if (holder != null) {
+                if (!candidateIds.contains(holder)) {
+                    // 来源结果已经不含这个人(重判/删边):落座行还原成空位,待落位行直接删
+                    dropRow(row, emptySlotKind, rowStatus);
+                    if (row.getSlot() != null) {
+                        // 还原后的空位行仍占着这个座位号,登记掉,避免下面重复补一行
+                        usedSlots.add(row.getSlot());
+                    }
+                    changed++;
+                    continue;
+                }
+                // 已经有人来的人:保留它当前所在的位置,重建不再插手
+                presentSourceIds.add(holder);
+                if (row.getSlot() != null) {
+                    usedSlots.add(row.getSlot());
+                }
+                continue;
+            }
+            if (manual) {
+                // 外卡/手工拉进来的人:导播的调整,原样保留
+                if (row.getSlot() != null) {
+                    usedSlots.add(row.getSlot());
+                }
+                continue;
+            }
+            // 纯空位行:空位是算出来的,整批删掉按缺失座位重建
+            entryMapper.deleteById(row.getId());
+            changed++;
+        }
+        // 新进来的候选 → 待落位区;已经有行的人不动(可能导播已经拖到座位上了)
+        for (RosterAssembler.AssembledRow candidate : projection.holdingRows()) {
+            Long cid = candidate.source == null ? null : candidate.source.getId();
+            if (cid == null || !presentSourceIds.add(cid)) {
+                continue;
+            }
+            entryMapper.insert(toHoldingEntry(target, candidate, sourceReady));
+            changed++;
+        }
+        // 座位实体:1..N 每个座位恰好一行(有人的行已在 usedSlots 里)
+        long total = Math.max(projection.slotCount(),
+            usedSlots.stream().mapToLong(Long::longValue).max().orElse(0L));
+        for (long slot = 1; slot <= total; slot++) {
+            if (usedSlots.contains(slot)) {
+                continue;
+            }
+            TStageRosterEntry bye = new TStageRosterEntry();
+            bye.setTournamentId(target.getTournamentId());
+            bye.setTargetStageId(targetStageId);
+            bye.setSlot(slot);
+            bye.setSlotKind(emptySlotKind);
+            bye.setOrigin(RosterConstants.ENTRY_ORIGIN_RULE);
+            bye.setStatus(rowStatus);
+            entryMapper.insert(bye);
+            changed++;
+        }
+        return changed;
     }
 
     /** 来源赛段变动后,重建所有"来源组引用了它"的下游赛段中间层 */

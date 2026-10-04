@@ -524,7 +524,7 @@ const insertAfterName = computed(() => {
 
 // 默认配置与类型列表(新建赛段时使用)
 const defaultConfigs: Record<StageMode, any> = {
-  [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
+  [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO1', teamsCount: 16, advanceCount: 8 },
   [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
   [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: true, publishMode: 'AUTO' },
   [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },
@@ -783,7 +783,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
   } else {
     // 默认配置(向后兼容)
     const defaultConfigs: Record<string, any> = {
-      [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO3', teamsCount: 16, advanceCount: 8 },
+      [StageMode.KNOCKOUT]: { template: 'ROUND_16', format: 'BO1', teamsCount: 16, advanceCount: 8 },
       [StageMode.AUDITION]: { advanceCondition: 'score', advanceCount: 16 },
       [StageMode.ARENA]: { format: 'BO1', scale: 8, drawBothScore: true, publishMode: 'AUTO' },
       [StageMode.FREE_MATCH]: { mode: 'FREE_MATCH', format: 'BO1', scoring: { type: 'WIN_LOSS_DRAW', matchMode: 'STANDARD' } },
@@ -834,7 +834,7 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
       name: name,
       stageMode: stageMode,
       // 海选为打分制,无 BO1/BO3;其余赛制按配置
-      format: stageMode === StageMode.AUDITION ? '' : config.format || 'BO3',
+      format: stageMode === StageMode.AUDITION ? '' : config.format || 'BO1',
       // 人数按赛制解析(见 resolveStageSize):各赛制配置里字段位置不同,只读顶层会写成 0
       teamCountStart: size.start,
       teamCountEnd: size.end,

@@ -24,7 +24,7 @@
         <el-button type="warning" size="small" :icon="Plus" @click="handleAdd" class="amber-button">添加选手</el-button>
         <!-- 测试工具:一键把所有未签到选手签到(仅开发/测试构建可见,见 VITE_ENABLE_DEV_TOOLS) -->
         <el-button
-          v-if="devToolsEnabled"
+          v-show="devToolsEnabled"
           size="small"
           :icon="UserRoundCheck"
           :loading="bulkCheckingIn"

@@ -175,7 +175,11 @@ public interface ITStageRosterService {
     List<TStageRosterEntry> entriesOf(Long targetStageId);
 
     /**
-     * 重建中间层名单:清空后按来源组规则全量生成,人工调整一并丢弃(上游一变就全部重新来)。
+     * 显式重建中间层名单:清空后按来源组规则全量生成,人工调整一并丢弃
+     * (来源组增删改、导播点「恢复自动顺序」走这里)。
+     *
+     * <p>上游结算/重判引发的是"对账式"重建:多入口汇合会保留导播已排好的位置,
+     * 见 {@code RosterEntryStore#reconcileEntries}。</p>
      *
      * @return 是否真的重建(赛段已开赛或来源未结算时为 false)
      */

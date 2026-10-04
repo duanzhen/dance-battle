@@ -78,7 +78,9 @@
         <div class="px-1 text-[11px]">
           <span v-if="overridePreview?.applied" class="text-green-500">名单已确认</span>
           <span v-else-if="overridePreview?.skipped" class="text-neutral-500">已跳过(本赛段不带人)</span>
-          <span v-else-if="rosterWaitingSource" class="text-orange-400"> 还有来源赛段没结束:来自它们的选手先锁定,已结算来源的选手现在就能调整 </span>
+          <span v-else-if="rosterWaitingSource" class="text-orange-400">
+            还有来源赛段没结束:多入口汇合可以先排位(选手后续可能变化),单入口自动排座要等它结束再调
+          </span>
           <span v-else class="text-neutral-500">
             {{
               targetMode === 'KNOCKOUT'
@@ -99,7 +101,7 @@
         </div>
         <!-- 部分来源还没结算:带锁标记的行不能动,其余可调 -->
         <div v-else-if="anyRowLocked" class="px-2 py-1.5 rounded bg-amber-500/5 border border-amber-600/30 text-[11px] text-amber-400/90">
-          带「未结算」标记的选手来自还没打完的赛段,先锁着(等这段结束再调);其余选手现在就能拖动或移出。
+          本赛段按来源名次自动排座,来源还没结束的「未结算」选手会被重新落座,先锁着;其余选手现在就能拖动或移出。
         </div>
 
         <!-- 待落位区:多入口汇合的人先到这里(没有座位号),拖到座位才算落位。
@@ -128,10 +130,7 @@
             >
               {{ it.name || '未命名' }}
               <span v-if="it.finalRank" class="text-[10px] text-neutral-600 ml-1">#{{ it.finalRank }}</span>
-              <span
-                v-if="it.adjustable === false"
-                class="ml-1 px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500"
-                title="来源赛段还没结束,这名选手还没定案"
+              <span v-if="it.sourcePending" class="ml-1 px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500" :title="pendingTitle(it)"
                 >未结算</span
               >
               <button
@@ -177,7 +176,10 @@
                       {{ slotSeedAt(p, side) }}
                     </span>
                     <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ p[side].name || '未命名' }}</span>
-                    <span v-if="p[side].adjustable === false" class="text-[9px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-500 flex-none"
+                    <span
+                      v-if="p[side].sourcePending"
+                      class="text-[9px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-500 flex-none"
+                      :title="pendingTitle(p[side])"
                       >未结算</span
                     >
                     <span v-if="entryTagLabel(p[side].entryTag)" class="text-[10px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-400 flex-none">{{
@@ -247,10 +249,7 @@
             >
               <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank }}</span>
               <span class="flex-1 min-w-0 truncate text-neutral-300">{{ it.name || '未命名' }}</span>
-              <span
-                v-if="it.adjustable === false"
-                class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none"
-                title="来源赛段还没结束,这名选手还没定案"
+              <span v-if="it.sourcePending" class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none" :title="pendingTitle(it)"
                 >未结算</span
               >
               <span class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(it.entryTag) }}</span>
@@ -303,10 +302,7 @@
                 >{{ idx + 1 }}</span
               >
               <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
-              <span
-                v-if="c.adjustable === false"
-                class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none"
-                title="来源赛段还没结束,这名选手还没定案"
+              <span v-if="c.sourcePending" class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none" :title="pendingTitle(c)"
                 >未结算</span
               >
               <span v-if="entryTagLabel(c.entryTag)" class="text-[10px] text-neutral-600 flex-none">{{ entryTagLabel(c.entryTag) }}</span>
@@ -884,10 +880,14 @@ const rosterWaitingSource = computed(() => !rosterSealed.value && overridePrevie
 const rosterReadonly = computed(() => rosterSealed.value || targetLocked.value);
 
 /**
- * 行级可调整:来自"未结算来源赛段"的人还被上游结果左右(后端每判完一场会覆盖对应座位),
- * 先锁着;已结算来源的人、人工行/外卡、空位行现在就能拖/能移出 —— 不用等所有来源边跑完。
+ * 行级可调整(后端同口径):多入口汇合的座位本来就得导播拖,来自未结算来源的人也能先排位;
+ * 单入口是按来源名次自动排座的,来自未结算来源的人会被重新落座,先锁着。
  */
 const rowAdjustable = (it: any) => !rosterReadonly.value && it?.adjustable !== false;
+
+/** 「未结算」标记的提示文案:锁着的(单入口)与可先排位的(多入口汇合)说法不一样 */
+const pendingTitle = (it: any) =>
+  it?.adjustable === false ? '来源赛段还没结束:本赛段按它的名次自动排座,等它结束再调' : '来源赛段还没结束:可以先排位,但这名选手后续还可能变化';
 
 /** 是否存在被锁住的行(用于批量操作按钮的可用性) */
 const anyRowLocked = computed(() => listItems.value.some((it) => it?.adjustable === false));

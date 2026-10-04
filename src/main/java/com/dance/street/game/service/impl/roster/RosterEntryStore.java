@@ -98,15 +98,33 @@ public class RosterEntryStore {
      * <p>座位数 = 下一赛段计划规模(未配置时退化为候选人数),<b>1..N 每个座位都落一行</b>:
      * 有人=PLAYER、缺人=BYE。空位必须占号,否则读路径按"有人的行"重排会让座位整体前移。</p>
      *
-     * <p><b>多入口汇合不做整表清空</b>:入边不止一条时座位是导播在中间态拖出来的,
-     * 一条入边结算后重建会把另一条入边已经排好的位置全部打回待落位区——这里改为
-     * 保留导播调整过的行(落座/加人/移出),只重算空位与待落位区(见
-     * {@link #rebuildHoldingEntries})。</p>
+     * <p>显式重建:来源组增删改、导播点「恢复自动顺序」都走这里 —— <b>人工调整一并丢弃</b>,
+     * 回到规则算出来的原始状态。上游结果变化那种"对账式"重建走
+     * {@link #reconcileEntries}(要保留导播已排好的位置)。</p>
      *
      * @return 是否真的重建了(赛段已开赛/来源未结算时为 false)
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean rebuildEntries(Long targetStageId) {
+        return rebuildEntries(targetStageId, false);
+    }
+
+    /**
+     * 上游结果变化后的对账重建:与 {@link #rebuildEntries} 用同一份投影,差别只有一条——
+     * <b>保留导播的人工调整</b>(落座/加人/移出)。
+     *
+     * <p>多入口汇合(入边不止一条)的座位是导播在中间态拖出来的,投影里根本没有座位号:
+     * 一条来源边结算或判罚重判时如果整表清空重写,另一条来源边已经排好的位置会被打回待落位区。
+     * 这里改为只重算空位与待落位区,导播动过的行原样保留(见 {@link #rebuildHoldingEntries})。</p>
+     *
+     * @return 是否真的重建了(赛段已开赛/来源未结算时为 false)
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean reconcileEntries(Long targetStageId) {
+        return rebuildEntries(targetStageId, true);
+    }
+
+    private boolean rebuildEntries(Long targetStageId, boolean keepManualAdjustments) {
         TStage target = targetStageId == null ? null : stageMapper.selectById(targetStageId);
         if (target == null || StageConstants.STAGE_DISCARD.equals(target.getStatus())) {
             return false;
@@ -134,14 +152,14 @@ public class RosterEntryStore {
         // 投影 = 唯一算法:单来源自动落座(座号=来源名次)、多来源进待落位区、
         // 座位 1..N 每个都铺实体行。
         RosterAssembler.Projection projection = rosterAssembler.project(target, groups);
-        if (projection.holding()) {
+        if (projection.holding() && keepManualAdjustments) {
             int changed = rebuildHoldingEntries(target, projection, sourceReady);
             rosterGroupStore.notifyTarget(targetStageId);
             log.info("赛段[{}]中间层名单已重建(多入口汇合):保留导播调整,{} 行变更,{} 个座位,待落位 {} 人",
                 targetStageId, changed, projection.slotCount(), projection.holdingRows().size());
             return true;
         }
-        // 单入口:投影就是权威座位表 —— 先清空再按投影重写
+        // 单入口(或显式重建):投影就是权威座位表 —— 先清空再按投影重写
         clearEntries(targetStageId);
         for (long slot = 1; slot <= projection.slotCount(); slot++) {
             entryMapper.insert(toEntry(target, slot, projection.bySlot().get(slot), sourceReady));
@@ -268,7 +286,8 @@ public class RosterEntryStore {
             .in(TStage::getId, referencing));
         int rebuilt = 0;
         for (TStage s : all) {
-            if (rebuildEntries(s.getId())) {
+            // 上游结算/重置 = 对账:多入口汇合要保留导播已经排好的位置
+            if (reconcileEntries(s.getId())) {
                 rebuilt++;
             }
         }
@@ -759,7 +778,7 @@ public class RosterEntryStore {
         // 有人的座位还没铺开(计划规模小于名次):整表重建兜底,重建后即是对账结果
         for (Long seat : seatBySourceSlot.values()) {
             if (!rowBySlot.containsKey(seat)) {
-                return rebuildEntries(target.getId()) ? 1 : 0;
+                return reconcileEntries(target.getId()) ? 1 : 0;
             }
         }
         int changed = 0;

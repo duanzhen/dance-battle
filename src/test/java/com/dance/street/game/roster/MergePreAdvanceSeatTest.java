@@ -293,11 +293,13 @@ class MergePreAdvanceSeatTest {
     /**
      * 中间态按来源边放行:某条来源结算后,它带进来的人立刻能调整,不必等另一条来源也跑完。
      *
-     * <p>回归:此前只要有一条来源边没结算,整个中间态只读(人工调整被整单拦住);
-     * 中间层记了 source_group_id/source_slot 之后,门禁按行判定。</p>
+     * <p>多入口汇合(待落位)按"座位靠导播拖"的口径全放开:来源还没结算时,来自它的人也能先排位——
+     * 实时对账与结算重建都只补人/取人,不会重排已落好的行;行上仍标「未结算」提示后续可能变化。</p>
+     *
+     * <p>对照:单入口自动排座的赛段仍按来源结算加锁(见 PreAdvanceRealtimeTest)。</p>
      */
     @Test
-    void settledEdgeRowsAreAdjustableWhileOtherSourceStillRunning() {
+    void mergeRowsStayAdjustableWhileSourceStillRunning() {
         Long tid = newTournament("partial-source-adjustable");
         TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
         insertCompetitors(tid, semiA.getId(), 2);
@@ -314,33 +316,73 @@ class MergePreAdvanceSeatTest {
 
         Long winnerA = submitLeftWin(matchesOf(semiA.getId()).get(0));
 
-        // A 段还没结算:来自 A 的行也锁着(这个人还没定案)
-        assertEquals(Boolean.FALSE, adjustableOf(finals.getId(), winnerA), "来源未结算时该行应锁定");
-        assertThrows(ServiceException.class, () -> removeOverride(finals.getId(), winnerA),
-            "来源赛段没结算,来自它的选手不能调整");
+        // A 段还没结算:多入口汇合不自动排座,来自 A 的人可以马上拖到座位上
+        assertEquals(Boolean.TRUE, adjustableOf(finals.getId(), winnerA),
+            "多入口汇合不按来源结算锁行");
+        assertEquals(Boolean.TRUE, sourcePendingOf(finals.getId(), winnerA),
+            "来源未结算仍要标记出来(选手后续可能变化)");
+        rosterService.moveRosterRow(finals.getId(), moveBo(winnerA, 1L));
+        assertEquals(1L, entryOfSource(finals.getId(), winnerA).getSlot(), "来源未结算也能先排位");
 
-        // A 段整段结算:A 的行立刻解锁(此时 B 还在跑、名单整体仍未就绪)
+        // A 段结算:已经排好的位置不能被重排(此时 B 还在跑、名单整体仍未就绪)
         lifecycleService.completeStage(semiA.getId());
-        assertEquals(Boolean.TRUE, adjustableOf(finals.getId(), winnerA), "来源结算后该行应可调整");
         assertFalse(Boolean.TRUE.equals(rosterService.previewAssembled(finals.getId()).getReady()),
             "B 还没结算,整单尚未就绪");
-        removeOverride(finals.getId(), winnerA);   // 不应抛异常
-        assertEquals(StageConstants.SLOT_BYE, entryOfSource(finals.getId(), winnerA).getSlotKind(),
-            "已结算来源的行可以移出");
+        assertEquals(1L, entryOfSource(finals.getId(), winnerA).getSlot(), "A 结算后位置要保留");
 
-        // B 段的人此刻还没定案:动 B 的人仍被拦,且报错点名是因为哪一段
+        // B 段同样:先拖到 2 号位,再移出(留可撤销的「移出」标记)
         Long winnerB = submitLeftWin(matchesOf(semiB.getId()).get(0));
-        assertEquals(Boolean.FALSE, adjustableOf(finals.getId(), winnerB), "B 未结算,该行应锁定");
-        ServiceException blocked = assertThrows(ServiceException.class,
-            () -> removeOverride(finals.getId(), winnerB), "B 段没结算,来自它的选手不能调整");
-        assertTrue(blocked.getMessage().contains("还没结束")
-                && blocked.getMessage().contains("半决赛B"),
-            "报错应点名未结束的来源赛段,实际:" + blocked.getMessage());
-
-        // B 结算后同样解锁
-        lifecycleService.completeStage(semiB.getId());
-        assertEquals(Boolean.TRUE, adjustableOf(finals.getId(), winnerB), "B 结算后该行也可调整");
+        assertEquals(Boolean.TRUE, adjustableOf(finals.getId(), winnerB), "B 未结算也能先排位");
+        rosterService.moveRosterRow(finals.getId(), moveBo(winnerB, 2L));
+        assertEquals(2L, entryOfSource(finals.getId(), winnerB).getSlot());
         removeOverride(finals.getId(), winnerB);
+        assertEquals(StageConstants.SLOT_BYE, entryOfSource(finals.getId(), winnerB).getSlotKind(),
+            "来源未结算也能移出(留可撤销标记)");
+
+        // B 结算:两条来源都定案,但导播的排位与「移出」都不能被结算重建冲掉
+        lifecycleService.completeStage(semiB.getId());
+        assertEquals(1L, entryOfSource(finals.getId(), winnerA).getSlot(), "结算后 A 的人仍在 1 号位");
+        assertEquals(StageConstants.SLOT_BYE, entryOfSource(finals.getId(), winnerB).getSlotKind(),
+            "结算不会把「移出」标记放回来");
+    }
+
+    /**
+     * 两种重建口径的分界:导播点「恢复自动顺序」是<b>显式重建</b>——整表按投影重来,
+     * 多入口汇合下人工排位一并清空(全体回待落位区);而上游结算/重判引发的
+     * <b>对账重建</b>必须保留导播已排好的位置。
+     */
+    @Test
+    void explicitRebuildDiscardsManualPlacementButSettleReconcileKeepsIt() {
+        Long tid = newTournament("explicit-rebuild-vs-reconcile");
+        TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
+        insertCompetitors(tid, semiA.getId(), 2);
+        TStageVo semiB = newStage(tid, "半决赛B", 2L, 1L, semiA.getId());
+        insertCompetitors(tid, semiB.getId(), 2);
+        TStageVo finals = newStage(tid, "决赛", 4L, 1L, semiB.getId());
+        addAdvanceGroup(finals.getId(), semiA.getId());
+
+        initializeAndGenerate(semiA.getId());
+        matchResultService.startMatch(matchesOf(semiA.getId()).get(0).getId());
+        Long winnerA = submitLeftWin(matchesOf(semiA.getId()).get(0));
+        lifecycleService.completeStage(semiA.getId());
+
+        // 导播把 A 的晋级者拖到 1 号位
+        rosterService.moveRosterRow(finals.getId(), moveBo(winnerA, 1L));
+        assertEquals(1L, entryOfSource(finals.getId(), winnerA).getSlot());
+
+        // 「恢复自动顺序」= 显式重建:人工排位清空,人回到待落位区
+        rosterService.rebuildEntries(finals.getId());
+        assertNull(entryOfSource(finals.getId(), winnerA).getSlot(),
+            "显式重建要丢弃人工排位");
+
+        // 再排一次,由来源 B 结算触发对账重建:位置必须保留
+        rosterService.moveRosterRow(finals.getId(), moveBo(winnerA, 1L));
+        initializeAndGenerate(semiB.getId());
+        matchResultService.startMatch(matchesOf(semiB.getId()).get(0).getId());
+        submitLeftWin(matchesOf(semiB.getId()).get(0));
+        lifecycleService.completeStage(semiB.getId());
+        assertEquals(1L, entryOfSource(finals.getId(), winnerA).getSlot(),
+            "对账重建要保留导播排好的位置");
     }
 
     // ===== 工具 =====
@@ -562,6 +604,15 @@ class MergePreAdvanceSeatTest {
         return preview.getItems().stream()
             .filter(i -> Objects.equals(i.getSourceCompetitorId(), sourceCompetitorId))
             .map(RosterPreviewItemVo::getAdjustable)
+            .findFirst().orElse(null);
+    }
+
+    /** 该行是否标记「来源还没结算」(取自中间态预览的 sourcePending 标记) */
+    private Boolean sourcePendingOf(Long stageId, Long sourceCompetitorId) {
+        RosterPreviewVo preview = rosterService.previewAssembled(stageId);
+        return preview.getItems().stream()
+            .filter(i -> Objects.equals(i.getSourceCompetitorId(), sourceCompetitorId))
+            .map(RosterPreviewItemVo::getSourcePending)
             .findFirst().orElse(null);
     }
 

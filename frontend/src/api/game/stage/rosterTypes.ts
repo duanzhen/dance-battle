@@ -151,8 +151,10 @@ export interface RosterPreviewItem {
   outcomeStatus?: string;
   finalRank?: number | null;
   seedRank?: number | null;
-  /** 这一行现在能不能调整:来源赛段还没结算的行会被锁住(后端同口径) */
+  /** 这一行现在能不能调整:多入口汇合全放开;单入口里来源未结算的行会锁住(后端同口径) */
   adjustable?: boolean;
+  /** 这一行来自的来源赛段还没结算:多入口汇合可以先排位(但选手后续可能变化) */
+  sourcePending?: boolean;
 }
 
 export interface RosterCandidates {

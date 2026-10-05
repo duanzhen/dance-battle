@@ -77,17 +77,26 @@
             v-if="votePanelVisible"
             class="absolute bottom-[2.5%] left-1/2 -translate-x-1/2 w-[94%] max-w-[1700px] flex flex-col items-center gap-1.5"
           >
-            <!-- 胜场汇总:谁赢的轮次多谁获胜(平局轮不计) -->
+            <!-- 胜场汇总:BO3/BO5 显示局分;BO1 显示轮次胜场 -->
             <div
-              v-if="roundWins.left + roundWins.right > 0"
+              v-if="(matchDetail && (matchDetail.bestOf || 1) > 1) || roundWins.left + roundWins.right > 0"
               class="px-4 py-1 rounded-full bg-black/60 border border-white/10 backdrop-blur text-[clamp(8px,0.9vw,13px)] font-bold"
             >
-              <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ roundWins.left }} 胜</span>
-              <span class="text-white/40 mx-2">·</span>
-              <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ roundWins.right }} 胜</span>
-              <template v-if="roundWins.draw > 0">
+              <template v-if="matchDetail && (matchDetail.bestOf || 1) > 1">
+                <span class="text-neutral-300">BO{{ matchDetail.bestOf }} · 第{{ matchDetail.currentGame || 1 }}ROUND</span>
                 <span class="text-white/40 mx-2">·</span>
-                <span class="text-neutral-400">平 {{ roundWins.draw }} 轮</span>
+                <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ matchDetail.seriesLeftWins || 0 }}</span>
+                <span class="text-white/40 mx-2">·</span>
+                <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ matchDetail.seriesRightWins || 0 }}</span>
+              </template>
+              <template v-else>
+                <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ roundWins.left }} 胜</span>
+                <span class="text-white/40 mx-2">·</span>
+                <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ roundWins.right }} 胜</span>
+                <template v-if="roundWins.draw > 0">
+                  <span class="text-white/40 mx-2">·</span>
+                  <span class="text-neutral-400">平 {{ roundWins.draw }} 轮</span>
+                </template>
               </template>
             </div>
             <div
@@ -326,6 +335,9 @@ const mirrorMatchDetail = (d: any) => {
     ...d,
     leftWin: d.rightWin,
     rightWin: d.leftWin,
+    // BO 局分按屏幕左右跟随翻转
+    seriesLeftWins: d.seriesRightWins,
+    seriesRightWins: d.seriesLeftWins,
     refereeVotes: flipVotes(d.refereeVotes),
     roundVotes: (d.roundVotes || []).map((r: any) => ({
       ...r,

@@ -127,13 +127,21 @@
                 <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
                   <div class="text-center mb-3">
                     <div class="text-[10px] text-neutral-500">本场判罚 · {{ selectedStageMatch.name }}</div>
-                    <div class="text-[9px] text-neutral-600 mt-0.5">
-                      {{ isArenaMode ? '擂台对决' : '第 ' + roundSeq + ' 轮' }}：选择左方胜 / 平局 / 右方胜
+                    <div v-if="!isArenaMode && bestOf > 1" class="text-[10px] font-bold mt-1">
+                      <span class="ml-2 font-mono">
+                        <span class="text-neutral-400">BO{{ bestOf }} · 第{{ currentGame }}ROUND</span>
+                        <span :class="isLeftRed ? 'text-red-400' : 'text-blue-400'">{{ seriesLeftWins }}</span>
+                        <span class="text-neutral-500 mx-0.5">:</span>
+                        <span :class="isLeftRed ? 'text-blue-400' : 'text-red-400'">{{ seriesRightWins }}</span>
+                      </span>
                     </div>
                     <div v-if="voteProgress" class="text-[9px] text-amber-400/80 mt-1 font-bold">裁判已判 {{ voteProgress }}</div>
-                    <div v-if="pendingPublish" class="text-[9px] text-amber-400 mt-1 font-bold">已判完，等待导播台公布结果</div>
+                    <div v-if="pendingPublish && !currentRoundGaming" class="text-[9px] text-amber-400 mt-1 font-bold">已判完，等待导播台公布结果</div>
+                    <div v-else-if="seriesWinnerSide && currentRoundGaming" class="text-[9px] text-amber-400 mt-1 font-bold">
+                      已分出胜负:可等导播台提前结束，也可继续判下一局
+                    </div>
                   </div>
-                  <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
+                  <div v-if="currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
                     <button
                       @click="submitKnockout('LEFT')"
                       :disabled="submitting"
@@ -466,7 +474,7 @@
                   <div class="text-[9px] text-neutral-600 mt-0.5">第 {{ roundSeq }} 轮：选择左方胜 / 平局 / 右方胜</div>
                   <div v-if="voteProgress" class="text-[9px] text-amber-400/80 mt-1 font-bold">裁判已判 {{ voteProgress }}</div>
                 </div>
-                <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
+                <div v-if="currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
                   <button
                     @click="submitKnockout('LEFT')"
                     :disabled="submitting"
@@ -698,6 +706,14 @@ const matchId = ref<number | null>(null);
 const matchName = ref('');
 const matchMode = ref('');
 const roundSeq = ref(0);
+/** 淘汰赛 BO 局分(BO3/BO5):总局数/先赢局数/第几局/左右已赢局数 */
+const bestOf = ref(1);
+const requiredWins = ref(1);
+const currentGame = ref(1);
+const seriesLeftWins = ref(0);
+const seriesRightWins = ref(0);
+const seriesWinnerSide = ref<string | null>(null);
+const currentRoundGaming = ref(false);
 
 interface Dimension {
   key: string;
@@ -1314,6 +1330,13 @@ const applyData = (data: any) => {
   matchName.value = fmtMatchName(data?.match?.name || '');
   matchMode.value = data?.match?.matchMode || 'STANDARD';
   roundSeq.value = data?.currentRound?.roundSequence || 1;
+  bestOf.value = Number(data?.bestOf) || 1;
+  requiredWins.value = Number(data?.requiredWins) || 1;
+  currentGame.value = Number(data?.currentGame) || 1;
+  seriesLeftWins.value = Number(data?.seriesLeftWins) || 0;
+  seriesRightWins.value = Number(data?.seriesRightWins) || 0;
+  seriesWinnerSide.value = data?.seriesWinnerSide ?? null;
+  currentRoundGaming.value = !!data?.currentRoundGaming;
   currentRoundId.value = data?.currentRound?.id ?? null;
 
   stages.value = (data?.stages || []).map((s: any) => ({

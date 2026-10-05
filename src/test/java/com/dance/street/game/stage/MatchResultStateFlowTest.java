@@ -115,6 +115,11 @@ class MatchResultStateFlowTest {
 
     private TStageVo newKnockoutStage(Long tid, String name, int teams, int advance,
                                       boolean thirdPlace, String publishMode) {
+        return newKnockoutStage(tid, name, teams, advance, thirdPlace, publishMode, "BO1");
+    }
+
+    private TStageVo newKnockoutStage(Long tid, String name, int teams, int advance,
+                                      boolean thirdPlace, String publishMode, String format) {
         TStageBo bo = new TStageBo();
         bo.setTournamentId(tid);
         bo.setName(name);
@@ -125,8 +130,8 @@ class MatchResultStateFlowTest {
         bo.setIsInitialized(0L);
         String third = thirdPlace ? ",\"thirdPlaceMatch\":true" : "";
         String publish = publishMode == null ? "" : ",\"publishMode\":\"" + publishMode + "\"";
-        bo.setRuleConfig("{\"mode\":\"KNOCKOUT\",\"knockout\":{\"teamsCount\":" + teams
-            + ",\"advanceCount\":" + advance + ",\"format\":\"BO1\",\"pairingMode\":\"SEED\""
+        bo.setRuleConfig("{\"mode\":\"KNOCKOUT\",\"format\":\"" + format + "\",\"knockout\":{\"teamsCount\":" + teams
+            + ",\"advanceCount\":" + advance + ",\"pairingMode\":\"SEED\""
             + third + publish + "},\"scoring\":{\"matchMode\":\"STANDARD\"}}");
         return stageService.insertByBo(bo);
     }
@@ -244,6 +249,18 @@ class MatchResultStateFlowTest {
         for (int i = 0; i < parts.size(); i++) {
             outcomes.put(parts.get(i).getCompetitorId(), i == 0 ? "WIN" : "LOSS");
         }
+        bo.setOutcomes(outcomes);
+        matchResultService.submitResult(bo);
+    }
+
+    /** 导播台判某局胜负(不负责开始场次,用于已在进行中的 BO 场次接着判) */
+    private void directorJudgeGame(Long matchId, boolean leftWin) {
+        List<TMatchParticipant> parts = realParticipants(matchId);
+        SubmitResultBo bo = new SubmitResultBo();
+        bo.setMatchId(matchId);
+        Map<Long, String> outcomes = new HashMap<>();
+        outcomes.put(parts.get(0).getCompetitorId(), leftWin ? "WIN" : "LOSS");
+        outcomes.put(parts.get(1).getCompetitorId(), leftWin ? "LOSS" : "WIN");
         bo.setOutcomes(outcomes);
         matchResultService.submitResult(bo);
     }
@@ -571,5 +588,194 @@ class MatchResultStateFlowTest {
         matchResultService.submitResult(bo);
         assertEquals(rowsAfterFirst, scoreRows(match.getId()),
             "重复提交应覆盖而不是新增明细行");
+    }
+
+    /** BO3(手动公布)两局打完(2:0):不自动结算,暂存结果等导播台「提前确认」,确认后按正常结果结算。 */
+    @Test
+    void bo3EarlySweepWaitsForConfirmThenSettles() {
+        Long tid = newTournament("BO3提前确认");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, "MANUAL", "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        vote(match.getId(), judge, true);
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus(),
+            "BO3 第1局打完不到2胜,应自动进第2局而不是结算");
+        assertEquals(2, roundCount(match.getId()), "第1局后应自动开第2局");
+
+        vote(match.getId(), judge, true);
+        TMatch afterSecond = matchMapper.selectById(match.getId());
+        assertEquals(StageConstants.MATCH_GAMING, afterSecond.getStatus(), "2:0 提前打出胜负,应等导播台确认");
+        assertNotNull(afterSecond.getResultJson(), "2:0 应暂存结果等待提前确认");
+        assertEquals(0, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()),
+            "确认前不应有人晋级");
+
+        matchResultService.publishResult(match.getId());
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
+            "提前确认后应按正常结果结算");
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ELIMINATED.getCode()));
+    }
+
+    /** BO3 2:0 后不点提前确认:继续开第3局,判完打满再结算。 */
+    @Test
+    void bo3SweepKeepsPlayingUntilThirdGameWhenNotConfirmed() {
+        Long tid = newTournament("BO3继续打满");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null, "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        vote(match.getId(), judge, true);
+        vote(match.getId(), judge, true);
+        TMatch afterSweep = matchMapper.selectById(match.getId());
+        assertEquals(StageConstants.MATCH_GAMING, afterSweep.getStatus(),
+            "2:0 不自动结束,应可继续判下一局");
+        assertNotNull(afterSweep.getResultJson(), "2:0 应暂存整场结果,供提前确认");
+        assertEquals(3, roundCount(match.getId()), "2:0 后应已开出第3局");
+
+        // 不点提前确认,继续判第3局 → 打满结算(即便第3局右方赢,整场仍是左方 2:1 胜)
+        vote(match.getId(), judge, false);
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
+            "打满3局后应结算");
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
+    }
+
+    /** BO3 2:0 后点提前确认:立即结束,无需判第3局。 */
+    @Test
+    void bo3EarlyConfirmEndsBeforeThirdGame() {
+        Long tid = newTournament("BO3提前结束");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null, "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        vote(match.getId(), judge, true);
+        vote(match.getId(), judge, true);
+        matchResultService.publishResult(match.getId());
+        TMatch after = matchMapper.selectById(match.getId());
+        assertEquals(StageConstants.MATCH_SETTLED, after.getStatus(), "提前确认后应立即结束整场");
+        assertNull(after.getResultJson(), "结束后不应残留待确认结果");
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
+    }
+
+    /** BO3 打满三局才分胜负(2:1):不暂存,直接按正常结果结算。 */
+    @Test
+    void bo3FullDistanceSettlesAutomatically() {
+        Long tid = newTournament("BO3打满");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null, "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        vote(match.getId(), judge, true);
+        vote(match.getId(), judge, false);
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus());
+        assertEquals(3, roundCount(match.getId()), "1:1 后应开第3局");
+
+        vote(match.getId(), judge, true);
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
+            "打满3局分出胜负应直接结算");
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
+    }
+
+    /** BO3 1:1 又打平:平局不计胜场,自动再加一局。 */
+    @Test
+    void bo3DrawAtOneOneAddsAnotherGame() {
+        Long tid = newTournament("BO3平局加局");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null, "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        vote(match.getId(), judge, true);
+        vote(match.getId(), judge, false);
+        voteDraw(match.getId(), judge);
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus(),
+            "1:1 又打平不算分出胜负,应继续加局");
+        assertEquals(4, roundCount(match.getId()), "平局应自动加第4局");
+        assertEquals(0, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
+
+        vote(match.getId(), judge, true);
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
+            "加局分出胜负后应结算");
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
+    }
+
+    /** DIRECTOR(导播台逐局判定)BO3:2:0 后同样开出第3局并可「提前结束」,无需裁判票。 */
+    @Test
+    void bo3DirectorSweepCanEndEarly() {
+        Long tid = newTournament("BO3导播判定");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, "DIRECTOR", "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        directorJudgeGame(match.getId(), true);
+        directorJudgeGame(match.getId(), true);
+        TMatch afterSweep = matchMapper.selectById(match.getId());
+        assertEquals(StageConstants.MATCH_GAMING, afterSweep.getStatus(),
+            "导播判定 2:0 不自动结束,应可继续判第3局");
+        assertNotNull(afterSweep.getResultJson(), "导播判定 2:0 也应暂存结果供提前结束");
+        assertEquals(3, roundCount(match.getId()), "2:0 后应已开出第3局");
+
+        matchResultService.publishResult(match.getId());
+        assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
+            "导播提前结束后整场立即结束");
+        assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
+    }
+
+    /** MC 重置指定局:删掉该局之后的局、清空该局判罚,回到该局重新判(局分随之回退)。 */
+    @Test
+    void bo3ResetRoundRewindsToThatRound() {
+        Long tid = newTournament("BO3重置某局");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null, "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        vote(match.getId(), judge, true);   // 第1局 A 胜
+        vote(match.getId(), judge, true);   // 第2局 A 胜 → 2:0,已开第3局并暂存结果
+        assertEquals(3, roundCount(match.getId()));
+        assertNotNull(matchMapper.selectById(match.getId()).getResultJson());
+
+        matchResultService.resetRound(match.getId(), 2L);
+        TMatch after = matchMapper.selectById(match.getId());
+        assertEquals(StageConstants.MATCH_GAMING, after.getStatus(), "重置后场次回到进行中");
+        assertNull(after.getResultJson(), "重置后不应残留待确认结果");
+        assertEquals(2, roundCount(match.getId()), "第2局之后的第3局应被删除");
+
+        // 重新判第2局为 B 胜 → 1:1,应自动再开第3局
+        vote(match.getId(), judge, false);
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus());
+        assertEquals(3, roundCount(match.getId()), "1:1 后应重新开第3局");
     }
 }

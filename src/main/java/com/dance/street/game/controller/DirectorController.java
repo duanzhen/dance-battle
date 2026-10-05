@@ -263,6 +263,19 @@ public class DirectorController {
     }
 
     /**
+     * 重置指定局(BO 多局制):删掉该局之后的局、清空该局判罚,场次回到该局进行中。
+     */
+    @Log(title = "导播台重置局", businessType = BusinessType.UPDATE)
+    @PostMapping("/match/{id}/round/{roundSequence}/reset")
+    public R<Void> resetRound(@PathVariable("id") Long id,
+                              @PathVariable("roundSequence") Long roundSequence,
+                              HttpServletRequest request) {
+        assertMatchInTournament(currentTournament(request), id);
+        matchResultService.resetRound(id, roundSequence);
+        return R.ok();
+    }
+
+    /**
      * 提交比赛结果
      */
     @Log(title = "导播台提交结果", businessType = BusinessType.UPDATE)

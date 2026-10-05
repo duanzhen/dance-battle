@@ -386,6 +386,15 @@
                   <template v-else>{{ match.status === 'SETTLED' ? '已结束' : '待开始' }}</template>
                 </span>
               </div>
+              <!-- BO3/BO5 局分:当前第几局 + 已赢局数 -->
+              <div v-if="(match.bestOf || 1) > 1" class="flex items-center justify-center gap-2 mb-1.5 text-[10px]">
+                <span class="text-neutral-500">BO{{ match.bestOf }} · 第{{ match.currentGame }}ROUND</span>
+                <span class="font-mono font-bold">
+                  <span :class="sideColorClass('LEFT')">{{ match.seriesLeftWins || 0 }}</span>
+                  <span class="text-neutral-600 mx-0.5">:</span>
+                  <span :class="sideColorClass('RIGHT')">{{ match.seriesRightWins || 0 }}</span>
+                </span>
+              </div>
               <div class="flex items-center gap-2">
                 <div class="flex-1 min-w-0 text-center">
                   <div v-if="match.leftWin" class="mb-1 flex justify-center" title="胜者">
@@ -452,11 +461,16 @@
                 </div>
               </div>
               <div v-if="match.status === 'GAMING' && match.pendingPublish" class="mt-2 text-center">
-                <span class="text-[9px] font-bold text-amber-400">裁判已判完，等待公布结果</span>
+                <span class="text-[9px] font-bold text-amber-400">
+                  {{ canEarlyEnd(match) ? '已分出胜负：可提前结束，也可继续判下一局' : '裁判已判完，等待公布结果' }}
+                </span>
               </div>
 
               <!-- 导播台判定模式:直接选择谁赢 -->
-              <div v-if="match.status === 'GAMING' && match.publishMode === 'DIRECTOR'" class="mt-2 grid grid-cols-3 gap-2">
+              <div
+                v-if="match.status === 'GAMING' && match.publishMode === 'DIRECTOR' && match.currentRoundGaming"
+                class="mt-2 grid grid-cols-3 gap-2"
+              >
                 <button
                   @click="handleDirectorJudge(match, 'LEFT')"
                   :disabled="actionLoading"
@@ -491,11 +505,11 @@
                   开始
                 </button>
                 <button
-                  v-if="match.status === 'GAMING' && match.pendingPublish && match.publishMode === 'MANUAL'"
+                  v-if="match.status === 'GAMING' && match.pendingPublish"
                   @click="handlePublish(match)"
                   class="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600/20 text-amber-400 border border-amber-600/30 active:scale-95 transition-transform"
                 >
-                  公布结果
+                  {{ confirmButtonLabel(match) }}
                 </button>
                 <button
                   v-if="match.status === 'GAMING' && currentStage?.stageMode === 'KNOCKOUT'"
@@ -512,9 +526,9 @@
                 >
                   删除
                 </button>
-                <!-- 展开/收起:仅已结束场次查看各轮判罚明细与重启;进行中已实时展示无需展开 -->
+                <!-- 展开/收起:进行中/已结束都可查看各轮判罚明细(前几 ROUND 结果 + 当前 ROUND 谁判了谁没判) -->
                 <button
-                  v-if="match.status === 'SETTLED'"
+                  v-if="match.status === 'SETTLED' || match.status === 'GAMING'"
                   @click="toggleExpand(match.id)"
                   class="w-7 h-7 rounded-lg flex items-center justify-center text-lg leading-none transition-colors"
                   :class="
@@ -537,17 +551,31 @@
                 <div v-for="r in match.roundVotes" :key="r.roundId" class="rounded-lg bg-neutral-900 border border-neutral-800 p-2">
                   <div class="flex items-center justify-between mb-1.5">
                     <span class="text-[10px] font-bold text-neutral-300">第{{ r.roundSequence }}轮</span>
-                    <span
-                      class="text-[8px] px-1.5 py-0.5 rounded"
-                      :class="
-                        r.outcome === 'DRAW'
-                          ? 'bg-amber-500/10 text-amber-400'
-                          : r.status === 'GAMING'
-                            ? 'bg-green-500/10 text-green-400'
-                            : 'bg-neutral-800 text-neutral-500'
-                      "
-                    >
-                      {{ r.outcome === 'DRAW' ? '平局' : r.status === 'GAMING' ? '进行中' : '已结束' }}
+                    <span class="flex items-center gap-1.5">
+                      <span v-if="roundResultText(r)" class="text-[9px] font-bold" :class="roundResultClass(r)">
+                        {{ roundResultText(r) }}
+                      </span>
+                      <span v-if="(r.refereeVotes || []).length" class="text-[8px] text-neutral-500">{{ roundJudgedText(r) }}</span>
+                      <span
+                        class="text-[8px] px-1.5 py-0.5 rounded"
+                        :class="
+                          r.outcome === 'DRAW'
+                            ? 'bg-amber-500/10 text-amber-400'
+                            : r.status === 'GAMING'
+                              ? 'bg-green-500/10 text-green-400'
+                              : 'bg-neutral-800 text-neutral-500'
+                        "
+                      >
+                        {{ r.status === 'GAMING' ? '进行中' : '已结束' }}
+                      </span>
+                      <button
+                        v-if="currentStage?.stageMode === 'KNOCKOUT'"
+                        @click.stop="handleResetRound(match, r.roundSequence)"
+                        class="text-[8px] px-1.5 py-0.5 rounded bg-red-600/15 text-red-400 border border-red-600/30 active:scale-95 transition-transform"
+                        title="重置本局及之后各局,重新判罚"
+                      >
+                        重置
+                      </button>
                     </span>
                   </div>
                   <div class="flex items-center gap-2 text-[10px] mb-1.5">
@@ -560,19 +588,9 @@
                     }}</span>
                   </div>
                   <div v-if="r.refereeVotes && r.refereeVotes.length" class="space-y-1">
-                    <div v-for="rv in r.refereeVotes" :key="rv.refereeId" class="flex items-center gap-2 text-[9px]">
-                      <div class="flex-1 min-w-0 text-center">
-                        <span v-if="rv.vote === 'LEFT'" class="font-bold" :class="sideColorClass('LEFT')">{{ rv.refereeName || '裁判' }}</span>
-                      </div>
-                      <div class="w-14 flex-none text-center">
-                        <span v-if="rv.vote === 'DRAW'" class="text-neutral-400 line-through decoration-neutral-500">{{
-                          rv.refereeName || '裁判'
-                        }}</span>
-                        <span v-else-if="!rv.vote" class="text-neutral-600">{{ rv.refereeName || '裁判' }}</span>
-                      </div>
-                      <div class="flex-1 min-w-0 text-center">
-                        <span v-if="rv.vote === 'RIGHT'" class="font-bold" :class="sideColorClass('RIGHT')">{{ rv.refereeName || '裁判' }}</span>
-                      </div>
+                    <div v-for="rv in r.refereeVotes" :key="rv.refereeId" class="flex items-center justify-between gap-2 text-[9px]">
+                      <span class="min-w-0 truncate text-neutral-300">{{ rv.refereeName || '裁判' }}</span>
+                      <span class="flex-none font-bold" :class="voteResultClass(rv.vote)">{{ voteResultText(rv.vote) }}</span>
                     </div>
                   </div>
                   <p v-else class="text-[9px] text-neutral-600 text-center py-0.5">本轮暂无裁判判罚</p>
@@ -798,6 +816,7 @@ import {
   directorStartMatch,
   directorCancelStartMatch,
   directorResetMatch,
+  directorResetRound,
   directorSubmitResult,
   directorPublishResult,
   directorSetCurrentCompetitor,
@@ -863,6 +882,9 @@ const mirrorMatch = (m: any) => {
     rightWin: !!m.leftWin,
     leftVotes: m.rightVotes ?? 0,
     rightVotes: m.leftVotes ?? 0,
+    seriesLeftWins: m.seriesRightWins ?? 0,
+    seriesRightWins: m.seriesLeftWins ?? 0,
+    seriesWinnerSide: m.seriesWinnerSide === 'LEFT' ? 'RIGHT' : m.seriesWinnerSide === 'RIGHT' ? 'LEFT' : null,
     refereeVotes: flipVotes(m.refereeVotes),
     roundVotes: (m.roundVotes || []).map((r: any) => ({
       ...r,
@@ -894,6 +916,37 @@ const sideButtonClass = (side: 'LEFT' | 'RIGHT') => {
   return red
     ? 'bg-red-600/15 text-red-400 border-red-600/30 active:bg-red-600/30'
     : 'bg-blue-600/15 text-blue-400 border-blue-600/30 active:bg-blue-600/30';
+};
+/**
+ * BO3/BO5 已分出胜负、但当前局仍可继续判(如 2:0 / 3:0):
+ * 此时既可「提前结束」,也可不点继续判下一局。
+ */
+const canEarlyEnd = (m: MatchInfo) =>
+  (m.bestOf || 1) > 1 && !!m.seriesWinnerSide && !!m.currentRoundGaming;
+/** 待确认按钮文案:可提前结束=提前结束/提前确认(DIRECTOR=提前结束);打满待公布=公布结果 */
+const confirmButtonLabel = (m: MatchInfo) =>
+  canEarlyEnd(m) ? (m.publishMode === 'DIRECTOR' ? '提前结束' : '提前确认') : '公布结果';
+/** 展开明细:每局结果(红胜/蓝胜/平局),DIRECTOR 无裁判票也算出来 */
+const roundResultText = (r: MatchRoundVote) =>
+  r.winnerSide === 'LEFT'
+    ? sideLabel('LEFT') + '胜'
+    : r.winnerSide === 'RIGHT'
+      ? sideLabel('RIGHT') + '胜'
+      : r.outcome === 'DRAW' || r.winnerSide === 'DRAW'
+        ? '平局'
+        : '';
+const roundResultClass = (r: MatchRoundVote) =>
+  r.winnerSide === 'LEFT' || r.winnerSide === 'RIGHT' ? sideColorClass(r.winnerSide) : 'text-neutral-400';
+/** 单个裁判本轮判罚结果文案/样式(未判为「未判」) */
+const voteResultText = (v?: string | null) =>
+  v === 'LEFT' ? sideLabel('LEFT') + '胜' : v === 'RIGHT' ? sideLabel('RIGHT') + '胜' : v === 'DRAW' ? '平' : '未判';
+const voteResultClass = (v?: string | null) =>
+  v === 'LEFT' || v === 'RIGHT' ? sideColorClass(v) : v === 'DRAW' ? 'text-neutral-400' : 'text-neutral-600';
+/** 本 ROUND 已判裁判数/应判裁判数 */
+const roundJudgedText = (r: MatchRoundVote) => {
+  const list = r.refereeVotes || [];
+  const done = list.filter((v) => v.vote).length;
+  return `${done}/${list.length} 已判`;
 };
 
 interface Stage {
@@ -934,6 +987,16 @@ interface MatchInfo {
   leftVotes?: number;
   rightVotes?: number;
   drawVotes?: number;
+  /** BO3/BO5 局分信息(bestOf=总局数, requiredWins=先赢几局, currentGame=第几局) */
+  bestOf?: number;
+  requiredWins?: number;
+  currentGame?: number;
+  seriesLeftWins?: number;
+  seriesRightWins?: number;
+  /** 整场胜负是否已定:LEFT/RIGHT/null */
+  seriesWinnerSide?: string | null;
+  /** 当前局是否还在进行(已可提前结束但未确认时,仍可继续判下一局) */
+  currentRoundGaming?: boolean;
   votedReferees?: number;
   totalReferees?: number;
   refereeVotes?: { refereeId?: string | number; refereeName?: string; vote?: string | null }[];
@@ -946,6 +1009,8 @@ interface MatchRoundVote {
   roundSequence: number;
   status: string;
   outcome?: string | null;
+  /** 本局胜方:LEFT/RIGHT/DRAW(裁判票或导播台判定现算) */
+  winnerSide?: string | null;
   leftName?: string;
   rightName?: string;
   refereeVotes?: { refereeId?: string | number; refereeName?: string; vote?: string | null }[];
@@ -1172,6 +1237,13 @@ const loadMatchesForStage = async (stageId: string) => {
         leftVotes: m.leftVotes ?? 0,
         rightVotes: m.rightVotes ?? 0,
         drawVotes: m.drawVotes ?? 0,
+        bestOf: m.bestOf ?? 1,
+        requiredWins: m.requiredWins ?? 1,
+        currentGame: m.currentGame ?? 1,
+        seriesLeftWins: m.seriesLeftWins ?? 0,
+        seriesRightWins: m.seriesRightWins ?? 0,
+        seriesWinnerSide: m.seriesWinnerSide ?? null,
+        currentRoundGaming: !!m.currentRoundGaming,
         votedReferees: m.votedReferees ?? 0,
         totalReferees: m.totalReferees ?? 0,
         refereeVotes: m.refereeVotes || [],
@@ -1528,6 +1600,18 @@ const handleRestartMatch = async (match: MatchInfo) => {
   } catch (e: any) {
     console.error('重启场次失败:', e);
     notifyError(e, '重启场次失败');
+  }
+};
+
+/** 重置某一局:删掉该局之后的局、清空该局判罚,回到该局重新判 */
+const handleResetRound = async (match: MatchInfo, roundSequence: number) => {
+  if (!(await askConfirm(`确认重置第${roundSequence}ROUND？该局及之后各局的判罚都会清空。`))) return;
+  try {
+    await directorResetRound(match.id, roundSequence);
+    await refreshMatches();
+  } catch (e: any) {
+    console.error('重置局失败:', e);
+    notifyError(e, '重置局失败');
   }
 };
 

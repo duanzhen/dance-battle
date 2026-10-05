@@ -31,6 +31,14 @@ public interface ITMatchResultService {
     /** 回退单场结算(调试用):级联清下游占位、清本场分数与排名、场次回 GAMING */
     void resetMatch(Long matchId);
 
+    /**
+     * 重置指定局(BO 多局制):删掉该局之后的所有局、清空该局判罚明细,
+     * 场次回到该局进行中,等待重新判罚。用于导播台发现某一局判错时回退。
+     *
+     * @param roundSequence 目标局序号(1 起)
+     */
+    void resetRound(Long matchId, Long roundSequence);
+
     /** 导播台确认公布结果(MANUAL 模式):用裁判判完暂存的结果结算场次 */
     com.dance.street.game.domain.vo.MatchResultVo publishResult(Long matchId);
 }

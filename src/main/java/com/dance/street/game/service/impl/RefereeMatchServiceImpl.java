@@ -19,6 +19,7 @@ import com.dance.street.game.domain.vo.RefereeMatchVo.RefereeStageInfo;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.MatchFormat;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
@@ -119,6 +120,7 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         boolean isAuditionStage = profile.audition();
         boolean isRankStage = profile.rank();
         boolean perCompetitorStage = profile.result().perCompetitor();
+        MatchFormat matchFormat = MatchFormat.of(stage.getRuleConfig());
         // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分
         boolean rankResultHidden = isRankStage && !"AUTO".equalsIgnoreCase(publishMode);
         // 分圈海选:裁判只应看到/判罚自己绑定的圈(t_match_referee 圈级绑定)。
@@ -198,6 +200,47 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         vo.setTournamentId(tournamentId);
         vo.setPublishMode(publishMode);
         vo.setPublishScope(publishScope);
+        // BO 局分:淘汰赛(非逐选手赛制)展示「第几局 + 已赢局数 + 是否待提前确认」
+        if (!perCompetitorStage) {
+            vo.setBestOf(matchFormat.maxGames());
+            vo.setRequiredWins(matchFormat.requiredWins());
+            // 局分不加字段:从每局判罚明细(t_round_score 的 VOTE)现算,左/右按场次槽位 0/1
+            Long leftCid = null;
+            Long rightCid = null;
+            for (TMatchParticipant p : participants) {
+                if (p.getDisplaySlotIndex() == null) {
+                    continue;
+                }
+                if (p.getDisplaySlotIndex() == 0L) {
+                    leftCid = p.getCompetitorId();
+                } else if (p.getDisplaySlotIndex() == 1L) {
+                    rightCid = p.getCompetitorId();
+                }
+            }
+            int leftWins = 0;
+            int rightWins = 0;
+            for (TMatchRound r : rounds) {
+                // 只有整局判完(所有应到裁判都判了)才计局分
+                if (!StageConstants.MATCH_SETTLED.equals(r.getStatus())) {
+                    continue;
+                }
+                int lw = roundWinVotes(r.getId(), leftCid);
+                int rw = roundWinVotes(r.getId(), rightCid);
+                if (lw > rw) {
+                    leftWins++;
+                } else if (rw > lw) {
+                    rightWins++;
+                }
+            }
+            vo.setSeriesLeftWins(leftWins);
+            vo.setSeriesRightWins(rightWins);
+            vo.setSeriesWinnerSide(leftWins >= matchFormat.requiredWins() ? "LEFT"
+                : rightWins >= matchFormat.requiredWins() ? "RIGHT" : null);
+            TMatchRound lastRound = rounds.isEmpty() ? null : rounds.get(rounds.size() - 1);
+            vo.setCurrentRoundGaming(lastRound != null
+                && StageConstants.MATCH_GAMING.equals(lastRound.getStatus()));
+            vo.setCurrentGame(Math.max(1, rounds.size()));
+        }
         // 海选:裁判端要显示「本场晋级几人 / 本赛段共晋级几人」(加赛显示本次加赛争几个名额)
         if (isAuditionStage) {
             vo.setStageAdvanceCount(auditionAdvanceInfoSupport.stageAdvanceCount(stage));
@@ -332,9 +375,10 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
                 ri.setId(r.getId());
                 ri.setRoundSequence(r.getRoundSequence());
                 ri.setStatus(r.getStatus());
-                // 平局加赛轮仅存在于淘汰赛/擂台赛(胜负判罚产生后续轮次);
-                // 海选/排名赛逐选手各占一个轮次,不标记为平局
-                if (!perCompetitorStage && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < mr.size() - 1) {
+                // BO1 平局加赛轮:已结算且非最后一轮即平局局。BO3/BO5 有胜局也会产生后续局,
+                // 不能据此判平——局分以整场 seriesLeftWins/seriesRightWins 为准,这里不再标注每局胜平。
+                if (!perCompetitorStage && matchFormat.maxGames() <= 1
+                    && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < mr.size() - 1) {
                     ri.setOutcome("DRAW");
                 }
                 ris.add(ri);
@@ -383,9 +427,9 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             ri.setId(r.getId());
             ri.setRoundSequence(r.getRoundSequence());
             ri.setStatus(r.getStatus());
-            // 已结算且非最后一轮的轮次 = 平局加赛轮(只有平局才会产生后续轮次);
-            // 海选/排名赛逐选手各占一个轮次,不标记为平局
-            if (!perCompetitorStage && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < rounds.size() - 1) {
+            // BO1 平局加赛轮才把"已结算且非最后一轮"判为平局;BO3/BO5 胜局也会有后续局。
+            if (!perCompetitorStage && matchFormat.maxGames() <= 1
+                && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < rounds.size() - 1) {
                 ri.setOutcome("DRAW");
             }
             roundInfos.add(ri);
@@ -628,5 +672,17 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             }
         }
         return allowed;
+    }
+
+    /** 某局判某参赛方胜的裁判票数(VOTE 明细里 score=1 且指向该参赛方的行数) */
+    private int roundWinVotes(Long roundId, Long competitorId) {
+        if (roundId == null || competitorId == null) {
+            return 0;
+        }
+        return roundScoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
+            .eq(TRoundScore::getRoundId, roundId)
+            .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE)
+            .eq(TRoundScore::getCompetitorId, competitorId)
+            .eq(TRoundScore::getScore, java.math.BigDecimal.ONE)).intValue();
     }
 }

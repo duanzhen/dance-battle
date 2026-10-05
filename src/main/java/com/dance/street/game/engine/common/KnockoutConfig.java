@@ -30,6 +30,9 @@ public class KnockoutConfig implements Serializable {
     /** 单轮配对模式:SEQUENTIAL(1-2、3-4 相邻)/ SEED(1-N、2-(N-1) 种子对位,海选赛后首轮常用) */
     private String pairingMode;
 
+    /** 比赛格式 BO1/BO3/BO5(兼容个别配置把 format 写在 knockout 段内;顶层 format 优先) */
+    private String format;
+
     /** 结果公布模式:AUTO(裁判判完自动公布)/ MANUAL(导播台确认后公布)/ DIRECTOR(导播台直接判定) */
     private String publishMode;
 }

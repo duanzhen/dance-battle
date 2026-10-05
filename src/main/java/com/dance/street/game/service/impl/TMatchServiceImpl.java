@@ -35,6 +35,7 @@ import com.dance.street.game.engine.common.StageModeProfiles;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.MatchFormat;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 
 import java.math.BigDecimal;
@@ -184,8 +185,90 @@ public class TMatchServiceImpl implements ITMatchService {
         fillPublishInfo(matches, byMatch);
         // 海选:本场(圈/加赛)晋级人数 + 本赛段共晋级人数(导播台展示)
         fillAuditionAdvanceInfo(matches);
+        // 淘汰赛:BO 局分(bestOf/需赢局数/当前局/已赢局数),供 MC 与大屏展示、提前确认
+        fillSeriesInfo(matches);
         // 淘汰赛:本场各轮判罚明细(每轮参赛者取自 round_score,保底用场次左右位)
         fillKnockoutRoundVotes(matches, byMatch, nameById);
+    }
+
+    /**
+     * 淘汰赛 BO 局分:bestOf/需赢局数取赛段 format;局分从每局判罚明细现算(不加字段)。
+     * 左/右按场次槽位 0/1,胜局 = 该局该方得票多于对方;平局局双方都不计。
+     */
+    private void fillSeriesInfo(List<TMatchVo> matches) {
+        if (matches == null || matches.isEmpty()) {
+            return;
+        }
+        List<Long> stageIds = matches.stream().map(TMatchVo::getStageId).filter(Objects::nonNull).distinct().toList();
+        if (stageIds.isEmpty()) {
+            return;
+        }
+        Map<Long, TStage> stageById = stageMapper.selectByIds(stageIds).stream()
+            .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
+        List<TMatchVo> koMatches = matches.stream()
+            .filter(m -> {
+                TStage s = stageById.get(m.getStageId());
+                return s != null && StageModeEnum.KNOCKOUT.getCode().equals(s.getStageMode())
+                    && "STANDARD".equals(m.getMatchMode());
+            })
+            .toList();
+        if (koMatches.isEmpty()) {
+            return;
+        }
+        List<Long> matchIds = koMatches.stream().map(TMatchVo::getId).filter(Objects::nonNull).toList();
+        List<TMatchRound> rounds = matchIds.isEmpty() ? List.of()
+            : matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .in(TMatchRound::getMatchId, matchIds)
+                .orderByAsc(TMatchRound::getMatchId)
+                .orderByAsc(TMatchRound::getRoundSequence));
+        Map<Long, List<TMatchRound>> roundsByMatch = rounds.stream()
+            .collect(Collectors.groupingBy(TMatchRound::getMatchId));
+        List<Long> roundIds = rounds.stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        Map<Long, List<TRoundScore>> votesByRound = roundIds.isEmpty() ? Map.of()
+            : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                    .in(TRoundScore::getRoundId, roundIds)
+                    .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE))
+                .stream().collect(Collectors.groupingBy(TRoundScore::getRoundId));
+        for (TMatchVo vo : koMatches) {
+            MatchFormat fmt = MatchFormat.of(stageById.get(vo.getStageId()).getRuleConfig());
+            vo.setBestOf(fmt.maxGames());
+            vo.setRequiredWins(fmt.requiredWins());
+            List<TMatchRound> roundList = roundsByMatch.getOrDefault(vo.getId(), List.of());
+            vo.setCurrentGame(Math.max(1, roundList.size()));
+            int leftWins = 0;
+            int rightWins = 0;
+            for (TMatchRound r : roundList) {
+                // 只有整局判完(所有应到裁判都判了)才计局分,避免一张票就把局分算进去
+                if (!StageConstants.MATCH_SETTLED.equals(r.getStatus())) {
+                    continue;
+                }
+                int lw = 0;
+                int rw = 0;
+                for (TRoundScore v : votesByRound.getOrDefault(r.getId(), List.of())) {
+                    if (v.getScore() == null || v.getScore().compareTo(BigDecimal.ONE) != 0) {
+                        continue;
+                    }
+                    if (Objects.equals(v.getCompetitorId(), vo.getLeftCompetitorId())) {
+                        lw++;
+                    } else if (Objects.equals(v.getCompetitorId(), vo.getRightCompetitorId())) {
+                        rw++;
+                    }
+                }
+                if (lw > rw) {
+                    leftWins++;
+                } else if (rw > lw) {
+                    rightWins++;
+                }
+            }
+            vo.setSeriesLeftWins(leftWins);
+            vo.setSeriesRightWins(rightWins);
+            // 整场胜负是否已定 + 当前局是否还在进行(提前确认可与"继续判下一局"并存)
+            vo.setSeriesWinnerSide(leftWins >= fmt.requiredWins() ? "LEFT"
+                : rightWins >= fmt.requiredWins() ? "RIGHT" : null);
+            TMatchRound currentRound = roundList.isEmpty() ? null : roundList.get(roundList.size() - 1);
+            vo.setCurrentRoundGaming(currentRound != null
+                && StageConstants.MATCH_GAMING.equals(currentRound.getStatus()));
+        }
     }
 
     /**
@@ -572,8 +655,10 @@ public class TMatchServiceImpl implements ITMatchService {
                 rv.setRoundId(r.getId());
                 rv.setRoundSequence(r.getRoundSequence());
                 rv.setStatus(r.getStatus());
-                // 已结算且非最后一轮的轮次 = 平局加赛轮(只有平局才会产生后续轮次)
-                if (StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < roundList.size() - 1) {
+                // BO1 平局加赛轮:已结算且非最后一轮即平局局。
+                // BO3/BO5 有胜局也会产生后续局,不能据此判平(局分见 seriesLeftWins/seriesRightWins)。
+                boolean boSeries = vo.getBestOf() != null && vo.getBestOf() > 1;
+                if (!boSeries && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < roundList.size() - 1) {
                     rv.setOutcome("DRAW");
                 }
                 // 本轮实际参赛者:按设计取 round_score 中出现的 competitor(去重),
@@ -641,12 +726,17 @@ public class TMatchServiceImpl implements ITMatchService {
                 }
                 long votedRefs = votes.stream().map(TRoundScore::getRefereeId)
                     .filter(Objects::nonNull).distinct().count();
+                // 导播台直接判定(不经过裁判)会把本局判定写成 referee_id=0 的明细:
+                // 这种局不能按"应到裁判是否投满"判断,只要有该明细就能定本局胜方。
+                boolean directorJudged = votes.stream()
+                    .anyMatch(v -> v.getRefereeId() != null && v.getRefereeId() == 0L);
                 String winnerSide = null;
-                if (!assigned.isEmpty() && votedRefs >= assigned.size()) {
+                if (directorJudged || (!assigned.isEmpty() && votedRefs >= assigned.size())) {
                     winnerSide = leftWins > rightWins ? "LEFT"
                         : rightWins > leftWins ? "RIGHT" : "DRAW";
                 }
-                if (winnerSide == null && StageConstants.MATCH_SETTLED.equals(vo.getStatus())) {
+                // 兜底仅限 BO1:BO3/BO5 多局时不能用整场胜者给每一局贴上同一个结果
+                if (winnerSide == null && StageConstants.MATCH_SETTLED.equals(vo.getStatus()) && !boSeries) {
                     if (Boolean.TRUE.equals(vo.getLeftWin())) {
                         winnerSide = "LEFT";
                     } else if (Boolean.TRUE.equals(vo.getRightWin())) {

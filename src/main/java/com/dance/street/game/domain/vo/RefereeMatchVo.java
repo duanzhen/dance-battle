@@ -73,6 +73,25 @@ public class RefereeMatchVo implements Serializable {
     /** 手动公布模式:裁判已判完、等待导播台公布 */
     private Boolean pendingPublish;
 
+    /** BO 局数(BO1=1/BO3=3/BO5=5);非淘汰赛为 null */
+    private Integer bestOf;
+
+    /** 先赢几局获胜(BO3=2/BO5=3);非淘汰赛为 null */
+    private Integer requiredWins;
+
+    /** 已进行的局数(第几局) */
+    private Integer currentGame;
+
+    /** BO 局分:本场左/右方(按场次槽位 0/1)已赢局数 */
+    private Integer seriesLeftWins;
+    private Integer seriesRightWins;
+
+    /** 整场胜负是否已定:已有一方赢满需赢局数时为其槽位 LEFT/RIGHT,否则 null */
+    private String seriesWinnerSide;
+
+    /** 当前局(轮次)是否进行中:为 true 时仍可继续判下一局(即使已可提前确认) */
+    private Boolean currentRoundGaming;
+
     /** 海选:本场(本圈/加赛)晋级人数 */
     private Integer advanceCount;
 

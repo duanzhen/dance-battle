@@ -53,6 +53,15 @@ public class TTournament extends TenantEntity {
     private Long status;
 
     /**
+     * 逻辑删除:0 未删除 1 已删除。
+     *
+     * <p>删除赛事只在主表打这个标记,下属数据(赛段/场景/控件/裁判/选手等)一律保留;
+     * 所有基于本实体的查询会自动附加 {@code deleted = 0},因此已删除赛事不再出现在入口列表中。</p>
+     */
+    @TableLogic
+    private Integer deleted;
+
+    /**
      * 设计稿宽度
      */
     private Long logicalWidth;

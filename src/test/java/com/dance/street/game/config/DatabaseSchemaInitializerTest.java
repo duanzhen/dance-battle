@@ -106,6 +106,14 @@ class DatabaseSchemaInitializerTest {
             assertTrue(index.matches("(?is)^CREATE\\s+(UNIQUE\\s+)?INDEX.*"), "应为 CREATE INDEX 语句: " + index);
             assertFalse(index.matches("(?is)^CREATE\\s+TABLE.*"), "不应包含建表语句: " + index);
         }
+
+        // 老库缺列靠 parseColumnDefinitions 出来的定义 ALTER 补齐:确认软删除列能被解析到
+        java.util.Map<String, String> tournamentColumns = ddlList.stream()
+            .filter(ddl -> "t_tournament".equals(DatabaseSchemaInitializer.extractTableName(ddl)))
+            .findFirst()
+            .map(DatabaseSchemaInitializer::parseColumnDefinitions)
+            .orElseThrow();
+        assertTrue(tournamentColumns.containsKey("deleted"), "t_tournament 应解析出 deleted 列(供老库自动补列)");
     }
 
     @Test

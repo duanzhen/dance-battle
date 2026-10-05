@@ -63,16 +63,25 @@
           <h1 class="text-3xl font-bold text-white tracking-tight">赛事大厅</h1>
           <p class="text-neutral-400 text-sm mt-1">发现并参与最热门的街舞赛事</p>
         </div>
-        <button
-          @click="showForm = true"
-          class="relative bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white px-5 py-2.5 rounded-lg font-bold transition-all shadow-lg shadow-amber-900/40 hover:shadow-amber-600/40 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] flex items-center gap-2 group overflow-hidden"
-        >
-          <span class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"></span>
-          <svg class="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
-          </svg>
-          <span class="relative">创建赛事</span>
-        </button>
+        <div class="flex items-center gap-2.5">
+          <button
+            @click="showHelp = true"
+            class="px-4 py-2.5 rounded-lg text-sm font-bold text-neutral-300 bg-neutral-900 border border-neutral-700 hover:border-amber-500/50 hover:text-amber-400 hover:bg-neutral-800 active:scale-[0.98] transition-all flex items-center gap-2"
+          >
+            <CircleHelp class="w-4 h-4" />
+            <span>使用帮助</span>
+          </button>
+          <button
+            @click="showForm = true"
+            class="relative bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white px-5 py-2.5 rounded-lg font-bold transition-all shadow-lg shadow-amber-900/40 hover:shadow-amber-600/40 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] flex items-center gap-2 group overflow-hidden"
+          >
+            <span class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"></span>
+            <svg class="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
+            </svg>
+            <span class="relative">创建赛事</span>
+          </button>
+        </div>
       </div>
 
       <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4 shadow-xl shadow-black/20 mb-8">
@@ -149,13 +158,6 @@
 
           <!-- 内容 -->
           <div class="absolute inset-0 flex flex-col p-4 z-10">
-            <!-- 游戏类型 -->
-            <div class="mb-2">
-              <span class="text-xs font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-                {{ item.gameType }}
-              </span>
-            </div>
-
             <!-- 赛事标题 -->
             <h3 class="text-lg font-bold text-white mb-2 line-clamp-2 group-hover:text-amber-500 transition-colors flex-1">
               {{ item.title }}
@@ -177,7 +179,7 @@
                     d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                   />
                 </svg>
-                {{ item.startDate }}
+                创建 {{ formatDate(item.createdAt) }}
               </div>
 
               <div class="flex items-center text-neutral-500 text-xs">
@@ -189,7 +191,34 @@
                     d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
                   />
                 </svg>
-                {{ item.participants }} <span class="text-neutral-600 mx-1">/</span> {{ item.maxParticipants }}
+                {{ item.playerCount }} 名选手
+              </div>
+
+              <!-- 赛段链:放到底部、单行不换行,只显示前几个,避免与右上角状态标签重叠 -->
+              <div
+                v-if="item.stageNames.length > 0"
+                class="flex flex-nowrap items-center gap-1 overflow-hidden pt-2 border-t border-neutral-800/70"
+              >
+                <template v-for="(stageName, i) in item.stageNames.slice(0, STAGE_PREVIEW_COUNT)" :key="i">
+                  <span class="text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded whitespace-nowrap">
+                    {{ stageName }}
+                  </span>
+                  <svg
+                    v-if="i < Math.min(item.stageNames.length, STAGE_PREVIEW_COUNT) - 1"
+                    class="w-2.5 h-2.5 text-neutral-600 flex-none"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 12h14m0 0l-4-4m4 4l-4 4" />
+                  </svg>
+                </template>
+                <span
+                  v-if="item.stageNames.length > STAGE_PREVIEW_COUNT"
+                  class="text-[10px] font-bold text-neutral-400 bg-neutral-800 border border-neutral-700 px-1.5 py-0.5 rounded whitespace-nowrap flex-none"
+                >
+                  +{{ item.stageNames.length - STAGE_PREVIEW_COUNT }}
+                </span>
               </div>
             </div>
           </div>
@@ -199,7 +228,8 @@
         </div>
       </div>
 
-      <div v-else class="flex flex-col items-center justify-center py-20 text-center">
+      <!-- 有筛选/搜索条件但无结果 -->
+      <div v-else-if="isFiltering" class="flex flex-col items-center justify-center py-20 text-center">
         <div class="w-24 h-24 rounded-full flex items-center justify-center mb-5 border border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 shadow-xl shadow-black/40">
           <svg class="w-10 h-10 text-neutral-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -221,6 +251,89 @@
           </svg>
           清除筛选条件
         </button>
+      </div>
+
+      <!-- 首次使用:还没有任何赛事,展示上手引导而非"未找到" -->
+      <div v-else class="max-w-3xl mx-auto py-10 sm:py-14">
+        <div class="text-center">
+          <div class="w-20 h-20 mx-auto rounded-2xl flex items-center justify-center mb-6 border border-amber-500/30 bg-gradient-to-b from-amber-500/15 to-amber-500/5 shadow-xl shadow-amber-900/20">
+            <svg class="w-9 h-9 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              />
+            </svg>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">创建你的第一场赛事</h2>
+          <p class="text-neutral-400 text-sm mt-3 max-w-lg mx-auto leading-relaxed">
+            从建赛到开赛只需四步。选一个模版即可自动生成赛段链、场景与对战树，剩下的按引导逐项完成。
+          </p>
+          <button
+            @click="showForm = true"
+            class="mt-7 px-6 py-3 rounded-xl font-bold text-white bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 shadow-lg shadow-amber-900/40 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] transition-all inline-flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4" />
+            </svg>
+            创建赛事
+          </button>
+        </div>
+
+        <!-- 四步上手 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-10">
+          <div
+            v-for="(step, i) in onboardingSteps"
+            :key="i"
+            class="flex items-start gap-3 rounded-xl border border-neutral-800 bg-neutral-900/60 p-4"
+          >
+            <div
+              class="flex-none w-8 h-8 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center text-amber-500 font-bold text-sm"
+            >
+              {{ i + 1 }}
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-sm font-bold text-neutral-100">{{ step.title }}</h3>
+              <p class="text-xs text-neutral-500 mt-1 leading-relaxed">{{ step.desc }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 角色说明:减少"找不到开赛入口"的困惑 -->
+        <div class="mt-8 rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+          <h3 class="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-3">开赛后谁用哪个入口</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div class="flex items-start gap-2">
+              <span class="text-amber-500 font-bold flex-none">管理端</span>
+              <span class="text-neutral-500">你在这里：建赛、编排赛段、导入名单与签到</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-amber-500 font-bold flex-none">手机导播台</span>
+              <span class="text-neutral-500">MC 扫码进入，负责开赛、完成赛段、公布结果</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-amber-500 font-bold flex-none">大屏 / 裁判</span>
+              <span class="text-neutral-500">大屏匿名投射，裁判扫码判罚</span>
+            </div>
+          </div>
+          <a
+            href="https://docs.dancebattle.win/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="mt-4 inline-flex items-center gap-1.5 text-xs text-amber-500 hover:text-amber-400 transition-colors"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
+            </svg>
+            查看完整使用文档
+          </a>
+        </div>
       </div>
 
       <!-- 分页:每页 20 条 -->
@@ -265,6 +378,54 @@
     <TournamentForm v-model="showForm" @submit-success="handleFormSuccess" />
     <!-- 修改密码对话框 -->
     <PasswordDialog ref="passwordDialogRef" />
+
+    <!-- 使用帮助:整体流程介绍 -->
+    <GameDialog
+      v-model="showHelp"
+      width="680px"
+      title="使用流程"
+      subtitle="从建赛到开赛,几步走完一整场比赛"
+      :icon="CircleHelp"
+      dialog-class="help-dialog"
+    >
+      <div class="space-y-2.5 max-h-[64vh] overflow-y-auto pr-1">
+        <div
+          v-for="(step, i) in helpSteps"
+          :key="i"
+          class="flex items-start gap-3 rounded-xl border border-neutral-800 bg-neutral-950/60 p-3"
+        >
+          <div class="flex-none w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center text-xs font-bold">
+            {{ i + 1 }}
+          </div>
+          <div class="min-w-0">
+            <h4 class="text-sm font-bold text-neutral-100">
+              {{ step.title }}
+              <span v-if="step.where" class="ml-1 text-[11px] font-normal text-amber-500/80">· {{ step.where }}</span>
+            </h4>
+            <p class="text-xs text-neutral-400 mt-1 leading-relaxed">{{ step.desc }}</p>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex items-center justify-between gap-3">
+          <a
+            href="https://docs.dancebattle.win/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-xs text-amber-500 hover:text-amber-400 transition-colors"
+          >
+            查看完整文档
+          </a>
+          <button
+            @click="showHelp = false"
+            class="px-5 py-2 rounded-lg text-sm font-bold text-neutral-900 bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all"
+          >
+            知道了
+          </button>
+        </div>
+      </template>
+    </GameDialog>
   </div>
 </template>
 
@@ -272,8 +433,10 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessageBox } from 'element-plus';
+import { CircleHelp } from 'lucide-vue-next';
 import { useUserStore } from '@/store/modules/user';
 import PasswordDialog from '@/components/PasswordDialog/index.vue';
+import GameDialog from '@/components/GameDialog/index.vue';
 import TournamentForm from './TournamentForm.vue';
 import { listTournament } from '@/api/game/tournament';
 import logoFlat from '@/assets/logo/logo_flat.png';
@@ -306,6 +469,42 @@ const handleUserCommand = async (command: string) => {
 // --- 表单显示控制 ---
 const showForm = ref(false);
 
+// --- 使用帮助弹窗 ---
+const showHelp = ref(false);
+// 整体使用流程:从建赛到开赛,每步标注在哪个入口完成
+const helpSteps = [
+  {
+    title: '创建赛事',
+    where: '管理端 · 赛事大厅',
+    desc: '点「创建赛事」填名称、选裁判与模版。选模版会自动生成赛段链、场景与对战树；也可以留空后手动编排。'
+  },
+  {
+    title: '导入选手并签到',
+    where: '管理端 · 赛事配置 → 参赛阵容',
+    desc: '用「批量导入」上传 Excel，或逐个添加选手。现场按签到给选手编号落圈；海选进行中签到会自动加入场次。'
+  },
+  {
+    title: '编排赛段与名单来源',
+    where: '管理端 · 赛段流程',
+    desc: '增删赛段、设置赛制规则，配置「谁晋级进哪一段」。上一段结束后，在中间态确认晋级名单，下一段才能开赛。'
+  },
+  {
+    title: '开赛',
+    where: '手机导播台（MC 扫码进入）',
+    desc: '点「开始赛段」自动生成对阵，逐场推进；每场判完点「下一场」，赛段打完点「完成赛段」结算排名。'
+  },
+  {
+    title: '裁判判罚',
+    where: '裁判端（裁判扫码进入）',
+    desc: '在赛事配置的「裁判组」里给每名裁判生成专属二维码；裁判扫码进入打分页，只看到自己该看的内容。'
+  },
+  {
+    title: '大屏投射',
+    where: '大屏（无需登录）',
+    desc: '打开「赛事大屏」，实时同步对战树、记分板与倒计时给观众；多台机器可互相联动。'
+  }
+];
+
 // --- 定义页面使用的赛事数据结构 ---
 interface TournamentItem {
   id: string | number;
@@ -313,12 +512,12 @@ interface TournamentItem {
   description: string;
   coverImage: string;
   status: string;
-  gameType: string;
-  format: string;
-  participants: number;
-  maxParticipants: number;
-  startDate: string;
-  progress: number;
+  /** 参赛选手数(真实聚合) */
+  playerCount: number;
+  /** 赛段名称列表(真实聚合,按赛段链顺序) */
+  stageNames: string[];
+  /** 创建时间(真实字段,ISO 字符串) */
+  createdAt: string;
 }
 
 // --- 数据状态 ---
@@ -327,6 +526,8 @@ const loading = ref(false);
 const total = ref(0);
 const pageNum = ref(1);
 const PAGE_SIZE = 20;
+/** 卡片底部赛段链最多展示几个(单行不换行,多余的用 +N 表示) */
+const STAGE_PREVIEW_COUNT = 3;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 // --- 数据适配器: 将API返回的数据转换为页面需要的格式 ---
@@ -340,17 +541,25 @@ const adaptTournamentData = (apiData: TournamentVO[]): TournamentItem[] => {
     return {
       id: item.id,
       title: item.name,
-      description: item.remark || '暂无描述',
+      description: item.description || item.remark || '暂无描述',
       coverImage: item.coverImage || '',
       status: statusStr,
-      gameType: '街舞赛事',
-      format: '积分赛',
-      participants: 0,
-      maxParticipants: 100,
-      startDate: '2024-01-01',
-      progress: item.status === 1 ? 50 : item.status === 2 ? 100 : 0
+      playerCount: Number(item.playerCount ?? 0),
+      stageNames: Array.isArray(item.stageNames) ? item.stageNames : [],
+      createdAt: item.createTime || ''
     };
   });
+};
+
+// --- 创建时间格式化(仅取日期部分,避免时区导致的显示抖动) ---
+const formatDate = (value?: string) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
 // --- 加载赛事数据 ---
@@ -437,6 +646,17 @@ const searchQuery = ref('');
 
 // 搜索/状态筛选已交由后端分页查询,这里直接返回当前页数据
 const filteredTournaments = computed(() => tournaments.value);
+
+// 是否处于筛选/搜索状态:用于区分"搜不到"与"一场赛事都还没有"两种空态
+const isFiltering = computed(() => currentTab.value !== 'ALL' || searchQuery.value.trim() !== '');
+
+// 首次使用引导步骤
+const onboardingSteps = [
+  { title: '创建赛事', desc: '填名称、选裁判与模版，赛段链/场景/对战树会自动生成' },
+  { title: '导入选手并签到', desc: '导入 Excel 或逐个添加，现场按号码签到落圈' },
+  { title: '手机导播台开赛', desc: 'MC 扫码进入，开始赛段、逐场推进、完成结算' },
+  { title: '大屏投射', desc: '打开赛事大屏，对战树与记分板实时同步到观众' }
+];
 
 const resetFilters = () => {
   currentTab.value = 'ALL';
@@ -552,5 +772,10 @@ html {
 .user-menu-popper .el-popper__arrow::before {
   background: #171717;
   border-color: #262626;
+}
+
+/* 使用帮助弹窗:窄屏下不超出视口 */
+.el-overlay .help-dialog {
+  max-width: 92vw;
 }
 </style>

@@ -69,10 +69,10 @@ export const updateStageConfig = (id: string | number, data: StageConfigForm) =>
 };
 
 /**
- * 删除赛段流程
- * @param id
+ * 删除赛段流程(一次只支持一个赛段)
+ * @param id 赛段ID
  */
-export const delStage = (id: string | number | Array<string | number>) => {
+export const delStage = (id: string | number) => {
   return request({
     url: '/game/stage/' + id,
     method: 'delete'

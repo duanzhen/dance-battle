@@ -317,6 +317,8 @@ CREATE TABLE IF NOT EXISTS `t_tournament` (
   `cover_image` TEXT,
   `description` TEXT,
   `status` INTEGER DEFAULT 0,
+  -- 逻辑删除:0 未删除 1 已删除
+  `deleted` INTEGER DEFAULT 0,
   `logical_width` INTEGER DEFAULT 1920,
   `logical_height` INTEGER DEFAULT 1080,
   `theme_config` TEXT,

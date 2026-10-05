@@ -10,6 +10,7 @@ import lombok.Data;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.Date;
+import java.util.List;
 
 
 
@@ -84,6 +85,21 @@ public class TTournamentVo implements Serializable {
      */
     @ExcelProperty(value = "备注")
     private String remark;
+
+    /**
+     * 创建时间(实体 BaseEntity 字段,列表展示用)
+     */
+    private Date createTime;
+
+    /**
+     * 参赛选手总数(列表聚合,非表字段)
+     */
+    private Long playerCount;
+
+    /**
+     * 赛段名称列表(按赛段链顺序,列表聚合,非表字段)
+     */
+    private List<String> stageNames;
 
 
 }

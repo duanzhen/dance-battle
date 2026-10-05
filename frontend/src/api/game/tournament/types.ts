@@ -15,6 +15,11 @@ export interface TournamentVO {
   coverImage: string;
 
   /**
+   * 详情(列表卡片描述展示用)
+   */
+  description?: string;
+
+  /**
    * 0:筹备 1:进行中 2:结束
    */
   status: number;
@@ -38,6 +43,21 @@ export interface TournamentVO {
    * 备注
    */
   remark: string;
+
+  /**
+   * 创建时间(ISO 字符串)
+   */
+  createTime?: string;
+
+  /**
+   * 参赛选手总数(列表聚合)
+   */
+  playerCount?: number;
+
+  /**
+   * 赛段名称列表(按赛段链顺序,列表聚合)
+   */
+  stageNames?: string[];
 }
 
 export interface TournamentForm extends BaseEntity {

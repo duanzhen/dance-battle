@@ -34,6 +34,7 @@ import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.TVisScene;
 import com.dance.street.game.domain.TVisWidget;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
+import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
@@ -58,6 +59,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Collection;
 import java.util.Objects;
+import java.util.Set;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.stream.Collectors;
 
 import tools.jackson.databind.ObjectMapper;
 import com.dance.street.game.engine.common.SnowflakeJson;
@@ -193,7 +198,80 @@ public class TTournamentServiceImpl implements ITTournamentService {
     public TableDataInfo<TTournamentVo> queryPageList(TTournamentBo bo, PageQuery pageQuery) {
         LambdaQueryWrapper<TTournament> lqw = buildQueryWrapper(bo);
         Page<TTournamentVo> result = baseMapper.selectVoPage(pageQuery.build(), lqw);
+        enrichListStats(result.getRecords());
         return TableDataInfo.build(result);
+    }
+
+    /**
+     * 为列表补充聚合数据:参赛选手数、赛段名称列表。
+     *
+     * <p>每类各一次 IN 查询后在内存归并,不逐行查库(避免 N+1),也不依赖具体数据库的
+     * group by 写法(SQLite / MySQL 通用)。赛段名称按赛段链(next)顺序排列,与编排页一致;
+     * 作废(DISCARD)的赛段不展示。</p>
+     */
+    private void enrichListStats(List<TTournamentVo> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        List<Long> ids = records.stream().map(TTournamentVo::getId).filter(Objects::nonNull).toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<Long, Long> playerCounts = playerMapper.selectList(
+                Wrappers.<TPlayer>lambdaQuery()
+                    .in(TPlayer::getTournamentId, ids)
+                    .select(TPlayer::getTournamentId))
+            .stream()
+            .collect(Collectors.groupingBy(TPlayer::getTournamentId, Collectors.counting()));
+        // 赛段:一次取回本页赛段的链信息,内存里按 next 链排序取名称
+        Map<Long, List<TStage>> stagesByTournament = stageMapper.selectList(
+                Wrappers.<TStage>lambdaQuery()
+                    .in(TStage::getTournamentId, ids)
+                    .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
+                    .select(TStage::getId, TStage::getTournamentId, TStage::getName, TStage::getNextStageId)
+                    .orderByAsc(TStage::getId))
+            .stream()
+            .collect(Collectors.groupingBy(TStage::getTournamentId));
+        for (TTournamentVo vo : records) {
+            vo.setPlayerCount(playerCounts.getOrDefault(vo.getId(), 0L));
+            vo.setStageNames(orderedStageNames(stagesByTournament.getOrDefault(vo.getId(), List.of())));
+        }
+    }
+
+    /**
+     * 把某赛事的赛段按 next 链排成线性顺序并取名称。
+     *
+     * <p>与 {@link StageChain#orderedChain(Long)} 同一口径(链头=无人以 next 指向者;
+     * 断链/成环的赛段按 id 顺序补在末尾),但在内存完成——复用上面一次批量查询取回的数据,
+     * 不额外查库。列表已按 id 升序,因此"补在末尾"的顺序稳定。</p>
+     */
+    private List<String> orderedStageNames(List<TStage> stages) {
+        if (stages == null || stages.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, TStage> byId = new HashMap<>();
+        Set<Long> referenced = new HashSet<>();
+        for (TStage s : stages) {
+            byId.put(s.getId(), s);
+            if (s.getNextStageId() != null) {
+                referenced.add(s.getNextStageId());
+            }
+        }
+        TStage head = stages.stream().filter(s -> !referenced.contains(s.getId())).findFirst().orElse(stages.get(0));
+        List<String> names = new ArrayList<>();
+        Set<Long> visited = new HashSet<>();
+        TStage cur = head;
+        while (cur != null && visited.add(cur.getId())) {
+            names.add(cur.getName());
+            cur = cur.getNextStageId() == null ? null : byId.get(cur.getNextStageId());
+        }
+        // 断链/自成环的赛段没走到,按 id 顺序补齐,保证不漏
+        for (TStage s : stages) {
+            if (!visited.contains(s.getId())) {
+                names.add(s.getName());
+            }
+        }
+        return names;
     }
 
     /**
@@ -709,30 +787,10 @@ public class TTournamentServiceImpl implements ITTournamentService {
         if (ids == null || ids.isEmpty()) {
             return false;
         }
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
-        }
-        List<Long> tids = ids.stream().map(Long::valueOf).toList();
-        // 级联删除:赛段及其关联(场次/参赛方/打分/裁判关联)→ 可视化场景与控件 → 裁判 → 选手
-        for (Long tid : tids) {
-            TStageBo q = new TStageBo();
-            q.setTournamentId(tid);
-            List<TStageVo> stages = stageService.queryList(q);
-            if (!stages.isEmpty()) {
-                stageService.deleteWithValidByIds(
-                    stages.stream().map(TStageVo::getId).toList(), false);
-            }
-        }
-        visWidgetMapper.delete(Wrappers.<TVisWidget>lambdaQuery()
-            .in(TVisWidget::getTournamentId, tids));
-        visSceneMapper.delete(Wrappers.<TVisScene>lambdaQuery()
-            .in(TVisScene::getTournamentId, tids));
-        refereeStageMapper.delete(Wrappers.<TRefereeStage>lambdaQuery()
-            .in(TRefereeStage::getTournamentId, tids));
-        refereeMapper.delete(Wrappers.<TReferee>lambdaQuery()
-            .in(TReferee::getTournamentId, tids));
-        playerMapper.delete(Wrappers.<TPlayer>lambdaQuery()
-            .in(TPlayer::getTournamentId, tids));
+        // 软删除:只在赛事主表打逻辑删除标记(@TableLogic → UPDATE deleted = 1)。
+        // 不级联删除任何下属数据——赛段/场次/参赛方/打分/场景/控件/裁判/选手全部保留。
+        // 所有基于本实体的查询会自动附加 deleted = 0,已删除赛事不再出现在入口列表,
+        // 数据仍完整留库,便于追溯或恢复。
         return baseMapper.deleteByIds(ids) > 0;
     }
 

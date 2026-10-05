@@ -39,6 +39,7 @@ import com.dance.street.game.engine.common.PairingModeResolver;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.service.RefereeSseNotifier;
+import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.engine.generator.KnockoutGenerator;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
@@ -88,6 +89,7 @@ public class TStageServiceImpl implements ITStageService {
     private final StageChain stageChain;
     /** 赛段配置变化要推裁判端:判罚方式在「裁判判罚 ↔ 导播台判定」之间切换会改变裁判端界面 */
     private final RefereeSseNotifier refereeSseNotifier;
+    private final TournamentEventNotifier tournamentEventNotifier;
 
     /**
      * 查询赛段流程
@@ -564,12 +566,15 @@ public class TStageServiceImpl implements ITStageService {
         if (ids == null || ids.isEmpty()) {
             return false;
         }
+        // 一次只允许删除一个赛段:批量删除入口已移除,这里再兜一道,防止绕过前端直接传多个 id
+        if (ids.size() > 1) {
+            throw new ServiceException("一次只能删除一个赛段,请逐个删除");
+        }
         List<TStage> deletingStages = baseMapper.selectList(
             Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids));
         if(isValid){
             // 状态守卫:进行中/已结束的赛段不允许删除,与前端「删除此赛段」的禁用口径一致。
             // 这两类赛段已承载现场数据(场次/判罚/打分),删除会级联抹掉,且不可恢复。
-            // 赛事级联删除传 isValid=false,不在此拦截,允许随赛事整体清理。
             for (TStage st : deletingStages) {
                 if (StageConstants.STAGE_GAMING.equals(st.getStatus())) {
                     throw new ServiceException("赛段[{}]进行中,不可删除(已承载现场场次与判分数据)",
@@ -645,6 +650,10 @@ public class TStageServiceImpl implements ITStageService {
         // 注:删段后不再自动补默认边——依赖以边表为准,"删掉就是删掉"(入边已在上面改挂到后继)
         // 自动解绑引用被删赛段/其场次的场景组件,避免大屏刷新后报"赛段不存在"
         clearWidgetStageBindings(deletingStages, matchIds);
+        // 广播赛段变化:删除前导播台/其他管理标签页手里是旧赛段链,不通知就会停留在已删赛段上
+        for (Long tid : affectedTournamentIds) {
+            tournamentEventNotifier.notify(tid, null, null, "stage");
+        }
         return deleted;
     }
 

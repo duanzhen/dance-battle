@@ -277,6 +277,7 @@
 import { ref, computed, markRaw, onMounted, onUnmounted } from 'vue';
 import { Plus, ArrowRight, SlidersHorizontal, Trophy, Mic, Target, ListOrdered, GitFork, Swords } from 'lucide-vue-next';
 import { useRoute } from 'vue-router';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { listStage, addStage as addStageApi, updateStageConfig as updateStageConfigApi, delStage as delStageApi } from '@/api/game/stage';
 import { StageVO, StageForm, StageConfigForm } from '@/api/game/stage/types';
 import { RosterVO } from '@/api/game/stage/rosterTypes';
@@ -922,6 +923,24 @@ const deleteStage = async () => {
   const idx = stages.value.findIndex((s) => String(s.id) === stageId);
   if (idx === -1) return;
 
+  // 破坏性操作二次确认:删除会级联清掉本赛段的场次/轮次/打分,不可恢复
+  const stageName = stages.value[idx]?.name || '该赛段';
+  try {
+    await ElMessageBox.confirm(
+      `确定删除赛段「${stageName}」吗？该赛段下属的相关数据会一并清除，且不可恢复。`,
+      '删除赛段',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    );
+  } catch {
+    // 取消删除
+    return;
+  }
+
   try {
     // 删除赛段（后端会自动维护链表指针）
     await delStageApi(stageId);
@@ -936,8 +955,10 @@ const deleteStage = async () => {
     } else {
       selection.value = { type: 'STAGE', id: '' };
     }
+    ElMessage.success(`已删除赛段「${stageName}」`);
   } catch (error) {
     console.error('❌ 删除赛段失败:', error);
+    notifyError(error, '删除赛段失败');
   }
 };
 

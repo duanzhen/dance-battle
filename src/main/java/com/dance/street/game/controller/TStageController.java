@@ -167,16 +167,16 @@ public class TStageController extends BaseController {
     }
 
     /**
-     * 删除赛段流程
+     * 删除赛段流程(一次只允许删除一个赛段,不接受批量)
      *
-     * @param ids 主键串
+     * @param id 主键
      */
     @SaCheckPermission("game:stage:remove")
     @Log(title = "赛段流程", businessType = BusinessType.DELETE)
-    @DeleteMapping("/{ids}")
-    public R<Void> remove(@NotEmpty(message = "主键不能为空")
-                          @PathVariable Long[] ids) {
-        return toAjax(tStageService.deleteWithValidByIds(List.of(ids), true));
+    @DeleteMapping("/{id}")
+    public R<Void> remove(@NotNull(message = "主键不能为空")
+                          @PathVariable Long id) {
+        return toAjax(tStageService.deleteWithValidByIds(List.of(id), true));
     }
 
     /**

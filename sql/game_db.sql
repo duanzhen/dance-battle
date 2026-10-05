@@ -376,6 +376,7 @@ CREATE TABLE `t_tournament` (
   `cover_image` varchar(500) DEFAULT NULL COMMENT '封面图片URL',
   `description` varchar(500) DEFAULT NULL COMMENT '详情',
   `status` tinyint DEFAULT '0' COMMENT '0:筹备 1:进行中 2:结束',
+  `deleted` tinyint DEFAULT '0' COMMENT '逻辑删除:0 未删除 1 已删除',
   `logical_width` int DEFAULT '1920' COMMENT '设计稿宽度',
   `logical_height` int DEFAULT '1080' COMMENT '设计稿高度',
   `theme_config` json DEFAULT NULL COMMENT '{"bgColor": "#000", "fontFamily": "Roboto"}',

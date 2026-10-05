@@ -321,4 +321,10 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
         return rosterEntryStore.syncPreAdvance(sourceStageId, competitorIds);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int clearPreAdvanceFromSource(Long sourceStageId) {
+        return rosterEntryStore.clearPreAdvanceFromSource(sourceStageId);
+    }
+
 }

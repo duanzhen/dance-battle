@@ -1298,4 +1298,94 @@ class RosterSmokeTest {
             rosterService.reorderRoster(targetStageId, items);
         }
     }
+
+    /** 撤销来源赛段数据:下游中间态里「由该来源边带进来的人」应被清空(只清这个边)。 */
+    @Test
+    void resetSourceClearsDownstreamEntriesOfThatEdge() {
+        TTournament tournament = new TTournament();
+        tournament.setName("撤销来源清下游中间态");
+        tournamentMapper.insert(tournament);
+
+        TStageVo source = stageService.insertByBo(baseStage(tournament.getId(), "海选", "AUDITION", 0L, 2L, null));
+        TStageVo target = stageService.insertByBo(
+            baseStage(tournament.getId(), "决赛", "KNOCKOUT", 2L, 1L, source.getId()));
+        TStage targetRule = new TStage();
+        targetRule.setId(target.getId());
+        targetRule.setRuleConfig(
+            "{\"mode\":\"KNOCKOUT\",\"knockout\":{\"template\":\"FINAL\",\"teamsCount\":2,\"advanceCount\":1,"
+                + "\"format\":\"BO1\",\"pairingMode\":\"SEQUENTIAL\"}}");
+        stageMapper.updateById(targetRule);
+
+        insertCompetitor(tournament.getId(), source.getId(), "选手A", "1", 1L);
+        insertCompetitor(tournament.getId(), source.getId(), "选手B", "2", 2L);
+        placeAuditionAdvancersInZone1(tournament.getId(), source.getId());
+        TStage settled = new TStage();
+        settled.setId(source.getId());
+        settled.setStatus(StageConstants.STAGE_SETTLED);
+        stageMapper.updateById(settled);
+
+        // 下游中间态已经铺出「来自 source 这条边」的行
+        List<TStageRosterEntry> before = rosterService.entriesOf(target.getId());
+        assertTrue(before.stream().anyMatch(r -> source.getId().equals(r.getSourceStageId())),
+            "下游中间态应有来自来源边的行");
+        long headCompetitorsBefore = competitorMapper.selectCount(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, source.getId()));
+        assertTrue(headCompetitorsBefore > 0);
+
+        // 目标未确认名单 → 允许撤销来源;撤销后该边的行应被清空
+        lifecycleService.resetStageToDraft(source.getId());
+
+        List<TStageRosterEntry> after = rosterService.entriesOf(target.getId());
+        assertEquals(0, after.stream().filter(r -> source.getId().equals(r.getSourceStageId())).count(),
+            "撤销来源后,下游中间态里来自该边的行应被清空");
+        assertEquals(0, after.stream().filter(r -> r.getSourceCompetitorId() != null).count(),
+            "该边带进来的人应全部摘掉");
+        // 链头(入口赛段)撤销:没有中间态,选手保留、比赛数据清空
+        assertEquals(headCompetitorsBefore, competitorMapper.selectCount(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, source.getId())), "链头撤销应保留选手");
+        assertEquals(0, matchMapper.selectCount(com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, source.getId())), "链头撤销应清空比赛数据");
+    }
+
+    /** 链头(入口赛段)撤销:没有中间态,保留选手,只清比赛数据。 */
+    @Test
+    void resetEntryStageKeepsCompetitorsAndClearsMatchData() {
+        TTournament tournament = new TTournament();
+        tournament.setName("链头撤销");
+        tournamentMapper.insert(tournament);
+        Long tid = tournament.getId();
+
+        TStageVo head = stageService.insertByBo(baseStage(tid, "海选", "AUDITION", 0L, 2L, null));
+        insertCompetitor(tid, head.getId(), "选手A", "1", 1L);
+        insertCompetitor(tid, head.getId(), "选手B", "2", 2L);
+        placeAuditionAdvancersInZone1(tid, head.getId());
+
+        assertEquals(2, competitorMapper.selectCount(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, head.getId())));
+        assertTrue(matchMapper.selectCount(com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, head.getId())) > 0, "撤销前应有比赛数据");
+
+        TStage gaming = new TStage();
+        gaming.setId(head.getId());
+        gaming.setStatus(StageConstants.STAGE_GAMING);
+        stageMapper.updateById(gaming);
+
+        lifecycleService.resetStageToDraft(head.getId());
+
+        assertEquals(2, competitorMapper.selectCount(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, head.getId())), "链头撤销应保留选手");
+        assertEquals(0, matchMapper.selectCount(com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, head.getId())), "链头撤销应清空比赛数据");
+        List<TCompetitor> comps = competitorMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, head.getId()));
+        assertTrue(comps.stream().allMatch(c ->
+                OutcomeStatusEnum.PENDING.getCode().equals(c.getOutcomeStatus()) && c.getFinalRank() == null),
+            "链头撤销后选手应回退待定且清空名次");
+        assertEquals(StageConstants.STAGE_DRAFT, stageMapper.selectById(head.getId()).getStatus());
+    }
 }

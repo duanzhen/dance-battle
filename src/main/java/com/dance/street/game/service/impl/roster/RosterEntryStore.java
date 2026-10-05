@@ -673,6 +673,62 @@ public class RosterEntryStore {
     }
 
     /**
+     * 撤销来源赛段数据后,把下游中间层里<b>由该来源边带进来的人</b>还原成空位。
+     *
+     * <p>只清 {@code source_stage_id = 本赛段} 的行:若下游是多个来源汇合,别的边带进来的人保持不动。
+     * 人工调整行(origin=MANUAL)保留;目标已开赛 / 已生成对阵 / 已确认名单时不动(那时名单已锁定)。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public int clearPreAdvanceFromSource(Long sourceStageId) {
+        if (sourceStageId == null) {
+            return 0;
+        }
+        TStage source = stageMapper.selectById(sourceStageId);
+        if (source == null) {
+            return 0;
+        }
+        Set<Long> referencing = rosterGroupStore.targetsReferencing(List.of(sourceStageId));
+        if (referencing.isEmpty()) {
+            return 0;
+        }
+        int changed = 0;
+        for (TStage target : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
+            .eq(TStage::getTournamentId, source.getTournamentId())
+            .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
+            .in(TStage::getId, referencing))) {
+            if (Objects.equals(target.getId(), sourceStageId)) {
+                continue;
+            }
+            if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
+                continue;   // 目标已开赛/已作废:名单锁定
+            }
+            if (matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, target.getId())) > 0) {
+                continue;   // 目标已生成对阵:名单锁定
+            }
+            List<TStageRosterEntry> rows = selectEntries(target.getId());
+            int targetChanged = 0;
+            for (TStageRosterEntry row : rows) {
+                // 只清这条边带进来的人;别的来源、人工调整都不动
+                if (!Objects.equals(row.getSourceStageId(), sourceStageId)
+                    || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
+                    continue;
+                }
+                dropRow(row, StageConstants.SLOT_PENDING, RosterConstants.ENTRY_STATUS_PENDING);
+                targetChanged++;
+            }
+            if (targetChanged > 0) {
+                rosterGroupStore.notifyTarget(target.getId());
+                changed += targetChanged;
+            }
+        }
+        if (changed > 0) {
+            log.info("撤销来源赛段[{}]:清空下游中间层中来自该边的 {} 行", sourceStageId, changed);
+        }
+        return changed;
+    }
+
+    /**
      * 把一个目标赛段的中间层与来源赛段当前的结果对齐:整表重建与实时同步共用同一份投影,
      * 不再有"快路径 / 通用路径 / 待落位路径"三套算法。
      *

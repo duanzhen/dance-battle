@@ -149,10 +149,16 @@ public class StageSettlementService {
             throw new ServiceException("已取消的赛段不能撤销数据");
         }
         assertDownstreamRevertible(stage);
-        // 入口赛段(海选/排名赛等第一个赛段)没有中间态:名单就是签到进来的人,
+        // 入口赛段(链头/海选/排名赛等第一个赛段)没有中间态:名单就是签到进来的人,
         // 撤销时人一个都不能动,只清比赛与判罚数据。
-        boolean entryStage = rosterService.groupsOfStage(stageId).stream()
+        // 判定用「链头(没有任何赛段以 next 指向它)」或「没有任何内部来源边」——
+        // 链头即使残留了历史内部来源边,也必须按入口赛段处理,不能删选手/回到中间态。
+        boolean chainHead = stageMapper.selectCount(Wrappers.<TStage>lambdaQuery()
+            .eq(TStage::getTournamentId, stage.getTournamentId())
+            .eq(TStage::getNextStageId, stageId)) == 0;
+        boolean noInternalSource = rosterService.groupsOfStage(stageId).stream()
             .noneMatch(g -> g.getSourceStageId() != null);
+        boolean entryStage = chainHead || noInternalSource;
         // 级联清除场次/轮次/参赛明细/打分
         List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId));
@@ -200,9 +206,10 @@ public class StageSettlementService {
         upd.setIsInitialized(0L);
         upd.setStatus(StageConstants.STAGE_DRAFT);
         stageMapper.updateById(upd);
-        // 参赛方已回退待定/名次清空:下游中间层里"按旧结果落座的人"必须一起还原成空位,
-        // 否则重置后中间态还挂着已经不算数的人(人工加进来的行保持不动)。
-        rosterService.syncPreAdvance(stageId);
+        // 参赛方已回退待定/名次清空:下游中间层里"由本赛段这条边带进来的人"必须一起还原成空位,
+        // 否则重置后中间态还挂着已经不算数的人。只清本赛段的来源边——多来源汇合时别的边的人不动,
+        // 人工调整行(origin=MANUAL)也保持不动。
+        rosterService.clearPreAdvanceFromSource(stageId);
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, null, "stage");
         log.info("赛段[{}]已撤销数据:清除{}场对阵及轮次/明细/裁判/打分,{}",
             stageId, matches.size(), entryStage ? "入口赛段参赛方保留" : "退回中间态未确认");

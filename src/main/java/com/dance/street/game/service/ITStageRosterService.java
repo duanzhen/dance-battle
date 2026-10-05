@@ -207,6 +207,14 @@ public interface ITStageRosterService {
     int syncPreAdvance(Long sourceStageId, Collection<Long> competitorIds);
 
     /**
+     * 撤销来源赛段数据后,把下游中间层里<b>由该来源边带进来的人</b>还原成空位(只清这个边,
+     * 别的来源/人工调整不动)。目标已开赛或已生成对阵时不动。
+     *
+     * @return 实际清空的行数
+     */
+    int clearPreAdvanceFromSource(Long sourceStageId);
+
+    /**
      * 上游结算完成后,把下游赛段里"等上游填入"的座位({@code slot_kind=PENDING})归一到轮空({@code BYE})。
      *
      * <p>赛前抢先生成对阵时,空位先标成"待定"(还有人会来);来源赛段全部结算后还没人来,

@@ -1345,8 +1345,13 @@ class RosterSmokeTest {
         assertEquals(headCompetitorsBefore, competitorMapper.selectCount(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, source.getId())), "链头撤销应保留选手");
-        assertEquals(0, matchMapper.selectCount(com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, source.getId())), "链头撤销应清空比赛数据");
+        // 入口海选:圈场次与落圈明细保留(否则重开赛报「尚未落圈」),只清判罚数据
+        List<TMatch> headMatches = matchMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, source.getId()));
+        assertFalse(headMatches.isEmpty(), "入口海选撤销应保留圈场次");
+        assertTrue(headMatches.stream().allMatch(m -> StageConstants.MATCH_PENDING.equals(m.getStatus())),
+            "圈场次应回待开始");
     }
 
     /** 链头(入口赛段)撤销:没有中间态,保留选手,只清比赛数据。 */
@@ -1358,15 +1363,40 @@ class RosterSmokeTest {
         Long tid = tournament.getId();
 
         TStageVo head = stageService.insertByBo(baseStage(tid, "海选", "AUDITION", 0L, 2L, null));
+        TStage headRule = new TStage();
+        headRule.setId(head.getId());
+        headRule.setRuleConfig("{\"mode\":\"AUDITION\",\"circles\":1,\"advanceCount\":1,\"maxScore\":10}");
+        stageMapper.updateById(headRule);
         insertCompetitor(tid, head.getId(), "选手A", "1", 1L);
         insertCompetitor(tid, head.getId(), "选手B", "2", 2L);
         placeAuditionAdvancersInZone1(tid, head.getId());
+        // 圈裁判绑定:开赛守卫要求每圈有裁判
+        TMatch circle = matchMapper.selectList(com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, head.getId())).get(0);
+        TMatchReferee mr = new TMatchReferee();
+        mr.setTournamentId(tid);
+        mr.setMatchId(circle.getId());
+        mr.setRefereeId(999L);
+        matchRefereeMapper.insert(mr);
+        // 旧的二海加赛场次:撤销时必须删掉,否则重开后完成赛段会报「需要加赛」
+        TMatch tiebreak = new TMatch();
+        tiebreak.setTournamentId(tid);
+        tiebreak.setStageId(head.getId());
+        tiebreak.setName("海选赛-1圈-加赛");
+        tiebreak.setDisplayZone("ZONE-1");
+        tiebreak.setMatchType(StageConstants.MATCH_TYPE_TIEBREAKER);
+        tiebreak.setStatus(StageConstants.MATCH_GAMING);
+        tiebreak.setMatchMode("VOTING");
+        matchMapper.insert(tiebreak);
 
         assertEquals(2, competitorMapper.selectCount(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, head.getId())));
         assertTrue(matchMapper.selectCount(com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, head.getId())) > 0, "撤销前应有比赛数据");
+        assertEquals(2, participantMapper.selectCount(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, circle.getId())), "撤销前应有落圈明细");
 
         TStage gaming = new TStage();
         gaming.setId(head.getId());
@@ -1378,8 +1408,15 @@ class RosterSmokeTest {
         assertEquals(2, competitorMapper.selectCount(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, head.getId())), "链头撤销应保留选手");
-        assertEquals(0, matchMapper.selectCount(com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
-            .eq(TMatch::getStageId, head.getId())), "链头撤销应清空比赛数据");
+        // 入口海选:圈场次与落圈明细保留(否则重开赛报「尚未落圈」),只清判罚数据
+        List<TMatch> headMatchesAfter = matchMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, head.getId()));
+        assertEquals(1, headMatchesAfter.size(), "入口海选撤销应保留圈场次、删除旧加赛场次");
+        assertEquals(circle.getId(), headMatchesAfter.get(0).getId(), "保留的应是圈场次而不是加赛场次");
+        assertEquals(2, participantMapper.selectCount(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, circle.getId())), "入口海选撤销应保留落圈明细");
         List<TCompetitor> comps = competitorMapper.selectList(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, head.getId()));
@@ -1387,5 +1424,10 @@ class RosterSmokeTest {
                 OutcomeStatusEnum.PENDING.getCode().equals(c.getOutcomeStatus()) && c.getFinalRank() == null),
             "链头撤销后选手应回退待定且清空名次");
         assertEquals(StageConstants.STAGE_DRAFT, stageMapper.selectById(head.getId()).getStatus());
+
+        // 重开赛应成功:不再报「参赛者尚未落圈」
+        lifecycleService.startStage(head.getId());
+        assertEquals(StageConstants.STAGE_GAMING, stageMapper.selectById(head.getId()).getStatus(),
+            "链头撤销后应能直接重新开赛");
     }
 }

@@ -287,8 +287,17 @@ public class TPlayerServiceImpl implements ITPlayerService {
      */
     @Override
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
+        if (ids == null || ids.isEmpty()) {
+            return false;
+        }
+        // 只允许删除未签到选手:已签到的选手已关联参赛单位/赛段,必须先解除签到再删
+        List<TPlayer> players = baseMapper.selectByIds(ids);
+        List<String> checkedIn = players.stream()
+            .filter(p -> p.getCompetitorId() != null)
+            .map(p -> p.getName() == null || p.getName().isBlank() ? String.valueOf(p.getId()) : p.getName())
+            .toList();
+        if (!checkedIn.isEmpty()) {
+            throw new ServiceException("已签到的选手不能删除,请先解除签到:{}", String.join("、", checkedIn));
         }
         return baseMapper.deleteByIds(ids) > 0;
     }

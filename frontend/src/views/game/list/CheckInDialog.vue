@@ -14,65 +14,51 @@
     </div>
 
     <div v-else class="space-y-4">
-      <!-- 选手名称：展示 / 编辑 -->
-      <div>
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">选手名称</label>
-        <!-- 展示模式 -->
-        <div v-if="!isEditing" class="flex items-center justify-between bg-neutral-800/50 rounded-lg px-3 py-2.5 border border-neutral-700">
-          <span class="text-white font-bold text-lg">{{ playerName || '未命名' }}</span>
-          <button
-            @click="startEdit"
-            class="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-amber-500 hover:bg-amber-500/10 transition-colors shrink-0"
-            title="编辑名称"
-          >
-            <Pencil class="w-4 h-4" />
-          </button>
+      <!-- 非编辑模式:头像 + 名称同一行 -->
+      <div v-if="!isEditing" class="flex items-center gap-3 bg-neutral-800/50 rounded-lg px-3 py-2.5 border border-neutral-700">
+        <img v-if="playerAvatar" :src="playerAvatar" class="w-14 h-14 rounded-lg object-cover shrink-0" />
+        <div v-else class="w-14 h-14 rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 shrink-0">
+          <User class="w-6 h-6" />
         </div>
-        <!-- 编辑模式 -->
-        <input
-          v-else
-          v-model="editPlayerName"
-          type="text"
-          maxlength="50"
-          class="w-full bg-neutral-950 border border-amber-500 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none transition-all text-sm"
-        />
+        <span class="text-white font-bold text-lg flex-1 min-w-0 truncate">{{ playerName || '未命名' }}</span>
+        <button
+          @click="startEdit"
+          class="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-amber-500 hover:bg-amber-500/10 transition-colors shrink-0"
+          title="编辑名称与头像"
+        >
+          <Pencil class="w-4 h-4" />
+        </button>
       </div>
 
-      <!-- 选手头像：展示 / 编辑 -->
-      <div>
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">选手头像</label>
-        <!-- 展示模式 -->
-        <div v-if="!isEditing" class="flex items-center justify-between bg-neutral-800/50 rounded-lg px-3 py-2.5 border border-neutral-700">
-          <img v-if="playerAvatar" :src="playerAvatar" class="w-16 h-16 rounded-lg object-cover" />
-          <div v-else class="w-16 h-16 rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500">
-            <User class="w-6 h-6" />
-          </div>
-          <button
-            @click="startEdit"
-            class="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-amber-500 hover:bg-amber-500/10 transition-colors shrink-0"
-            title="编辑头像"
-          >
-            <Pencil class="w-4 h-4" />
-          </button>
+      <!-- 编辑模式:名称 / 头像 分块编辑 -->
+      <template v-else>
+        <div>
+          <label class="block text-sm font-medium text-neutral-400 mb-1.5">选手名称</label>
+          <input
+            v-model="editPlayerName"
+            type="text"
+            maxlength="50"
+            class="w-full bg-neutral-950 border border-amber-500 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none transition-all text-sm"
+          />
         </div>
-        <!-- 编辑模式 -->
-        <div v-else>
+        <div>
+          <label class="block text-sm font-medium text-neutral-400 mb-1.5">选手头像</label>
           <PortraitMatting ref="mattingRef" v-model="editPlayerAvatar" />
         </div>
-      </div>
 
-      <!-- 编辑模式操作按钮 -->
-      <div v-if="isEditing" class="flex gap-2 pt-1">
-        <button
-          @click="cancelEdit"
-          class="flex-1 py-2 text-sm rounded-lg border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
-        >
-          取消编辑
-        </button>
-        <button @click="confirmEdit" class="flex-1 py-2 text-sm font-bold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors">
-          确认
-        </button>
-      </div>
+        <!-- 编辑模式操作按钮 -->
+        <div class="flex gap-2 pt-1">
+          <button
+            @click="cancelEdit"
+            class="flex-1 py-2 text-sm rounded-lg border border-neutral-700 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+          >
+            取消编辑
+          </button>
+          <button @click="confirmEdit" class="flex-1 py-2 text-sm font-bold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors">
+            确认
+          </button>
+        </div>
+      </template>
 
       <!-- 分圈横排(海选分圈时,号码列表上方):圈位一律手动指定,不按号码自动分配 -->
       <div v-if="showCircleBar" class="bg-neutral-800/50 rounded-lg p-3 border border-neutral-700">

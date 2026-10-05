@@ -405,17 +405,17 @@
                     :inputmode="blockSoftKeyboard ? 'none' : 'decimal'"
                     :value="keypadValue"
                     placeholder="0"
-                    class="no-caret w-full h-12 bg-black text-center text-2xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums mb-2"
+                    class="no-caret w-full h-11 bg-black text-center text-2xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
                     @input="onKeypadInput"
                     @keydown.enter.prevent="confirmKeypad"
                   />
                   <!-- <p class="text-[9px] text-neutral-600 -mt-1 mb-2 text-center">支持键盘直接输入，回车提交并跳下一位</p> -->
-                  <div class="grid grid-cols-3 gap-2">
+                  <div class="grid grid-cols-3 gap-1.5 mt-2">
                     <button
                       v-for="k in keypadKeys"
                       :key="k"
                       @click="pressKey(k)"
-                      class="py-3 rounded-xl text-lg font-bold bg-neutral-800 border border-neutral-700 text-neutral-200 active:bg-neutral-700 transition-colors"
+                      class="py-2.5 rounded-xl text-lg font-bold bg-neutral-800 border border-neutral-700 text-neutral-200 active:bg-neutral-700 transition-colors"
                       :class="k === '⌫' ? 'text-neutral-400' : ''"
                     >
                       {{ k }}

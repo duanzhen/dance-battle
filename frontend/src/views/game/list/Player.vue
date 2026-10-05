@@ -236,7 +236,13 @@
     </div>
 
     <!-- PlayerForm Dialog -->
-    <PlayerForm v-model="formVisible" :player="currentPlayer" :tournament-id="tournamentId" @submit="handleSubmit" />
+    <PlayerForm
+      v-model="formVisible"
+      :player="currentPlayer"
+      :tournament-id="tournamentId"
+      @submit="handleSubmit"
+      @delete="handleDeletePlayer"
+    />
 
     <!-- CheckIn Dialog -->
     <CheckInDialog
@@ -335,7 +341,7 @@
 import { ref, watch, computed, nextTick } from 'vue';
 import { Users, Plus, User, Check, Clock, UserRoundCheck, File, RefreshCw } from 'lucide-vue-next';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers, checkInPlayer } from '@/api/game/player';
+import { listPlayer, addPlayer, updatePlayer as updatePlayerApi, importPlayers, checkInPlayer, delPlayer } from '@/api/game/player';
 import { download } from '@/utils/request';
 import { PlayerVO, PlayerForm as PlayerFormType } from '@/api/game/player/types';
 import { listCompetitor } from '@/api/game/competitor';
@@ -601,6 +607,32 @@ const handleAdd = () => {
 const handleEdit = (player: PlayerVO) => {
   currentPlayer.value = player;
   formVisible.value = true;
+};
+
+/** 删除未签到选手:已签到的必须先解除签到,避免误删带参赛单位的选手 */
+const handleDeletePlayer = async (player: PlayerVO) => {
+  if (player.competitorId) {
+    ElMessage.warning('该选手已签到，不能直接删除；请先在签到页解除签到');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除选手「${player.name || '未命名'}」？`, '删除选手', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消'
+    });
+  } catch {
+    return;
+  }
+  try {
+    await delPlayer(player.id);
+    ElMessage.success('已删除');
+    formVisible.value = false;
+    currentPlayer.value = null;
+    await loadPlayers();
+  } catch (error) {
+    notifyError(error, '删除失败');
+  }
 };
 
 // 签到

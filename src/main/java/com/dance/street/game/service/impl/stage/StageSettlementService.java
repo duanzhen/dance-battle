@@ -160,27 +160,79 @@ public class StageSettlementService {
         boolean noInternalSource = rosterService.groupsOfStage(stageId).stream()
             .noneMatch(g -> g.getSourceStageId() != null);
         boolean entryStage = chainHead || noInternalSource;
+        // 入口海选:圈场次与「参赛方落圈」是选手配置(不是比赛数据),撤销时必须保留,
+        // 否则重开赛会被「参赛者尚未落圈」守卫拦下。只清判罚数据。
+        boolean entryAudition = entryStage && StageModeEnum.AUDITION.getCode().equals(stage.getStageMode());
         // 级联清除场次/轮次/参赛明细/打分
         List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stageId));
         if (!matches.isEmpty()) {
             List<Long> matchIds = matches.stream().map(TMatch::getId).toList();
-            List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                    .in(TMatchRound::getMatchId, matchIds)
-                    .select(TMatchRound::getId))
-                .stream().map(TMatchRound::getId).toList();
-            if (!roundIds.isEmpty()) {
-                roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds));
+            if (entryAudition) {
+                // 保留圈场次 + 落圈明细,只清轮次/打分;但旧的同分加赛(二海/三海)是比赛数据,必须删掉,
+                // 否则重开后加赛场次仍挂着未结算,完成赛段会报「海选出现同分,需要加赛」。
+                List<Long> tiebreakerIds = matches.stream()
+                    .filter(m -> StageConstants.MATCH_TYPE_TIEBREAKER.equals(m.getMatchType()))
+                    .map(TMatch::getId).filter(Objects::nonNull).toList();
+                List<Long> circleIds = matches.stream()
+                    .filter(m -> !StageConstants.MATCH_TYPE_TIEBREAKER.equals(m.getMatchType()))
+                    .map(TMatch::getId).filter(Objects::nonNull).toList();
+                if (!tiebreakerIds.isEmpty()) {
+                    List<Long> tbRoundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                            .in(TMatchRound::getMatchId, tiebreakerIds)
+                            .select(TMatchRound::getId))
+                        .stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+                    if (!tbRoundIds.isEmpty()) {
+                        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                            .in(TRoundScore::getRoundId, tbRoundIds));
+                    }
+                    participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
+                        .in(TMatchParticipant::getMatchId, tiebreakerIds));
+                    matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
+                        .in(TMatchRound::getMatchId, tiebreakerIds));
+                    matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery()
+                        .in(TMatchReferee::getMatchId, tiebreakerIds));
+                    matchMapper.deleteByIds(tiebreakerIds);
+                }
+                if (!circleIds.isEmpty()) {
+                    List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                            .in(TMatchRound::getMatchId, circleIds)
+                            .select(TMatchRound::getId))
+                        .stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+                    if (!roundIds.isEmpty()) {
+                        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                            .in(TRoundScore::getRoundId, roundIds));
+                    }
+                    matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
+                        .in(TMatchRound::getMatchId, circleIds));
+                    matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
+                        .in(TMatch::getId, circleIds)
+                        .set(TMatch::getStatus, StageConstants.MATCH_PENDING));
+                    // 落圈明细保留,只清判罚分数/名次/结果
+                    participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                        .in(TMatchParticipant::getMatchId, circleIds)
+                        .set(TMatchParticipant::getScoreValue, null)
+                        .set(TMatchParticipant::getRankInMatch, null)
+                        .set(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode()));
+                }
+            } else {
+                List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                        .in(TMatchRound::getMatchId, matchIds)
+                        .select(TMatchRound::getId))
+                    .stream().map(TMatchRound::getId).toList();
+                if (!roundIds.isEmpty()) {
+                    roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                        .in(TRoundScore::getRoundId, roundIds));
+                }
+                participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .in(TMatchParticipant::getMatchId, matchIds));
+                matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
+                    .in(TMatchRound::getMatchId, matchIds));
+                // 场次裁判也必须删:留着孤儿行,重新生成对阵后裁判名单会越积越多
+                matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery()
+                    .in(TMatchReferee::getMatchId, matchIds));
+                matchMapper.deleteByIds(matchIds);
             }
-            participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchIds));
-            matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
-                .in(TMatchRound::getMatchId, matchIds));
-            // 场次裁判也必须删:留着孤儿行,重新生成对阵后裁判名单会越积越多
-            matchRefereeMapper.delete(Wrappers.<TMatchReferee>lambdaQuery()
-                .in(TMatchReferee::getMatchId, matchIds));
-            matchMapper.deleteByIds(matchIds);
         }
         if (!entryStage) {
             // 名单快照:删除 apply 写入的行(from_roster=1)及其成员,名单 applied 回退,可重新装配;

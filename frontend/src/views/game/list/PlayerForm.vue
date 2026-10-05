@@ -77,25 +77,38 @@
     </div>
 
     <template #footer>
-      <div class="flex justify-end gap-3 pt-2">
-        <button @click="handleClose" class="px-4 py-2 rounded-lg text-sm text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all">
-          取消
-        </button>
+      <div class="flex items-center justify-between gap-3 pt-2">
+        <!-- 删除:仅编辑已有选手、且未签到时可用,放左下角避免误触 -->
         <button
-          @click="handleSubmit"
-          :disabled="submitting"
-          class="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-bold shadow-lg shadow-amber-900/20 transition-all flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+          v-if="isEdit"
+          @click="handleDelete"
+          :disabled="!canDelete"
+          :title="canDelete ? '删除该选手' : '该选手已签到，不能直接删除；请先解除签到'"
+          class="px-4 py-2 rounded-lg text-sm flex items-center gap-1.5 border transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-red-500/10 text-red-400 border-red-500/25 hover:bg-red-500/20 disabled:hover:bg-red-500/10"
         >
-          <svg v-if="submitting" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            ></path>
-          </svg>
-          {{ submitting ? '提交中...' : isEdit ? '保存' : '添加' }}
+          <Trash2 class="h-3.5 w-3.5" /> 删除
         </button>
+        <span v-else></span>
+        <div class="flex gap-3">
+          <button @click="handleClose" class="px-4 py-2 rounded-lg text-sm text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all">
+            取消
+          </button>
+          <button
+            @click="handleSubmit"
+            :disabled="submitting"
+            class="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-bold shadow-lg shadow-amber-900/20 transition-all flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg v-if="submitting" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+            {{ submitting ? '提交中...' : isEdit ? '保存' : '添加' }}
+          </button>
+        </div>
       </div>
     </template>
   </GameDialog>
@@ -104,7 +117,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { ElMessage } from 'element-plus';
-import { User } from 'lucide-vue-next';
+import { User, Trash2 } from 'lucide-vue-next';
 import { PlayerVO } from '@/api/game/player/types';
 import PortraitMatting from './PortraitMatting.vue';
 import GameDialog from '@/components/GameDialog/index.vue';
@@ -118,6 +131,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: boolean];
   submit: [data: Omit<typeof formData.value, 'tags'> & { tags?: string | string[] }];
+  delete: [player: PlayerVO];
 }>();
 
 const visible = computed({
@@ -126,6 +140,15 @@ const visible = computed({
 });
 
 const isEdit = computed(() => !!props.player?.id);
+/** 只有未签到的选手允许删除(已签到需先解除签到) */
+const canDelete = computed(() => isEdit.value && !props.player?.competitorId);
+
+const handleDelete = () => {
+  if (!props.player || !canDelete.value) {
+    return;
+  }
+  emit('delete', props.player);
+};
 
 // 响应式宽度
 const dialogWidth = ref('610px');

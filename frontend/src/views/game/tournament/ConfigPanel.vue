@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch } from 'vue';
 import { Settings2, Pencil } from 'lucide-vue-next';
 import GameInfo, { type MatchInfo } from './../list/GameInfo.vue';
 import PlayerEditor from './../list/Player.vue';
@@ -69,9 +69,12 @@ const matchInfo = ref<MatchInfo>({
 
 // --- 加载赛事数据 ---
 const loadTournamentData = async () => {
-  if (!props.tournamentId) return;
+  const id = props.tournamentId;
+  if (!id) return;
   try {
-    const response = await getTournament(props.tournamentId);
+    const response = await getTournament(id);
+    // 过期响应丢弃:tournamentId 已切换到别的赛事时,不能用旧数据覆盖
+    if (String(props.tournamentId) !== String(id)) return;
     const data: TournamentVO = response.data;
     tournament.value = data;
     matchInfo.value = {
@@ -100,9 +103,10 @@ const onTournamentEdited = async () => {
   await loadTournamentData();
 };
 
-onMounted(() => {
-  loadTournamentData();
-});
+// tournamentId 由父组件传入,本组件挂载时它未必已就绪(默认落在配置 tab 时曾出现这种时序),
+// 因此不能只在 onMounted 里加载一次——那样 URL 里的 id 补不回来,编辑弹窗会退化成「创建新赛事」。
+// 用 immediate watch 覆盖「初始就有 id」与「id 稍后/切换后到达」两种情况。
+watch(() => props.tournamentId, () => loadTournamentData(), { immediate: true });
 </script>
 
 <style scoped>

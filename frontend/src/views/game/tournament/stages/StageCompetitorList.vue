@@ -41,7 +41,7 @@
             @click="handleExportAudition"
             :disabled="exporting"
             class="px-2.5 py-1 rounded border text-[11px] font-bold transition-colors bg-emerald-600/15 text-emerald-400 border-emerald-600/30 hover:bg-emerald-600/25 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-            title="导出 Excel:号码 / 选手名 / 各裁判分数 / 总分 / 排名"
+            title="导出 Excel:号码 / 选手名 / 各裁判分数 / 总分 / 排名(多圈时为各圈圈内排名)"
           >
             <Download class="w-3.5 h-3.5" />
             {{ exporting ? '导出中...' : '导出结果' }}
@@ -204,7 +204,7 @@
               </span>
             </div>
 
-            <!-- 最终排名(淘汰赛不展示);分圈查看时显示该圈的圈内名次 -->
+            <!-- 最终排名(淘汰赛不展示);分圈查看显示圈内名次,多圈「全部圈」不显示(不同圈无法一起排名) -->
             <div v-if="rankOf(competitor) && !isKnockout" class="flex-shrink-0 w-16 text-center">
               <div class="text-xs text-neutral-500">{{ circleFiltered ? '圈内排名' : '排名' }}</div>
               <div
@@ -403,8 +403,13 @@ const circleRankOf = (c: CompetitorVO): number | null => {
   }
   return liveRankOf(c, competitors.value.filter((x) => circleZones.value[String(x.id)] === zone));
 };
-/** 排名列取值:分圈看圈内名次;全部圈优先用后端最终名次,名次未定(加赛未出结果)时用实时并列名次 */
+/** 多圈且查看「全部圈」:不同圈的人放一起无法排名,不展示名次(单圈/分圈视图不受影响) */
+const multiCircleAll = computed(() => isAudition.value && circleOptions.value.length > 1 && !circleFiltered.value);
+/** 排名列取值:分圈看圈内名次;多圈「全部圈」不排名;单圈用最终名次,未定(加赛未出结果)时用实时并列名次 */
 const rankOf = (c: CompetitorVO): number | null => {
+  if (multiCircleAll.value) {
+    return null;
+  }
   if (circleFiltered.value) {
     return circleRankOf(c);
   }

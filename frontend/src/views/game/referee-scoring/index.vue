@@ -137,9 +137,9 @@
                     <button
                       @click="submitKnockout('LEFT')"
                       :disabled="submitting"
-                      class="py-5 rounded-xl text-sm font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30 transition-colors disabled:opacity-40"
+                      :class="sideButtonClass('LEFT')"
                     >
-                      <span class="block text-[9px] text-red-500/70 mb-1">左方胜</span>
+                      <span class="block text-[9px] mb-1" :class="sideLabelClass('LEFT')">左方胜</span>
                       <span class="truncate block max-w-[110px] mx-auto">{{ leftParticipant?.competitorName || '待定' }}</span>
                     </button>
                     <button
@@ -152,9 +152,9 @@
                     <button
                       @click="submitKnockout('RIGHT')"
                       :disabled="submitting"
-                      class="py-5 rounded-xl text-sm font-bold bg-blue-600/15 text-blue-400 border border-blue-600/30 active:bg-blue-600/30 transition-colors disabled:opacity-40"
+                      :class="sideButtonClass('RIGHT')"
                     >
-                      <span class="block text-[9px] text-blue-500/70 mb-1">右方胜</span>
+                      <span class="block text-[9px] mb-1" :class="sideLabelClass('RIGHT')">右方胜</span>
                       <span class="truncate block max-w-[110px] mx-auto">{{ rightParticipant?.competitorName || '待定' }}</span>
                     </button>
                   </div>
@@ -459,7 +459,7 @@
                 </div>
               </div>
 
-              <!-- 三按钮判罚:左(红) / 平 / 右(蓝) -->
+              <!-- 三按钮判罚:左 / 平 / 右(红蓝按赛事配置上色) -->
               <div class="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
                 <div class="text-center mb-3">
                   <div class="text-[10px] text-neutral-500">本场判罚</div>
@@ -470,9 +470,9 @@
                   <button
                     @click="submitKnockout('LEFT')"
                     :disabled="submitting"
-                    class="py-5 rounded-xl text-sm font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30 transition-colors disabled:opacity-40"
+                    :class="sideButtonClass('LEFT')"
                   >
-                    <span class="block text-[9px] text-red-500/70 mb-1">左方胜</span>
+                    <span class="block text-[9px] mb-1" :class="sideLabelClass('LEFT')">左方胜</span>
                     <span class="truncate block max-w-[110px] mx-auto">{{ leftParticipant?.competitorName || '待定' }}</span>
                   </button>
                   <button
@@ -485,9 +485,9 @@
                   <button
                     @click="submitKnockout('RIGHT')"
                     :disabled="submitting"
-                    class="py-5 rounded-xl text-sm font-bold bg-blue-600/15 text-blue-400 border border-blue-600/30 active:bg-blue-600/30 transition-colors disabled:opacity-40"
+                    :class="sideButtonClass('RIGHT')"
                   >
-                    <span class="block text-[9px] text-blue-500/70 mb-1">右方胜</span>
+                    <span class="block text-[9px] mb-1" :class="sideLabelClass('RIGHT')">右方胜</span>
                     <span class="truncate block max-w-[110px] mx-auto">{{ rightParticipant?.competitorName || '待定' }}</span>
                   </button>
                 </div>
@@ -626,10 +626,17 @@ import { Plus, Minus } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import logo from '@/assets/logo/logo.png';
 import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore, getRefereeMatchScores } from '@/api/game/referee/scoring';
+import { getTournament } from '@/api/game/screen';
 import { subscribeChannel } from '@/utils/sseChannel';
 import type { SseStatus } from '@/utils/sseChannel';
 import SseLiveBadge from '@/components/SseLiveBadge/index.vue';
 import { payloadOf } from '@/utils/apiEnvelope';
+import {
+  parseTournamentColorConfig,
+  isMatchMirrored,
+  DEFAULT_TOURNAMENT_COLOR_CONFIG,
+  TournamentColorConfig
+} from '@/utils/tournamentColorConfig';
 
 const route = useRoute();
 
@@ -644,6 +651,41 @@ const error = ref('');
 /** 右上角连接标识状态:由统一 SSE 客户端按"最近 20s 是否有心跳"推导 */
 const sseStatus = ref<SseStatus>('connecting');
 const tournamentId = ref<number | string | null>(null);
+/** 赛事级展示配置(当前场次朝向 + 红蓝位置) */
+const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
+let colorLoadedFor = '';
+/** 展示配置缓存 TTL:改赛事配置后,裁判端不必刷新,几秒内自动跟上 */
+const COLOR_CONFIG_TTL_MS = 5000;
+let colorLoadedAt = 0;
+const loadColorConfig = async () => {
+  const tid = tournamentId.value;
+  if (tid == null) return;
+  if (colorLoadedFor === String(tid) && Date.now() - colorLoadedAt < COLOR_CONFIG_TTL_MS) return;
+  colorLoadedFor = String(tid);
+  colorLoadedAt = Date.now();
+  try {
+    // 大屏公开接口取主题配置(裁判端没有管理员 JWT,不能走 /game/tournament/{id})
+    const tr: any = await getTournament(tid);
+    colorConfig.value = parseTournamentColorConfig(payloadOf<any>(tr)?.themeConfig);
+  } catch (e) {
+    colorConfig.value = { ...DEFAULT_TOURNAMENT_COLOR_CONFIG };
+  }
+};
+/** 当前场次朝向:上右下左=左右互换(与赛事高级配置一致;不改 match 生成) */
+const mirrored = computed(() => isMatchMirrored(colorConfig.value));
+/** 左/右哪边是红色(赛事级红蓝位置,与导播台/大屏同一口径) */
+const isLeftRed = computed(() => colorConfig.value.matchColorOrder !== 'BLUE_LEFT');
+/** 判定按钮配色:按「显示后的左右」上色,与朝向配置配合 */
+const sideButtonClass = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red
+    ? 'py-5 rounded-xl text-sm font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:bg-red-600/30 transition-colors disabled:opacity-40'
+    : 'py-5 rounded-xl text-sm font-bold bg-blue-600/15 text-blue-400 border border-blue-600/30 active:bg-blue-600/30 transition-colors disabled:opacity-40';
+};
+const sideLabelClass = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  return red ? 'text-red-500/70' : 'text-blue-500/70';
+};
 const submitting = ref(false);
 const submitted = ref(false);
 
@@ -740,7 +782,11 @@ const isKnockoutJudging = computed(() => {
   return isStandard.value && !isPerCompetitor.value && participants.value.length === 2;
 });
 const isKnockoutMode = computed(() => stageMode.value === 'KNOCKOUT' && isStandard.value);
-const sortedParticipants = computed(() => participants.value.slice().sort((a, b) => (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0)));
+const sortedParticipants = computed(() => {
+  const list = participants.value.slice().sort((a, b) => (a.displaySlotIndex || 0) - (b.displaySlotIndex || 0));
+  // 上右下左:交换左右两名选手的展示位置(判定按钮/提交结果都跟着走,按人而不是按边)
+  return mirrored.value ? list.reverse() : list;
+});
 const leftParticipant = computed(() => sortedParticipants.value[0] || null);
 const rightParticipant = computed(() => sortedParticipants.value[1] || null);
 
@@ -1533,6 +1579,8 @@ const loadData = async (stageIdParam?: number, matchIdParam?: number, selectAfte
   try {
     const resp = await getRefereeMyMatch(stageIdParam, matchIdParam);
     applyData(payloadOf<any>(resp));
+    // 拿到 tournamentId 后加载赛事展示配置(朝向/红蓝),供本页左右位置与上色使用
+    await loadColorConfig();
     // 海选:刷新后按需选中选手(默认第一个未评;提交后跳下一位),只滚动一次
     if (isAudition.value) {
       autoSelectNext(selectAfter ?? null);

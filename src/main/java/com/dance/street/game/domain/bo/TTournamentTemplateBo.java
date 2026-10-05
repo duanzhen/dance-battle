@@ -18,7 +18,7 @@ public class TTournamentTemplateBo {
     @NotBlank(message = "赛事名称不能为空")
     private String name;
 
-    /** 主题配置 JSON(含赛事级红蓝配色 bracketColorOrder/matchColorOrder;为空用默认) */
+    /** 主题配置 JSON(含赛事级展示配置 matchLayoutOrder/matchColorOrder;为空用默认) */
     private String themeConfig;
 
     /**

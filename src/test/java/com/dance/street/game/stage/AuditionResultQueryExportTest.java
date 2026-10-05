@@ -148,13 +148,30 @@ class AuditionResultQueryExportTest {
             List<Row> rows = main.read();
             List<String> header = rows.get(0).getCells(0, rows.get(0).getCellCount()).stream()
                 .map(c -> c.asString()).toList();
-            assertEquals(List.of("号码", "选手名", "圈", "裁判A", "裁判B", "总分", "排名"), header,
+            assertEquals(List.of("号码", "选手名", "圈", "裁判A", "裁判B", "总分", "圈内排名"), header,
                 "多圈导出表头应含圈列与全部裁判列");
             // 首行数据:号码与圈标签要有值
             Row first = rows.get(1);
             assertNotNull(first.getCellText(0));
             assertTrue(first.getCellText(2) != null && !first.getCellText(2).isBlank(),
                 "多圈时圈列应有圈标签(裁判名或第N圈)");
+
+            // 多圈的「排名」必须是各圈的圈内名次(每圈各自 1..4),不能是跨圈的赛段全局名次
+            int rankCol = header.indexOf("圈内排名");
+            List<String> rankValues = new ArrayList<>();
+            for (int i = 1; i < rows.size(); i++) {
+                Row r = rows.get(i);
+                if (r == null || r.getCellText(0) == null || r.getCellText(0).isBlank()) {
+                    continue;
+                }
+                String rv = r.getCellText(rankCol);
+                if (rv != null && !rv.isBlank()) {
+                    rankValues.add(rv.trim());
+                }
+            }
+            assertEquals(List.of("1", "1", "2", "2", "3", "3", "4", "4"),
+                rankValues.stream().sorted().toList(),
+                "多圈导出的排名应是圈内名次(每圈独立 1..4),实际:" + rankValues);
         }
     }
 

@@ -249,7 +249,8 @@ public class AuditionResultService {
     /**
      * 导出海选结果 Excel:
      * <ul>
-     *   <li>"海选成绩" sheet:号码 / 选手名 / 各裁判分数 / 总分 / 排名,总分只统计原始海选场;</li>
+     *   <li>"海选成绩" sheet:号码 / 选手名 /[圈]/ 各裁判分数 / 总分 / 排名,总分只统计原始海选场;
+     *       多圈时带「圈」列,排名列为各圈的圈内名次(不同圈放一起无法排名);</li>
      *   <li>二海/三海/… sheet:按加赛深度各占一张(号码 / 选手名 / 各裁判分数 / 总分 / 结果),
      *       加赛分数仅用于同分者决出晋级顺序,不进入主表总分。</li>
      * </ul>
@@ -280,17 +281,24 @@ public class AuditionResultService {
             head.add(List.of(StringUtils.defaultString(r.getName(), "裁判" + r.getId())));
         }
         head.add(List.of("总分"));
-        head.add(List.of("排名"));
+        // 多圈:每圈独立排名,列名点明是圈内名次,避免被当成跨圈的赛段总名次
+        head.add(List.of(multiCircle ? "圈内排名" : "排名"));
         // 排序口径与名单页「分数排名」一致:原始分降序 → 加赛(二海/三海)分降序 → 号码牌升序;
-        // 多圈时先按圈分组,与「排名」列的分圈名次保持一致
+        // 多圈时先按圈分组,与「圈内排名」列保持一致
         Map<Long, BigDecimal> tiebreakScore = auditionTiebreakScoreMap(result.getTiebreakers());
         List<String> zoneOrder = auditionCircleSupport.circles(stage).stream()
             .map(TMatch::getDisplayZone).filter(Objects::nonNull).distinct().toList();
         List<AuditionResultVo.CompetitorItem> mainItems = new ArrayList<>(result.getCompetitors());
         mainItems.sort(auditionExportComparator(zoneOrder, tiebreakScore));
+        // 多圈:每圈自成一张榜。排名列按「圈内名次」(结算写入的 rank_in_match,未结算时按圈内
+        // 分数实时补算),不再用跨圈的赛段最终名次——不同圈的人放一起没有可比性。
+        Map<Long, Long> circleRanks = multiCircle
+            ? auditionCircleRankMap(mainItems, tiebreakScore)
+            : Map.of();
         List<List<Object>> rows = new ArrayList<>();
         for (AuditionResultVo.CompetitorItem c : mainItems) {
-            rows.add(auditionExportRow(c, referees, true, zoneLabels, multiCircle));
+            rows.add(auditionExportRow(c, referees, true, zoneLabels, multiCircle,
+                multiCircle ? circleRanks.get(c.getCompetitorId()) : c.getFinalRank()));
         }
 
         // 加赛表头:号码 | 选手名 | [圈] | 裁判1..n | 总分 | 结果
@@ -320,7 +328,7 @@ public class AuditionResultService {
                 .reversed()
                 .thenComparingInt(c -> parseCompetitorNumber(c.getNumber())));
             for (AuditionResultVo.CompetitorItem c : tbItems) {
-                tbRows.add(auditionExportRow(c, referees, false, zoneLabels, multiCircle));
+                tbRows.add(auditionExportRow(c, referees, false, zoneLabels, multiCircle, null));
             }
             String sheetName = tiebreakerSheetName(tb.getRound());
             String zoneLabel = zoneLabelOf(zoneLabels, tb.getZone());
@@ -372,6 +380,69 @@ public class AuditionResultService {
     }
 
     /**
+     * 多圈导出的「圈内排名」:competitorId -> 该选手在本圈的排名(每圈从 1 独立起排)。
+     *
+     * <p>优先后端结算写入的 {@code rank_in_match}(结算会把加赛决出的先后回写进原圈);
+     * 比赛进行中导出(尚未结算)的行,按圈内「原始分降序 → 加赛分降序」实时补算,并列同名次。
+     * 不使用 {@code finalRank}——它是跨圈的赛段全局名次,不同圈放一起无法排名。</p>
+     */
+    private Map<Long, Long> auditionCircleRankMap(List<AuditionResultVo.CompetitorItem> items,
+                                                  Map<Long, BigDecimal> tiebreakScore) {
+        Map<Long, Long> ranks = new HashMap<>();
+        Map<String, List<AuditionResultVo.CompetitorItem>> byZone = new LinkedHashMap<>();
+        for (AuditionResultVo.CompetitorItem c : items) {
+            byZone.computeIfAbsent(c.getZone() == null ? "" : c.getZone(), k -> new ArrayList<>()).add(c);
+        }
+        for (List<AuditionResultVo.CompetitorItem> group : byZone.values()) {
+            for (AuditionResultVo.CompetitorItem c : group) {
+                if (c.getCompetitorId() != null && c.getRankInMatch() != null) {
+                    ranks.put(c.getCompetitorId(), c.getRankInMatch());
+                }
+            }
+            for (AuditionResultVo.CompetitorItem c : group) {
+                if (c.getCompetitorId() == null || ranks.containsKey(c.getCompetitorId())) {
+                    continue;
+                }
+                Long live = liveCircleRank(c, group, tiebreakScore);
+                if (live != null) {
+                    ranks.put(c.getCompetitorId(), live);
+                }
+            }
+        }
+        return ranks;
+    }
+
+    /** 未结算时的圈内实时名次(与前端「全部圈→分圈」的并列口径一致:并列同名次,分高者在前) */
+    private Long liveCircleRank(AuditionResultVo.CompetitorItem self,
+                                List<AuditionResultVo.CompetitorItem> group,
+                                Map<Long, BigDecimal> tiebreakScore) {
+        BigDecimal mine = self.getScore();
+        if (mine == null) {
+            return null;
+        }
+        BigDecimal mineTb = self.getCompetitorId() == null ? null : tiebreakScore.get(self.getCompetitorId());
+        int ahead = 0;
+        for (AuditionResultVo.CompetitorItem x : group) {
+            if (x == self) {
+                continue;
+            }
+            BigDecimal s = x.getScore();
+            if (s == null || s.compareTo(mine) < 0) {
+                continue;
+            }
+            if (s.compareTo(mine) > 0) {
+                ahead++;
+                continue;
+            }
+            BigDecimal tb = x.getCompetitorId() == null ? null : tiebreakScore.get(x.getCompetitorId());
+            if (tb != null && (mineTb == null || tb.compareTo(mineTb) > 0)) {
+                ahead++;
+            }
+        }
+        return (long) ahead + 1;
+    }
+
+    /**
      * 海选导出主表排序:圈序 → 原始分降序 → 加赛分降序 → 号码牌升序
      * (与名单页「分数排名」同一口径,保证二海选手按加赛成绩排在前面)。
      */
@@ -395,7 +466,8 @@ public class AuditionResultService {
     /** 海选导出行:主表最后一列为排名,加赛表最后一列为结果 */
     private List<Object> auditionExportRow(AuditionResultVo.CompetitorItem c,
                                            List<TReferee> referees, boolean mainSheet,
-                                           Map<String, String> zoneLabels, boolean multiCircle) {
+                                           Map<String, String> zoneLabels, boolean multiCircle,
+                                           Long mainRank) {
         Map<Long, BigDecimal> refMap = c.getRefereeScores() == null ? Map.of()
             : c.getRefereeScores().stream()
                 .collect(Collectors.toMap(AuditionResultVo.RefereeScoreItem::getRefereeId,
@@ -418,7 +490,7 @@ public class AuditionResultService {
         }
         row.add(scoredRefs == 0 ? "" : total.stripTrailingZeros().toPlainString());
         row.add(mainSheet
-            ? (c.getFinalRank() == null ? "" : c.getFinalRank())
+            ? (mainRank == null ? "" : mainRank)
             : auditionResultText(c.getOutcomeStatus()));
         return row;
     }

@@ -807,7 +807,12 @@ import {
   directorDeleteFreeMatch,
   directorSaveFreeMatchAdvancers
 } from '@/api/game/director';
-import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
+import {
+  parseTournamentColorConfig,
+  isMatchMirrored,
+  DEFAULT_TOURNAMENT_COLOR_CONFIG,
+  TournamentColorConfig
+} from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import type { SseStatus } from '@/utils/sseChannel';
 import SseLiveBadge from '@/components/SseLiveBadge/index.vue';
@@ -823,10 +828,13 @@ const loading = ref(false);
 const sseStatus = ref<SseStatus>('connecting');
 /** 赛事级红蓝配色(当前场次/裁判列表 左红右蓝 或 右红左蓝) */
 const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
-let colorLoaded = false;
+/** 展示配置缓存 TTL:改赛事配置后,MC 端不必刷新,几秒内自动跟上 */
+const COLOR_CONFIG_TTL_MS = 5000;
+let colorLoadedAt = 0;
 const loadColorConfig = async () => {
-  if (colorLoaded || !tournamentId.value) return;
-  colorLoaded = true;
+  if (!tournamentId.value) return;
+  if (Date.now() - colorLoadedAt < COLOR_CONFIG_TTL_MS) return;
+  colorLoadedAt = Date.now();
   try {
     // 走导播 authKey 认证的赛事信息接口(与管理端同结构),不带管理员 JWT
     const tr: any = await getDirectorTournament();
@@ -836,6 +844,35 @@ const loadColorConfig = async () => {
   }
 };
 const isLeftRed = computed(() => colorConfig.value.matchColorOrder !== 'BLUE_LEFT');
+/** 当前场次朝向:上右下左=左右互换(纯展示;判定按钮/票型都按显示后的左右映射回选手) */
+const mirrored = computed(() => isMatchMirrored(colorConfig.value));
+const flipSide = (side?: string | null) => (side === 'LEFT' ? 'RIGHT' : side === 'RIGHT' ? 'LEFT' : side);
+/** 把一场比赛的 LEFT/RIGHT 口径整体翻到显示侧:翻一次后模板/HANDLER 里的左右就是屏幕左右 */
+const mirrorMatch = (m: any) => {
+  if (!mirrored.value) return m;
+  const flipVotes = (votes: any[]) => (votes || []).map((v) => ({ ...v, vote: flipSide(v.vote) }));
+  return {
+    ...m,
+    leftName: m.rightName,
+    rightName: m.leftName,
+    leftCompetitorId: m.rightCompetitorId ?? null,
+    rightCompetitorId: m.leftCompetitorId ?? null,
+    leftSlotKind: m.rightSlotKind ?? null,
+    rightSlotKind: m.leftSlotKind ?? null,
+    leftWin: !!m.rightWin,
+    rightWin: !!m.leftWin,
+    leftVotes: m.rightVotes ?? 0,
+    rightVotes: m.leftVotes ?? 0,
+    refereeVotes: flipVotes(m.refereeVotes),
+    roundVotes: (m.roundVotes || []).map((r: any) => ({
+      ...r,
+      leftName: r.rightName,
+      rightName: r.leftName,
+      winnerSide: flipSide(r.winnerSide),
+      refereeVotes: flipVotes(r.refereeVotes)
+    }))
+  };
+};
 /** LEFT/RIGHT 对应的红蓝文字色 */
 const sideColorClass = (side: 'LEFT' | 'RIGHT') => {
   const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
@@ -1112,34 +1149,36 @@ const loadMatchesForStage = async (stageId: string) => {
   try {
     const resp = await listDirectorMatches(stageId);
     const list = listOf(resp);
-    matches.value = (list || []).map((m: any) => ({
-      id: String(m.id),
-      name: m.name || `场次 #${m.id}`,
-      status: m.status || 'PENDING',
-      leftName: m.leftName || m.teamA || '',
-      rightName: m.rightName || m.teamB || '',
-      leftCompetitorId: m.leftCompetitorId ?? null,
-      rightCompetitorId: m.rightCompetitorId ?? null,
-      // 座位类型必须带过来:BYE=轮空 / PENDING=待定(等上游出人),否则空位一律被当成待定
-      leftSlotKind: m.leftSlotKind ?? null,
-      rightSlotKind: m.rightSlotKind ?? null,
-      leftWin: !!m.leftWin,
-      rightWin: !!m.rightWin,
-      winnerName: m.winnerName || '',
-      publishMode: m.publishMode || 'AUTO',
-      pendingPublish: !!m.pendingPublish,
-      advanceCount: m.advanceCount ?? 0,
-      stageAdvanceCount: m.stageAdvanceCount ?? 0,
-      tiebreakerRound: m.tiebreakerRound || '',
-      leftVotes: m.leftVotes ?? 0,
-      rightVotes: m.rightVotes ?? 0,
-      drawVotes: m.drawVotes ?? 0,
-      votedReferees: m.votedReferees ?? 0,
-      totalReferees: m.totalReferees ?? 0,
-      refereeVotes: m.refereeVotes || [],
-      roundScores: m.roundScores || [],
-      roundVotes: m.roundVotes || []
-    }));
+    matches.value = (list || []).map((m: any) =>
+      mirrorMatch({
+        id: String(m.id),
+        name: m.name || `场次 #${m.id}`,
+        status: m.status || 'PENDING',
+        leftName: m.leftName || m.teamA || '',
+        rightName: m.rightName || m.teamB || '',
+        leftCompetitorId: m.leftCompetitorId ?? null,
+        rightCompetitorId: m.rightCompetitorId ?? null,
+        // 座位类型必须带过来:BYE=轮空 / PENDING=待定(等上游出人),否则空位一律被当成待定
+        leftSlotKind: m.leftSlotKind ?? null,
+        rightSlotKind: m.rightSlotKind ?? null,
+        leftWin: !!m.leftWin,
+        rightWin: !!m.rightWin,
+        winnerName: m.winnerName || '',
+        publishMode: m.publishMode || 'AUTO',
+        pendingPublish: !!m.pendingPublish,
+        advanceCount: m.advanceCount ?? 0,
+        stageAdvanceCount: m.stageAdvanceCount ?? 0,
+        tiebreakerRound: m.tiebreakerRound || '',
+        leftVotes: m.leftVotes ?? 0,
+        rightVotes: m.rightVotes ?? 0,
+        drawVotes: m.drawVotes ?? 0,
+        votedReferees: m.votedReferees ?? 0,
+        totalReferees: m.totalReferees ?? 0,
+        refereeVotes: m.refereeVotes || [],
+        roundScores: m.roundScores || [],
+        roundVotes: m.roundVotes || []
+      })
+    );
   } catch (e) {
     console.error('加载场次失败:', e);
     matches.value = [];

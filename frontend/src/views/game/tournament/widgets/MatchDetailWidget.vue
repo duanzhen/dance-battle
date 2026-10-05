@@ -200,7 +200,12 @@ import CheckboxGroup from './common/CheckboxGroup.vue';
 import ColorInput from './common/ColorInput.vue';
 import StageSelector from '../stages/StageSelector.vue';
 import { getStageFlow, getMatch, listCompetitor, getTournament } from '@/api/game/screen';
-import { parseTournamentColorConfig, DEFAULT_TOURNAMENT_COLOR_CONFIG, TournamentColorConfig } from '@/utils/tournamentColorConfig';
+import {
+  parseTournamentColorConfig,
+  isMatchMirrored,
+  DEFAULT_TOURNAMENT_COLOR_CONFIG,
+  TournamentColorConfig
+} from '@/utils/tournamentColorConfig';
 import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/tournamentEventSse';
 import { StageMode } from '../stages/types';
 
@@ -293,10 +298,13 @@ const tournamentId = computed(() => props.tournamentId ?? qid(route.query.id) ??
 
 // ---- 赛事级红蓝配色(当前场次/裁判列表 左红右蓝 或 右红左蓝)----
 const colorConfig = ref<TournamentColorConfig>({ ...DEFAULT_TOURNAMENT_COLOR_CONFIG });
-let colorLoaded = false;
+/** 展示配置缓存 TTL:改赛事配置后,现场大屏不必刷新,几秒内自动跟上 */
+const COLOR_CONFIG_TTL_MS = 5000;
+let colorLoadedAt = 0;
 const loadColorConfig = async () => {
-  if (colorLoaded || !tournamentId.value) return;
-  colorLoaded = true;
+  if (!tournamentId.value) return;
+  if (Date.now() - colorLoadedAt < COLOR_CONFIG_TTL_MS) return;
+  colorLoadedAt = Date.now();
   try {
     const tr: any = await getTournament(tournamentId.value);
     colorConfig.value = parseTournamentColorConfig(tr?.data?.themeConfig);
@@ -305,6 +313,39 @@ const loadColorConfig = async () => {
   }
 };
 const isLeftRed = computed(() => colorConfig.value.matchColorOrder !== 'BLUE_LEFT');
+/** 当前场次朝向:上右下左=左右互换(纯展示,不改 match 生成、不影响对战树) */
+const mirrored = computed(() => isMatchMirrored(colorConfig.value));
+/** LEFT <-> RIGHT 互换(其余值原样返回) */
+const flipSide = (side?: string | null) =>
+  side === 'LEFT' ? 'RIGHT' : side === 'RIGHT' ? 'LEFT' : side;
+/** 把当前场次详情整体翻到显示口径:翻一次后,模板里的 LEFT/RIGHT 就是屏幕上的左/右 */
+const mirrorMatchDetail = (d: any) => {
+  if (!d || !mirrored.value) return d;
+  const flipVotes = (votes: any[]) => (votes || []).map((v) => ({ ...v, vote: flipSide(v.vote) }));
+  return {
+    ...d,
+    leftWin: d.rightWin,
+    rightWin: d.leftWin,
+    refereeVotes: flipVotes(d.refereeVotes),
+    roundVotes: (d.roundVotes || []).map((r: any) => ({
+      ...r,
+      leftName: r.rightName,
+      rightName: r.leftName,
+      winnerSide: flipSide(r.winnerSide),
+      refereeVotes: flipVotes(r.refereeVotes)
+    }))
+  };
+};
+/** 参赛方槽位整体左右互换(无槽位信息的旧数据直接反序兜底) */
+const mirrorParticipants = (list: any[]) => {
+  if (!mirrored.value) return list;
+  if (list.some((p) => p?.displaySlotIndex != null)) {
+    return list.map((p) =>
+      p?.displaySlotIndex == null ? p : { ...p, displaySlotIndex: 1 - Number(p.displaySlotIndex) }
+    );
+  }
+  return list.slice().reverse();
+};
 /** LEFT/RIGHT 对应的红蓝文字色 */
 const sideColorClass = (side: 'LEFT' | 'RIGHT') => {
   const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
@@ -346,7 +387,7 @@ const loadData = async () => {
     if (current?.id !== match.value?.id && match.value && celebratedMatchId !== String(match.value.id)) {
       try {
         const md: any = await getMatch(match.value.id);
-        const detail = md.data || null;
+        const detail = mirrorMatchDetail(md.data || null);
         const winnerSide = detail?.leftWin === true ? 'LEFT' : detail?.rightWin === true ? 'RIGHT' : null;
         if (winnerSide) {
           matchDetail.value = detail;
@@ -366,14 +407,16 @@ const loadData = async () => {
     }
     match.value = current;
     lastMatchId = current?.id != null ? String(current.id) : null;
-    participants.value = ((data?.currentMatchParticipants || []) as any[])
-      .slice()
-      .sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0));
+    participants.value = mirrorParticipants(
+      ((data?.currentMatchParticipants || []) as any[])
+        .slice()
+        .sort((a: any, b: any) => (a.displaySlotIndex ?? 0) - (b.displaySlotIndex ?? 0))
+    );
 
     // 场次详情:裁判判罚(refereeVotes)与各轮判罚明细(roundVotes)
     try {
       const md: any = await getMatch(current.id);
-      matchDetail.value = md.data || null;
+      matchDetail.value = mirrorMatchDetail(md.data || null);
       const rounds: any[] = matchDetail.value?.roundVotes || [];
       roundSeq.value = rounds.length > 0 ? rounds[rounds.length - 1].roundSequence : 1;
     } catch (e) {

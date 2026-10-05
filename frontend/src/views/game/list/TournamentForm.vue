@@ -222,10 +222,10 @@
         </button>
         <div v-if="showAdvanced" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
           <div>
-            <label class="block text-sm font-medium text-neutral-400 mb-1.5">对战树红蓝位置</label>
-            <el-select v-model="form.bracketColorOrder" class="w-full">
-              <el-option value="RED_TOP" label="上红下蓝" />
-              <el-option value="BLUE_TOP" label="上蓝下红" />
+            <label class="block text-sm font-medium text-neutral-400 mb-1.5">当前场次朝向</label>
+            <el-select v-model="form.matchLayoutOrder" class="w-full">
+              <el-option value="UPPER_LEFT" label="上左下右" />
+              <el-option value="UPPER_RIGHT" label="上右下左" />
             </el-select>
           </div>
           <div>
@@ -335,7 +335,7 @@ const form = reactive({
   remark: '', // 备注
   refereeNames: [], // 裁判配置:裁判姓名列表
   refereeNone: false, // 裁判配置:是否标记「暂无裁判」
-  bracketColorOrder: 'RED_TOP', // 对战树红蓝位置:上红下蓝 / 上蓝下红
+  matchLayoutOrder: 'UPPER_LEFT', // 当前场次朝向:上左下右 / 上右下左(选手左右互换)
   matchColorOrder: 'RED_LEFT', // 当前场次/裁判列表红蓝位置:左红右蓝 / 右红左蓝
   autoConfirmAdvancement: true // 跳过中间态确认阶段(默认开启)
 });
@@ -430,7 +430,7 @@ const resetForm = () => {
     remark: '',
     refereeNames: [],
     refereeNone: false,
-    bracketColorOrder: 'RED_TOP',
+    matchLayoutOrder: 'UPPER_LEFT',
     matchColorOrder: 'RED_LEFT',
     autoConfirmAdvancement: true
   });
@@ -456,7 +456,7 @@ watch(
         remark: newTournament.remark || ''
       });
       const colorCfg = parseTournamentThemeConfig(newTournament.themeConfig);
-      form.bracketColorOrder = colorCfg.bracketColorOrder;
+      form.matchLayoutOrder = colorCfg.matchLayoutOrder;
       form.matchColorOrder = colorCfg.matchColorOrder;
       form.autoConfirmAdvancement = colorCfg.autoConfirmAdvancement;
       // 设置预览图
@@ -504,7 +504,7 @@ const submitForm = async () => {
     // 构建主题配置 JSON
     const themeConfig = form.themeConfig ? JSON.parse(form.themeConfig) : { bgColor: '#000000', fontFamily: 'Roboto' };
     // 赛事级红蓝配色(所有下属淘汰赛共享)写入 themeConfig
-    themeConfig.bracketColorOrder = form.bracketColorOrder;
+    themeConfig.matchLayoutOrder = form.matchLayoutOrder;
     themeConfig.matchColorOrder = form.matchColorOrder;
     themeConfig.autoConfirmAdvancement = !!form.autoConfirmAdvancement;
 

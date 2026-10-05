@@ -103,8 +103,12 @@ watch(activeTab, (v) => {
   localStorage.setItem('tournamentActiveTab', v);
 });
 
-// 从 URL 获取 tournamentId
-const tournamentId = ref<string | number | null>(null);
+// 从 URL 获取 tournamentId:在 setup 阶段就取值,子组件(赛事配置)挂载时才能拿到 id——
+// 若放到 onMounted 再赋值,默认落在「赛事配置」tab 时子组件会先以 null 挂载并错过加载。
+const queryId = route.query.id;
+const tournamentId = ref<string | number | null>(
+  queryId ? (Array.isArray(queryId) ? (queryId[0] ?? null) : queryId) : null
+);
 
 // 点击 logo 切换到赛事首页标签:
 // 列表页(/game/list)加载时会把所在标签命名为 gameListTab,
@@ -117,14 +121,10 @@ const openHome = () => {
 };
 
 onMounted(async () => {
-  // 从 query.id 中获取 tournamentId
-  const id = route.query.id;
-
-  if (id) {
-    tournamentId.value = id;
+  if (tournamentId.value != null) {
     // 从后端加载场景数据
-    await directorStore.loadScenes(id);
-    console.log(`📂 已加载赛事场景数据: tournamentId = ${id}`);
+    await directorStore.loadScenes(String(tournamentId.value));
+    console.log(`📂 已加载赛事场景数据: tournamentId = ${tournamentId.value}`);
   } else {
     console.warn('⚠️ URL 中未找到 id 参数');
   }

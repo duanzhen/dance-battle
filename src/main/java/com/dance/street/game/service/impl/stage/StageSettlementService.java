@@ -14,6 +14,7 @@ import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.engine.common.DimensionConfig;
+import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
@@ -184,9 +185,13 @@ public class StageSettlementService {
         if (!entryStage) {
             // 名单快照:删除 apply 写入的行(from_roster=1)及其成员,名单 applied 回退,可重新装配;
             // 保留签到/手工 GUEST 等非快照行按旧语义回退待定
+            // 保险:只删「确实由名单物化出来」的行(有来源赛段或外卡名)。签到进来的真实选手
+            // 即使被误标 from_roster=1,也不会被当成快照删掉——链头撤销尤其不能丢人。
             List<TCompetitor> snapshotRows = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
                 .eq(TCompetitor::getStageId, stageId)
-                .eq(TCompetitor::getFromRoster, 1L));
+                .eq(TCompetitor::getFromRoster, 1L)
+                .and(w -> w.isNotNull(TCompetitor::getSourceStageId)
+                    .or().eq(TCompetitor::getEntryTag, RosterConstants.ENTRY_GUEST)));
             if (!snapshotRows.isEmpty()) {
                 List<Long> snapshotRowIds = snapshotRows.stream().map(TCompetitor::getId).toList();
                 competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()

@@ -26,16 +26,14 @@
             <div class="text-lg font-medium text-white mb-1">{{ config.format }}</div>
           </div>
 
-          <!-- 判罚方式 -->
+          <!-- 判罚方式:赛段开始后仍可修改(参考淘汰赛) -->
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
-            <div class="text-xs text-neutral-500 mb-2">判罚方式</div>
-            <div class="text-sm text-neutral-200">
-              {{
-                config.publishMode === 'DIRECTOR'
-                  ? '导播台直接判定（裁判端不显示场次，MC 在手机导播台选胜负/平局）'
-                  : '裁判判罚（裁判端录入，判完即结算）'
-              }}
-            </div>
+            <label class="text-xs text-neutral-500 mb-2 block">判罚方式</label>
+            <el-select v-model="config.publishMode" class="w-full" @change="handleUpdate">
+              <el-option value="AUTO" label="裁判判罚（裁判端录入，判完即结算）" />
+              <el-option value="DIRECTOR" label="导播台直接判定（MC 在导播台选胜负/平局）" />
+            </el-select>
+            <p class="text-[10px] text-neutral-600 mt-1.5">赛段开始后仍可修改,新场次按新模式生效</p>
           </div>
 
           <!-- 平局计分 -->

@@ -468,7 +468,11 @@
 
               <!-- 导播台判定模式:直接选择谁赢 -->
               <div
-                v-if="match.status === 'GAMING' && match.publishMode === 'DIRECTOR' && match.currentRoundGaming"
+                v-if="
+                  match.status === 'GAMING' &&
+                  match.publishMode === 'DIRECTOR' &&
+                  (!match.pendingPublish || match.currentRoundGaming)
+                "
                 class="mt-2 grid grid-cols-3 gap-2"
               >
                 <button

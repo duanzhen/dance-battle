@@ -141,7 +141,7 @@
                       已分出胜负:可等导播台提前结束，也可继续判下一局
                     </div>
                   </div>
-                  <div v-if="currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
+                  <div v-if="!pendingPublish || currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
                     <button
                       @click="submitKnockout('LEFT')"
                       :disabled="submitting"
@@ -474,7 +474,7 @@
                   <div class="text-[9px] text-neutral-600 mt-0.5">第 {{ roundSeq }} 轮：选择左方胜 / 平局 / 右方胜</div>
                   <div v-if="voteProgress" class="text-[9px] text-amber-400/80 mt-1 font-bold">裁判已判 {{ voteProgress }}</div>
                 </div>
-                <div v-if="currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
+                <div v-if="!pendingPublish || currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
                   <button
                     @click="submitKnockout('LEFT')"
                     :disabled="submitting"

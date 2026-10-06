@@ -5,7 +5,9 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TMatchReferee;
+import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TReferee;
+import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
@@ -19,7 +21,9 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
+import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
+import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
@@ -85,6 +89,10 @@ class AuditionMultiRefereeTest {
     private TMatchMapper matchMapper;
     @Autowired
     private TMatchParticipantMapper participantMapper;
+    @Autowired
+    private TMatchRoundMapper matchRoundMapper;
+    @Autowired
+    private TRoundScoreMapper roundScoreMapper;
     @Autowired
     private TCompetitorMapper competitorMapper;
     @Autowired
@@ -280,9 +288,104 @@ class AuditionMultiRefereeTest {
         assertEquals(OutcomeStatusEnum.ELIMINATED.getCode(),
             competitorMapper.selectById(second).getOutcomeStatus(),
             "答辩化聚合列的残留不应影响晋级裁决");
+        // 结算时应按明细把显示用总分(participant.score_value)整段重算回来,抹平提交期残留
+        assertEquals(0, bd("9").compareTo(scoreValueOf(circle.getId(), first)),
+            "结算后总分应按明细重算为 9");
+        assertEquals(0, bd("3").compareTo(scoreValueOf(circle.getId(), second)),
+            "结算后总分应按明细重算为 3");
     }
 
     // ===== 造数据 =====
+
+    /**
+     * 同一裁判对同一选手重复提交:必须覆盖(先删旧再写新),不能累加成 2 倍;
+     * 每次提交后 participant.score_value(总分回显)都要跟着更新。
+     */
+    @Test
+    void resubmitSameRefereeReplacesScoreAndRefreshesTotal() {
+        Long tid = newTournament("重复提交");
+        TReferee refereeA = newReferee(tid, "裁判A");
+        TStageVo stage = newAuditionStage(tid, "海选", 1, new long[]{1}, null);
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        TMatch circle = circlesOf(stage.getId()).get(0);
+        bindRefereeToCircle(circle.getId(), refereeA.getId(), tid);
+        putPlayers(tid, stage, circle.getId(), 2);
+        lifecycleService.startStage(stage.getId());
+
+        scoreAll(circle.getId(), refereeA.getId(), List.of(bd("8"), bd("1")));
+        Long first = participantsOf(circle.getId()).get(0).getCompetitorId();
+        assertEquals(1, scoreRowsOf(circle.getId(), first).size(), "首次提交应只落一行");
+        assertEquals(0, bd("8").compareTo(scoreValueOf(circle.getId(), first)), "首次提交应写入总分 8");
+
+        // 重新提交同一裁判分数:覆盖而非追加
+        scoreAll(circle.getId(), refereeA.getId(), List.of(bd("8"), bd("1")));
+        assertEquals(1, scoreRowsOf(circle.getId(), first).size(), "重复提交应覆盖而非新增");
+        assertEquals(0, bd("8").compareTo(scoreValueOf(circle.getId(), first)), "重复提交不应翻倍");
+    }
+
+    private List<TRoundScore> scoreRowsOf(Long matchId, Long competitorId) {
+        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, matchId).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).toList();
+        if (roundIds.isEmpty()) {
+            return List.of();
+        }
+        return roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+            .in(TRoundScore::getRoundId, roundIds)
+            .eq(TRoundScore::getCompetitorId, competitorId));
+    }
+
+    /**
+     * 回归 P0:一场里残留多个回合(历史数据)时,重新提交同一裁判的分不能翻倍,
+     * 且总分必须跟着刷新。写路径要"按整场删旧分",只删当前回合会把旧行留下 -> 分数翻倍。
+     */
+    @Test
+    void resubmitAfterLegacyMultiRoundDoesNotDouble() {
+        Long tid = newTournament("多回合残留");
+        TReferee refereeA = newReferee(tid, "裁判A");
+        TStageVo stage = newAuditionStage(tid, "海选", 1, new long[]{1}, null);
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        TMatch circle = circlesOf(stage.getId()).get(0);
+        bindRefereeToCircle(circle.getId(), refereeA.getId(), tid);
+        putPlayers(tid, stage, circle.getId(), 2);
+        lifecycleService.startStage(stage.getId());
+
+        Long first = participantsOf(circle.getId()).get(0).getCompetitorId();
+        // 模拟老数据:圈里有两个回合,8 分挂在第一个回合
+        TMatchRound extra = new TMatchRound();
+        extra.setTournamentId(tid);
+        extra.setMatchId(circle.getId());
+        extra.setRoundSequence(99L);
+        extra.setStatus(StageConstants.MATCH_GAMING);
+        matchRoundMapper.insert(extra);
+        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, circle.getId()))
+            .stream().map(TMatchRound::getId).sorted().toList();
+        TRoundScore old = new TRoundScore();
+        old.setTournamentId(tid);
+        old.setRoundId(roundIds.get(0));
+        old.setCompetitorId(first);
+        old.setRefereeId(refereeA.getId());
+        old.setScore(bd("8"));
+        old.setDimension("MAIN");
+        old.setAction(StageConstants.SCORE_ACTION_SCORE);
+        roundScoreMapper.insert(old);
+
+        // 重新提交同一裁判分:应"整场覆盖",而不是在另一个回合再插一行
+        scoreAll(circle.getId(), refereeA.getId(), List.of(bd("8"), bd("1")));
+
+        assertEquals(1, scoreRowsOf(circle.getId(), first).size(),
+            "重新提交后该裁判对该选手只应有一行(整场覆盖,不翻倍)");
+        assertEquals(0, bd("8").compareTo(scoreValueOf(circle.getId(), first)),
+            "总分应等于 8,不能累加成 16");
+    }
+
+    private BigDecimal scoreValueOf(Long matchId, Long competitorId) {
+        return participantsOf(matchId).stream()
+            .filter(p -> competitorId.equals(p.getCompetitorId()))
+            .map(TMatchParticipant::getScoreValue)
+            .findFirst().orElse(null);
+    }
 
     private BigDecimal bd(String v) {
         return new BigDecimal(v);

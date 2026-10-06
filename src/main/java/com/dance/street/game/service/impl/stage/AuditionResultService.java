@@ -225,10 +225,12 @@ public class AuditionResultService {
         item.setName(c == null ? null : c.getName());
         TMatch m = p.getMatchId() == null ? null : matchById.get(p.getMatchId());
         item.setZone(m == null ? null : m.getDisplayZone());
-        item.setScore(p.getScoreValue());
         item.setRankInMatch(p.getRankInMatch());
         item.setOutcomeStatus(p.getOutcomeStatus());
         item.setFinalRank(c == null ? null : c.getFinalRank());
+        // 总分以打分明细现算(与导出、结算同口径):participant.score_value 只是提交时刷新的缓存,
+        // 并发提交或一场残留多回合时可能只含部分裁判,不能作为"总分"口径。
+        BigDecimal total = null;
         List<AuditionResultVo.RefereeScoreItem> refScores = new ArrayList<>();
         if (p.getCompetitorId() != null) {
             for (TReferee r : referees) {
@@ -239,9 +241,11 @@ public class AuditionResultService {
                     rs.setRefereeName(refNameById.get(r.getId()));
                     rs.setScore(v);
                     refScores.add(rs);
+                    total = total == null ? v : total.add(v);
                 }
             }
         }
+        item.setScore(total);
         item.setRefereeScores(refScores);
         return item;
     }

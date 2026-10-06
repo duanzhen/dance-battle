@@ -10,6 +10,8 @@ import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.StageFlowSupport;
+import com.dance.street.game.engine.common.RuleConfigHolder;
+import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
@@ -32,6 +34,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -96,11 +99,17 @@ public class AuditionStageSettler implements StageSettler {
         // 两种情况导播要做的都是去盯加赛,混进"仍有场次未完成"会被当成漏判了场次。
         List<TMatch> tiebreakers = unfinished.stream().filter(SettlementSupport::isTiebreaker).toList();
         if (!tiebreakers.isEmpty()) {
-            String reason = tiebreakerReason(tiebreakers);
+            // 手动指定模式:加赛不打分,等导播指定晋级人员;用普通 pending 提示,不弹「需要加赛」
+            String reason = isManualTiebreak(stage)
+                ? "海选加赛「" + tiebreakerLabel(tiebreakers.get(0))
+                    + "」尚未指定晋级人员,请在导播台指定后再完成赛段"
+                : tiebreakerReason(tiebreakers);
             if (blocked != null) {
                 reason = reason + " " + blocked;
             }
-            return StageSettleOutcome.tiebreaker(reason);
+            return isManualTiebreak(stage)
+                ? StageSettleOutcome.pending(reason)
+                : StageSettleOutcome.tiebreaker(reason);
         }
         if (blocked != null) {
             return StageSettleOutcome.pending(blocked);
@@ -109,6 +118,10 @@ public class AuditionStageSettler implements StageSettler {
             return StageSettleOutcome.pending(
                 "赛段仍有 " + unfinished.size() + " 场未结算,完成全部判罚后才能结束赛段");
         }
+        // 到这里:正式圈与各级加赛全部判完、结算完毕 —— 本次调用产出最终排名。
+        // 就在"出排名"这一刻,按打分明细把整段显示用总分(participant.score_value)重算一遍,
+        // 抹平提交期并发/多回合留下的落后缓存;与名次同事务写入,保证回显/导出/取人三处同源。
+        refreshParticipantTotals(stage);
         return StageSettleOutcome.completed();
     }
 
@@ -193,7 +206,11 @@ public class AuditionStageSettler implements StageSettler {
         if (stage == null || stage.getId() == null) {
             return null;
         }
-        List<String> unjudged = judgeCompletenessChecker.unjudgedNames(pending);
+        // 手动指定模式下的加赛场次不打分,不参与「有没有判完」的判定
+        List<TMatch> toCheck = isManualTiebreak(stage)
+            ? pending.stream().filter(m -> !SettlementSupport.isTiebreaker(m)).toList()
+            : pending;
+        List<String> unjudged = judgeCompletenessChecker.unjudgedNames(toCheck);
         if (unjudged.isEmpty()) {
             return null;
         }
@@ -201,6 +218,19 @@ public class AuditionStageSettler implements StageSettler {
         String names = String.join("、", unjudged.subList(0, shown)) + (unjudged.size() > shown ? " 等" : "");
         return "海选还有 " + unjudged.size() + " 位选手未判完(" + names + "),本场裁判需逐人打完分才能结束赛段;"
             + "确实不上场的选手请标记退赛,或由裁判打 0 分(0 分不参与晋级)";
+    }
+
+    /** 本赛段是否为「海选加赛手动指定晋级」模式(rule_config.tiebreakMode=MANUAL)。 */
+    private boolean isManualTiebreak(TStage stage) {
+        if (stage == null) {
+            return false;
+        }
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        return rc != null && "MANUAL".equals(rc.resolveTiebreakMode());
+    }
+
+    private boolean isManualTiebreakByStageId(Long stageId) {
+        return stageId != null && isManualTiebreak(stageMapper.selectById(stageId));
     }
 
     /** 整段结算:逐场结算尚未结算的海选场(圈名额/排名起点统一口径) */
@@ -228,6 +258,63 @@ public class AuditionStageSettler implements StageSettler {
                 continue;
             }
             settleAuditionMatch(match, qb.quota(), qb.base(), zoneAdvanced);
+        }
+    }
+
+    /**
+     * 按 {@code t_round_score} 重算每个参赛行的显示用总分({@code participant.score_value})。
+     *
+     * <p>提交打分时刷新这一列只是给裁判端/大屏做实时回显,并发提交(各事务看不到彼此未提交的行)
+     * 时会落后;在赛段结算完成、产出最终排名这一刻以明细为准整段重算一次,把落后抹平。
+     * 名次/晋级不依赖这一列(另行按明细裁决),这一列只服务回显与下游按分数取人。</p>
+     */
+    private void refreshParticipantTotals(TStage stage) {
+        List<TMatch> matches = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+            .eq(TMatch::getStageId, stage.getId()));
+        List<Long> matchIds = matches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        if (matchIds.isEmpty()) {
+            return;
+        }
+        Map<Long, Long> matchByRound = new HashMap<>();
+        matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .in(TMatchRound::getMatchId, matchIds)
+                .select(TMatchRound::getId, TMatchRound::getMatchId))
+            .forEach(r -> {
+                if (r.getId() != null && r.getMatchId() != null) {
+                    matchByRound.putIfAbsent(r.getId(), r.getMatchId());
+                }
+            });
+        if (matchByRound.isEmpty()) {
+            return;
+        }
+        // "matchId:competitorId" -> 明细累计分
+        Map<String, BigDecimal> totals = new HashMap<>();
+        roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                .in(TRoundScore::getRoundId, matchByRound.keySet())
+                .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_SCORE)
+                .select(TRoundScore::getRoundId, TRoundScore::getCompetitorId, TRoundScore::getScore))
+            .forEach(s -> {
+                Long matchId = s.getRoundId() == null ? null : matchByRound.get(s.getRoundId());
+                if (matchId != null && s.getCompetitorId() != null && s.getScore() != null) {
+                    totals.merge(matchId + ":" + s.getCompetitorId(), s.getScore(), BigDecimal::add);
+                }
+            });
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .in(TMatchParticipant::getMatchId, matchIds)
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        int changed = 0;
+        for (TMatchParticipant p : parts) {
+            BigDecimal total = totals.getOrDefault(p.getMatchId() + ":" + p.getCompetitorId(), BigDecimal.ZERO);
+            if (p.getScoreValue() != null && p.getScoreValue().compareTo(total) == 0) {
+                continue;
+            }
+            participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
+                .eq(TMatchParticipant::getId, p.getId())
+                .set(TMatchParticipant::getScoreValue, total));
+            changed++;
+        }
+        if (changed > 0) {
+            log.info("海选结算:按明细重算 {} 行显示用总分(participant.score_value)", changed);
         }
     }
 
@@ -306,6 +393,11 @@ public class AuditionStageSettler implements StageSettler {
     private void settleAuditionMatch(TMatch match, int advanceQuota,
                                      int zoneBase,
                                      Map<String, Integer> zoneAdvanced) {
+        // 手动指定晋级模式的加赛:不打分,按导播指定的人员结算(晋级者按号码牌升序排),其余淘汰
+        if (settlementSupport.isTiebreaker(match) && isManualTiebreakByStageId(match.getStageId())) {
+            settleManualTiebreakMatch(match, advanceQuota, zoneBase, zoneAdvanced);
+            return;
+        }
         List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery().eq(TMatchParticipant::getMatchId, match.getId())
                 .isNotNull(TMatchParticipant::getCompetitorId));
@@ -470,6 +562,66 @@ public class AuditionStageSettler implements StageSettler {
 
         log.info("海选赛场次[{}]已结算,共{}名选手,正分{}名,晋级{}名(0分选手不晋级)", match.getId(),
             sortedCids.size(), positiveCount, advanced);
+    }
+
+    /**
+     * 结算「手动指定晋级」的海选加赛:分数不参与——按导播指定名单定晋级,晋级排序用号码牌从小到大。
+     * 未指定时保持未结算(由 {@code settle()} 给出明确提示)。
+     */
+    private void settleManualTiebreakMatch(TMatch match, int advanceQuota, int zoneBase,
+                                           Map<String, Integer> zoneAdvanced) {
+        List<Long> designated = AuditionTiebreakResult.read(match.getResultJson());
+        if (designated.isEmpty()) {
+            return;   // 还没指定:settle() 会提示"尚未指定晋级人员"
+        }
+        List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, match.getId())
+            .isNotNull(TMatchParticipant::getCompetitorId));
+        Set<Long> partIds = new LinkedHashSet<>();
+        for (TMatchParticipant p : parts) {
+            if (p.getCompetitorId() != null) {
+                partIds.add(p.getCompetitorId());
+            }
+        }
+        if (partIds.isEmpty()) {
+            settlementSupport.markMatchSettled(match);
+            return;
+        }
+        Map<Long, TCompetitor> compMap = settlementSupport.competitorMap(new ArrayList<>(partIds));
+        Comparator<Long> byNumber = Comparator.comparingInt(cid -> {
+            TCompetitor c = compMap.get(cid);
+            return c == null ? Integer.MAX_VALUE : SettlementSupport.parseCompetitorNumber(c.getNumber());
+        });
+        String zone = match.getDisplayZone();
+        int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
+        int remaining = Math.max(0, advanceQuota - alreadyAdvanced);
+        // 指定晋级的人(限定在本场参赛方内)按号码牌升序,取满剩余名额
+        List<Long> orderedAdvance = designated.stream()
+            .filter(partIds::contains)
+            .sorted(byNumber)
+            .limit(remaining)
+            .toList();
+        Set<Long> advanceSet = new HashSet<>(orderedAdvance);
+        List<Long> orderedRest = partIds.stream()
+            .filter(cid -> !advanceSet.contains(cid))
+            .sorted(byNumber)
+            .toList();
+        List<Long> ordered = new ArrayList<>(orderedAdvance);
+        ordered.addAll(orderedRest);
+        Map<Long, Integer> ranks = new HashMap<>();
+        for (int i = 0; i < ordered.size(); i++) {
+            ranks.put(ordered.get(i), i + 1);
+        }
+        for (int i = 0; i < ordered.size(); i++) {
+            Long cid = ordered.get(i);
+            String outcome = i < orderedAdvance.size()
+                ? OutcomeStatusEnum.ADVANCE.getCode() : OutcomeStatusEnum.ELIMINATED.getCode();
+            markAuditionResult(cid, outcome, (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match.getId());
+        }
+        zoneAdvanced.put(zone, alreadyAdvanced + orderedAdvance.size());
+        settlementSupport.markMatchSettled(match);
+        log.info("海选手动加赛[{}]结算:指定晋级{}名(按号码牌升序),其余淘汰",
+            match.getId(), orderedAdvance.size());
     }
 
     private void markAuditionResult(Long cid, String outcome, Long finalRank,

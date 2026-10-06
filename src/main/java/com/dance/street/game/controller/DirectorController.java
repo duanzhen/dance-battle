@@ -299,6 +299,20 @@ public class DirectorController {
     }
 
     /**
+     * 海选加赛「手动指定晋级」:仅加赛场次、且赛段配置为「指定晋级人员」时可用。
+     * 指定的人由服务端按号码牌升序规范,后续「完成赛段」按此结算。
+     */
+    @Log(title = "导播台指定加赛晋级", businessType = BusinessType.UPDATE)
+    @PostMapping("/match/{id}/tiebreak-advance")
+    public R<Void> designateTiebreakAdvance(@PathVariable("id") Long id,
+                                            @RequestBody(required = false) com.dance.street.game.domain.bo.TiebreakAdvanceBo bo,
+                                            HttpServletRequest request) {
+        assertMatchInTournament(currentTournament(request), id);
+        matchResultService.designateAuditionTiebreakAdvance(id, bo == null ? null : bo.getCompetitorIds());
+        return R.ok();
+    }
+
+    /**
      * 标记场次当前上场选手(海选大屏):MC 点击选手名字后调用,仅标记并广播,不参与结算。
      * competitorId 传 null 清除标记。
      */

@@ -503,14 +503,40 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                     continue;
                 }
                 long keep = roundIds.get(0);
-                List<String> drop = new ArrayList<>();
-                for (int i = 1; i < roundIds.size(); i++) {
-                    drop.add(String.valueOf(roundIds.get(i)));
+                Set<Long> drop = new HashSet<>(roundIds.subList(1, roundIds.size()));
+                // 打分明细里同 (裁判, 选手, 维度) 只保留一行:先到的保留,重复的删掉,
+                // 否则 re-point 到同一回合会撞唯一键(uk_round_score),导致整场搬迁失败。
+                Set<String> kept = new HashSet<>();
+                List<long[]> repoint = new ArrayList<>();
+                List<Long> duplicateRowIds = new ArrayList<>();
+                try (Statement statement = connection.createStatement();
+                     ResultSet rs = statement.executeQuery(
+                         "SELECT id, round_id, referee_id, competitor_id, dimension FROM t_round_score"
+                             + " WHERE round_id IN (" + joinIds(roundIds) + ")")) {
+                    while (rs.next()) {
+                        long rowId = rs.getLong(1);
+                        long roundId = rs.getLong(2);
+                        String key = rs.getObject(3) + "|" + rs.getObject(4) + "|" + rs.getObject(5);
+                        if (roundId == keep) {
+                            kept.add(key);
+                        } else if (drop.contains(roundId)) {
+                            if (kept.contains(key)) {
+                                duplicateRowIds.add(rowId);
+                            } else {
+                                kept.add(key);
+                                repoint.add(new long[]{rowId, roundId});
+                            }
+                        }
+                    }
                 }
-                String dropIn = String.join(",", drop);
-                executeDdl(connection, "UPDATE t_round_score SET round_id = " + keep
-                    + " WHERE round_id IN (" + dropIn + ")");
-                executeDdl(connection, "DELETE FROM t_match_round WHERE id IN (" + dropIn + ")");
+                for (Long rowId : duplicateRowIds) {
+                    executeDdl(connection, "DELETE FROM t_round_score WHERE id = " + rowId);
+                }
+                for (long[] row : repoint) {
+                    executeDdl(connection, "UPDATE t_round_score SET round_id = " + keep
+                        + " WHERE id = " + row[0]);
+                }
+                executeDdl(connection, "DELETE FROM t_match_round WHERE id IN (" + joinIds(drop) + ")");
                 collapsed++;
             }
             if (collapsed > 0) {
@@ -521,6 +547,18 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
             // 搬迁失败不影响启动:业务仍能跑
             log.warn("逐选手轮次一次性合并失败(不影响启动): {}", e.getMessage());
         }
+    }
+
+    /** 把 ID 集合拼成 SQL 的 IN 列表(值均为内部数字 ID,无注入面) */
+    private static String joinIds(java.util.Collection<Long> ids) {
+        StringBuilder sb = new StringBuilder();
+        for (Long id : ids) {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(id);
+        }
+        return sb.toString();
     }
 
     private static void insertGroupRow(Connection connection, long[] stage, TStageRosterGroupBo g, int order)

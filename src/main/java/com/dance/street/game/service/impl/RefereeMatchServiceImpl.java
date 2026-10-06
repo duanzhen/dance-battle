@@ -456,15 +456,17 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         List<RefereeMatchVo.RefereeScoreInfo> myScoreInfos = new ArrayList<>();
         // 查询当前裁判对各参赛方的已有打分
         Map<Long, java.math.BigDecimal> refereeScores = new HashMap<>();
+        List<Long> perCompetitorRoundIds = (match != null && perCompetitorStage)
+            ? matchRoundMapper.selectList(
+                    Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
+                .stream().map(TMatchRound::getId).toList()
+            : List.of();
         List<TRoundScore> myScores;
         if (match != null && perCompetitorStage) {
-            // 海选赛/排名赛逐选手打分分布在各自轮次,跨本场全部轮次聚合该裁判的打分
-            List<Long> roundIds = matchRoundMapper.selectList(
-                    Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
-                .stream().map(TMatchRound::getId).toList();
-            myScores = roundIds.isEmpty() ? List.of() : roundScoreMapper.selectList(
+            // 海选赛/排名赛逐选手打分分布在本场各回合,跨回合聚合该裁判的打分
+            myScores = perCompetitorRoundIds.isEmpty() ? List.of() : roundScoreMapper.selectList(
                 Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds)
+                    .in(TRoundScore::getRoundId, perCompetitorRoundIds)
                     .eq(TRoundScore::getRefereeId, refereeId));
         } else if (match != null && currentRound != null) {
             myScores = roundScoreMapper.selectList(
@@ -487,6 +489,20 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             }
         }
         vo.setMyScores(myScoreInfos);
+        // 海选:当前累计总分一律按打分明细现算。participant.score_value 是提交时刷新的缓存,
+        // 并发提交/一场残留多回合时可能只含部分裁判 —— 显示层不能拿它当总分口径。
+        Map<Long, java.math.BigDecimal> globalScoreByComp = new HashMap<>();
+        if (isAuditionStage && !perCompetitorRoundIds.isEmpty()) {
+            roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                    .in(TRoundScore::getRoundId, perCompetitorRoundIds)
+                    .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_SCORE)
+                    .select(TRoundScore::getCompetitorId, TRoundScore::getScore))
+                .forEach(s -> {
+                    if (s.getCompetitorId() != null && s.getScore() != null) {
+                        globalScoreByComp.merge(s.getCompetitorId(), s.getScore(), java.math.BigDecimal::add);
+                    }
+                });
+        }
         // 参赛方姓名/号码批量取:此前循环内逐个 selectById,36 人的海选圈一次刷新就是 36 条 SQL
         List<Long> partCompetitorIds = participants.stream()
             .map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
@@ -498,7 +514,8 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             pi.setCompetitorId(p.getCompetitorId());
             pi.setDisplaySlotIndex(p.getDisplaySlotIndex());
             // 排名赛未公布时隐藏汇总分与排名,避免裁判端提前看到全局结果
-            pi.setCurrentScore(rankResultHidden ? null : p.getScoreValue());
+            pi.setCurrentScore(rankResultHidden ? null
+                : (isAuditionStage ? globalScoreByComp.get(p.getCompetitorId()) : p.getScoreValue()));
             pi.setRankInMatch(rankResultHidden ? null : p.getRankInMatch());
             if (p.getCompetitorId() != null && refereeScores.containsKey(p.getCompetitorId())) {
                 pi.setMyScore(refereeScores.get(p.getCompetitorId()));
@@ -562,6 +579,25 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         List<TMatchParticipant> participants = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
             .eq(TMatchParticipant::getMatchId, matchId)
             .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
+        // 海选:当前累计总分按打分明细现算(缓存 score_value 可能只含部分裁判)
+        boolean isAudition = stage != null && StageModeProfiles.of(stage.getStageMode()).audition();
+        Map<Long, java.math.BigDecimal> globalScoreByComp = new HashMap<>();
+        if (isAudition) {
+            List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                    .eq(TMatchRound::getMatchId, matchId).select(TMatchRound::getId))
+                .stream().map(TMatchRound::getId).toList();
+            if (!roundIds.isEmpty()) {
+                roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                        .in(TRoundScore::getRoundId, roundIds)
+                        .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_SCORE)
+                        .select(TRoundScore::getCompetitorId, TRoundScore::getScore))
+                    .forEach(s -> {
+                        if (s.getCompetitorId() != null && s.getScore() != null) {
+                            globalScoreByComp.merge(s.getCompetitorId(), s.getScore(), java.math.BigDecimal::add);
+                        }
+                    });
+            }
+        }
         List<RefereeParticipantInfo> out = new ArrayList<>();
         for (TMatchParticipant p : participants) {
             if (p.getCompetitorId() == null) {
@@ -570,7 +606,8 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             RefereeParticipantInfo pi = new RefereeParticipantInfo();
             pi.setCompetitorId(p.getCompetitorId());
             pi.setDisplaySlotIndex(p.getDisplaySlotIndex());
-            pi.setCurrentScore(rankResultHidden ? null : p.getScoreValue());
+            pi.setCurrentScore(rankResultHidden ? null
+                : (isAudition ? globalScoreByComp.get(p.getCompetitorId()) : p.getScoreValue()));
             pi.setRankInMatch(rankResultHidden ? null : p.getRankInMatch());
             out.add(pi);
         }

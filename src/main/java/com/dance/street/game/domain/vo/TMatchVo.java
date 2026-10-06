@@ -152,6 +152,12 @@ public class TMatchVo implements Serializable {
      */
     private String tiebreakerRound;
 
+    /** 海选加赛晋级方式:SCORE=加赛打分晋级 / MANUAL=导播手动指定(仅加赛场次有值) */
+    private String tiebreakMode;
+
+    /** 手动指定模式下当前已指定晋级的人员(按号码牌升序;未指定为空列表) */
+    private List<Long> designatedAdvanceIds;
+
     /**
      * 手动公布模式暂存结果(competitorId -> WIN/LOSS/DRAW),公布后清空
      */

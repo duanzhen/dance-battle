@@ -123,6 +123,13 @@
               <span class="text-xs text-neutral-400">按总分排名，取前 N 名晋级</span>
               <label class="text-xs text-neutral-500 flex items-center gap-2">
                 满分
+              <label class="text-xs text-neutral-500 flex items-center gap-2">加赛晋级
+                <el-select v-if="editable" v-model="config.tiebreakMode" class="w-40" @change="handleUpdate">
+                  <el-option value="SCORE" label="打分晋级" />
+                  <el-option value="MANUAL" label="指定晋级人员" />
+                </el-select>
+                <span v-else class="text-neutral-300">{{ config.tiebreakMode === 'MANUAL' ? '指定晋级人员' : '打分晋级' }}</span>
+              </label>
                 <el-select v-if="editable" v-model="config.maxScore" class="w-32" @change="handleUpdate">
                   <el-option :value="10" label="10 分制" />
                   <el-option :value="100" label="100 分制" />
@@ -351,6 +358,7 @@ const currentMode = computed(() => props.mode || ConfigMode.INIT);
 const config = ref<any>({
   advanceCondition: 'score',
   advanceCount: 16,
+  tiebreakMode: 'SCORE',
   circles: 0,
   maxScore: 10,
   circleAdvanceCounts: [],

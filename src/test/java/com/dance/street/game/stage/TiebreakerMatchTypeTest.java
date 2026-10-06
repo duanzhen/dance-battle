@@ -251,6 +251,120 @@ class TiebreakerMatchTypeTest {
 
     // ===== 造数据 =====
 
+    /**
+     * 出排名时(赛段结算完成那一刻)按明细重算显示用总分,且必须"按场"分开:
+     * 原圈行的总分 = 原圈明细和(不掺加赛分);加赛行的总分 = 加赛明细和。
+     */
+    @Test
+    void settlementRecomputesTotalsPerMatchAcrossTiebreakers() {
+        Long tid = newTournament("加赛重算总分");
+        TStageVo stage = newAuditionStage(tid, "海选", 2);
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        Long refereeId = insertReferee(tid, "裁判A");
+        Long circleId = circlesOf(stage.getId()).get(0).getId();
+        bindRefereeToCircle(circleId, refereeId, tid);
+        for (int i = 1; i <= 4; i++) {
+            putPlayerInCircle(tid, stage, "选手" + i, String.valueOf(i));
+        }
+        lifecycleService.startStage(stage.getId());
+
+        List<TMatchParticipant> parts = participantsOf(circleId);
+        Long a = parts.get(0).getCompetitorId();
+        Long b = parts.get(1).getCompetitorId();
+        Long c = parts.get(2).getCompetitorId();
+        Long d = parts.get(3).getCompetitorId();
+        score(circleId, a, new BigDecimal("9"));
+        score(circleId, b, new BigDecimal("9"));
+        score(circleId, c, new BigDecimal("9"));
+        score(circleId, d, new BigDecimal("4"));
+        assertTrue(lifecycleService.completeStage(stage.getId()).getTiebreaker(), "前三名同分应产生二海");
+
+        TMatch tb = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, stage.getId())
+                .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER))
+            .get(0);
+        List<TMatchParticipant> tbParts = participantsOf(tb.getId());
+        assertEquals(3, tbParts.size(), "三人加赛");
+        score(tb.getId(), tbParts.get(0).getCompetitorId(), new BigDecimal("9.5"));
+        score(tb.getId(), tbParts.get(1).getCompetitorId(), new BigDecimal("9"));
+        score(tb.getId(), tbParts.get(2).getCompetitorId(), new BigDecimal("8"));
+        assertTrue(lifecycleService.completeStage(stage.getId()).getCompleted(), "加赛判完应能结束赛段");
+
+        // 原圈行:总分 = 原圈分,不掺加赛分
+        assertEquals(0, new BigDecimal("9").compareTo(scoreValueOf(circleId, a)), "原圈 A 应为 9");
+        assertEquals(0, new BigDecimal("9").compareTo(scoreValueOf(circleId, b)), "原圈 B 应为 9");
+        assertEquals(0, new BigDecimal("9").compareTo(scoreValueOf(circleId, c)), "原圈 C 应为 9");
+        assertEquals(0, new BigDecimal("4").compareTo(scoreValueOf(circleId, d)), "原圈 D 应为 4");
+        // 加赛行:总分 = 加赛分
+        assertEquals(0, new BigDecimal("9.5").compareTo(scoreValueOf(tb.getId(), tbParts.get(0).getCompetitorId())));
+        assertEquals(0, new BigDecimal("9").compareTo(scoreValueOf(tb.getId(), tbParts.get(1).getCompetitorId())));
+        assertEquals(0, new BigDecimal("8").compareTo(scoreValueOf(tb.getId(), tbParts.get(2).getCompetitorId())));
+    }
+
+    private BigDecimal scoreValueOf(Long matchId, Long competitorId) {
+        return participantsOf(matchId).stream()
+            .filter(p -> Objects.equals(p.getCompetitorId(), competitorId))
+            .map(TMatchParticipant::getScoreValue)
+            .findFirst().orElse(null);
+    }
+
+    /**
+     * 手动指定模式的加赛:不打分,由导播指定谁晋级;晋级排序按号码牌升序。
+     */
+    @Test
+    void manualTiebreakDesignatesAdvancersByNumber() {
+        Long tid = newTournament("手动加赛");
+        TStageVo stage = newAuditionStage(tid, "海选", 2, "MANUAL");
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        Long refereeId = insertReferee(tid, "裁判A");
+        Long circleId = circlesOf(stage.getId()).get(0).getId();
+        bindRefereeToCircle(circleId, refereeId, tid);
+        for (int i = 1; i <= 4; i++) {
+            putPlayerInCircle(tid, stage, "选手" + i, String.valueOf(i));
+        }
+        lifecycleService.startStage(stage.getId());
+
+        List<TMatchParticipant> parts = participantsOf(circleId);
+        Long a = parts.get(0).getCompetitorId();
+        Long b = parts.get(1).getCompetitorId();
+        Long c = parts.get(2).getCompetitorId();
+        Long d = parts.get(3).getCompetitorId();
+        score(circleId, a, new BigDecimal("9"));
+        score(circleId, b, new BigDecimal("9"));
+        score(circleId, c, new BigDecimal("9"));
+        score(circleId, d, new BigDecimal("4"));
+        // 前三名同分争 2 个名额 → 生成二海(手动模式:不能直接结束,要等指定)
+        assertFalse(lifecycleService.completeStage(stage.getId()).getCompleted(), "生成二海后不能直接结束");
+        assertFalse(lifecycleService.completeStage(stage.getId()).getCompleted(), "未指定晋级人员不能结束");
+
+        TMatch tb = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
+                .eq(TMatch::getStageId, stage.getId())
+                .eq(TMatch::getMatchType, StageConstants.MATCH_TYPE_TIEBREAKER))
+            .get(0);
+        List<TMatchParticipant> tbParts = participantsOf(tb.getId());
+        assertEquals(3, tbParts.size(), "三人同分进二海");
+        List<Long> cids = tbParts.stream().map(TMatchParticipant::getCompetitorId).toList();
+
+        // 指定第 1、2 号(乱序传入)晋级 2 人;服务端按号码牌升序规范
+        matchResultService.designateAuditionTiebreakAdvance(tb.getId(), List.of(cids.get(1), cids.get(0)));
+        assertTrue(lifecycleService.completeStage(stage.getId()).getCompleted(), "指定后应能结束赛段");
+
+        assertEquals(OutcomeStatusEnum.ADVANCE.getCode(), competitorMapper.selectById(cids.get(0)).getOutcomeStatus());
+        assertEquals(OutcomeStatusEnum.ADVANCE.getCode(), competitorMapper.selectById(cids.get(1)).getOutcomeStatus());
+        assertEquals(OutcomeStatusEnum.ELIMINATED.getCode(), competitorMapper.selectById(cids.get(2)).getOutcomeStatus());
+        // 原圈名次:晋级者按号码牌升序占名额段(1、2),淘汰者排其后
+        assertEquals(1L, rankInMatchOf(circleId, cids.get(0)).longValue());
+        assertEquals(2L, rankInMatchOf(circleId, cids.get(1)).longValue());
+        assertEquals(3L, rankInMatchOf(circleId, cids.get(2)).longValue());
+    }
+
+    private Long rankInMatchOf(Long matchId, Long competitorId) {
+        return participantsOf(matchId).stream()
+            .filter(p -> Objects.equals(p.getCompetitorId(), competitorId))
+            .map(TMatchParticipant::getRankInMatch)
+            .findFirst().orElse(null);
+    }
+
     private Long newTournament(String name) {
         TTournament t = new TTournament();
         t.setName(name);
@@ -269,6 +383,22 @@ class TiebreakerMatchTypeTest {
         bo.setIsInitialized(0L);
         bo.setRuleConfig("{\"mode\":\"AUDITION\",\"circles\":1,\"advanceCount\":" + advanceCount
             + ",\"maxScore\":10,\"circleAdvanceCounts\":[" + advanceCount + "]}");
+        return stageService.insertByBo(bo);
+    }
+
+    /** 与 {@link #newAuditionStage(Long, String, int)} 同,但带加赛晋级方式(SCORE/MANUAL)。 */
+    private TStageVo newAuditionStage(Long tid, String name, int advanceCount, String tiebreakMode) {
+        TStageBo bo = new TStageBo();
+        bo.setTournamentId(tid);
+        bo.setName(name);
+        bo.setStageMode("AUDITION");
+        bo.setStatus(StageConstants.STAGE_DRAFT);
+        bo.setTeamCountStart(0L);
+        bo.setTeamCountEnd((long) advanceCount);
+        bo.setIsInitialized(0L);
+        String extra = tiebreakMode == null ? "" : ",\"tiebreakMode\":\"" + tiebreakMode + "\"";
+        bo.setRuleConfig("{\"mode\":\"AUDITION\",\"circles\":1,\"advanceCount\":" + advanceCount
+            + ",\"maxScore\":10,\"circleAdvanceCounts\":[" + advanceCount + "]" + extra + "}");
         return stageService.insertByBo(bo);
     }
 

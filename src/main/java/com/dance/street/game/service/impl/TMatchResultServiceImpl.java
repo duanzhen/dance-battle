@@ -43,6 +43,9 @@ import com.dance.street.game.service.impl.flow.DownstreamRouter;
 import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
+import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
+import com.dance.street.game.service.impl.settle.AuditionTiebreakResult;
+import com.dance.street.game.service.impl.settle.SettlementSupport;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
@@ -54,6 +57,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -98,6 +102,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     /** 参赛方成绩批量写入口(整场一条 SQL) */
     private final ParticipantScoreWriter scoreWriter;
     private final ScoringEngine scoringEngine;
+    /** 海选加赛剩余晋级名额(手动指定晋级时校验人数) */
+    private final AuditionAdvanceInfoSupport auditionAdvanceInfoSupport;
     /** 待公布结果 JSON:内部配置读写统一走雪花 ID 安全 mapper */
     private static final tools.jackson.databind.ObjectMapper RESULT_MAPPER = SnowflakeJson.mapper();
 
@@ -251,8 +257,16 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             String[] parts = key.split(":");
             touchedRoundByCompetitor.put(Long.valueOf(parts[1]), Long.valueOf(parts[0]));
         }
+        // 覆盖写:删掉本次涉事裁判在这些选手「本场任何一个回合」里的旧分,再写进当前回合。
+        // 关键点是按整场删而不是只删当前回合:一场若残留多个回合(历史数据/异常),
+        // 只删当前回合会留下旧行 —— 重复提交就把同一裁判的分累成 2 倍,结算也翻倍。
+        List<Long> matchRoundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        List<Long> deleteRoundIds = matchRoundIds.isEmpty()
+            ? new ArrayList<>(touchedRoundByCompetitor.values()) : matchRoundIds;
         roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-            .in(TRoundScore::getRoundId, touchedRoundByCompetitor.values())
+            .in(TRoundScore::getRoundId, deleteRoundIds)
             .eq(TRoundScore::getRefereeId, refId)
             .in(TRoundScore::getCompetitorId, touchedRoundByCompetitor.keySet()));
         // 批量插入:此前逐条 insert,整圈提交 = O(人数×维度) 条插入
@@ -1177,6 +1191,57 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void designateAuditionTiebreakAdvance(Long matchId, List<Long> competitorIds) {
+        TMatch match = matchId == null ? null : matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在");
+        }
+        if (!SettlementSupport.isTiebreaker(match)) {
+            throw new ServiceException("只有海选加赛场次支持手动指定晋级");
+        }
+        TStage stage = stageMapper.selectById(match.getStageId());
+        if (stage == null || !StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            throw new ServiceException("只有海选加赛支持手动指定晋级");
+        }
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        if (rc == null || !"MANUAL".equals(rc.resolveTiebreakMode())) {
+            throw new ServiceException("本场为「加赛打分晋级」,不能手动指定;"
+                + "如需指定,请先在海选配置里把「加赛晋级方式」改成「指定晋级人员」");
+        }
+        if (!StageConstants.MATCH_GAMING.equals(match.getStatus())) {
+            throw new ServiceException("加赛场次不在进行中,无法指定晋级,当前:{}", match.getStatus());
+        }
+        List<Long> partIds = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, matchId)
+                .isNotNull(TMatchParticipant::getCompetitorId))
+            .stream().map(TMatchParticipant::getCompetitorId).filter(Objects::nonNull).distinct().toList();
+        List<Long> ids = competitorIds == null ? List.of()
+            : competitorIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty() || !partIds.containsAll(ids)) {
+            throw new ServiceException("指定晋级的人必须是本加赛场次的参赛方");
+        }
+        int quota = auditionAdvanceInfoSupport.matchAdvanceCount(stage, match);
+        if (quota > 0 && ids.size() != quota) {
+            throw new ServiceException("本场应指定 {} 人晋级,实际指定 {} 人", quota, ids.size());
+        }
+        // 顺序规范化:晋级排序用号码牌从小到大
+        Map<Long, Integer> numberById = competitorMapper.selectByIds(ids).stream()
+            .collect(Collectors.toMap(TCompetitor::getId,
+                c -> SettlementSupport.parseCompetitorNumber(c.getNumber()), (a, b) -> a));
+        List<Long> ordered = new ArrayList<>(ids);
+        ordered.sort(Comparator.comparingInt(cid -> numberById.getOrDefault(cid, Integer.MAX_VALUE)));
+
+        TMatch upd = new TMatch();
+        upd.setId(matchId);
+        upd.setResultJson(AuditionTiebreakResult.write(ordered));
+        matchMapper.updateById(upd);
+        log.info("海选加赛[{}]导播指定晋级:{}", matchId, ordered);
+        refereeSseNotifier.notifyMatch(stage.getId(), matchId, "match");
+        tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), matchId, "match");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public MatchResultVo publishResult(Long matchId) {
         TMatch match = matchMapper.selectById(matchId);
         if (match == null) {
@@ -1262,18 +1327,22 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
      * 现算,所以这里不需要、也不应该重算整圈。</p>
      */
     private List<MatchScoreResult> accumulateAuditionScores(TMatch match, Map<Long, Long> touchedRoundByCompetitor) {
+        // 选手总分 = 本场「全部回合」里该选手的所有裁判分之和(与结算口径一致)。
+        // 不能只查"当前回合":一场若残留多个回合,只读一个回合会把别的回合的分漏掉(总分不更新)。
+        List<Long> matchRoundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, match.getId()).select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
         List<MatchScoreResult> results = new ArrayList<>();
-        for (Map.Entry<Long, Long> e : touchedRoundByCompetitor.entrySet()) {
-            Long competitorId = e.getKey();
-            Long roundId = e.getValue();
-            java.math.BigDecimal sum = roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-                    .eq(TRoundScore::getRoundId, roundId)
-                    .eq(TRoundScore::getCompetitorId, competitorId)
-                    .select(TRoundScore::getScore))
-                .stream()
-                .map(TRoundScore::getScore)
-                .filter(Objects::nonNull)
-                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+        for (Long competitorId : touchedRoundByCompetitor.keySet()) {
+            java.math.BigDecimal sum = matchRoundIds.isEmpty() ? java.math.BigDecimal.ZERO
+                : roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
+                        .in(TRoundScore::getRoundId, matchRoundIds)
+                        .eq(TRoundScore::getCompetitorId, competitorId)
+                        .select(TRoundScore::getScore))
+                    .stream()
+                    .map(TRoundScore::getScore)
+                    .filter(Objects::nonNull)
+                    .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
             participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
                 .set(TMatchParticipant::getScoreValue, sum)
                 .eq(TMatchParticipant::getMatchId, match.getId())

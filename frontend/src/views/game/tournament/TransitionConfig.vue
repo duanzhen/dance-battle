@@ -477,6 +477,15 @@
             </button>
             <button
               type="button"
+              @click="addPlacement = 'HOLDING'"
+              class="px-3 py-1.5 text-[12px] rounded border transition-colors"
+              :class="placementBtnClass('HOLDING')"
+              title="不占座位,先加到待落座区,稍后拖到座位"
+            >
+              待落座区
+            </button>
+            <button
+              type="button"
               @click="addPlacement = 'REPLACE'"
               class="px-3 py-1.5 text-[12px] rounded border transition-colors"
               :class="placementBtnClass('REPLACE')"
@@ -484,7 +493,11 @@
               替换
             </button>
           </div>
-          <p class="text-[11px] text-neutral-600 leading-relaxed">
+          <p class="text-[11px] text-neutral-500 leading-relaxed">替换/顶位不再删除被挤下来的人:他会进入待落座区,可再拖到座位。</p>
+          <p v-if="addPlacement === 'HOLDING'" class="text-[11px] text-neutral-600 leading-relaxed">
+            新人先加到待落座区,不占座位;由导播拖到座位后再确认名单。
+          </p>
+          <p v-else class="text-[11px] text-neutral-600 leading-relaxed">
             <template v-if="addPlacement === 'INSERT'">
               插到选中的人前面:他和他后面的人依次后移一位(插第 1 个之前 = 顶前); 名单已满时最后一名会被挤出去。
             </template>
@@ -1107,8 +1120,8 @@ const addStages = ref<any[]>([]);
 const addPlayerId = ref('');
 const addPlayers = ref<any[]>([]);
 const addSubmitting = ref(false);
-/** 加入位置:INSERT 插入到指定位置(第 1 位=顶前,末位=加到末尾)/ REPLACE 替换指定的人或空位 */
-const addPlacement = ref<'INSERT' | 'REPLACE'>('INSERT');
+/** 加入位置:INSERT 插入到指定位置(顶位,后面的人后移)/ REPLACE 替换指定的人或空位 / HOLDING 加到待落座区 */
+const addPlacement = ref<'INSERT' | 'REPLACE' | 'HOLDING'>('INSERT');
 const addReplaceKey = ref('');
 
 /** 名单项唯一键(源选手或人工新增行) */
@@ -1118,7 +1131,7 @@ const rosterFull = computed(() => {
   const cap = Number(overridePreview.value?.capacity || 0);
   return cap > 0 && listItems.value.length >= cap;
 });
-const placementBtnClass = (mode: 'INSERT' | 'REPLACE') =>
+const placementBtnClass = (mode: 'INSERT' | 'REPLACE' | 'HOLDING') =>
   addPlacement.value === mode ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200';
 
 const openAddDialog = () => {
@@ -1246,7 +1259,6 @@ const submitAdd = async () => {
     //  - 插入且名单已满:挤出最后一名(插到第 1 位时等价于"顶前,最后一名出去")
     const replaceToSlot = addPlacement.value === 'REPLACE' && addReplaceKey.value.startsWith('slot:');
     const replacedIndex = replaceToSlot ? -1 : listItems.value.findIndex((it) => itemKeyOf(it) === addReplaceKey.value);
-    const bySeedDesc = [...listItems.value].sort((a, b) => (Number(b.seedRank) || 0) - (Number(a.seedRank) || 0));
     const replacedSeed = replaceToSlot
       ? Number(addReplaceKey.value.slice(5)) || 0
       : replacedIndex >= 0
@@ -1259,24 +1271,7 @@ const submitAdd = async () => {
         return;
       }
     }
-    const outItem =
-      addPlacement.value === 'REPLACE'
-        ? replacedIndex >= 0
-          ? listItems.value[replacedIndex]
-          : null
-        : addPlacement.value === 'INSERT' && rosterFull.value
-          ? bySeedDesc[0]
-          : null;
     // 被顶掉的人:走"移出意图"(不压缩,后面的人先不动;插入的后移由后端在加人时统一算)
-    if (outItem) {
-      const rm: any = await removeRosterRows(p.id, {
-        ids: outItem.overrideId != null ? [outItem.overrideId] : undefined,
-        sourceCompetitorIds: outItem.overrideId == null && outItem.sourceCompetitorId != null ? [outItem.sourceCompetitorId] : undefined,
-        fillGap: false
-      });
-      applyPreview(rm?.data);
-    }
-
     // 2) 加人 + 落位:座位与"插入后移"都由后端算,直接把返回的最新名单铺上
     const body: any = {};
     if (addMode.value === 'name') {
@@ -1309,14 +1304,23 @@ const submitAdd = async () => {
         body.guestType = 0;
       }
     }
-    if (replacedSeed > 0) {
+    if (addPlacement.value === 'HOLDING') {
+      // 加到待落座区:不占座位号,后续由导播拖到座位
+      body.placement = 'HOLDING';
+    } else if (replacedSeed > 0) {
       body.seedRank = replacedSeed;
       body.placement = addPlacement.value === 'INSERT' ? 'INSERT' : 'REPLACE';
     }
     const resp: any = await addRosterRow(p.id, body);
     applyPreview(resp?.data);
     await loadRosters();
-    ElMessage.success(addPlacement.value === 'INSERT' ? `已插入第 ${replacedSeed} 位,后面的人依次后移` : '已替换入名单');
+    ElMessage.success(
+      addPlacement.value === 'HOLDING'
+        ? '已加入待落座区,拖到座位后生效'
+        : addPlacement.value === 'INSERT'
+          ? `已插入第 ${replacedSeed} 位,后面的人依次后移`
+          : '已替换入名单'
+    );
     addDialogVisible.value = false;
   } catch (e: any) {
     notifyError(e, '加入名单失败');

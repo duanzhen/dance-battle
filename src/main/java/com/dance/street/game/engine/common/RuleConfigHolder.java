@@ -58,6 +58,12 @@ public class RuleConfigHolder implements Serializable {
     /** 结果公布模式(排名赛等使用):AUTO=实时公布 / MANUAL=导播台手动公布 / BATCH=全部完成后一次性公布 */
     private String publishMode;
 
+    /**
+     * 海选加赛晋级方式(mode=AUDITION 时使用):SCORE=加赛打分晋级(默认) / MANUAL=导播台手动指定晋级人员。
+     * 现场常有"海选加赛不打分、由裁判商量指定谁晋级"的做法,MANUAL 时加赛场次不需要打分,由导播指定。
+     */
+    private String tiebreakMode;
+
     /** 公布范围(BATCH 模式使用):ALL=公布全部排名 / TOP_N=只公布前 N 名晋级名单 */
     private String publishScope;
 
@@ -86,5 +92,10 @@ public class RuleConfigHolder implements Serializable {
             return nested;
         }
         return publishMode != null && !publishMode.isBlank() ? publishMode : "AUTO";
+    }
+
+    /** 海选加赛晋级方式:MANUAL=手动指定 / SCORE=加赛打分(默认)。 */
+    public String resolveTiebreakMode() {
+        return "MANUAL".equalsIgnoreCase(tiebreakMode) ? "MANUAL" : "SCORE";
     }
 }

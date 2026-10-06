@@ -385,7 +385,171 @@ class MergePreAdvanceSeatTest {
             "对账重建要保留导播排好的位置");
     }
 
+    /**
+     * 加人可以直接加到「待落座区」(不占座位号),之后再拖到座位。
+     */
+    @Test
+    void addGuestCanGoStraightToHoldingArea() {
+        Long tid = newTournament("add-to-holding");
+        TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
+        insertCompetitors(tid, semiA.getId(), 2);
+        TStageVo semiB = newStage(tid, "半决赛B", 2L, 1L, semiA.getId());
+        insertCompetitors(tid, semiB.getId(), 2);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semiB.getId());
+        addAdvanceGroup(finals.getId(), semiA.getId());
+        initializeAndGenerate(semiA.getId());
+        initializeAndGenerate(semiB.getId());
+        matchResultService.startMatch(matchesOf(semiA.getId()).get(0).getId());
+        matchResultService.startMatch(matchesOf(semiB.getId()).get(0).getId());
+        submitLeftWin(matchesOf(semiA.getId()).get(0));
+        submitLeftWin(matchesOf(semiB.getId()).get(0));
+        lifecycleService.completeStage(semiA.getId());
+        lifecycleService.completeStage(semiB.getId());
+
+        TStageRosterOverrideBo g = new TStageRosterOverrideBo();
+        g.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        g.setGuestName("待落座外卡");
+        g.setPlacement(RosterConstants.PLACEMENT_HOLDING);
+        rosterService.addOverride(finals.getId(), g);
+
+        TStageRosterEntry guest = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> "待落座外卡".equals(e.getGuestName()))
+            .findFirst().orElse(null);
+        assertTrue(guest != null, "应写入外卡行");
+        assertNull(guest.getSlot(), "加到待落座区不应占座位号");
+        assertEquals(StageConstants.SLOT_PLAYER, guest.getSlotKind());
+        assertEquals(3, holdingCompetitorIdsCount(finals.getId()), "待落座区应有 3 行(两条来源 + 外卡)");
+
+        // 拖到 1 号座位
+        TStageRosterMoveBo mv = new TStageRosterMoveBo();
+        mv.setOverrideId(guest.getId());
+        mv.setTargetSeed(1L);
+        rosterService.moveRosterRow(finals.getId(), mv);
+        TStageRosterEntry seated = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> Objects.equals(e.getId(), guest.getId())).findFirst().orElse(null);
+        assertTrue(seated != null && seated.getSlot() != null, "拖到座位后应有座位号");
+        assertEquals(1L, seated.getSlot().longValue());
+    }
+
+    /**
+     * 回归:之前被移出的人「重新加入」时,必须按调用方指定的实际座位落位,
+     * 而不是恢复成这一行原来带的座位(来源备份原座号/旧座位)。
+     */
+    @Test
+    void reAddRemovedPersonHonorsRequestedSeat() {
+        Long tid = newTournament("re-add-seat");
+        TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
+        insertCompetitors(tid, semiA.getId(), 2);
+        TStageVo semiB = newStage(tid, "半决赛B", 2L, 1L, semiA.getId());
+        insertCompetitors(tid, semiB.getId(), 2);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semiB.getId());
+        addAdvanceGroup(finals.getId(), semiA.getId());
+        initializeAndGenerate(semiA.getId());
+        initializeAndGenerate(semiB.getId());
+        matchResultService.startMatch(matchesOf(semiA.getId()).get(0).getId());
+        matchResultService.startMatch(matchesOf(semiB.getId()).get(0).getId());
+        Long winnerA = submitLeftWin(matchesOf(semiA.getId()).get(0));
+        submitLeftWin(matchesOf(semiB.getId()).get(0));
+        lifecycleService.completeStage(semiA.getId());
+        lifecycleService.completeStage(semiB.getId());
+
+        assertNull(entryOfSource(finals.getId(), winnerA).getSlot(), "汇合段的人先在待落座区");
+        removeOverride(finals.getId(), winnerA);
+
+        TStageRosterOverrideBo add = new TStageRosterOverrideBo();
+        add.setOp(RosterConstants.OVERRIDE_ADD_SOURCE);
+        add.setSourceCompetitorId(winnerA);
+        add.setSeedRank(2L);
+        add.setPlacement("REPLACE");
+        rosterService.addOverride(finals.getId(), add);
+
+        TStageRosterEntry row = entryOfSource(finals.getId(), winnerA);
+        assertEquals(2L, row.getSlot().longValue(),
+            "重新加入应按指定的实际座位落位,而不是回到旧位置");
+        assertEquals(StageConstants.SLOT_PLAYER, row.getSlotKind());
+    }
+
     // ===== 工具 =====
+
+    private record MergeWinners(TStageVo finals, Long winnerA, Long winnerB) {
+    }
+
+    /** 造一个"两分支汇合 + 两来源都已结算"的决赛,返回两个胜者;人先在待落座区。 */
+    private MergeWinners buildSettledMerge(String name) {
+        Long tid = newTournament(name);
+        TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
+        insertCompetitors(tid, semiA.getId(), 2);
+        TStageVo semiB = newStage(tid, "半决赛B", 2L, 1L, semiA.getId());
+        insertCompetitors(tid, semiB.getId(), 2);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semiB.getId());
+        addAdvanceGroup(finals.getId(), semiA.getId());
+        initializeAndGenerate(semiA.getId());
+        initializeAndGenerate(semiB.getId());
+        matchResultService.startMatch(matchesOf(semiA.getId()).get(0).getId());
+        matchResultService.startMatch(matchesOf(semiB.getId()).get(0).getId());
+        Long winnerA = submitLeftWin(matchesOf(semiA.getId()).get(0));
+        Long winnerB = submitLeftWin(matchesOf(semiB.getId()).get(0));
+        lifecycleService.completeStage(semiA.getId());
+        lifecycleService.completeStage(semiB.getId());
+        return new MergeWinners(finals, winnerA, winnerB);
+    }
+
+    private void seat(Long stageId, Long sourceCompetitorId, long seed) {
+        rosterService.moveRosterRow(stageId, moveBo(sourceCompetitorId, seed));
+    }
+
+    /**
+     * 加人「替换」占用某座位:原占位者被挤到待落座区(不删除),新人坐进该座位。
+     */
+    @Test
+    void addByReplaceDisplacesOccupantToHolding() {
+        MergeWinners m = buildSettledMerge("replace-displace");
+        seat(m.finals().getId(), m.winnerA(), 1L);
+        seat(m.finals().getId(), m.winnerB(), 2L);
+        assertEquals(2, seatedSlots(m.finals().getId()).size(), "两人先坐满");
+
+        TStageRosterOverrideBo g = new TStageRosterOverrideBo();
+        g.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        g.setGuestName("替换外卡");
+        g.setSeedRank(1L);
+        g.setPlacement("REPLACE");
+        rosterService.addOverride(m.finals().getId(), g);
+
+        TStageRosterEntry guest = rosterService.entriesOf(m.finals().getId()).stream()
+            .filter(e -> "替换外卡".equals(e.getGuestName())).findFirst().orElse(null);
+        assertTrue(guest != null && guest.getSlot() != null, "新人应有座位");
+        assertEquals(1L, guest.getSlot().longValue(), "新人坐进 1 号座位");
+        assertEquals(List.of(m.winnerA()), holdingCompetitorIds(m.finals().getId()),
+            "原 1 号位的人进待落座区,而不是被删除");
+        assertEquals(2L, entryOfSource(m.finals().getId(), m.winnerB()).getSlot().longValue(),
+            "没被顶到的人不动");
+    }
+
+    /**
+     * 加人「顶位(INSERT)」插在最前:后面的人整体后移,超出计划规模的末尾进待落座区(不删除)。
+     */
+    @Test
+    void addByInsertPushesTailToHolding() {
+        MergeWinners m = buildSettledMerge("insert-overflow");
+        seat(m.finals().getId(), m.winnerA(), 1L);
+        seat(m.finals().getId(), m.winnerB(), 2L);
+
+        TStageRosterOverrideBo g = new TStageRosterOverrideBo();
+        g.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        g.setGuestName("顶位外卡");
+        g.setSeedRank(1L);
+        g.setPlacement(RosterConstants.PLACEMENT_INSERT);
+        rosterService.addOverride(m.finals().getId(), g);
+
+        TStageRosterEntry guest = rosterService.entriesOf(m.finals().getId()).stream()
+            .filter(e -> "顶位外卡".equals(e.getGuestName())).findFirst().orElse(null);
+        assertTrue(guest != null && guest.getSlot() != null, "新人应有座位");
+        assertEquals(1L, guest.getSlot().longValue(), "新人插到 1 号位");
+        assertEquals(2L, entryOfSource(m.finals().getId(), m.winnerA()).getSlot().longValue(),
+            "原 1 号位的人后移一位到 2");
+        assertEquals(List.of(m.winnerB()), holdingCompetitorIds(m.finals().getId()),
+            "超出计划规模的末尾进待落座区,而不是被删除");
+    }
 
     /**
      * 移动接口:前端只说"把谁移到哪",后端落位并把最新名单整份返回。
@@ -670,6 +834,14 @@ class MergePreAdvanceSeatTest {
             .filter(e -> e.getSlot() == null)
             .map(TStageRosterEntry::getSourceCompetitorId)
             .toList();
+    }
+
+    /** 待落位区的行数(含无来源的外卡,故按行数而不是按来源参赛方统计) */
+    private long holdingCompetitorIdsCount(Long stageId) {
+        return rosterService.entriesOf(stageId).stream()
+            .filter(e -> StageConstants.SLOT_PLAYER.equals(e.getSlotKind()))
+            .filter(e -> e.getSlot() == null)
+            .count();
     }
 
     private List<TMatch> matchesOf(Long stageId) {

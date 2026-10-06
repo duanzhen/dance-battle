@@ -230,6 +230,34 @@
           <!-- 海选赛:圈(match) → 轮次(round) → 评分(支持分圈) -->
           <div v-if="currentStage?.stageMode === 'AUDITION'" class="space-y-2">
             <div v-for="match in matches" :key="match.id" class="bg-neutral-900 rounded-lg border border-neutral-800 p-3">
+              <!-- 海选加赛·手动指定晋级:列出参赛方,勾选谁晋级(不打分) -->
+              <div v-if="match.tiebreakMode === 'MANUAL'" class="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-amber-400">手动指定晋级({{ manualSelCount(match) }}/{{ match.advanceCount }})</span>
+                  <span class="text-[9px] text-neutral-500">按号码牌升序定位次</span>
+                </div>
+                <label
+                  v-for="r in (match.roundScores || [])"
+                  :key="'m-' + String(match.id) + '-' + String(r.competitorId)"
+                  class="flex items-center gap-2 py-1 px-1 rounded cursor-pointer hover:bg-neutral-800/40"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="manualSelected(match, r.competitorId)"
+                    @change="toggleManualSel(match, r.competitorId)"
+                    class="accent-amber-500"
+                  />
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 flex-none">{{ r.competitorNumber || '—' }}</span>
+                  <span class="text-xs text-neutral-200 flex-1 truncate">{{ r.competitorName || '待定' }}</span>
+                </label>
+                <button
+                  @click="saveManualAdvance(match)"
+                  :disabled="savingManual[String(match.id)]"
+                  class="w-full py-1.5 rounded-lg text-[10px] font-bold bg-amber-600/20 text-amber-400 border border-amber-600/40 active:scale-95 transition-transform disabled:opacity-40"
+                >
+                  {{ savingManual[String(match.id)] ? '保存中...' : '保存指定晋级' }}
+                </button>
+              </div>
               <div class="flex items-center justify-between mb-2">
                 <span class="text-[9px] text-neutral-500">
                   {{ match.name }}
@@ -828,7 +856,8 @@ import {
   listDirectorStageCompetitors,
   directorCreateFreeMatch,
   directorDeleteFreeMatch,
-  directorSaveFreeMatchAdvancers
+  directorSaveFreeMatchAdvancers,
+  directorDesignateTiebreakAdvance
 } from '@/api/game/director';
 import {
   parseTournamentColorConfig,
@@ -988,6 +1017,10 @@ interface MatchInfo {
   advanceCount?: number;
   stageAdvanceCount?: number;
   tiebreakerRound?: string;
+  /** 海选加赛晋级方式:SCORE=打分 / MANUAL=导播手动指定 */
+  tiebreakMode?: string;
+  /** 手动指定模式下已指定晋级的人员 */
+  designatedAdvanceIds?: (string | number)[];
   leftVotes?: number;
   rightVotes?: number;
   drawVotes?: number;
@@ -1214,6 +1247,44 @@ const loadStages = async () => {
   }
 };
 
+// ===== 海选加赛:导播手动指定晋级(不打分) =====
+const manualAdvanceSel = ref<Record<string, (string | number)[]>>({});
+const savingManual = ref<Record<string, boolean>>({});
+const manualSelected = (match: any, competitorId: string | number | null | undefined): boolean => {
+  if (competitorId == null) return false;
+  const sel = manualAdvanceSel.value[String(match.id)] ?? match.designatedAdvanceIds ?? [];
+  return sel.map(String).includes(String(competitorId));
+};
+const manualSelCount = (match: any): number =>
+  (manualAdvanceSel.value[String(match.id)] ?? match.designatedAdvanceIds ?? []).length;
+const toggleManualSel = (match: any, competitorId: string | number | null | undefined) => {
+  if (competitorId == null) return;
+  const cur = new Set<string>(
+    (manualAdvanceSel.value[String(match.id)] ?? match.designatedAdvanceIds ?? []).map(String)
+  );
+  const key = String(competitorId);
+  if (cur.has(key)) cur.delete(key);
+  else cur.add(key);
+  manualAdvanceSel.value = { ...manualAdvanceSel.value, [String(match.id)]: Array.from(cur) };
+};
+const saveManualAdvance = async (match: any) => {
+  const sel = manualAdvanceSel.value[String(match.id)] ?? match.designatedAdvanceIds ?? [];
+  if (sel.length !== Number(match.advanceCount)) {
+    ElMessage.warning(`本场应指定 ${match.advanceCount} 人晋级,当前已选 ${sel.length} 人`);
+    return;
+  }
+  savingManual.value = { ...savingManual.value, [String(match.id)]: true };
+  try {
+    await directorDesignateTiebreakAdvance(match.id, sel);
+    ElMessage.success('已保存指定晋级人员');
+    if (selectedStageId.value) await loadMatchesForStage(selectedStageId.value);
+  } catch (e) {
+    notifyError(e, '指定晋级失败');
+  } finally {
+    savingManual.value = { ...savingManual.value, [String(match.id)]: false };
+  }
+};
+
 const loadMatchesForStage = async (stageId: string) => {
   try {
     const resp = await listDirectorMatches(stageId);
@@ -1238,6 +1309,8 @@ const loadMatchesForStage = async (stageId: string) => {
         advanceCount: m.advanceCount ?? 0,
         stageAdvanceCount: m.stageAdvanceCount ?? 0,
         tiebreakerRound: m.tiebreakerRound || '',
+        tiebreakMode: m.tiebreakMode || 'SCORE',
+        designatedAdvanceIds: m.designatedAdvanceIds || [],
         leftVotes: m.leftVotes ?? 0,
         rightVotes: m.rightVotes ?? 0,
         drawVotes: m.drawVotes ?? 0,

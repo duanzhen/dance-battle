@@ -174,6 +174,15 @@ export function directorPublishResult(id: string | number) {
   });
 }
 
+/** 海选加赛「手动指定晋级」:competitorIds = 指定晋级的人员 */
+export function directorDesignateTiebreakAdvance(id: string | number, competitorIds: (string | number)[]) {
+  return directorRequest({
+    url: `/game/director/match/${id}/tiebreak-advance`,
+    method: 'post',
+    data: { competitorIds }
+  });
+}
+
 // ==================== 自由对抗(手动加场 + 手动选晋级) ====================
 
 /** 本赛段参赛选手(选人对战 / 勾选晋级用) */

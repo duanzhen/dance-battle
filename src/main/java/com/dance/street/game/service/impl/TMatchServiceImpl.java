@@ -30,6 +30,7 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
+import com.dance.street.game.service.impl.settle.AuditionTiebreakResult;
 import com.dance.street.game.engine.common.StageModeProfile;
 import com.dance.street.game.engine.common.StageModeProfiles;
 import com.dance.street.game.engine.common.RuleConfigHolder;
@@ -186,6 +187,8 @@ public class TMatchServiceImpl implements ITMatchService {
         fillPublishInfo(matches, byMatch);
         // 海选:本场(圈/加赛)晋级人数 + 本赛段共晋级人数(导播台展示)
         fillAuditionAdvanceInfo(matches);
+        // 海选加赛:晋级方式(打分/手动指定) + 已指定人员
+        fillAuditionTiebreakInfo(matches);
         // 淘汰赛:BO 局分(bestOf/需赢局数/当前局/已赢局数),供 MC 与大屏展示、提前确认
         fillSeriesInfo(matches);
         // 淘汰赛:本场各轮判罚明细(每轮参赛者取自 round_score,保底用场次左右位)
@@ -313,8 +316,10 @@ public class TMatchServiceImpl implements ITMatchService {
                 .orderByAsc(TMatchRound::getMatchId)
                 .orderByAsc(TMatchRound::getRoundSequence));
         Map<Long, TMatchRound> roundByMatch = new HashMap<>();
+        Map<Long, List<Long>> roundIdsByMatch = new HashMap<>();
         for (TMatchRound r : rounds) {
             roundByMatch.putIfAbsent(r.getMatchId(), r);
+            roundIdsByMatch.computeIfAbsent(r.getMatchId(), k -> new ArrayList<>()).add(r.getId());
         }
 
         List<Long> roundIds = rounds.stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
@@ -350,8 +355,9 @@ public class TMatchServiceImpl implements ITMatchService {
             List<MatchRoundScoreVo> roundScores = new ArrayList<>();
             for (TMatchParticipant p : partList) {
                 Long cid = p.getCompetitorId();
-                List<TRoundScore> rs = round == null ? List.of()
-                    : scoresByRound.getOrDefault(round.getId(), List.of()).stream()
+                // 本场所有回合里该选手的打分明细(正常一场一个回合;多回合残留时也不漏分)
+                List<TRoundScore> rs = roundIdsByMatch.getOrDefault(vo.getId(), List.of()).stream()
+                        .flatMap(rid -> scoresByRound.getOrDefault(rid, List.of()).stream())
                         .filter(s -> Objects.equals(s.getCompetitorId(), cid))
                         .toList();
                 MatchRoundScoreVo item = buildAuditionRoundItem(round, cid, rs,
@@ -396,9 +402,9 @@ public class TMatchServiceImpl implements ITMatchService {
                 refScores.add(ref);
             }
         }
-        BigDecimal total = p != null && p.getScoreValue() != null ? p.getScoreValue()
-            : refScores.isEmpty() ? null : sum;
-        item.setScore(total);
+        // 总分以打分明细现算(与结算/导出口径一致):participant.score_value 只是提交时刷新的缓存,
+        // 并发提交或一场残留多回合时可能只含部分裁判,不能作为展示口径。
+        item.setScore(refScores.isEmpty() ? null : sum);
         item.setRefereeScores(refScores.isEmpty() ? null : refScores);
         if (p != null && p.getOutcomeStatus() != null) {
             item.setOutcomeStatus(p.getOutcomeStatus());
@@ -545,6 +551,39 @@ public class TMatchServiceImpl implements ITMatchService {
      * <p>口径与结算一致(见 {@code AuditionAdvanceInfoSupport}):正式圈 = 本圈名额,
      * 加赛 = 本圈剩余名额。导播台要在圈卡片上直接告诉 MC "这一场晋级几个人"。</p>
      */
+    /**
+     * 海选加赛:晋级方式(SCORE=打分 / MANUAL=导播手动指定)与手动已指定人员,供导播台展示与指定。
+     */
+    private void fillAuditionTiebreakInfo(List<TMatchVo> matches) {
+        List<TMatchVo> tbs = matches.stream()
+            .filter(m -> StageConstants.MATCH_TYPE_TIEBREAKER.equals(m.getMatchType()))
+            .toList();
+        if (tbs.isEmpty()) {
+            return;
+        }
+        List<Long> stageIds = tbs.stream().map(TMatchVo::getStageId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, TStage> stageById = stageIds.isEmpty() ? Map.of()
+            : stageMapper.selectByIds(stageIds).stream()
+                .collect(Collectors.toMap(TStage::getId, s -> s, (a, b) -> a));
+        List<Long> matchIds = tbs.stream().map(TMatchVo::getId).filter(Objects::nonNull).toList();
+        Map<Long, TMatch> matchById = matchIds.isEmpty() ? Map.of()
+            : baseMapper.selectByIds(matchIds).stream()
+                .collect(Collectors.toMap(TMatch::getId, m -> m, (a, b) -> a));
+        for (TMatchVo vo : tbs) {
+            TStage s = vo.getStageId() == null ? null : stageById.get(vo.getStageId());
+            if (s == null || !StageModeEnum.AUDITION.getCode().equals(s.getStageMode())) {
+                continue;
+            }
+            RuleConfigHolder rc = RuleConfigParser.parse(s.getRuleConfig());
+            String mode = rc == null ? "SCORE" : rc.resolveTiebreakMode();
+            vo.setTiebreakMode(mode);
+            if ("MANUAL".equals(mode)) {
+                TMatch m = matchById.get(vo.getId());
+                vo.setDesignatedAdvanceIds(AuditionTiebreakResult.read(m == null ? null : m.getResultJson()));
+            }
+        }
+    }
+
     private void fillAuditionAdvanceInfo(List<TMatchVo> matches) {
         if (matches == null || matches.isEmpty()) {
             return;

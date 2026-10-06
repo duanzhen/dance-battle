@@ -239,28 +239,58 @@ public class RosterOverrideService {
             }
         } else {
             row = entryOfSource(stageId, bo.getSourceCompetitorId());
-            if (row != null && RosterConstants.OVERRIDE_ADD_SOURCE.equals(op)) {
-                // 之前被移出过:直接把这个座位恢复成人,不新增行
+            boolean reAdd = row != null && RosterConstants.OVERRIDE_ADD_SOURCE.equals(op);
+            boolean toHolding = RosterConstants.PLACEMENT_HOLDING.equalsIgnoreCase(bo.getPlacement());
+            Long want = bo.getSeedRank() != null && bo.getSeedRank() > 0 ? bo.getSeedRank() : null;
+            if (reAdd) {
+                // 之前被移出过:这一行还在,恢复成人(不新增行)。
                 assertRowAdjustable(target, row);
-                row.setSlotKind(StageConstants.SLOT_PLAYER);
-                row.setEntryTag(entryTagOf(bo.getSourceCompetitorId()));
-                entryMapper.updateById(row);
+                if (toHolding) {
+                    // 加到待落座区:摘掉座位号(updateById 跳过 null 字段,必须显式 SET)
+                    entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                        .eq(TStageRosterEntry::getId, row.getId())
+                        .set(TStageRosterEntry::getSlot, null)
+                        .set(TStageRosterEntry::getSlotKind, StageConstants.SLOT_PLAYER)
+                        .set(TStageRosterEntry::getEntryTag, entryTagOf(bo.getSourceCompetitorId())));
+                } else if (want != null) {
+                    // 按调用方指定的"实际座位"落位,而不是这一行原来带的座位:
+                    // 替换/顶位与"新增落位"同一口径(只看 slot,不看 source_slot)。
+                    row.setSlotKind(StageConstants.SLOT_PLAYER);
+                    row.setEntryTag(entryTagOf(bo.getSourceCompetitorId()));
+                    seatExistingRow(target, stageId, row, want,
+                        RosterConstants.PLACEMENT_INSERT.equalsIgnoreCase(bo.getPlacement()));
+                } else {
+                    // 未指定目标座位:原地恢复(旧行为)
+                    row.setSlotKind(StageConstants.SLOT_PLAYER);
+                    row.setEntryTag(entryTagOf(bo.getSourceCompetitorId()));
+                    entryMapper.updateById(row);
+                }
+            } else if (toHolding) {
+                // 新增行,直接进待落座区(不占座位号,后续由导播拖到座位)
+                row = insertManualRow(target, stageId, bo, null);
             } else {
                 // 新增行(加外卡 / 从别的赛段手工拉人);来源是否结算的前置已在方法开头统一校验
-                long slot = bo.getSeedRank() != null && bo.getSeedRank() > 0
-                    ? bo.getSeedRank() : nextFreeSlot(target, stageId);
-                // INSERT:插到该座位,原占位者及后面的人整体 +1(座位号是位置,不是数组下标)
+                long slot = want != null ? want : nextFreeSlot(target, stageId);
+                // INSERT:插到该座位,原占位者及后面的人整体 +1(座位号是位置,不是数组下标);
+                // 插入导致超出计划规模的尾部行摘到待落座区(而不是删掉)。
                 if (RosterConstants.PLACEMENT_INSERT.equalsIgnoreCase(bo.getPlacement())
-                    && bo.getSeedRank() != null && bo.getSeedRank() > 0) {
+                    && want != null) {
                     shiftSeatsFrom(stageId, slot, 1);
+                    pushOverflowToHolding(target, stageId);
                 }
                 TStageRosterEntry occupant = entryOfSlot(stageId, slot);
-                if (occupant != null && StageConstants.SLOT_PLAYER.equals(occupant.getSlotKind())
-                    && bo.getSeedRank() != null) {
-                    throw new ServiceException("种子位[{}]已被占用,请先在中间态调整预排位置", slot);
-                }
                 if (occupant != null) {
-                    entryMapper.deleteById(occupant.getId()); // 占的是空位:原地换人,座位号不变
+                    boolean occupantEmpty = occupant.getSourceCompetitorId() == null
+                        && occupant.getPlayerId() == null
+                        && (occupant.getGuestName() == null || occupant.getGuestName().isBlank());
+                    if (occupantEmpty) {
+                        entryMapper.deleteById(occupant.getId()); // 占的是空位:原地换人,座位号不变
+                    } else {
+                        // 替换:原占位者(真人)挪到待落座区(从"外面"加进来的人占他的座位)
+                        entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                            .eq(TStageRosterEntry::getId, occupant.getId())
+                            .set(TStageRosterEntry::getSlot, null));
+                    }
                 }
                 row = insertManualRow(target, stageId, bo, slot);
             }
@@ -410,6 +440,82 @@ public class RosterOverrideService {
             .isNotNull(TStageRosterEntry::getSlot)
             .ge(TStageRosterEntry::getSlot, fromSlot)
             .setSql("slot = slot + " + delta));
+    }
+
+    /**
+     * 插入导致超出赛段计划规模时:把座位号 &gt; 计划规模的"尾部"行摘到待落座区(座位不压紧)。
+     *
+     * <p>口径:座位是位置不是数组下标——「顶位插入」多出来的是<b>最后一位</b>,他进待落座区,
+     * 而不是被删掉。计划规模未知(teamCountStart≤0)时不做溢出处理(没有"末尾"可判定)。</p>
+     */
+    private void pushOverflowToHolding(TStage target, Long stageId) {
+        long plan = target == null || target.getTeamCountStart() == null ? 0L : target.getTeamCountStart();
+        if (plan <= 0) {
+            return;
+        }
+        // updateById 跳过 null 字段,这里显式 SET slot = NULL
+        entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+            .eq(TStageRosterEntry::getTargetStageId, stageId)
+            .isNotNull(TStageRosterEntry::getSlot)
+            .gt(TStageRosterEntry::getSlot, plan)
+            .set(TStageRosterEntry::getSlot, null));
+    }
+
+    /**
+     * 把一行<b>已存在</b>的人落到指定座位(替换/顶位),按<b>实际座位(slot)</b>处理占位者。
+     *
+     * <p>INSERT=插到该座位,原占位者及后面的人整体 +1;REPLACE=与占位者互换(占位者回到本行原座位,
+     * 本行原座位为空则占位者进待落座区)。与"新增落位""拖动移动"同一口径——不看来源备份的
+     * {@code source_slot}。</p>
+     */
+    private void seatExistingRow(TStage target, Long stageId, TStageRosterEntry row, long seat, boolean insert) {
+        Long from = row.getSlot();
+        if (insert) {
+            // 先把本行摘出来,避免"整体后移"时把自己也挪走;再后移,最后落到目标座位
+            if (from != null) {
+                entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                    .eq(TStageRosterEntry::getId, row.getId())
+                    .set(TStageRosterEntry::getSlot, null));
+                row.setSlot(null);
+            }
+            shiftSeatsFrom(stageId, seat, 1);
+            pushOverflowToHolding(target, stageId);
+            entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                .eq(TStageRosterEntry::getId, row.getId())
+                .set(TStageRosterEntry::getSlot, seat)
+                .set(TStageRosterEntry::getSlotKind, StageConstants.SLOT_PLAYER)
+                .set(TStageRosterEntry::getEntryTag, row.getEntryTag()));
+            row.setSlot(seat);
+            row.setSlotKind(StageConstants.SLOT_PLAYER);
+            normalizeEmptySeats(target, stageId);
+            return;
+        }
+        // REPLACE:与占位者互换
+        if (!Objects.equals(from, seat)) {
+            TStageRosterEntry occupant = entryOfSlot(stageId, seat);
+            if (occupant != null && !Objects.equals(occupant.getId(), row.getId())) {
+                boolean occupantEmpty = occupant.getSourceCompetitorId() == null
+                    && occupant.getPlayerId() == null
+                    && (occupant.getGuestName() == null || occupant.getGuestName().isBlank());
+                if (occupantEmpty) {
+                    // 占的是空位:原地换人,座位号不变
+                    entryMapper.deleteById(occupant.getId());
+                } else {
+                    // 占位者挪到本行原座位(from 可为 null → 占位者进待落座区)
+                    entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                        .eq(TStageRosterEntry::getId, occupant.getId())
+                        .set(TStageRosterEntry::getSlot, from));
+                }
+            }
+        }
+        entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+            .eq(TStageRosterEntry::getId, row.getId())
+            .set(TStageRosterEntry::getSlot, seat)
+            .set(TStageRosterEntry::getSlotKind, StageConstants.SLOT_PLAYER)
+            .set(TStageRosterEntry::getEntryTag, row.getEntryTag()));
+        row.setSlot(seat);
+        row.setSlotKind(StageConstants.SLOT_PLAYER);
+        normalizeEmptySeats(target, stageId);
     }
 
     /**
@@ -721,10 +827,12 @@ public class RosterOverrideService {
      * 插入一行"人工加进来的"名单行(ADD_SOURCE / ADD_GUEST / SEED 拉人共用)。
      * 座位已被空位行占着时原地替换,座位号不变。
      */
-    private TStageRosterEntry insertManualRow(TStage target, Long stageId, TStageRosterOverrideBo bo, long slot) {
-        TStageRosterEntry occupant = entryOfSlot(stageId, slot);
-        if (occupant != null) {
-            entryMapper.deleteById(occupant.getId());
+    private TStageRosterEntry insertManualRow(TStage target, Long stageId, TStageRosterOverrideBo bo, Long slot) {
+        if (slot != null) {
+            TStageRosterEntry occupant = entryOfSlot(stageId, slot);
+            if (occupant != null) {
+                entryMapper.deleteById(occupant.getId());
+            }
         }
         TStageRosterEntry e = new TStageRosterEntry();
         e.setTournamentId(target.getTournamentId());

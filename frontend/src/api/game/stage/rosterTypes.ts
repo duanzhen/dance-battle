@@ -93,7 +93,7 @@ export interface RosterOverride {
   guestNumber?: string | null;
   seedRank?: number | null;
   /** 新增行时的放置方式:INSERT = 插到该座位并让后面的人后移;其它/不传 = 替换该座位 */
-  placement?: 'INSERT' | 'REPLACE';
+  placement?: 'INSERT' | 'REPLACE' | 'HOLDING';
   remark?: string;
 }
 

@@ -41,4 +41,10 @@ public interface ITMatchResultService {
 
     /** 导播台确认公布结果(MANUAL 模式):用裁判判完暂存的结果结算场次 */
     com.dance.street.game.domain.vo.MatchResultVo publishResult(Long matchId);
+
+    /**
+     * 海选加赛「手动指定晋级」(导播台):仅加赛场次且赛段配置为手动指定模式时可用。
+     * 指定的人必须都是本场参赛方,数量等于本场剩余晋级名额;落库顺序按号码牌升序规范。
+     */
+    void designateAuditionTiebreakAdvance(Long matchId, java.util.List<Long> competitorIds);
 }

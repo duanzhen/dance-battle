@@ -179,6 +179,47 @@ class AuditionResultQueryExportTest {
     // 造数据:两圈各 4 人、每圈取 2;圈1 的 2、3 名同分 → 二海
     // ==================================================================
 
+    /**
+     * 回归:同一圈 3 名裁判都打过分,但 {@code participant.score_value}(缓存)只算了 2 名时,
+     * 结果查询必须按明细现算成 3 名之和(与导出文件一致),不能读缓存。
+     */
+    @Test
+    void resultTotalIgnoresStaleAggregateCache() {
+        TTournament t = new TTournament();
+        t.setName("三分裁判缓存落后");
+        tournamentMapper.insert(t);
+        Long tid = t.getId();
+        Long refA = newReferee(tid, "裁判A");
+        Long refB = newReferee(tid, "裁判B");
+        Long refC = newReferee(tid, "裁判C");
+        TStageVo stage = newAuditionStage(tid, "海选", new long[]{1},
+            "[[\"" + refA + "\",\"" + refB + "\",\"" + refC + "\"]]");
+        TMatch circle = circleMatches(stage.getId()).get(0);
+        checkIn(tid, stage, circle.getId(), 2);
+        lifecycleService.startStage(stage.getId());
+        scoreAll(circle.getId(), refA, List.of("8", "1"));
+        scoreAll(circle.getId(), refB, List.of("7", "2"));
+        scoreAll(circle.getId(), refC, List.of("6", "3"));
+
+        // 模拟"缓存只含两名裁判"的落后状态:8 + 7 = 15
+        Long first = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, circle.getId())
+                .orderByAsc(TMatchParticipant::getDisplaySlotIndex))
+            .get(0).getCompetitorId();
+        TMatchParticipant stale = new TMatchParticipant();
+        stale.setScoreValue(new BigDecimal("15"));
+        participantMapper.update(stale, Wrappers.<TMatchParticipant>lambdaUpdate()
+            .eq(TMatchParticipant::getMatchId, circle.getId())
+            .eq(TMatchParticipant::getCompetitorId, first));
+
+        AuditionResultVo vo = auditionResultService.queryAuditionResult(stage.getId());
+        AuditionResultVo.CompetitorItem item = vo.getCompetitors().stream()
+            .filter(c -> first.equals(c.getCompetitorId())).findFirst().orElseThrow();
+        assertEquals(0, item.getScore().compareTo(new BigDecimal("21")),
+            "总分应按明细 8+7+6=21 现算,而不是缓存里的 15,实际:" + item.getScore());
+        assertEquals(3, item.getRefereeScores().size(), "应带出全部 3 名裁判的分");
+    }
+
     private record Fixture(Long tournamentId, Long stageId) {
     }
 

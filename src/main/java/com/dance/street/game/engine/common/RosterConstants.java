@@ -50,6 +50,9 @@ public final class RosterConstants {
     /** 放置方式:插到该座位,原占位者及后面的人整体 +1 */
     public static final String PLACEMENT_INSERT = "INSERT";
 
+    /** 放置方式:直接加到待落座区(不占座位号,由导播后续拖到座位) */
+    public static final String PLACEMENT_HOLDING = "HOLDING";
+
     /** 组排序键:按圈分组、圈内名次升序 */
     public static final String ORDER_ZONE_RANK = "ZONE_RANK";
     /** 组排序键:跨圈按圈内名次轮转交叉(圈1第1、圈2第1、圈1第2…) */

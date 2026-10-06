@@ -385,6 +385,27 @@ CREATE INDEX IF NOT EXISTS `idx_scene` ON `t_vis_widget` (`scene_id`);
 CREATE INDEX IF NOT EXISTS `idx_type` ON `t_vis_widget` (`type`);
 
 --
+-- Table structure for table `t_vis_screen`
+--
+
+CREATE TABLE IF NOT EXISTS `t_vis_screen` (
+  `id` INTEGER NOT NULL,
+  `tenant_id` INTEGER NOT NULL,
+  `tournament_id` INTEGER NOT NULL,
+  `name` TEXT,
+  `sort_order` INTEGER DEFAULT 0,
+  `current_scene_id` INTEGER,
+  `create_by` INTEGER,
+  `create_time` TEXT,
+  `update_by` INTEGER,
+  `update_time` TEXT,
+  `remark` TEXT,
+  PRIMARY KEY (`id`)
+);
+
+CREATE INDEX IF NOT EXISTS `idx_vis_screen_tournament` ON `t_vis_screen` (`tournament_id`);
+
+--
 -- Table structure for table `t_login_account`
 --
 

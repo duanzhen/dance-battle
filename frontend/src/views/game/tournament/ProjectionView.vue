@@ -292,6 +292,9 @@ const handleScreenMessage = (message: any) => {
     case 'SCREEN_CLEARED':
       requestSceneClear();
       break;
+    case 'screenListChanged':
+      // 屏幕列表增删改只影响控制端,投射页无需处理
+      break;
     default:
       console.warn('[ProjectionView] 未知消息类型:', message.type);
   }

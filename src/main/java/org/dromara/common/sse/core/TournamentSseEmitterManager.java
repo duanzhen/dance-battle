@@ -801,6 +801,36 @@ public class TournamentSseEmitterManager extends AbstractSseEmitterManager {
     }
 
     /**
+     * 向指定赛事的所有屏幕广播「屏幕列表已变更」。
+     *
+     * <p>屏幕列表改为服务端共用后,任一控制端新增/改名/删除屏幕都要让其它控制端重新拉取,
+     * 否则多台控制端看到的屏幕列表会不一致。消息不带 screenId,前端控制通道会广播给所有订阅者。</p>
+     *
+     * @param tournamentId 赛事ID
+     */
+    public void notifyScreenListChanged(String tournamentId) {
+        if (tournamentId == null) {
+            return;
+        }
+        try {
+            String tournamentScreensKey = TOURNAMENT_SCREENS_KEY_PREFIX + tournamentId;
+            java.util.Collection<String> screenIds = RedisUtils.getCacheSet(tournamentScreensKey);
+            if (screenIds == null || screenIds.isEmpty()) {
+                log.debug("赛事 {} 没有活跃的屏幕,跳过屏幕列表变更通知", tournamentId);
+                return;
+            }
+            String message = String.format("{\"type\":\"screenListChanged\",\"tournamentId\":\"%s\"}", tournamentId);
+            TournamentSseMessageDto sseMessage = new TournamentSseMessageDto();
+            sseMessage.setMessage(message);
+            sseMessage.setScreenIds(new java.util.ArrayList<>(screenIds));
+            publishMessage(sseMessage);
+            log.info("广播屏幕列表变更 tournamentId:{} screenIds:{}", tournamentId, screenIds);
+        } catch (Exception e) {
+            log.error("广播屏幕列表变更失败 tournamentId:{}", tournamentId, e);
+        }
+    }
+
+    /**
      * 向所有显示指定场景的屏幕发送场景更新消息
      * 注意：此方法会扫描所有Redis键，性能较差，建议使用 notifySceneUpdate(tournamentId, sceneId)
      *

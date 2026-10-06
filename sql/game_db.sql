@@ -451,6 +451,30 @@ CREATE TABLE `t_vis_widget` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `t_vis_screen`
+--
+
+DROP TABLE IF EXISTS `t_vis_screen`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `t_vis_screen` (
+  `id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `tournament_id` bigint NOT NULL,
+  `name` varchar(50) DEFAULT NULL COMMENT '屏幕名',
+  `sort_order` int DEFAULT '0' COMMENT '屏幕排序',
+  `current_scene_id` bigint DEFAULT NULL COMMENT '当前投射的场景ID(多控制端共用)',
+  `create_by` bigint DEFAULT NULL COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`),
+  KEY `idx_vis_screen_tournament` (`tournament_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='大屏屏幕配置';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `t_login_account`
 --
 

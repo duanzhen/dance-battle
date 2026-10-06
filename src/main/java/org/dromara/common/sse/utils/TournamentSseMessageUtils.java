@@ -220,6 +220,18 @@ public class TournamentSseMessageUtils {
     }
 
     /**
+     * 向指定赛事的所有屏幕广播「屏幕列表已变更」,让其它控制端重新拉取共用的屏幕列表。
+     *
+     * @param tournamentId 赛事ID
+     */
+    public static void notifyScreenListChanged(String tournamentId) {
+        if (!isEnable()) {
+            return;
+        }
+        MANAGER.notifyScreenListChanged(tournamentId);
+    }
+
+    /**
      * 向所有显示指定场景的屏幕发送场景更新消息
      * 注意：此方法会扫描所有Redis键，性能较差
      *

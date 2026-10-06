@@ -3,10 +3,14 @@ package com.dance.street.game.interceptor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.dromara.common.core.exception.ServiceException;
+import org.dromara.common.core.utils.StringUtils;
 import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.service.ITTournamentService;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
+
+import java.util.Objects;
 
 /**
  * 手机导播台认证拦截器：从 Authorization header(或 SSE 的 query 参数)提取赛事 authKey，
@@ -26,6 +30,27 @@ public class DirectorAuthInterceptor implements HandlerInterceptor {
 
     public static final String DIRECTOR_ATTR = "directorTournament";
     private static final String BEARER_PREFIX = "Bearer ";
+
+    /**
+     * 校验请求里的 tournamentId 与 authKey 所属赛事一致,并返回该赛事。
+     *
+     * <p>供需要「authKey 已通过拦截器」的端点复用(屏幕控制 / 投射入口等),
+     * 避免各处重复写同一段一致性校验。</p>
+     */
+    public static TTournamentVo requireTournament(HttpServletRequest request, String tournamentId) {
+        TTournamentVo tournament = (TTournamentVo) request.getAttribute(DIRECTOR_ATTR);
+        if (tournament == null || tournament.getId() == null || StringUtils.isBlank(tournamentId)) {
+            throw new ServiceException("赛事凭证与请求不匹配");
+        }
+        try {
+            if (!Objects.equals(tournament.getId(), Long.valueOf(tournamentId.trim()))) {
+                throw new ServiceException("赛事凭证与请求不匹配");
+            }
+        } catch (NumberFormatException e) {
+            throw new ServiceException("赛事凭证与请求不匹配");
+        }
+        return tournament;
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {

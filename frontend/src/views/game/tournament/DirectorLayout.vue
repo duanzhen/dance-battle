@@ -145,7 +145,7 @@
         </div>
 
         <button
-          @click="store.addScreen"
+          @click="handleAddScreen"
           class="flex-none w-20 sm:w-24 h-28 sm:h-32 rounded-lg border-2 border-dashed border-neutral-800 bg-[#0a0a0a] flex flex-col items-center justify-center gap-2 text-neutral-600 hover:text-amber-500 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all cursor-pointer active:scale-95 group"
           title="添加新屏幕"
         >
@@ -390,7 +390,8 @@ const handleWidgetUpdated = () => {
 
 // 缓存场景查找结果,避免重复计算
 const getSceneById = (sceneId) => {
-  return store.scenes.find((s) => s.id === sceneId);
+  // 屏幕当前场景ID统一存字符串,场景ID可能来自接口是数字,这里按字符串比较
+  return store.scenes.find((s) => String(s.id) === String(sceneId));
 };
 
 // 用于防止同一屏幕内重复触发动画
@@ -557,6 +558,16 @@ const deleteScreen = async (screenId) => {
   } catch (error) {
     console.error('删除屏幕失败:', error);
     notifyError(error, '删除屏幕失败，请稍后重试');
+  }
+};
+
+// 新增屏幕:屏幕列表在服务端共用,写入失败要提示而不是静默失败
+const handleAddScreen = async () => {
+  try {
+    await store.addScreen();
+  } catch (error) {
+    console.error('添加屏幕失败:', error);
+    notifyError(error, '添加屏幕失败，请稍后重试');
   }
 };
 

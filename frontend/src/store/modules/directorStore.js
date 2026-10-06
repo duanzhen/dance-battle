@@ -1,13 +1,13 @@
 // stores/directorStore.js
 import { defineStore } from 'pinia';
 import { ref, computed, shallowRef } from 'vue';
-import { v4 as uuidv4 } from 'uuid';
 import { listVisScene, addVisScene, updateVisScene, delVisScene } from '@/api/game/visScene';
 import { listVisWidget, addVisWidget, updateVisWidget, delVisWidget } from '@/api/game/visWidget';
 import { moveWidgetLayer, reorderWidgets } from '@/api/game/visWidget';
+import { listVisScreen, addVisScreen, delVisScreen } from '@/api/game/visScreen';
 import { projectSceneToScreen, clearScreenScene } from '@/api/game/screenControl';
 import { getTournamentAuthKey } from '@/api/game/tournament';
-import { subscribeScreenControl, unsubscribeScreenControl, unsubscribeAllScreens } from '@/utils/screenSse';
+import { subscribeScreenControl, unsubscribeScreenControl } from '@/utils/screenSse';
 
 export const useDirectorStore = defineStore('director', () => {
   // ============================================
@@ -21,38 +21,9 @@ export const useDirectorStore = defineStore('director', () => {
   // 常量：每个场景最多支持的组件数量
   const MAX_WIDGETS_PER_SCENE = 10;
 
-  // 屏幕 - 不接入 API
-  // 从 history state 恢复 screens，或创建默认屏幕
-  const getStateScreens = () => {
-    try {
-      const stateScreens = history.state?.screens;
-      if (stateScreens && Array.isArray(stateScreens) && stateScreens.length > 0) {
-        console.log('✅ 从 history.state 恢复 screens:', stateScreens.length, '个屏幕');
-        return stateScreens;
-      }
-    } catch (e) {
-      console.warn('读取 history.state 失败:', e);
-    }
-    // 创建默认屏幕
-    console.log('📝 history.state 中无 screens，创建默认屏幕');
-    const defaultScreens = [
-      {
-        id: uuidv4(),
-        name: '屏幕 1',
-        status: 'ONLINE',
-        currentSceneId: null
-      }
-    ];
-    // 同步到 history.state
-    try {
-      history.replaceState({ screens: defaultScreens }, '');
-    } catch (e) {
-      console.error('同步默认屏幕到 history.state 失败:', e);
-    }
-    return defaultScreens;
-  };
-
-  const screens = ref(getStateScreens());
+  // 屏幕列表:按赛事存在服务端(多控制端共用同一份),由 loadScreens 拉取。
+  // 不再使用 history.state —— 那是每个标签页各自的数据,多台控制端无法共享。
+  const screens = ref([]);
 
   // 场景 - 从 API 加载
   const scenes = ref([]);
@@ -523,8 +494,13 @@ export const useDirectorStore = defineStore('director', () => {
 
       // 获取赛事导播专用凭证(屏幕控制通道鉴权用)
       await loadDirectorAuthKey();
-      // 场景加载完成后，初始化所有屏幕的 SSE 订阅
-      initializeScreensSubscriptions();
+      // 屏幕列表改为服务端共用:拉取最新列表并按列表同步 SSE 订阅
+      // 屏幕列表拉取失败不应连累场景加载,单独兜住
+      try {
+        await reloadScreens();
+      } catch (e) {
+        console.warn('⚠️ 加载屏幕列表失败,屏幕控制功能暂不可用:', e);
+      }
     } catch (error) {
       console.error('❌ 加载场景失败:', error);
       scenes.value = [];
@@ -717,8 +693,60 @@ export const useDirectorStore = defineStore('director', () => {
   }
 
   // ============================================
-  // 屏幕管理（本地管理，不接入 API）
+  // 屏幕管理（服务端共用:多控制端同一份屏幕列表 + 同一份投射状态）
   // ============================================
+
+  // 本控制端已订阅的屏幕ID(用于屏幕列表变更后补齐/取消订阅)
+  const subscribedScreenIds = new Set();
+  // 屏幕列表变更后的重载去抖:一次广播会按屏幕逐个触发回调
+  let screensReloadTimer = null;
+
+  /** 从服务端拉取本赛事屏幕列表(服务端保证至少一块);当前投射场景一并带回,实现跨控制端同步 */
+  async function loadScreens(tournamentId) {
+    if (!tournamentId) {
+      screens.value = [];
+      return;
+    }
+    const resp = await listVisScreen({ tournamentId: String(tournamentId) });
+    const rows = resp?.data || [];
+    screens.value = rows.map((s) => ({
+      id: String(s.id),
+      name: s.name,
+      sortOrder: Number(s.sortOrder) || 0,
+      status: 'ONLINE',
+      // 当前投射的场景:服务端持久化,新打开的控制端据此直接显示;统一成字符串便于前端比较
+      currentSceneId: s.currentSceneId == null ? null : String(s.currentSceneId)
+    }));
+    console.log(`📂 已加载屏幕列表: ${screens.value.length} 块`);
+  }
+
+  /** 屏幕列表变更(别的控制端增删改)后重新拉取,并补齐/取消对应的 SSE 订阅 */
+  async function reloadScreens() {
+    if (!currentTournamentId) return;
+    await loadScreens(currentTournamentId);
+    const ids = new Set(screens.value.map((s) => s.id));
+    ids.forEach((id) => {
+      if (!subscribedScreenIds.has(id)) {
+        subscribeToScreenSSE(id);
+      }
+    });
+    [...subscribedScreenIds].forEach((id) => {
+      if (!ids.has(id)) {
+        unsubscribeScreenSSE(id);
+      }
+    });
+  }
+
+  function scheduleReloadScreens() {
+    if (screensReloadTimer) return;
+    screensReloadTimer = setTimeout(() => {
+      screensReloadTimer = null;
+      reloadScreens().catch((e) => console.warn('[SSE] 重新加载屏幕列表失败:', e));
+    }, 300);
+  }
+
+  /** sceneId 是否为空/无效(空 = 清除投射) */
+  const isInvalidSceneId = (v) => v === null || v === undefined || v === '' || v === 'null';
 
   // 获取赛事导播专用凭证
   async function loadDirectorAuthKey() {
@@ -742,36 +770,60 @@ export const useDirectorStore = defineStore('director', () => {
 
   // 订阅单个屏幕的 SSE 控制通道
   function subscribeToScreenSSE(screenId) {
+    const sid = String(screenId);
     if (!currentTournamentId) {
-      console.warn(`[SSE] 未设置 tournamentId，无法订阅屏幕 ${screenId}`);
+      console.warn(`[SSE] 未设置 tournamentId，无法订阅屏幕 ${sid}`);
       return;
     }
 
     if (!directorAuthKey.value) {
-      console.warn(`[SSE] 缺少赛事导播凭证,跳过屏幕 ${screenId} 控制通道订阅`);
+      console.warn(`[SSE] 缺少赛事导播凭证,跳过屏幕 ${sid} 控制通道订阅`);
       return;
     }
 
-    subscribeScreenControl(screenId, currentTournamentId, directorAuthKey.value, (message) => {
+    subscribeScreenControl(sid, currentTournamentId, directorAuthKey.value, (message) => {
       // 处理 SSE 消息
-      handleScreenSSEMessage(screenId, message);
+      handleScreenSSEMessage(sid, message);
     });
+    subscribedScreenIds.add(sid);
   }
 
-  // 初始化所有屏幕的 SSE 订阅
-  function initializeScreensSubscriptions() {
-    console.log(`[SSE] 初始化所有屏幕的 SSE 订阅，共 ${screens.value.length} 个屏幕`);
-    screens.value.forEach((screen) => {
-      subscribeToScreenSSE(screen.id);
-    });
+  // 取消单个屏幕的 SSE 订阅(屏幕被删除时调用)
+  function unsubscribeScreenSSE(screenId) {
+    const sid = String(screenId);
+    unsubscribeScreenControl(sid);
+    subscribedScreenIds.delete(sid);
   }
 
   // 处理屏幕 SSE 消息
   function handleScreenSSEMessage(screenId, message) {
     console.log(`[SSE] 处理屏幕 ${screenId} 的消息:`, message);
 
+    // 屏幕"当前投射什么场景"以服务端广播为准:任一控制端投射/清除,其它控制端据此同步
+    const findScreen = () => screens.value.find((s) => String(s.id) === String(screenId));
+
     // 根据消息类型处理
     switch (message.type) {
+      case 'sceneSwitch': {
+        // sceneId 为空 = 清除投射
+        const sceneId = isInvalidSceneId(message.sceneId) ? null : String(message.sceneId);
+        const target = findScreen();
+        if (target) {
+          target.currentSceneId = sceneId;
+        }
+        break;
+      }
+      case 'SCREEN_CLEARED': {
+        const target = findScreen();
+        if (target) {
+          target.currentSceneId = null;
+        }
+        break;
+      }
+      case 'screenListChanged':
+        // 其它控制端增删/改名了屏幕:重新拉取共用的屏幕列表
+        scheduleReloadScreens();
+        break;
       case 'SCREEN_ONLINE':
         // 屏幕上线
         setScreenOnline(screenId);
@@ -789,48 +841,43 @@ export const useDirectorStore = defineStore('director', () => {
     }
   }
 
-  // 同步 screens 到 history state（使用 replaceState 避免创建历史记录）
-  function syncScreensToState() {
-    try {
-      const currentState = history.state || {};
-      const newState = {
-        ...currentState,
-        screens: JSON.parse(JSON.stringify(screens.value)) // 深拷贝避免引用问题
-      };
-      history.replaceState(newState, '');
-      console.log('🔄 已同步 screens 到 history.state');
-    } catch (e) {
-      console.error('同步 screens 到 history.state 失败:', e);
-    }
-  }
-
-  // 添加屏幕（本地）
-  function addScreen() {
-    // 检查屏幕数量限制
+  // 添加屏幕(服务端共用:写入后其它控制端通过 screenListChanged 广播同步)
+  async function addScreen() {
     if (screens.value.length >= MAX_SCREENS_PER_TOURNAMENT) {
       console.warn(`❌ 已达到最大屏幕数量限制 (${MAX_SCREENS_PER_TOURNAMENT} 块)`);
       throw new Error(`每个赛事最多只能添加 ${MAX_SCREENS_PER_TOURNAMENT} 块屏幕`);
     }
-
-    const newId = uuidv4(); // 使用 UUID 替代 screen_${Date.now()}
+    if (!currentTournamentId) {
+      throw new Error('缺少赛事ID,无法添加屏幕');
+    }
     const screenNumber = screens.value.length + 1;
-    const newScreen = {
-      id: newId,
+    const resp = await addVisScreen({
+      tournamentId: currentTournamentId,
       name: `新屏幕 ${screenNumber}`,
+      sortOrder: screens.value.length
+    });
+    const data = resp?.data;
+    if (!data) {
+      throw new Error('添加屏幕失败');
+    }
+    const newScreen = {
+      id: String(data.id),
+      name: data.name,
+      sortOrder: Number(data.sortOrder) || screens.value.length,
       status: 'ONLINE',
-      currentSceneId: null
+      currentSceneId: data.currentSceneId == null ? null : String(data.currentSceneId)
     };
     screens.value.push(newScreen);
-    syncScreensToState(); // 同步到 history state
-    console.log(`➕ 已添加新屏幕 [${screenNumber}] (ID: ${newId})`);
+    console.log(`➕ 已添加新屏幕 [${screenNumber}] (ID: ${newScreen.id})`);
 
     // 订阅该屏幕的 SSE 控制通道
-    subscribeToScreenSSE(newId);
+    subscribeToScreenSSE(newScreen.id);
+    return newScreen;
   }
 
-  // 删除屏幕（本地）
+  // 删除屏幕(服务端共用)
   async function deleteScreen(screenId) {
-    const screen = screens.value.find((s) => s.id === screenId);
+    const screen = screens.value.find((s) => String(s.id) === String(screenId));
     if (!screen) {
       console.warn(`❌ 屏幕 ${screenId} 不存在`);
       return;
@@ -842,21 +889,22 @@ export const useDirectorStore = defineStore('director', () => {
         if (!directorAuthKey.value) {
           await loadDirectorAuthKey();
         }
-        console.log(`📤 删除屏幕前先清除投射: screenId=${screenId}, sceneId=null`);
+        console.log(`📤 删除屏幕前先清除投射: screenId=${screen.id}, sceneId=null`);
         if (directorAuthKey.value) {
-          await projectSceneToScreen(screenId, null, currentTournamentId, directorAuthKey.value);
+          await projectSceneToScreen(screen.id, null, currentTournamentId, directorAuthKey.value);
         }
         console.log(`✅ 已清除屏幕 [${screen.name}] 的投射`);
       }
 
       // 取消该屏幕的 SSE 订阅
-      unsubscribeScreenControl(screenId);
+      unsubscribeScreenSSE(screen.id);
 
-      // 删除屏幕
-      const index = screens.value.findIndex((s) => s.id === screenId);
+      // 从服务端删除(其它控制端收到 screenListChanged 后重新拉取)
+      await delVisScreen(screen.id);
+
+      const index = screens.value.findIndex((s) => String(s.id) === String(screen.id));
       if (index > -1) {
         screens.value.splice(index, 1);
-        syncScreensToState(); // 同步到 history state
         console.log(`🗑️ 已删除屏幕 [${screen.name}]`);
       }
     } catch (error) {
@@ -867,7 +915,7 @@ export const useDirectorStore = defineStore('director', () => {
 
   // 投射场景到屏幕
   async function projectScene(screenId, sceneId) {
-    const screen = screens.value.find((s) => s.id === screenId);
+    const screen = screens.value.find((s) => String(s.id) === String(screenId));
     if (!screen) {
       console.warn(`❌ 屏幕 ${screenId} 不存在`);
       return;
@@ -881,20 +929,14 @@ export const useDirectorStore = defineStore('director', () => {
         throw new Error('缺少赛事导播凭证,无法投射场景');
       }
       // 调用后端 API
-      console.log(`📤 向后端发送投射请求: screenId=${screenId}, sceneId=${sceneId}`);
-      await projectSceneToScreen(screenId, sceneId, currentTournamentId, directorAuthKey.value);
+      console.log(`📤 向后端发送投射请求: screenId=${screen.id}, sceneId=${sceneId}`);
+      await projectSceneToScreen(screen.id, sceneId, currentTournamentId, directorAuthKey.value);
 
-      // 更新本地状态
-      screen.currentSceneId = sceneId;
-      syncScreensToState(); // 同步到 history state
+      // 更新本地状态(其它控制端由后端 sceneSwitch 广播同步)
+      screen.currentSceneId = sceneId == null ? null : String(sceneId);
 
       const statusText = screen.status === 'OFFLINE' ? '⏳ 预配置' : '🚀 已投射';
       console.log(`${statusText} 将场景 [${sceneId}] 投射到屏幕 [${screen.name}]${screen.status === 'OFFLINE' ? ' (等待上线)' : ''}`);
-
-      // 如果屏幕在线，后端会通过 SSE 通知大屏端
-      if (screen.status === 'ONLINE') {
-        console.log(`  → 后端将通过 SSE 通知屏幕 [${screen.name}]`);
-      }
     } catch (error) {
       console.error(`❌ 投射场景失败:`, error);
       throw error;
@@ -903,7 +945,7 @@ export const useDirectorStore = defineStore('director', () => {
 
   // 清除屏幕投射
   async function clearScreenProjection(screenId) {
-    const screen = screens.value.find((s) => s.id === screenId);
+    const screen = screens.value.find((s) => String(s.id) === String(screenId));
     if (!screen) {
       console.warn(`❌ 屏幕 ${screenId} 不存在`);
       return;
@@ -917,12 +959,11 @@ export const useDirectorStore = defineStore('director', () => {
         throw new Error('缺少赛事导播凭证,无法清除投射');
       }
       // 调用后端 API
-      console.log(`📤 向后端发送清除投射请求: screenId=${screenId}`);
-      await clearScreenScene(screenId, currentTournamentId, directorAuthKey.value);
+      console.log(`📤 向后端发送清除投射请求: screenId=${screen.id}`);
+      await clearScreenScene(screen.id, currentTournamentId, directorAuthKey.value);
 
-      // 更新本地状态
+      // 更新本地状态(其它控制端由后端 sceneSwitch 广播同步)
       screen.currentSceneId = null;
-      syncScreensToState(); // 同步到 history state
       console.log(`✅ 已清除屏幕 [${screen.name}] 的投射`);
     } catch (error) {
       console.error(`❌ 清除投射失败:`, error);
@@ -935,14 +976,12 @@ export const useDirectorStore = defineStore('director', () => {
     return screen ? screen.name : 'Unknown';
   }
 
-  // 设置屏幕在线（由 WebSocket 连接触发，不同步到 history state）
+  // 设置屏幕在线(连接状态是临时的,只改本地,不落服务端)
   function setScreenOnline(screenId) {
-    const screen = screens.value.find((s) => s.id === screenId);
+    const screen = screens.value.find((s) => String(s.id) === String(screenId));
     if (screen) {
       const wasOffline = screen.status === 'OFFLINE';
       screen.status = 'ONLINE';
-      // 注意：不同步到 history state，因为 online/offline 是临时的 WebSocket 连接状态
-
       console.log(`✅ 屏幕 [${screen.name}] 已上线`);
 
       if (wasOffline && screen.currentSceneId) {
@@ -951,22 +990,20 @@ export const useDirectorStore = defineStore('director', () => {
     }
   }
 
-  // 设置屏幕离线（由 WebSocket 断开触发，不同步到 history state）
+  // 设置屏幕离线(同上是临时状态)
   function setScreenOffline(screenId) {
-    const screen = screens.value.find((s) => s.id === screenId);
+    const screen = screens.value.find((s) => String(s.id) === String(screenId));
     if (screen) {
       screen.status = 'OFFLINE';
-      // 注意：不同步到 history state，因为 online/offline 是临时的 WebSocket 连接状态
       console.log(`⚫ 屏幕 [${screen.name}] 已离线${screen.currentSceneId ? ' (投射配置已保留)' : ''}`);
     }
   }
 
-  // 关闭屏幕（手动控制，不同步到 history state）
+  // 关闭屏幕(手动控制,只改本地状态)
   function turnOffScreen(screenId) {
-    const screen = screens.value.find((s) => s.id === screenId);
+    const screen = screens.value.find((s) => String(s.id) === String(screenId));
     if (screen) {
       screen.status = 'OFFLINE';
-      // 注意：不同步到 history state，因为 online/offline 是临时的 WebSocket 连接状态
       console.log(`⚫ 屏幕 [${screen.name}] 已离线${screen.currentSceneId ? ' (投射配置已保留)' : ''}`);
     }
   }

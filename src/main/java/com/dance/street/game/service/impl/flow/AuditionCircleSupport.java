@@ -3,6 +3,7 @@ package com.dance.street.game.service.impl.flow;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchReferee;
+import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
@@ -12,6 +13,7 @@ import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
+import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.impl.settle.SettlementSupport;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +41,7 @@ public class AuditionCircleSupport {
 
     private final TMatchMapper matchMapper;
     private final TMatchRefereeMapper matchRefereeMapper;
+    private final TMatchRoundMapper matchRoundMapper;
     private final ITRefereeStageService refereeStageService;
     /** 加赛场次判定(同分加赛复用原圈 displayZone,不计入圈场次) */
     private final SettlementSupport settlementSupport;
@@ -154,6 +157,14 @@ public class AuditionCircleSupport {
             m.setMatchMode(matchMode);
             m.setMatchType(StageConstants.MATCH_TYPE_NORMAL);
             matchMapper.insert(m);
+            // 每圈一个首回合:round 只表示「场次内的回合/局」,与选手无关
+            TMatchRound round = new TMatchRound();
+            round.setTenantId(stage.getTenantId());
+            round.setTournamentId(stage.getTournamentId());
+            round.setMatchId(m.getId());
+            round.setRoundSequence(1L);
+            round.setStatus(StageConstants.MATCH_PENDING);
+            matchRoundMapper.insert(round);
             log.info("海选赛段[{}]追加空白第{}圈(matchId={})", stage.getId(), c, m.getId());
         }
         // 按配置刷新圈-裁判绑定(新增圈一并绑定,已有圈幂等重绑)

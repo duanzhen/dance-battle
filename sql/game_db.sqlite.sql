@@ -118,7 +118,6 @@ CREATE TABLE IF NOT EXISTS `t_match_round` (
   `tournament_id` INTEGER NOT NULL,
   `match_id` INTEGER NOT NULL,
   `round_sequence` INTEGER NOT NULL,
-  `competitor_id` INTEGER,
   `status` TEXT NOT NULL DEFAULT 'PENDING',
   `create_by` INTEGER,
   `create_time` TEXT,

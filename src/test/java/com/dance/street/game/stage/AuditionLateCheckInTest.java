@@ -188,7 +188,7 @@ class AuditionLateCheckInTest {
         assertEquals(circle2, circleOf(stage.getId(), late), "迟到者应落在客户端指定的第 2 圈");
         assertEquals(0, participantCount(circle1, late), "不应影响已开判的第 1 圈");
         assertEquals(1, participantCount(circle2, late), "应挂入第 2 圈");
-        assertEquals(1, roundCount(circle2, late), "补签到应同时建好轮次,裁判才能打分");
+        assertEquals(1, roundCount(circle2), "第 2 圈应有回合(round),补签到的人才能被打分");
 
         assertEquals(1, participantCount(circle1, c1), "既有选手的落圈不受影响");
         assertEquals(1, participantCount(circle2, c4));
@@ -445,10 +445,9 @@ class AuditionLateCheckInTest {
             .eq(TMatchParticipant::getCompetitorId, competitorId));
     }
 
-    private long roundCount(Long matchId, Long competitorId) {
+    private long roundCount(Long matchId) {
         return matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
-            .eq(TMatchRound::getMatchId, matchId)
-            .eq(TMatchRound::getCompetitorId, competitorId));
+            .eq(TMatchRound::getMatchId, matchId));
     }
 
     private long competitorCount(Long stageId) {

@@ -202,9 +202,12 @@ public class StageSettlementService {
                     if (!roundIds.isEmpty()) {
                         roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
                             .in(TRoundScore::getRoundId, roundIds));
+                        // 回合(round)是场次结构、不是比赛数据:保留并回退状态,
+                        // 否则撤销会把「谁在哪圈」的入场结构劈掉一半(round 没了、participant 还在)。
+                        matchRoundMapper.update(null, Wrappers.<TMatchRound>lambdaUpdate()
+                            .in(TMatchRound::getId, roundIds)
+                            .set(TMatchRound::getStatus, StageConstants.MATCH_PENDING));
                     }
-                    matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
-                        .in(TMatchRound::getMatchId, circleIds));
                     matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
                         .in(TMatch::getId, circleIds)
                         .set(TMatch::getStatus, StageConstants.MATCH_PENDING));
@@ -513,7 +516,7 @@ public class StageSettlementService {
         return vo;
     }
 
-    /** 聚合某参赛者跨全部轮次(逐选手轮次)的各维度分:按裁判间汇总规则合并多裁判分 */
+    /** 聚合某参赛者在本场各轮次的各维度分:round 只表示回合,按明细的 competitor_id 归属到人 */
     private List<RankDetailVo.DimensionScore> aggregateCompetitorDimensions(
             TMatch match, Long competitorId,
             Map<Long, List<TMatchRound>> roundsByMatch,
@@ -522,11 +525,8 @@ public class StageSettlementService {
             List<DimensionConfig> dims) {
         Map<String, List<java.math.BigDecimal>> byDim = new LinkedHashMap<>();
         for (TMatchRound r : roundsByMatch.getOrDefault(match.getId(), List.of())) {
-            if (!Objects.equals(r.getCompetitorId(), competitorId)) {
-                continue;
-            }
             for (TRoundScore s : scoresByRound.getOrDefault(r.getId(), List.of())) {
-                if (s.getCompetitorId() == null || s.getScore() == null) {
+                if (!Objects.equals(s.getCompetitorId(), competitorId) || s.getScore() == null) {
                     continue;
                 }
                 String dim = s.getDimension() != null ? s.getDimension() : StageConstants.DIMENSION_MAIN;

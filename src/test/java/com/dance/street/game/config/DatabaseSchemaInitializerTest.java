@@ -29,7 +29,7 @@ class DatabaseSchemaInitializerTest {
 
         List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
 
-        assertEquals(17, ddlList.size());
+        assertEquals(18, ddlList.size());
         for (String ddl : ddlList) {
             assertTrue(ddl.matches("(?is)^CREATE\\s+TABLE.*"), "应为 CREATE TABLE 语句: " + ddl);
             assertFalse(ddl.matches("(?is)^DROP\\s+TABLE.*"), "不应包含 DROP 语句: " + ddl);
@@ -100,8 +100,8 @@ class DatabaseSchemaInitializerTest {
         List<String> ddlList = DatabaseSchemaInitializer.parseCreateTableStatements(script);
         List<String> indexList = DatabaseSchemaInitializer.parseCreateIndexStatements(script);
 
-        assertEquals(17, ddlList.size());
-        assertEquals(22, indexList.size());
+        assertEquals(18, ddlList.size());
+        assertEquals(23, indexList.size());
         for (String index : indexList) {
             assertTrue(index.matches("(?is)^CREATE\\s+(UNIQUE\\s+)?INDEX.*"), "应为 CREATE INDEX 语句: " + index);
             assertFalse(index.matches("(?is)^CREATE\\s+TABLE.*"), "不应包含建表语句: " + index);

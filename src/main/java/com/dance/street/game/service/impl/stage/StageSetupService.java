@@ -329,27 +329,14 @@ public class StageSetupService {
             matchMapper.insert(m);
             matchKeyToId.put(matchKey(mp.getRound(), mp.getMatchIndex()), m.getId());
 
-            // 海选赛/排名赛:每个选手一个轮次,按上场顺序
-            if (perCompetitorRound) {
-                int seq = 1;
-                for (SlotPlan slot : mp.getSlots()) {
-                    TMatchRound round = new TMatchRound();
-                    round.setTournamentId(stage.getTournamentId());
-                    round.setMatchId(m.getId());
-                    round.setRoundSequence((long) seq);
-                    round.setCompetitorId(slot.getCompetitorId());
-                    round.setStatus(StageConstants.MATCH_PENDING);
-                    matchRoundMapper.insert(round);
-                    seq++;
-                }
-            } else {
-                TMatchRound round = new TMatchRound();
-                round.setTournamentId(stage.getTournamentId());
-                round.setMatchId(m.getId());
-                round.setRoundSequence(1L);
-                round.setStatus(StageConstants.MATCH_PENDING);
-                matchRoundMapper.insert(round);
-            }
+            // 每场一个首回合:round 只表示「场次内的回合/局」,不再承载「某个选手」
+            // (逐选手制的「谁在这场」由 t_match_participant 承载;BO 多局再加 round)。
+            TMatchRound round = new TMatchRound();
+            round.setTournamentId(stage.getTournamentId());
+            round.setMatchId(m.getId());
+            round.setRoundSequence(1L);
+            round.setStatus(StageConstants.MATCH_PENDING);
+            matchRoundMapper.insert(round);
 
             for (SlotPlan slot : mp.getSlots()) {
                 // 每个座位都落一行:真人=PLAYER,轮空=BYE,待上游填入=PENDING。

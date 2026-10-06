@@ -745,37 +745,29 @@ public class AuditionStageSettler implements StageSettler {
         // 不复制绑定会导致二海的场次谁都看不到、判罚不了,赛段卡住无法结算。
         copyMatchReferees(parentMatch, tb);
 
-        // 每个同分选手一个参赛位 + 一个专属轮次(与正式圈同一口径):
-        // 海选是「逐选手轮次」,裁判端按轮次逐人展示与打分。
-        // 这里若只建一轮,3 个人的加赛在裁判端只会显示「第1轮」,看起来像只判了 1 个人;
-        // 打分写入也会退化成"单轮多人共享",回显与正式圈两套口径。
-        List<TMatchRound> rounds = new ArrayList<>();
+        // 每个同分选手一个参赛位(entry);加赛场次一个回合,「谁」由 participant 承载。
+        // 打分明细按 (回合, 选手) 区分到人,裁判端逐人展示与打分。
         for (int i = 0; i < tiedCompetitorIds.size(); i++) {
             TMatchParticipant p = new TMatchParticipant();
             p.setTournamentId(tb.getTournamentId());
             p.setMatchId(tb.getId());
             p.setCompetitorId(tiedCompetitorIds.get(i));
             p.setDisplaySlotIndex((long) (i + 1));
+            p.setSlotKind(StageConstants.SLOT_PLAYER);
             p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
             participantMapper.insert(p);
-
-            TMatchRound round = new TMatchRound();
-            round.setTournamentId(tb.getTournamentId());
-            round.setMatchId(tb.getId());
-            round.setRoundSequence((long) (i + 1));
-            round.setCompetitorId(tiedCompetitorIds.get(i));
-            round.setStatus(StageConstants.MATCH_PENDING);
-            matchRoundMapper.insert(round);
-            rounds.add(round);
         }
+
+        TMatchRound round = new TMatchRound();
+        round.setTournamentId(tb.getTournamentId());
+        round.setMatchId(tb.getId());
+        round.setRoundSequence(1L);
+        round.setStatus(StageConstants.MATCH_GAMING);
+        matchRoundMapper.insert(round);
 
         // 自动开始加赛
         tb.setStatus(StageConstants.MATCH_GAMING);
         matchMapper.updateById(tb);
-        for (TMatchRound round : rounds) {
-            round.setStatus(StageConstants.MATCH_GAMING);
-            matchRoundMapper.updateById(round);
-        }
         // 加赛创建后必须推送:裁判端需要看到新场次才能打分,导播端需要知道赛段尚未完成
         refereeSseNotifier.notifyMatch(tb.getStageId(), tb.getId(), "match");
         tournamentEventNotifier.notify(tb.getTournamentId(), tb.getStageId(), tb.getId(), "match");

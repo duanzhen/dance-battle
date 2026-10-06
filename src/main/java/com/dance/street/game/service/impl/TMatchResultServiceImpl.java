@@ -208,19 +208,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         if (bo.getScores() == null || bo.getScores().isEmpty()) {
             return Map.of();
         }
-        Map<Long, TMatchRound> roundByCompetitor = new HashMap<>();
-        List<TMatchRound> rounds = matchRoundMapper.selectList(
-            Wrappers.<TMatchRound>lambdaQuery().eq(TMatchRound::getMatchId, match.getId()));
-        for (TMatchRound r : rounds) {
-            if (r.getCompetitorId() != null) {
-                roundByCompetitor.putIfAbsent(r.getCompetitorId(), r);
-            }
-        }
         Long refId = bo.getRefereeId() != null ? bo.getRefereeId() : 0L;
         // 参赛方用 Set 做越界校验(此前 List.contains 线性查找,O(人数×维度))
         Set<Long> competitorIdSet = new HashSet<>(competitorIds);
-        // 无专属轮次时的兜底轮:整批只解析一次(此前循环里每个选手都重查一次全部轮次 → N+1)
-        TMatchRound fallbackRound = null;
+        // 本场当前生效轮:逐选手制(海选/排名)一场一回合,全员共享同一个 round,
+        // 「谁」由打分明细的 competitor_id 区分。整批只解析一次。
+        TMatchRound currentRound = matchRoundLocator.current(match);
         // 按 (轮次,选手) 分组:同一选手多个维度一次删除再批量插入,
         // 避免逐条「先删后插」导致同一次提交的多维度分互相覆盖
         Map<String, List<ScoreEntryBo>> byRoundCompetitor = new java.util.LinkedHashMap<>();
@@ -238,18 +231,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 || se.getScore().compareTo(maxScore) > 0) {
                 throw new ServiceException("{}打分须在 0-{} 之间", isAudition ? "海选" : "维度", maxScore);
             }
-            // 越界校验:只能给本场参赛方打分(海选/排名赛逐选手轮次);
-            // 加赛场次等单轮共评场景无选手专属轮次,回退到当前轮
+            // 越界校验:只能给本场参赛方打分
             if (!competitorIdSet.contains(se.getCompetitorId())) {
                 throw new ServiceException("选手[{}]不属于本场,无法提交打分", se.getCompetitorId());
             }
-            TMatchRound target = roundByCompetitor.get(se.getCompetitorId());
-            if (target == null) {
-                if (fallbackRound == null) {
-                    fallbackRound = matchRoundLocator.current(match);
-                }
-                target = fallbackRound;
-            }
+            TMatchRound target = currentRound;
             byRoundCompetitor
                 .computeIfAbsent(target.getId() + ":" + se.getCompetitorId(), k -> new ArrayList<>())
                 .add(se);

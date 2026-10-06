@@ -223,11 +223,11 @@ class CheckInFlowTest {
         assertEquals(List.of(ids.get(1), ids.get(3)),
             participantsOf(circles.get(1).getId()).stream()
                 .map(TMatchParticipant::getCompetitorId).toList());
-        // 圈内槽位 1..n 连续,且每个选手一个独立轮次
+        // 圈内槽位 1..n 连续;每圈一个回合(round),选手由 participant(entry)承载
         for (TMatch c : circles) {
             assertSlotsContiguous(c.getId());
-            assertEquals(2, matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
-                .eq(TMatchRound::getMatchId, c.getId())), "每名选手应有独立轮次");
+            assertEquals(1, matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, c.getId())), "每圈应有一个回合(round)");
         }
         // 签到只落圈,不提前锁名单:初始化留给生成对阵/开赛(留出加外卡/排位的窗口)
         assertEquals(0L, stageMapper.selectById(stage.getId()).getIsInitialized(),
@@ -342,9 +342,8 @@ class CheckInFlowTest {
         Long scored = ids.get(0);
         TMatchRound round = matchRoundMapper.selectOne(Wrappers.<TMatchRound>lambdaQuery()
             .eq(TMatchRound::getMatchId, circles.get(0).getId())
-            .eq(TMatchRound::getCompetitorId, scored)
             .last("limit 1"));
-        assertTrue(round != null, "选手中应有独立轮次");
+        assertTrue(round != null, "圈场次应有回合(round)");
         TRoundScore score = new TRoundScore();
         score.setTournamentId(tid);
         score.setRoundId(round.getId());
@@ -368,6 +367,40 @@ class CheckInFlowTest {
             "应说明原因是已打分,实际: " + moveEx.getMessage());
         // 拦截后该选手仍留在原圈
         assertEquals(1, circleCountOf(stage.getId(), scored));
+    }
+
+    /**
+     * 入口海选撤销数据后,「谁在哪圈」的入场结构必须原样保留:圈、回合(round)、参赛行都还在,
+     * 只清分数。历史事故:撤销把 round 删了、participant 留下,再补签只会给新人建 round,
+     * MC 就只剩后补的人。这里锁死「撤销后结构不丢、补签只追加参赛行」。
+     */
+    @Test
+    void resetEntryAuditionKeepsEntriesAndRound() {
+        Long tid = newTournament("入口海选撤销");
+        TStageVo stage = newAuditionStage(tid, "海选", 2, 2);
+        lifecycleService.ensureAuditionCircles(stage.getId());
+        List<Long> ids = new ArrayList<>();
+        List<TMatch> circles = circleMatches(stage.getId());
+        for (int i = 1; i <= 4; i++) {
+            ids.add(checkInByNumber(tid, stage.getId(), "选手" + i, i, circles));
+        }
+        bindRefereeToCircles(stage.getId());
+        lifecycleService.startStage(stage.getId());
+        lifecycleService.resetStageToDraft(stage.getId());
+
+        for (TMatch c : circles) {
+            assertEquals(1, matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, c.getId())), "撤销后每圈仍应保留回合(round)");
+            assertEquals(2, participantsOf(c.getId()).size(), "撤销后入场行应原样保留");
+        }
+        assertEquals(StageConstants.STAGE_DRAFT, stageMapper.selectById(stage.getId()).getStatus());
+
+        // 撤销后补签:只追加参赛行,不新增回合 -> MC/裁判读到的名单不再只剩新人
+        Long late = insertPending(tid, stage.getId(), "撤销后补签", "9");
+        lifecycleService.appendStageCompetitor(stage.getId(), late, circles.get(0).getId());
+        assertEquals(1, matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, circles.get(0).getId())), "补签不应再建回合");
+        assertEquals(3, participantsOf(circles.get(0).getId()).size(), "补签不该把圈里原有的人弄丢");
     }
 
     /** 显式指定落圈:合法目标圈生效,重复签到不重挂,非法目标圈报错。 */

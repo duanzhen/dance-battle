@@ -163,6 +163,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                 }
             }
             migrateRosterGroups(connection, false);
+            collapsePerCompetitorRounds(connection);
         } catch (SQLException e) {
             log.error("连接数据库检查表结构失败: {}", e.getMessage());
             return;
@@ -224,6 +225,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                 }
             }
             migrateRosterGroups(connection, true);
+            collapsePerCompetitorRounds(connection);
         } catch (SQLException e) {
             log.error("连接 SQLite 检查表结构失败: {}", e.getMessage());
             return;
@@ -463,6 +465,61 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
         } catch (Exception e) {
             // 搬迁失败不影响启动:业务仍能跑,只是老数据没带过来
             log.warn("来源组一次性搬迁失败(不影响启动): {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 一次性数据搬迁(逐选手赛制):老库把「一个选手一个 round」当成了回合,与新的
+     * 「一场一个回合 + participant 承载选手」模型冲突。这里把每个海选/排名赛场次的
+     * 多余回合合并成一个:先把打分明细 re-point 到保留回合,再删掉其余回合。
+     *
+     * <p>幂等:只处理「回合数 &gt; 1」的逐选手赛段的场次;新库每场只有一个回合,不受影响。
+     * 座位制(淘汰/擂台/自由对抗)的 BO 多局是合法多回合,不在处理范围。</p>
+     */
+    private void collapsePerCompetitorRounds(Connection connection) {
+        try {
+            List<Long> matchIds = new ArrayList<>();
+            try (Statement statement = connection.createStatement();
+                 ResultSet rs = statement.executeQuery(
+                     "SELECT m.id FROM t_match m JOIN t_stage s ON m.stage_id = s.id"
+                         + " WHERE s.stage_mode IN ('AUDITION','RANK')")) {
+                while (rs.next()) {
+                    matchIds.add(rs.getLong(1));
+                }
+            }
+            int collapsed = 0;
+            for (Long matchId : matchIds) {
+                List<Long> roundIds = new ArrayList<>();
+                try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT id FROM t_match_round WHERE match_id = ? ORDER BY round_sequence, id")) {
+                    ps.setLong(1, matchId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            roundIds.add(rs.getLong(1));
+                        }
+                    }
+                }
+                if (roundIds.size() <= 1) {
+                    continue;
+                }
+                long keep = roundIds.get(0);
+                List<String> drop = new ArrayList<>();
+                for (int i = 1; i < roundIds.size(); i++) {
+                    drop.add(String.valueOf(roundIds.get(i)));
+                }
+                String dropIn = String.join(",", drop);
+                executeDdl(connection, "UPDATE t_round_score SET round_id = " + keep
+                    + " WHERE round_id IN (" + dropIn + ")");
+                executeDdl(connection, "DELETE FROM t_match_round WHERE id IN (" + dropIn + ")");
+                collapsed++;
+            }
+            if (collapsed > 0) {
+                log.info("schema 自检: 已把 {} 个逐选手赛场次的多余轮次合并为一个回合(round),打分已重挂到保留回合",
+                    collapsed);
+            }
+        } catch (Exception e) {
+            // 搬迁失败不影响启动:业务仍能跑
+            log.warn("逐选手轮次一次性合并失败(不影响启动): {}", e.getMessage());
         }
     }
 

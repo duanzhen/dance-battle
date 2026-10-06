@@ -156,7 +156,7 @@ public class StageCheckInService {
             // 否则同一批号码会因「先建圈后签到 / 签完再生成」等调用顺序不同而落到不同的圈。
             throw new ServiceException("请指定落圈:补签到必须传入目标圈场次ID或圈序号");
         }
-        appendParticipantWithRound(target, competitorId);
+        appendParticipant(target, competitorId);
         log.info("海选/排名赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
         // 开赛后的补签到:必须推给该圈裁判,否则裁判端横向选手列表里看不到刚加的人
@@ -221,8 +221,8 @@ public class StageCheckInService {
             target = source;
         }
 
-        removeParticipantWithRound(source, competitorId);
-        appendParticipantWithRound(target, competitorId);
+        removeParticipant(source, competitorId);
+        appendParticipant(target, competitorId);
         tournamentEventNotifier.notify(stage.getTournamentId(), stageId, target.getId(), "stage");
         refereeSseNotifier.notifyMatch(stageId, target.getId(), "competitors");
         if (source.getId() != null && !source.getId().equals(target.getId())) {
@@ -262,7 +262,7 @@ public class StageCheckInService {
         boolean removed = false;
         for (TMatch m : matches) {
             if (attachedMatchIds.contains(m.getId())) {
-                removeParticipantWithRound(m, competitorId);
+                removeParticipant(m, competitorId);
                 removed = true;
             }
         }
@@ -274,24 +274,25 @@ public class StageCheckInService {
     }
 
     /**
-     * 从场次移除参赛方及其独立轮次:已有打分记录时禁止移除;
-     * 移除后按号码顺序重排本场 participant 槽位与轮次序号。
+     * 从场次移除参赛方入场行(entry):已有打分记录时禁止移除;
+     * 分数按 (轮次, 选手) 定位——round 只表示回合,不再一人一轮。
      */
-    private void removeParticipantWithRound(TMatch match, Long competitorId) {
-        TMatchRound round = matchRoundMapper.selectOne(Wrappers.<TMatchRound>lambdaQuery()
-            .eq(TMatchRound::getMatchId, match.getId())
-            .eq(TMatchRound::getCompetitorId, competitorId)
-            .last("limit 1"));
-        if (round != null) {
+    private void removeParticipant(TMatch match, Long competitorId) {
+        List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                .eq(TMatchRound::getMatchId, match.getId())
+                .select(TMatchRound::getId))
+            .stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        if (!roundIds.isEmpty()) {
             long scored = roundScoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
-                .eq(TRoundScore::getRoundId, round.getId()));
+                .in(TRoundScore::getRoundId, roundIds)
+                .eq(TRoundScore::getCompetitorId, competitorId));
             if (scored > 0) {
                 throw new ServiceException(
                     "该选手在「{}」已有打分记录,无法修改/解除签到,请先处理该场次成绩", match.getName());
             }
             roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                .eq(TRoundScore::getRoundId, round.getId()));
-            matchRoundMapper.deleteById(round.getId());
+                .in(TRoundScore::getRoundId, roundIds)
+                .eq(TRoundScore::getCompetitorId, competitorId));
         }
         participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
             .eq(TMatchParticipant::getMatchId, match.getId())
@@ -300,7 +301,8 @@ public class StageCheckInService {
     }
 
     /**
-     * 按号码顺序重建场次内的展示位与轮次序号(移除/改号后保持 1..n 连续)。
+     * 按号码顺序重建场次内的展示位(移除/改号后保持 1..n 连续)。
+     * 上场顺序是参赛方(entry)的属性,落在 participant.display_slot_index;round 不参与。
      */
     private void renumberMatchParticipants(Long matchId) {
         List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
@@ -320,13 +322,6 @@ public class StageCheckInService {
             })
             .thenComparingLong(TMatchParticipant::getId));
 
-        List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-            .eq(TMatchRound::getMatchId, matchId)
-            .orderByAsc(TMatchRound::getRoundSequence));
-        Map<Long, List<TMatchRound>> roundsByComp = rounds.stream()
-            .filter(r -> r.getCompetitorId() != null)
-            .collect(Collectors.groupingBy(TMatchRound::getCompetitorId));
-
         for (int i = 0; i < parts.size(); i++) {
             TMatchParticipant p = parts.get(i);
             long targetSlot = i + 1L;
@@ -338,25 +333,16 @@ public class StageCheckInService {
                 slotUpd.setDisplaySlotIndex(targetSlot);
                 participantMapper.updateById(slotUpd);
             }
-            List<TMatchRound> own = roundsByComp.getOrDefault(p.getCompetitorId(), List.of());
-            if (!own.isEmpty()) {
-                TMatchRound round = own.get(0);
-                if (round.getRoundSequence() == null || round.getRoundSequence() != targetSlot) {
-                    TMatchRound rUpd = new TMatchRound();
-                    rUpd.setId(round.getId());
-                    rUpd.setRoundSequence(targetSlot);
-                    matchRoundMapper.updateById(rUpd);
-                }
-            }
         }
     }
 
     /**
-     * 追加参赛方并新建轮次(海选补签到:每个参赛方一个独立轮次,裁判逐选手打分)。
-     * 海选/排名赛按号码数值排序上场:补签选手按其号码插入对应位置,
-     * 插入点之后的参赛方(slot)与轮次(round)统一顺延 +1,避免新选手被追加到队尾导致号码排序错位。
+     * 往场次里加一行参赛方(entry):海选/排名赛的「落圈/补签到」就是加或挪这一行。
+     * 按号码数值排序插入,插入点之后的参赛方 display_slot_index 顺延 +1,
+     * 避免新选手被追加到队尾导致号码排序错位。
+     * round 不在此处产生:round 只表示场次的回合/局,已由生成或建圈时建好。
      */
-    private void appendParticipantWithRound(TMatch target, Long competitorId) {
+    private void appendParticipant(TMatch target, Long competitorId) {
         TCompetitor newcomer = competitorId == null ? null : competitorMapper.selectById(competitorId);
         List<TMatchParticipant> parts = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
             .eq(TMatchParticipant::getMatchId, target.getId())
@@ -380,11 +366,10 @@ public class StageCheckInService {
             insertIdx = parts.size();
         }
         long newSlot = insertIdx + 1L;
-        long newRound = insertIdx + 1L;
 
-        // 插入点及之后的座位/轮次顺延 +1。
+        // 插入点及之后的座位顺延 +1。
         // 用一条集合式 UPDATE 代替"逐行 updateById":一个圈里签到第 K+1 个人时,
-        // 逐行写法要发 2K 条写语句,人多时签到会明显变慢(现场表现:人越多越卡)。
+        // 逐行写法要发 K 条写语句,人多时签到会明显变慢(现场表现:人越多越卡)。
         if (newcomer != null) {
             Set<Long> shiftCompetitorIds = parts.stream()
                 .filter(p -> {
@@ -400,11 +385,6 @@ public class StageCheckInService {
                     .eq(TMatchParticipant::getMatchId, target.getId())
                     .in(TMatchParticipant::getCompetitorId, shiftCompetitorIds)
                     .setSql("display_slot_index = display_slot_index + 1"));
-                // 逐选手赛制里每个参赛方一个独立轮次,按 competitorId 对齐顺延
-                matchRoundMapper.update(null, Wrappers.<TMatchRound>lambdaUpdate()
-                    .eq(TMatchRound::getMatchId, target.getId())
-                    .in(TMatchRound::getCompetitorId, shiftCompetitorIds)
-                    .setSql("round_sequence = round_sequence + 1"));
             }
         }
 
@@ -414,19 +394,10 @@ public class StageCheckInService {
         p.setMatchId(target.getId());
         p.setCompetitorId(competitorId);
         p.setDisplaySlotIndex(newSlot);
+        p.setSlotKind(StageConstants.SLOT_PLAYER);
         p.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
         participantMapper.insert(p);
 
-        // 每个参赛方一个独立轮次,裁判逐选手打分
-        TMatchRound round = new TMatchRound();
-        round.setTenantId(target.getTenantId());
-        round.setTournamentId(target.getTournamentId());
-        round.setMatchId(target.getId());
-        round.setRoundSequence(newRound);
-        round.setCompetitorId(competitorId);
-        round.setStatus(target.getStatus());
-        matchRoundMapper.insert(round);
-
-        log.info("参赛方[{}]挂入场次[{}](slot={},round={})", competitorId, target.getId(), newSlot, newRound);
+        log.info("参赛方[{}]落入场次[{}](slot={})", competitorId, target.getId(), newSlot);
     }
 }

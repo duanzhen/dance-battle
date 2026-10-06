@@ -45,6 +45,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -305,24 +306,25 @@ public class TMatchServiceImpl implements ITMatchService {
         }
         List<Long> matchIds = auditionMatches.stream().map(TMatchVo::getId).filter(Objects::nonNull).toList();
 
+        // 本场当前回合:逐选手制一场一回合,全员共享;「谁在这场」由 participant(entry)承载
         List<TMatchRound> rounds = matchRoundMapper.selectList(
             Wrappers.<TMatchRound>lambdaQuery()
                 .in(TMatchRound::getMatchId, matchIds)
                 .orderByAsc(TMatchRound::getMatchId)
                 .orderByAsc(TMatchRound::getRoundSequence));
-        Map<Long, List<TMatchRound>> roundsByMatch = rounds.stream()
-            .collect(Collectors.groupingBy(TMatchRound::getMatchId));
-        if (rounds.isEmpty()) {
-            return;
+        Map<Long, TMatchRound> roundByMatch = new HashMap<>();
+        for (TMatchRound r : rounds) {
+            roundByMatch.putIfAbsent(r.getMatchId(), r);
         }
 
         List<Long> roundIds = rounds.stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
-        List<TRoundScore> allScores = roundScoreMapper.selectList(
-            Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds))
-            .stream()
-            .filter(s -> s.getCompetitorId() != null)
-            .toList();
-        // 打分明细按轮次归组:海选(含加赛)每个轮次对应一名选手
+        List<TRoundScore> allScores = roundIds.isEmpty() ? List.of()
+            : roundScoreMapper.selectList(
+                    Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, roundIds))
+                .stream()
+                .filter(s -> s.getCompetitorId() != null)
+                .toList();
+        // 打分明细按轮次归组,再按 competitor_id 区分到人
         Map<Long, List<TRoundScore>> scoresByRound = allScores.stream()
             .collect(Collectors.groupingBy(TRoundScore::getRoundId));
 
@@ -333,24 +335,30 @@ public class TMatchServiceImpl implements ITMatchService {
                 .collect(Collectors.toMap(TReferee::getId, TReferee::getName, (a, b) -> a));
 
         for (TMatchVo vo : auditionMatches) {
-            List<TMatchRound> roundList = roundsByMatch.get(vo.getId());
-            if (roundList == null || roundList.isEmpty()) {
+            // 上场名单 = 本场参赛行(按入场顺序),不再按「一人一轮」推导
+            List<TMatchParticipant> partList = (byMatch.get(vo.getId()) == null
+                ? List.<TMatchParticipant>of() : byMatch.get(vo.getId())).stream()
+                .filter(p -> p.getCompetitorId() != null)
+                .sorted(Comparator.comparingLong((TMatchParticipant p) ->
+                    p.getDisplaySlotIndex() == null ? Long.MAX_VALUE : p.getDisplaySlotIndex())
+                    .thenComparingLong(p -> p.getId() == null ? Long.MAX_VALUE : p.getId()))
+                .toList();
+            if (partList.isEmpty()) {
                 continue;
             }
-            Map<Long, TMatchParticipant> participantByCid = (byMatch.get(vo.getId()) == null ? List.<TMatchParticipant>of()
-                : byMatch.get(vo.getId())).stream()
-                .filter(p -> p.getCompetitorId() != null)
-                .collect(Collectors.toMap(TMatchParticipant::getCompetitorId, p -> p, (a, b) -> a));
-
+            TMatchRound round = roundByMatch.get(vo.getId());
             List<MatchRoundScoreVo> roundScores = new ArrayList<>();
-            for (TMatchRound r : roundList) {
-                List<TRoundScore> roundScoresOfRound = scoresByRound.getOrDefault(r.getId(), List.of());
-                // 每个轮次绑定一名选手,取该选手本轮的评分明细
-                List<TRoundScore> rs = roundScoresOfRound.stream()
-                    .filter(s -> Objects.equals(s.getCompetitorId(), r.getCompetitorId()))
-                    .toList();
-                roundScores.add(buildAuditionRoundItem(r, r.getCompetitorId(), rs,
-                    nameById, numberById, participantByCid, refereeNameById));
+            for (TMatchParticipant p : partList) {
+                Long cid = p.getCompetitorId();
+                List<TRoundScore> rs = round == null ? List.of()
+                    : scoresByRound.getOrDefault(round.getId(), List.of()).stream()
+                        .filter(s -> Objects.equals(s.getCompetitorId(), cid))
+                        .toList();
+                MatchRoundScoreVo item = buildAuditionRoundItem(round, cid, rs,
+                    nameById, numberById, p, refereeNameById);
+                // 展示序号取入场顺序(上场第几位),round 序号不再等于人
+                item.setRoundSequence(p.getDisplaySlotIndex());
+                roundScores.add(item);
             }
             vo.setRoundScores(roundScores);
         }
@@ -364,11 +372,11 @@ public class TMatchServiceImpl implements ITMatchService {
                                                      List<TRoundScore> scores,
                                                      Map<Long, String> nameById,
                                                      Map<Long, String> numberById,
-                                                     Map<Long, TMatchParticipant> participantByCid,
+                                                     TMatchParticipant p,
                                                      Map<Long, String> refereeNameById) {
         MatchRoundScoreVo item = new MatchRoundScoreVo();
-        item.setRoundId(r.getId());
-        item.setRoundSequence(r.getRoundSequence());
+        item.setRoundId(r == null ? null : r.getId());
+        item.setRoundSequence(r == null ? null : r.getRoundSequence());
         item.setCompetitorId(competitorId);
         item.setCompetitorName(competitorId == null ? null : nameById.get(competitorId));
         item.setCompetitorNumber(competitorId == null ? null : numberById.get(competitorId));
@@ -388,7 +396,6 @@ public class TMatchServiceImpl implements ITMatchService {
                 refScores.add(ref);
             }
         }
-        TMatchParticipant p = competitorId == null ? null : participantByCid.get(competitorId);
         BigDecimal total = p != null && p.getScoreValue() != null ? p.getScoreValue()
             : refScores.isEmpty() ? null : sum;
         item.setScore(total);

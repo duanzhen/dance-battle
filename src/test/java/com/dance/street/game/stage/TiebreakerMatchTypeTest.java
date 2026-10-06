@@ -232,24 +232,21 @@ class TiebreakerMatchTypeTest {
         List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
             .eq(TMatchRound::getMatchId, tb.getId())
             .orderByAsc(TMatchRound::getRoundSequence));
-        assertEquals(3, rounds.size(), "3 人加赛应有 3 个轮次(逐选手一轮),而不是 1 轮");
-        assertEquals(List.of(1L, 2L, 3L),
-            rounds.stream().map(TMatchRound::getRoundSequence).toList(), "轮次序号应连续");
-        List<Long> roundCompetitorIds = rounds.stream().map(TMatchRound::getCompetitorId).toList();
-        assertTrue(roundCompetitorIds.stream().noneMatch(Objects::isNull),
-            "每个轮次都应绑定一名同分选手");
-        assertEquals(3, roundCompetitorIds.stream().distinct().count(), "轮次与同分选手一一对应");
+        assertEquals(1, rounds.size(), "加赛场次应只有一个回合(round),选手由 participant 承载");
+        List<TMatchParticipant> tbParts = participantsOf(tb.getId());
+        assertEquals(3, tbParts.size(), "3 人加赛应有 3 个参赛位");
+        assertEquals(3, tbParts.stream().map(TMatchParticipant::getCompetitorId).distinct().count(),
+            "参赛位与同分选手一一对应");
 
-        // 打分写进选手自己的轮次(不再把 3 个人的分全塞进同一轮)
-        Map<Long, Long> roundIdByCompetitor = rounds.stream()
-            .collect(Collectors.toMap(TMatchRound::getCompetitorId, TMatchRound::getId));
-        Long firstTied = participantsOf(tb.getId()).get(0).getCompetitorId();
+        // 打分写进 (回合, 选手):3 人的分落在同一回合,按 competitor_id 区分到人
+        Long roundId = rounds.get(0).getId();
+        Long firstTied = tbParts.get(0).getCompetitorId();
         score(tb.getId(), firstTied, new BigDecimal("9.5"));
         List<TRoundScore> scoreRows = roundScoreMapper.selectList(Wrappers.<TRoundScore>lambdaQuery()
-            .in(TRoundScore::getRoundId, rounds.stream().map(TMatchRound::getId).toList()));
-        assertTrue(scoreRows.stream().allMatch(r ->
-                Objects.equals(r.getRoundId(), roundIdByCompetitor.get(r.getCompetitorId()))),
-            "选手的加赛分应落在自己的轮次上");
+            .eq(TRoundScore::getRoundId, roundId));
+        assertTrue(scoreRows.stream().anyMatch(r ->
+                Objects.equals(r.getRoundId(), roundId) && Objects.equals(r.getCompetitorId(), firstTied)),
+            "选手的加赛分应落在本场回合上(按 competitor_id 区分)");
     }
 
     // ===== 造数据 =====

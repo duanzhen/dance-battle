@@ -165,8 +165,12 @@ const renderedScenes = reactive<Record<string, { config: SceneConfig; isReady: b
 // 渲染器引用：sceneId -> ScreenRenderer 实例
 const rendererRefs = new Map<string, any>();
 
-// 是否正在加载新场景
-const isLoadingScene = ref(false);
+// 投射请求排序:每收到一次 sceneSwitch / 清除 就自增序号。
+// 场景加载是异步的,处理时统一按"最新一次请求胜出"落地 —— 加载过程中若又收到
+// 别的设备投来的场景,不再被直接丢弃,而是覆盖掉正在加载的那次(按请求先后顺序,后到生效)。
+let sceneRequestSeq = 0;
+let latestSceneRequest: { seq: number; sceneId: string | null } | null = null;
+let drainingSceneRequests = false;
 
 // 屏幕视图 SSE 订阅
 let unsubScreenSse: (() => void) | null = null;
@@ -265,32 +269,72 @@ const isInvalidSceneId = (sceneId: any): boolean => {
 };
 
 // 处理屏幕消息
-const handleScreenMessage = async (message: any) => {
+const handleScreenMessage = (message: any) => {
   switch (message.type) {
     case 'sceneSwitch':
       if (isInvalidSceneId(message.sceneId)) {
         console.log('[ProjectionView] 收到无效 sceneId，屏幕已关闭');
-        clearScene(true);
+        requestSceneClear();
       } else if (message.sceneId) {
-        isScreenClosed.value = false;
-        await loadScene(String(message.sceneId));
+        requestSceneSwitch(String(message.sceneId));
       }
       break;
     case 'sceneUpdate':
-      // 更新当前场景配置
+      // 更新当前场景配置(不切换场景,按场景ID就地刷新配置,不参与投射顺序)
       if (isInvalidSceneId(message.sceneId)) {
         console.log('[ProjectionView] 收到无效 sceneId，屏幕已关闭');
-        clearScene(true);
+        requestSceneClear();
       } else if (message.sceneId) {
         isScreenClosed.value = false;
-        await updateScene(String(message.sceneId));
+        void updateScene(String(message.sceneId));
       }
       break;
     case 'SCREEN_CLEARED':
-      clearScene(true);
+      requestSceneClear();
       break;
     default:
       console.warn('[ProjectionView] 未知消息类型:', message.type);
+  }
+};
+
+/**
+ * 登记一次「切换到某场景」的投射请求(后到覆盖先到),交给 {@link drainSceneRequests} 串行处理。
+ *
+ * <p>此前投射页用一个 isLoadingScene 标志位:加载 A 期间收到切到 B 的请求会被直接丢弃,
+ * 结果屏幕永远停在 A。这里改为登记 + 覆盖:任何设备任何时候投来的场景都按到达先后顺序排队,
+ * 最后一次请求最终生效。</p>
+ */
+const requestSceneSwitch = (sceneId: string) => {
+  latestSceneRequest = { seq: ++sceneRequestSeq, sceneId };
+  void drainSceneRequests();
+};
+
+/** 登记一次「清除投射」请求(同样服从先后顺序:清除后又被投射,会被更新的投射覆盖)。 */
+const requestSceneClear = () => {
+  latestSceneRequest = { seq: ++sceneRequestSeq, sceneId: null };
+  void drainSceneRequests();
+};
+
+/**
+ * 串行消费投射请求:同一时刻只加载一个场景,期间后到的请求放进 latestSceneRequest 覆盖待处理项。
+ * 加载完成后若已被更新的请求取代,则不落地这次结果,避免旧场景闪一下再被覆盖。
+ */
+const drainSceneRequests = async () => {
+  if (drainingSceneRequests) return;
+  drainingSceneRequests = true;
+  try {
+    while (latestSceneRequest) {
+      const req = latestSceneRequest;
+      latestSceneRequest = null;
+      if (req.sceneId === null) {
+        clearScene(true);
+        continue;
+      }
+      isScreenClosed.value = false;
+      await loadScene(req.sceneId, () => req.seq === sceneRequestSeq);
+    }
+  } finally {
+    drainingSceneRequests = false;
   }
 };
 
@@ -344,31 +388,28 @@ const preloadImages = (sceneConfig: SceneConfig): Promise<void> => {
   });
 };
 
-// 加载场景
-const loadScene = async (sceneId: string) => {
-  if (currentSceneId.value === sceneId) {
-    console.log(`[ProjectionView] 场景 ${sceneId} 已是当前场景，跳过加载`);
-    return;
-  }
-
-  if (isLoadingScene.value) {
-    console.log(`[ProjectionView] 正在加载其他场景，跳过场景 ${sceneId}`);
-    return;
-  }
-
-  isLoadingScene.value = true;
-
+/**
+ * 加载并切换到一个场景。
+ *
+ * @param sceneId     目标场景
+ * @param stillLatest 判断这次请求是否仍是最新一次投射(加载是异步的,期间可能又来新的投射);
+ *                    已被取代时保留缓存但不切到屏幕上,由排队的下一次请求决定最终画面。
+ */
+const loadScene = async (sceneId: string, stillLatest: () => boolean) => {
   try {
-    console.log(`[ProjectionView] 正在加载场景 ${sceneId}...`);
-
-    // 如果场景已渲染，直接切换
+    // 如果场景已渲染，直接切换(仍要服从投射顺序:已被更新的请求取代就不落地)
     if (renderedScenes[sceneId]) {
+      if (!stillLatest()) {
+        console.log(`[ProjectionView] 场景 ${sceneId} 已被更新的投射取代，跳过切换`);
+        return;
+      }
       console.log(`[ProjectionView] 场景 ${sceneId} 已缓存，直接切换`);
       currentSceneId.value = sceneId;
       loading.value = false;
-      isLoadingScene.value = false;
       return;
     }
+
+    console.log(`[ProjectionView] 正在加载场景 ${sceneId}...`);
 
     // 从 API 加载场景
     const sceneResponse = await getVisScene(sceneId);
@@ -426,6 +467,12 @@ const loadScene = async (sceneId: string) => {
     // 等待一帧确保 DOM 更新
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
+    // 加载期间若已被更新的投射取代,这次不落地,交给排队的下一轮请求
+    if (!stillLatest()) {
+      console.log(`[ProjectionView] 场景 ${sceneId} 加载完成时已被更新的投射取代，跳过切换`);
+      return;
+    }
+
     // 切换到新场景
     console.log(`[ProjectionView] 场景 ${sceneId} 准备就绪，开始切换，设置 currentSceneId = ${sceneId}`);
     currentSceneId.value = sceneId;
@@ -437,8 +484,6 @@ const loadScene = async (sceneId: string) => {
     console.error('[ProjectionView] 加载场景失败:', error);
     // 清理失败的场景
     delete renderedScenes[sceneId];
-  } finally {
-    isLoadingScene.value = false;
   }
 };
 

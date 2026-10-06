@@ -319,6 +319,23 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 }
 
 /**
+ * 用当前 buildUrl 重建指定通道的连接(立即重开一次)。
+ *
+ * <p>连接只在首次订阅时建一次,后续订阅复用同一条连接,因此当订阅方动态改变了
+ * 连接地址(典型场景:屏幕控制通道要把新增屏幕的 screenId 追加进 URL)时,
+ * 光新增订阅不会让服务端看到新的地址。调用本方法强制重开一次,让 buildUrl 重新求值。</p>
+ *
+ * <p>多次连续调用会合并成一次重连(见 {@link scheduleOpen} 对 retryTimer 的去重),
+ * 因此初始化时依次订阅多个屏幕只会在最后重连一次。通道不存在时为空操作。</p>
+ */
+export function refreshChannel(key: string): void {
+  const conn = channels.get(key);
+  if (!conn) return;
+  // 不健康检查、不等待重试周期:地址已经变化,必须立刻用新地址重开
+  reconnect(conn, true);
+}
+
+/**
  * 订阅一个 SSE 通道。
  * @param options.key 连接复用键(如赛事ID),同 key 共享一条连接
  * @param options.buildUrl 构建 SSE URL(重连时重新调用)

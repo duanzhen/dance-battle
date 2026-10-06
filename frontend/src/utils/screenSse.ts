@@ -1,4 +1,4 @@
-import { subscribeChannel } from './sseChannel';
+import { subscribeChannel, refreshChannel } from './sseChannel';
 
 // 屏幕控制通道:同一赛事的所有屏幕共享一条 SSE 连接(浏览器对同主机 HTTP/1.1
 // 并发连接数约 6 条,若每屏一条连接,控制页 5 屏 + 事件通道就达上限,
@@ -54,6 +54,10 @@ export function subscribeScreenControl(screenId: string | number, tournamentId: 
     existing.unsub();
     m.delete(sid);
   }
+  // 本屏幕加入前,这条共享连接是否已经存在(还有别的屏幕在订阅)。
+  // 共享连接只在首次订阅时建一次,若已存在,新增屏幕不会进入建连时的 URL,
+  // 服务端也就不会注册它 —— 表现为该屏幕在别的设备上打不开大屏(屏幕未注册)。
+  const sharedConnExists = m.size > 0;
 
   const unsubRaw = subscribeChannel({
     key: `screen-control:${tid}`,
@@ -102,6 +106,12 @@ export function subscribeScreenControl(screenId: string | number, tournamentId: 
       }
     }
   });
+
+  // 连接已存在时,上面的 subscribeChannel 只会复用旧连接、不会重算 URL;
+  // 强制重开一次,让 buildUrl 带上刚加入的屏幕(后端据此完成注册)。
+  if (sharedConnExists) {
+    refreshChannel(`screen-control:${tid}`);
+  }
 
   console.log(`[SSE] 屏幕 ${sid} 已加入赛事 ${tid} 控制通道(当前 ${m.size} 个屏幕)`);
 }

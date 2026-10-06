@@ -11,6 +11,7 @@
     "build:prod": "vite build --mode production",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
+    "test": "vitest run",
     "lint:eslint": "eslint",
     "lint:eslint:fix": "eslint --fix",
     "prettier": "prettier --write ."

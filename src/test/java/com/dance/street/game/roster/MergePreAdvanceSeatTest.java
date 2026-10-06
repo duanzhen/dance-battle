@@ -532,6 +532,46 @@ class MergePreAdvanceSeatTest {
 
     // ===== 工具 =====
 
+    /**
+     * 只要还有任一上游入边没结束,加人就只能加到待落座区:落座位被拒、待落座放行。
+     */
+    @Test
+    void addToSeatBlockedUntilAllSourcesSettled() {
+        Long tid = newTournament("add-holding-only");
+        TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
+        insertCompetitors(tid, semiA.getId(), 2);
+        TStageVo semiB = newStage(tid, "半决赛B", 2L, 1L, semiA.getId());
+        insertCompetitors(tid, semiB.getId(), 2);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semiB.getId());
+        addAdvanceGroup(finals.getId(), semiA.getId());
+        initializeAndGenerate(semiA.getId());
+        initializeAndGenerate(semiB.getId());
+        matchResultService.startMatch(matchesOf(semiA.getId()).get(0).getId());
+        submitLeftWin(matchesOf(semiA.getId()).get(0));
+        // 只结算 A 线,B 线未完 → 决赛仍有未结算入边
+        lifecycleService.completeStage(semiA.getId());
+
+        // 落到座位:被拒
+        TStageRosterOverrideBo seat = new TStageRosterOverrideBo();
+        seat.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        seat.setGuestName("落座外卡");
+        seat.setSeedRank(1L);
+        seat.setPlacement("REPLACE");
+        ServiceException ex = assertThrows(ServiceException.class,
+            () -> rosterService.addOverride(finals.getId(), seat));
+        assertTrue(ex.getMessage().contains("待落座"), "应提示只能加到待落座区,实际:" + ex.getMessage());
+
+        // 加到待落座区:放行
+        TStageRosterOverrideBo hold = new TStageRosterOverrideBo();
+        hold.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        hold.setGuestName("待落座外卡");
+        hold.setPlacement(RosterConstants.PLACEMENT_HOLDING);
+        rosterService.addOverride(finals.getId(), hold);
+        assertTrue(rosterService.entriesOf(finals.getId()).stream()
+                .anyMatch(e -> "待落座外卡".equals(e.getGuestName()) && e.getSlot() == null),
+            "待落座外卡应进待落座区");
+    }
+
     private record MergeWinners(TStageVo finals, Long winnerA, Long winnerB) {
     }
 

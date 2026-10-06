@@ -128,6 +128,7 @@
               class="px-2 py-1 rounded bg-neutral-900 border border-neutral-700 text-[11px] text-neutral-300"
               :class="rowAdjustable(it) ? 'cursor-grab hover:border-amber-600/50' : 'opacity-70'"
             >
+              <span v-if="it.number" class="text-[10px] font-mono text-amber-400/80 mr-1">{{ it.number }}</span>
               {{ it.name || '未命名' }}
               <span v-if="it.finalRank" class="text-[10px] text-neutral-600 ml-1">#{{ it.finalRank }}</span>
               <span v-if="it.sourcePending" class="ml-1 px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500" :title="pendingTitle(it)"
@@ -248,6 +249,7 @@
               :class="dragIndex !== null && hoverIndex === idx ? 'bg-amber-500/10 border-t border-amber-500/50' : 'hover:bg-neutral-800/60'"
             >
               <span class="text-neutral-600 font-mono w-5 flex-none">{{ it.seedRank }}</span>
+              <span v-if="it.number" class="text-[10px] font-mono text-neutral-500 flex-none">#{{ it.number }}</span>
               <span class="flex-1 min-w-0 truncate text-neutral-300">{{ it.name || '未命名' }}</span>
               <span v-if="it.sourcePending" class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none" :title="pendingTitle(it)"
                 >未结算</span
@@ -302,6 +304,7 @@
                 >{{ idx + 1 }}</span
               >
               <span class="flex-1 min-w-0 text-sm text-neutral-200 truncate">{{ c.name || '未命名' }}</span>
+              <span v-if="c.number" class="text-[10px] font-mono text-neutral-500 flex-none">#{{ c.number }}</span>
               <span v-if="c.sourcePending" class="px-1 py-0.5 rounded bg-neutral-800 text-[9px] text-neutral-500 flex-none" :title="pendingTitle(c)"
                 >未结算</span
               >
@@ -469,6 +472,7 @@
             <button
               type="button"
               @click="addPlacement = 'INSERT'"
+              :disabled="rosterWaitingSource"
               class="px-3 py-1.5 text-[12px] rounded border transition-colors"
               :class="placementBtnClass('INSERT')"
               title="插到指定位置:第 1 位就是顶前,最后一位就是加到末尾;后面的人依次后移"
@@ -487,6 +491,7 @@
             <button
               type="button"
               @click="addPlacement = 'REPLACE'"
+              :disabled="rosterWaitingSource"
               class="px-3 py-1.5 text-[12px] rounded border transition-colors"
               :class="placementBtnClass('REPLACE')"
             >
@@ -494,6 +499,7 @@
             </button>
           </div>
           <p class="text-[11px] text-neutral-500 leading-relaxed">替换/顶位不再删除被挤下来的人:他会进入待落座区,可再拖到座位。</p>
+          <p v-if="rosterWaitingSource" class="text-[11px] text-amber-400/90 leading-relaxed">上游还有赛段没结束:现在只能加到待落座区,等来源结算后再落座。</p>
           <p v-if="addPlacement === 'HOLDING'" class="text-[11px] text-neutral-600 leading-relaxed">
             新人先加到待落座区,不占座位;由导播拖到座位后再确认名单。
           </p>
@@ -511,7 +517,7 @@
             placeholder="选择要替换的人或空位"
             filterable
           >
-            <el-option v-for="it in listItems" :key="itemKeyOf(it)" :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'}`" :value="itemKeyOf(it)" />
+            <el-option v-for="it in listItems" :key="itemKeyOf(it)" :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'}${it.number ? ' · ' + it.number : ''}`" :value="itemKeyOf(it)" />
             <!-- 也可以直接落到空位上(空位不占人,只是把新人放到那个位置) -->
             <el-option v-for="n in emptySlots" :key="'slot-' + n" :label="`#${n} 空位`" :value="'slot:' + n" />
           </el-select>
@@ -526,7 +532,7 @@
             <el-option
               v-for="it in listItems"
               :key="itemKeyOf(it)"
-              :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'} 之前`"
+              :label="`#${it.seedRank ?? '-'} ${it.name || '未命名'}${it.number ? ' · ' + it.number : ''} 之前`"
               :value="itemKeyOf(it)"
             />
           </el-select>
@@ -1145,7 +1151,8 @@ const openAddDialog = () => {
   // 默认:满员时插到第 1 位(等于原「顶前」),未满时插到最后一个之前
   const lastItem = listItems.value[listItems.value.length - 1];
   addReplaceKey.value = rosterFull.value ? (listItems.value.length > 0 ? itemKeyOf(listItems.value[0]) : '') : lastItem ? itemKeyOf(lastItem) : '';
-  addPlacement.value = 'INSERT';
+  // 上游还有赛段没结束:加人只能到待落座区
+  addPlacement.value = rosterWaitingSource.value ? 'HOLDING' : 'INSERT';
   addDialogVisible.value = true;
 };
 
@@ -1254,6 +1261,10 @@ const submitAdd = async () => {
   }
   addSubmitting.value = true;
   try {
+    // 上游还有赛段没结束:忽略所选落位方式,强制加到待落座区(后端同样只允许待落座)
+    if (rosterWaitingSource.value) {
+      addPlacement.value = 'HOLDING';
+    }
     // 1) 先腾位置
     //  - 替换:移出被替换的那个人(也可以选空位,那就谁都不动)
     //  - 插入且名单已满:挤出最后一名(插到第 1 位时等价于"顶前,最后一名出去")

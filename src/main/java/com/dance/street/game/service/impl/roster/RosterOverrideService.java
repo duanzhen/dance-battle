@@ -139,22 +139,21 @@ public class RosterOverrideService {
      * <p><b>加到待落座区不受此限</b>:他不占座位号、不参与"来源名次=座位"的自动排座,
      * 来源入边还有没结束时也能先放进来,等来源全部结算、名次定案后再由导播拖到座位。</p>
      *
-     * <p><b>多入口汇合也不加锁</b>:那种赛段座位全靠导播拖,新来的人先落在待落座区,
-     * 来源判罚/结算时的对账也只"补人/取人"、不重排已落好的行。<br>
-     * 只有<b>单入口自动排座 + 直接落座位</b>才要求来源边全部结算:座位由来源名次算出,
-     * 来源没打完时会被重新落座。</p>
+     * <p><b>只要还有任一上游入边没结束,加人就只能加到待落座区</b>:不管单入口自动排座还是
+     * 多入口汇合,直接落座位都可能在来源结算/对账时被重排或冲掉。落到待落座区则不占座位号,
+     * 等来源全部结算后再由导播拖到座位。</p>
      */
     private void assertAllSourcesSettled(TStage stage, boolean toHolding) {
-        if (stage == null) {
+        if (stage == null || toHolding) {
             return;
         }
         List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(stage);
-        if (toHolding || rosterAssembler.multiEntry(groups)) {
+        if (groups.isEmpty()) {
             return;
         }
-        if (!groups.isEmpty() && !rosterEntryStore.readyByGroups(groups)) {
-            throw new ServiceException("上一赛段还没结束:本赛段按它的名次自动排座,"
-                + "直接落座位会被重新排座;请选「待落座区」先把人加进来");
+        if (!rosterEntryStore.readyByGroups(groups)) {
+            throw new ServiceException("上游还有赛段没结束:现在加人只能先加到「待落座区」,"
+                + "等来源全部结算后再拖到座位");
         }
     }
 
@@ -171,13 +170,12 @@ public class RosterOverrideService {
         }
         boolean placeInHolding = RosterConstants.PLACEMENT_HOLDING.equalsIgnoreCase(bo.getPlacement());
         validateOverrideSource(stageId, op, bo, placeInHolding);
-        // 新增一行(加外卡 / 从别的赛段手工拉人)落到具体座位前,来源边全部结算,座位才不会再被投影改写
-        // (加到待落座区、多入口汇合例外,见 assertAllSourcesSettled)。
+        // 加人落到具体座位前,必须所有上游入边都已结算;否则只能加到「待落座区」。
+        // 外卡、从别的赛段拉人、以及把移出过的人重新加回来,一视同仁。
         // 必须放在"按姓名建 t_player"等副作用之前:否则先建人再抛异常,事务回滚后
         // 调用方手里的 bo 还留着那个已经失效的 playerId,重试时报"外卡关联选手不存在"。
         if (RosterConstants.OVERRIDE_ADD_GUEST.equals(op)
-            || (RosterConstants.OVERRIDE_ADD_SOURCE.equals(op)
-                && entryOfSource(stageId, bo.getSourceCompetitorId()) == null)) {
+            || RosterConstants.OVERRIDE_ADD_SOURCE.equals(op)) {
             assertAllSourcesSettled(target, placeInHolding);
         }
         if (RosterConstants.OVERRIDE_ADD_GUEST.equals(op)) {
@@ -797,9 +795,8 @@ public class RosterOverrideService {
     /**
      * 手工加入名单的校验:源行存在、同赛事、非本赛段自身、未弃权。
      *
-     * <p>只是先把人拉进「待落座区」({@code toHolding}),或多入口汇合的赛段,都不要求来源
-     * 赛段已结算:待落座不占座位号、不参与"来源名次=座位"的自动排座,来源还没打完也能先安排
-     * 进来,等定案后再由导播拖到座位。</p>
+     * <p>只是先把人拉进「待落座区」({@code toHolding})时不要求该来源已结算:待落座不占座位号,
+     * 来源还没打完也能先安排进来,等定案后再由导播拖到座位。直接落座位则要求该来源已结算。</p>
      */
     private void assertAddableSource(TStage target, TCompetitor c, boolean toHolding) {
         if (target == null || c == null) {
@@ -818,13 +815,10 @@ public class RosterOverrideService {
         if (OutcomeStatusEnum.WITHDRAWN.getCode().equals(c.getOutcomeStatus())) {
             throw new ServiceException("源参赛方[{}]({})已弃权,不能加入名单", c.getId(), c.getName());
         }
-        // 手工把人拉进名单 = 断言这个人已经定案:来源赛段还没结束的话,他的名次/座位随后
-        // 还会被投影覆盖一遍,现在拉进来的行之后连"移出"都会被行级门禁挡住
-        // 例外:只是先放待落座区,或多入口汇合(座位全靠导播拖)——来源没结束也能先安排进来。
-        boolean merge = target != null && rosterAssembler.multiEntry(rosterGroupStore.groupsOf(target));
-        if (!merge && !toHolding && !StageConstants.STAGE_SETTLED.equals(src.getStatus())) {
-            throw new ServiceException("来源赛段「{}」还没结束:直接落座位会被重新排座;"
-                + "如需先安排,请选「待落座区」", src.getName());
+        // 直接落座位要求该来源已结算(加人的统一门禁在 addOverride,这里再兜一道"具体来源")。
+        if (!toHolding && !StageConstants.STAGE_SETTLED.equals(src.getStatus())) {
+            throw new ServiceException("来源赛段「{}」还没结束:现在只能先加到「待落座区」,"
+                + "等它结算后再拖到座位", src.getName());
         }
     }
 

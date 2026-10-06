@@ -109,8 +109,8 @@
              赛段已开始/已结束(整页只读)时不再显示——那时既不能拖也另有下游名单接手。 -->
         <div
           v-if="!targetLocked"
-          class="rounded border border-dashed p-1.5 transition-colors"
-          :class="holdingHover ? 'border-amber-500/60 bg-amber-500/10' : 'border-amber-600/40 bg-amber-500/5'"
+          class="sticky top-0 z-20 rounded border border-dashed p-1.5 transition-colors bg-neutral-900/95 backdrop-blur"
+          :class="holdingHover ? 'border-amber-500/60 ring-2 ring-amber-500/40' : 'border-amber-600/40'"
           @dragover.prevent="holdingHover = true"
           @dragleave="holdingHover = false"
           @drop.stop.prevent="onDropToHolding"

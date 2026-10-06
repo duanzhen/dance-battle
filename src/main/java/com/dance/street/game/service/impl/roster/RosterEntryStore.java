@@ -159,13 +159,41 @@ public class RosterEntryStore {
                 targetStageId, changed, projection.slotCount(), projection.holdingRows().size());
             return true;
         }
-        // 单入口(或显式重建):投影就是权威座位表 —— 先清空再按投影重写
+        // 单入口(或显式重建):投影就是权威座位表 —— 先清空再按投影重写。
+        // 对账式重建(keepManualAdjustments)要把导播手工加进来的人留下:投影已经包含的人交给投影
+        // (不重复),其余的人保留;原来占着的座位已被投影的行占掉 → 顶到待落座区(不覆盖不删除)。
+        // 显式重建(导播点「恢复自动顺序」)才整份丢弃。
+        List<TStageRosterEntry> manualRows = keepManualAdjustments
+            ? selectEntries(targetStageId).stream()
+                .filter(r -> RosterConstants.ENTRY_ORIGIN_MANUAL.equals(r.getOrigin()))
+                .toList()
+            : List.of();
         clearEntries(targetStageId);
+        Set<Long> projectedSourceIds = new HashSet<>();
+        Set<Long> projectedSlots = new HashSet<>();
         for (long slot = 1; slot <= projection.slotCount(); slot++) {
-            entryMapper.insert(toEntry(target, slot, projection.bySlot().get(slot), sourceReady));
+            RosterAssembler.AssembledRow r = projection.bySlot().get(slot);
+            entryMapper.insert(toEntry(target, slot, r, sourceReady));
+            projectedSlots.add(slot);
+            if (r != null && r.source != null) {
+                projectedSourceIds.add(r.source.getId());
+            }
         }
         for (RosterAssembler.AssembledRow r : projection.holdingRows()) {
             entryMapper.insert(toHoldingEntry(target, r, sourceReady));
+            if (r.source != null) {
+                projectedSourceIds.add(r.source.getId());
+            }
+        }
+        for (TStageRosterEntry m : manualRows) {
+            if (m.getSourceCompetitorId() != null && projectedSourceIds.contains(m.getSourceCompetitorId())) {
+                continue;   // 这个人来源投影已经带进来(已落座/待落座),不再重复一行
+            }
+            if (m.getSlot() != null && projectedSlots.contains(m.getSlot())) {
+                m.setSlot(null);   // 座位让给投影,人顶到待落座区
+            }
+            m.setId(null);
+            entryMapper.insert(m);
         }
         rosterGroupStore.notifyTarget(targetStageId);
         log.info("赛段[{}]中间层名单已重建:{} 个座位,有人 {} 个{}",
@@ -956,7 +984,14 @@ public class RosterEntryStore {
         TCompetitor advancer = expected.source;
         long sourceSlot = advancer.getFinalRank() != null ? advancer.getFinalRank() : seat;
         if (RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
-            log.info("赛段[{}]座位[{}]原本是人工调整,按上游晋级结果覆盖", target.getId(), row.getSlot());
+            if (Objects.equals(row.getSourceCompetitorId(), advancer.getId())) {
+                // 同一个人:导播手工把他拉进来过,现在直接转成规则行即可,不用另留一行
+                log.info("赛段[{}]座位[{}]原本是人工调整,按上游晋级结果覆盖", target.getId(), row.getSlot());
+            } else {
+                // 座位上原本是导播手工加进来的人(外卡/别的手工拉人):不要覆盖丢掉 ——
+                // 先把人顶到待落座区,这个座位再让给来源晋级的人。
+                parkManualRowToHolding(target, row, rowStatus);
+            }
         }
         // 与 sourceRow 同一口径:胜者标"晋级",败者组带进来的人标"复活"
         String tag = OutcomeStatusEnum.ADVANCE.getCode().equals(advancer.getOutcomeStatus())
@@ -993,6 +1028,34 @@ public class RosterEntryStore {
         row.setStatus(rowStatus);
         log.info("赛段[{}]中间层座位[{}]实时写入名单行[{}](来源名次 {}),来源赛段[{}]",
             target.getId(), seat, advancer.getName(), advancer.getFinalRank(), advancer.getStageId());
+    }
+
+    /**
+     * 自动落座要占用的座位上若原本是导播手工加进来的人(外卡/手工拉人),把这个人顶到待落座区
+     * (新建一行,不覆盖不删除),座位让给来源晋级的人。
+     */
+    private void parkManualRowToHolding(TStage target, TStageRosterEntry row, String rowStatus) {
+        TStageRosterEntry holding = new TStageRosterEntry();
+        holding.setTournamentId(target.getTournamentId());
+        holding.setTargetStageId(target.getId());
+        holding.setSlot(null);
+        holding.setSlotKind(StageConstants.SLOT_PLAYER);
+        holding.setOrigin(RosterConstants.ENTRY_ORIGIN_MANUAL);
+        holding.setStatus(rowStatus);
+        holding.setRefType(row.getRefType());
+        holding.setSourceCompetitorId(row.getSourceCompetitorId());
+        holding.setSourceStageId(row.getSourceStageId());
+        holding.setSourceGroupId(row.getSourceGroupId());
+        holding.setPlayerId(row.getPlayerId());
+        holding.setGuestName(row.getGuestName());
+        holding.setGuestType(row.getGuestType());
+        holding.setGuestNumber(row.getGuestNumber());
+        holding.setEntryTag(row.getEntryTag());
+        holding.setRemark(row.getRemark());
+        entryMapper.insert(holding);
+        log.info("赛段[{}]座位[{}]原本是导播手工加进来的人[{}],已顶到待落座区",
+            target.getId(), row.getSlot(),
+            row.getGuestName() != null ? row.getGuestName() : ("参赛方 " + row.getSourceCompetitorId()));
     }
 
 }

@@ -60,6 +60,11 @@ export interface CompetitorVO {
   remark: string;
 
   /**
+   * 创建时间(首个赛段的参赛方由签到产生,即签到时间)
+   */
+  createTime?: string | null;
+
+  /**
    * 关联的选手列表
    */
   playerList?: Array<{

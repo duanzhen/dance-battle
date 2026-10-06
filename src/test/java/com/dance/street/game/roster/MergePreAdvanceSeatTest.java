@@ -432,6 +432,67 @@ class MergePreAdvanceSeatTest {
     }
 
     /**
+     * 来源入边还有没结束时:多入口汇合仍然可以先加人(待落座),不再被整单挡住。
+     *
+     * <p>回归:多入口汇合里只有一条来源结算了,加外卡/手工拉人原来会被"上一赛段还没结束"整单挡住;
+     * 待落座区不占座位号、不参与自动排座,来源没结束也允许先放进来,来源定案后再由导播拖到座位。</p>
+     */
+    @Test
+    void addToHoldingAllowedWhileSomeSourcesUnsettled() {
+        Long tid = newTournament("holding-unsettled");
+        TStageVo semiA = newStage(tid, "半决赛A", 2L, 1L, null);
+        insertCompetitors(tid, semiA.getId(), 2);
+        TStageVo semiB = newStage(tid, "半决赛B", 2L, 1L, semiA.getId());
+        insertCompetitors(tid, semiB.getId(), 2);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semiB.getId());
+        addAdvanceGroup(finals.getId(), semiA.getId());
+
+        initializeAndGenerate(semiA.getId());
+        initializeAndGenerate(semiB.getId());
+        matchResultService.startMatch(matchesOf(semiA.getId()).get(0).getId());
+        matchResultService.startMatch(matchesOf(semiB.getId()).get(0).getId());
+        // A 线判完并结算;B 线还在打 -> 来源入边有未结束
+        Long winnerA = submitLeftWin(matchesOf(semiA.getId()).get(0));
+        lifecycleService.completeStage(semiA.getId());
+        assertEquals(List.of(winnerA), holdingCompetitorIds(finals.getId()),
+            "A 线胜者先在待落座区");
+
+        // 加到待落座区:来源入边还没结束也允许
+        TStageRosterOverrideBo holdingGuest = new TStageRosterOverrideBo();
+        holdingGuest.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        holdingGuest.setGuestName("待落座外卡");
+        holdingGuest.setPlacement(RosterConstants.PLACEMENT_HOLDING);
+        rosterService.addOverride(finals.getId(), holdingGuest);
+
+        TStageRosterEntry guest = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> "待落座外卡".equals(e.getGuestName())).findFirst().orElse(null);
+        assertTrue(guest != null, "应写入外卡行");
+        assertNull(guest.getSlot(), "加到待落座区不应占座位号");
+        assertEquals(2, holdingCompetitorIdsCount(finals.getId()),
+            "待落座区应有 2 行(A 线胜者 + 外卡)");
+
+        // 从未结算来源手工拉人:加到待落座区也可以(多入口汇合不按来源加锁)
+        TCompetitor someoneB = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+            .eq(TCompetitor::getStageId, semiB.getId()).orderByAsc(TCompetitor::getId)).get(0);
+        TStageRosterOverrideBo pullHolding = new TStageRosterOverrideBo();
+        pullHolding.setOp(RosterConstants.OVERRIDE_ADD_SOURCE);
+        pullHolding.setSourceCompetitorId(someoneB.getId());
+        pullHolding.setPlacement(RosterConstants.PLACEMENT_HOLDING);
+        rosterService.addOverride(finals.getId(), pullHolding);
+        assertTrue(holdingCompetitorIds(finals.getId()).contains(someoneB.getId()),
+            "从没结算来源拉进来的人可先放待落座区");
+
+        // 另一条来源结算触发的重建:导播先放进来的行不能被冲掉
+        Long winnerB = submitLeftWin(matchesOf(semiB.getId()).get(0));
+        lifecycleService.completeStage(semiB.getId());
+        List<Long> holding = holdingCompetitorIds(finals.getId());
+        assertTrue(holding.containsAll(List.of(winnerA, winnerB)), "两条来源的胜者都还在,实际=" + holding);
+        assertTrue(rosterService.entriesOf(finals.getId()).stream()
+                .anyMatch(e -> "待落座外卡".equals(e.getGuestName())),
+            "重建后外卡仍应在待落座区");
+    }
+
+    /**
      * 回归:之前被移出的人「重新加入」时,必须按调用方指定的实际座位落位,
      * 而不是恢复成这一行原来带的座位(来源备份原座号/旧座位)。
      */

@@ -109,6 +109,11 @@ public class TCompetitorVo implements Serializable {
     private String remark;
 
     /**
+     * 创建时间(首个赛段的参赛方由签到产生,即签到时间;跨赛段带入的为物化时间)
+     */
+    private Date createTime;
+
+    /**
      * 选手列表
      */
     private List<TPlayerVo> playerList;

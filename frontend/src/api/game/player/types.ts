@@ -44,6 +44,8 @@ export interface PlayerVO {
     finalRank: number | null;
     outcomeStatus: string | null;
     remark: string | null;
+    /** 创建时间(首个赛段参赛方由签到产生,即签到时间) */
+    createTime?: string | null;
     playerList: any;
   } | null;
 

@@ -3,7 +3,7 @@
     <!-- 查看模式: 显示文本 -->
     <div v-if="mode !== 'edit'" class="w-full h-full overflow-hidden select-none bg-neutral-700/30">
       <div :style="textStyle" class="w-full h-full flex items-center justify-center">
-        {{ text }}
+        <span class="block w-full whitespace-pre-wrap">{{ text }}</span>
       </div>
     </div>
 
@@ -89,6 +89,9 @@ const textStyle = computed(() => ({
   fontWeight: props.fontWeight || 'normal',
   textAlign: props.textAlign || 'center',
   padding: '8px',
+  // 保留文本里的换行/连续空格(默认会因为 HTML 空白折叠把换行吃掉)
+  whiteSpace: 'pre-wrap' as const,
+  lineHeight: 1.25,
   wordBreak: 'break-word' as const,
   overflowWrap: 'break-word' as const
 }));

@@ -254,6 +254,82 @@ class PreAdvanceRealtimeTest {
     }
 
     /**
+     * 单入口自动排座:来源没结算时不能直接落座位(座位由来源名次算出来),但可以先加到「待落座区」;
+     * 来源结算时的对账重建会保留这条人工行,不会被冲掉。
+     */
+    @Test
+    void singleEntryCanStageGuestInHoldingWhileSourceUnsettled() {
+        Long tid = newTournament("pre-advance-holding-unsettled");
+        TStageVo semi = newStage(tid, "半决赛", 4L, 2L, null);
+        insertCompetitors(tid, semi.getId(), 4);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semi.getId());
+        initializeAndGenerate(semi.getId());
+        List<TMatch> matches = matchesOf(semi.getId());
+        judgeLeftWin(matches.get(0));
+
+        // 直接落座:来源没结算,被挡
+        TStageRosterOverrideBo seated = new TStageRosterOverrideBo();
+        seated.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        seated.setGuestName("落座外卡");
+        seated.setPlacement("REPLACE");
+        seated.setSeedRank(2L);
+        assertThrows(ServiceException.class, () -> rosterService.addOverride(finals.getId(), seated),
+            "来源没结算时不能直接落座");
+
+        // 待落座区:允许(不占座位号)
+        TStageRosterOverrideBo holding = new TStageRosterOverrideBo();
+        holding.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        holding.setGuestName("待落座外卡");
+        holding.setPlacement(RosterConstants.PLACEMENT_HOLDING);
+        rosterService.addOverride(finals.getId(), holding);
+        assertTrue(rosterService.entriesOf(finals.getId()).stream()
+                .anyMatch(e -> "待落座外卡".equals(e.getGuestName()) && e.getSlot() == null),
+            "外卡应先进待落座区");
+
+        // 来源结算触发对账重建:先放进来的行不能被冲掉
+        judgeLeftWin(matches.get(1));
+        lifecycleService.completeStage(semi.getId());
+        assertTrue(rosterService.entriesOf(finals.getId()).stream()
+                .anyMatch(e -> "待落座外卡".equals(e.getGuestName()) && e.getSlot() == null),
+            "来源结算重建后,导播先放进来的外卡仍在待落座区");
+    }
+
+    /**
+     * 单入口自动排座:加人「替换」占一个已有人的座位时,原占位者顶到「待落座区」(不删除)。
+     */
+    @Test
+    void singleEntryReplacePushesOccupantToHolding() {
+        Long tid = newTournament("pre-advance-replace-holding");
+        TStageVo semi = newStage(tid, "半决赛", 4L, 2L, null);
+        insertCompetitors(tid, semi.getId(), 4);
+        TStageVo finals = newStage(tid, "决赛", 2L, 1L, semi.getId());
+        initializeAndGenerate(semi.getId());
+        List<TMatch> matches = matchesOf(semi.getId());
+        Long a1 = judgeLeftWin(matches.get(0));
+        judgeLeftWin(matches.get(1));
+        lifecycleService.completeStage(semi.getId());
+
+        TStageRosterEntry a1Row = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> Objects.equals(a1, e.getSourceCompetitorId())).findFirst().orElse(null);
+        assertTrue(a1Row != null && a1Row.getSlot() != null, "来源晋级者先自动落座");
+        long a1Seat = a1Row.getSlot();
+
+        TStageRosterOverrideBo guest = new TStageRosterOverrideBo();
+        guest.setOp(RosterConstants.OVERRIDE_ADD_GUEST);
+        guest.setGuestName("替换外卡");
+        guest.setPlacement("REPLACE");
+        guest.setSeedRank(a1Seat);
+        rosterService.addOverride(finals.getId(), guest);
+
+        assertTrue(rosterService.entriesOf(finals.getId()).stream()
+                .anyMatch(e -> "替换外卡".equals(e.getGuestName()) && Long.valueOf(a1Seat).equals(e.getSlot())),
+            "外卡坐进被替换的座位");
+        assertTrue(rosterService.entriesOf(finals.getId()).stream()
+                .anyMatch(e -> Objects.equals(a1, e.getSourceCompetitorId()) && e.getSlot() == null),
+            "原占位者被顶到待落座区,而不是删除");
+    }
+
+    /**
      * 轮空场次判胜(=点开始即自动结算)也要实时写进下一赛段中间态。
      *
      * <p>回归事故:只有"裁判判完一场"那条路会同步,轮空判胜那条路没同步 ——

@@ -133,12 +133,28 @@ public class RosterOverrideService {
         assertRowsAdjustable(target, List.of(row));
     }
 
-    /** 新增行(加人/外卡)的前置:来源边全部结算,座位才不会再被投影改写 */
-    private void assertAllSourcesSettled(TStage stage) {
+    /**
+     * 新增行(加人/外卡)的前置:来源边全部结算,座位才不会再被投影改写。
+     *
+     * <p><b>加到待落座区不受此限</b>:他不占座位号、不参与"来源名次=座位"的自动排座,
+     * 来源入边还有没结束时也能先放进来,等来源全部结算、名次定案后再由导播拖到座位。</p>
+     *
+     * <p><b>多入口汇合也不加锁</b>:那种赛段座位全靠导播拖,新来的人先落在待落座区,
+     * 来源判罚/结算时的对账也只"补人/取人"、不重排已落好的行。<br>
+     * 只有<b>单入口自动排座 + 直接落座位</b>才要求来源边全部结算:座位由来源名次算出,
+     * 来源没打完时会被重新落座。</p>
+     */
+    private void assertAllSourcesSettled(TStage stage, boolean toHolding) {
+        if (stage == null) {
+            return;
+        }
         List<TStageRosterGroupBo> groups = rosterGroupStore.groupsOf(stage);
+        if (toHolding || rosterAssembler.multiEntry(groups)) {
+            return;
+        }
         if (!groups.isEmpty() && !rosterEntryStore.readyByGroups(groups)) {
-            throw new ServiceException("上一赛段还没结束,中间态暂不能加人(已有名单里来自已结算赛段的选手可以先调整,"
-                + "等来源全部结算后再加人)");
+            throw new ServiceException("上一赛段还没结束:本赛段按它的名次自动排座,"
+                + "直接落座位会被重新排座;请选「待落座区」先把人加进来");
         }
     }
 
@@ -153,14 +169,16 @@ public class RosterOverrideService {
             RosterConstants.OVERRIDE_REMOVE, RosterConstants.OVERRIDE_SEED).contains(op)) {
             throw new ServiceException("不支持的覆盖操作: {}", op);
         }
-        validateOverrideSource(stageId, op, bo);
-        // 新增一行(加外卡 / 从别的赛段手工拉人)的前置:来源边全部结算,座位才不会再被投影改写。
+        boolean placeInHolding = RosterConstants.PLACEMENT_HOLDING.equalsIgnoreCase(bo.getPlacement());
+        validateOverrideSource(stageId, op, bo, placeInHolding);
+        // 新增一行(加外卡 / 从别的赛段手工拉人)落到具体座位前,来源边全部结算,座位才不会再被投影改写
+        // (加到待落座区、多入口汇合例外,见 assertAllSourcesSettled)。
         // 必须放在"按姓名建 t_player"等副作用之前:否则先建人再抛异常,事务回滚后
         // 调用方手里的 bo 还留着那个已经失效的 playerId,重试时报"外卡关联选手不存在"。
         if (RosterConstants.OVERRIDE_ADD_GUEST.equals(op)
             || (RosterConstants.OVERRIDE_ADD_SOURCE.equals(op)
                 && entryOfSource(stageId, bo.getSourceCompetitorId()) == null)) {
-            assertAllSourcesSettled(target);
+            assertAllSourcesSettled(target, placeInHolding);
         }
         if (RosterConstants.OVERRIDE_ADD_GUEST.equals(op)) {
             validateGuestProfile(target, bo);
@@ -203,7 +221,8 @@ public class RosterOverrideService {
         } else if (RosterConstants.OVERRIDE_SEED.equals(op)) {
             row = entryOfSource(stageId, bo.getSourceCompetitorId());
             if (row == null) {
-                // 规则没选中,但要求钉在某个座位:等价于"拉进来 + 钉座位"
+                // 规则没选中,但要求钉在某个座位:等价于"拉进来 + 钉座位"。
+                // 该座位原本有人时,insertManualRow 会把原占位者顶到待落座区(不覆盖不删除)。
                 row = insertManualRow(target, stageId, bo, bo.getSeedRank());
             } else {
                 // 钉座位 = 与占位方互换(空位行也一样被换走),其他人不动
@@ -240,7 +259,7 @@ public class RosterOverrideService {
         } else {
             row = entryOfSource(stageId, bo.getSourceCompetitorId());
             boolean reAdd = row != null && RosterConstants.OVERRIDE_ADD_SOURCE.equals(op);
-            boolean toHolding = RosterConstants.PLACEMENT_HOLDING.equalsIgnoreCase(bo.getPlacement());
+            boolean toHolding = placeInHolding;
             Long want = bo.getSeedRank() != null && bo.getSeedRank() > 0 ? bo.getSeedRank() : null;
             if (reAdd) {
                 // 之前被移出过:这一行还在,恢复成人(不新增行)。
@@ -756,7 +775,8 @@ public class RosterOverrideService {
         rosterGroupStore.notifyTarget(stageId);
     }
 
-    private void validateOverrideSource(Long stageId, String op, TStageRosterOverrideBo bo) {
+    private void validateOverrideSource(Long stageId, String op, TStageRosterOverrideBo bo,
+                                        boolean toHolding) {
         if (RosterConstants.OVERRIDE_ADD_GUEST.equals(op)) {
             return;
         }
@@ -770,12 +790,18 @@ public class RosterOverrideService {
         }
         // 手工名单:允许从本赛事推进链上位于目标赛段之前的任意赛段取人(不限于规则声明的来源组)
         if (!RosterConstants.OVERRIDE_REMOVE.equals(op)) {
-            assertAddableSource(target, c);
+            assertAddableSource(target, c, toHolding);
         }
     }
 
-    /** 手工加入名单的校验:源行存在、同赛事、非本赛段自身、未弃权 */
-    private void assertAddableSource(TStage target, TCompetitor c) {
+    /**
+     * 手工加入名单的校验:源行存在、同赛事、非本赛段自身、未弃权。
+     *
+     * <p>只是先把人拉进「待落座区」({@code toHolding}),或多入口汇合的赛段,都不要求来源
+     * 赛段已结算:待落座不占座位号、不参与"来源名次=座位"的自动排座,来源还没打完也能先安排
+     * 进来,等定案后再由导播拖到座位。</p>
+     */
+    private void assertAddableSource(TStage target, TCompetitor c, boolean toHolding) {
         if (target == null || c == null) {
             throw new ServiceException("源参赛方不存在");
         }
@@ -794,8 +820,11 @@ public class RosterOverrideService {
         }
         // 手工把人拉进名单 = 断言这个人已经定案:来源赛段还没结束的话,他的名次/座位随后
         // 还会被投影覆盖一遍,现在拉进来的行之后连"移出"都会被行级门禁挡住
-        if (!StageConstants.STAGE_SETTLED.equals(src.getStatus())) {
-            throw new ServiceException("来源赛段「{}」还没结束,不能手工把该赛段的人加进名单", src.getName());
+        // 例外:只是先放待落座区,或多入口汇合(座位全靠导播拖)——来源没结束也能先安排进来。
+        boolean merge = target != null && rosterAssembler.multiEntry(rosterGroupStore.groupsOf(target));
+        if (!merge && !toHolding && !StageConstants.STAGE_SETTLED.equals(src.getStatus())) {
+            throw new ServiceException("来源赛段「{}」还没结束:直接落座位会被重新排座;"
+                + "如需先安排,请选「待落座区」", src.getName());
         }
     }
 
@@ -825,14 +854,11 @@ public class RosterOverrideService {
 
     /**
      * 插入一行"人工加进来的"名单行(ADD_SOURCE / ADD_GUEST / SEED 拉人共用)。
-     * 座位已被空位行占着时原地替换,座位号不变。
+     * 目标座位原本有人时,原占位者顶到待落座区(不覆盖、不删除),座位号让给新行。
      */
     private TStageRosterEntry insertManualRow(TStage target, Long stageId, TStageRosterOverrideBo bo, Long slot) {
         if (slot != null) {
-            TStageRosterEntry occupant = entryOfSlot(stageId, slot);
-            if (occupant != null) {
-                entryMapper.deleteById(occupant.getId());
-            }
+            parkSeatOccupantToHolding(stageId, slot);
         }
         TStageRosterEntry e = new TStageRosterEntry();
         e.setTournamentId(target.getTournamentId());
@@ -858,6 +884,30 @@ public class RosterOverrideService {
         e.setRemark(bo.getRemark());
         entryMapper.insert(e);
         return e;
+    }
+
+    /**
+     * 目标座位上如果有人,把人挪到待落座区(摘座位号,不删除也不覆盖);纯空位行直接删掉。
+     *
+     * <p>单入口自动排座的赛段座位是算出来的:导播手工加进来的人坐在上面时,来源一变就会
+     * 被重新落座。这里先把人顶到待落座区,座位让给要坐的人 —— 人不会丢。</p>
+     */
+    private void parkSeatOccupantToHolding(Long stageId, long slot) {
+        TStageRosterEntry occupant = entryOfSlot(stageId, slot);
+        if (occupant == null) {
+            return;
+        }
+        boolean empty = occupant.getSourceCompetitorId() == null
+            && occupant.getPlayerId() == null
+            && (occupant.getGuestName() == null || occupant.getGuestName().isBlank());
+        if (empty) {
+            entryMapper.deleteById(occupant.getId());
+            return;
+        }
+        // updateById 跳过 null 字段,必须显式 SET slot = NULL
+        entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+            .eq(TStageRosterEntry::getId, occupant.getId())
+            .set(TStageRosterEntry::getSlot, null));
     }
 
     /** 按座位号取一行(空位行也算);走 entriesOf 以确保中间层已生成(首次兜底) */

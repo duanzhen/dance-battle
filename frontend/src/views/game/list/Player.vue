@@ -56,18 +56,19 @@
         />
       </div>
 
-      <!-- 排序:默认顺序 / 按签到拿到的号码升序 -->
+      <!-- 排序:默认顺序 / 按签到拿到的号码升序 / 按签到时间升序 -->
       <div class="flex items-center gap-1.5">
         <span class="hidden text-[11px] text-neutral-500 md:inline">排序</span>
         <el-segmented
           v-model="sortMode"
           :options="[
             { label: '默认顺序', value: 'DEFAULT' },
-            { label: '按号码', value: 'NUMBER' }
+            { label: '按号码', value: 'NUMBER' },
+            { label: '按签到时间', value: 'CHECKIN' }
           ]"
           size="small"
           class="amber-segmented"
-          title="按签到拿到的号码升序排列(没号码的排在最后)"
+          title="按号码:签到号码升序;按签到时间:签到先后升序(均把未签到的排在最后)"
         />
       </div>
 
@@ -361,8 +362,8 @@ const props = defineProps<{
 const displayMode = ref<'player' | 'competitor'>('player');
 const searchKeyword = ref('');
 const filterUncheckInOnly = ref(false);
-/** 排序方式:DEFAULT=后端顺序 / NUMBER=按签到拿到的号码升序 */
-const sortMode = ref<'DEFAULT' | 'NUMBER'>('NUMBER');
+/** 排序方式:DEFAULT=后端顺序 / NUMBER=按签到拿到的号码升序 / CHECKIN=按签到时间升序 */
+const sortMode = ref<'DEFAULT' | 'NUMBER' | 'CHECKIN'>('NUMBER');
 const players = ref<PlayerVO[]>([]);
 const competitors = ref<CompetitorVO[]>([]);
 const loading = ref(false);
@@ -426,6 +427,16 @@ const numberKeyOf = (number?: string | number | null): number => {
   return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
 };
 
+/**
+ * 签到时间排序键:取参赛方创建时间(首个赛段由签到产生)的毫秒数,升序;
+ * 未签到/时间缺失的排在最后。
+ */
+const checkInTimeKeyOf = (createTime?: string | null): number => {
+  if (!createTime) return Number.MAX_SAFE_INTEGER;
+  const t = new Date(createTime).getTime();
+  return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
+};
+
 const filteredPlayers = computed(() => {
   let result = players.value;
 
@@ -445,6 +456,11 @@ const filteredPlayers = computed(() => {
     result = [...result].sort(
       (a, b) => numberKeyOf(a.competitorVo?.number) - numberKeyOf(b.competitorVo?.number)
     );
+  } else if (sortMode.value === 'CHECKIN') {
+    // 按签到时间升序(签到早些的排前面);未签到的排在最后
+    result = [...result].sort(
+      (a, b) => checkInTimeKeyOf(a.competitorVo?.createTime) - checkInTimeKeyOf(b.competitorVo?.createTime)
+    );
   }
 
   return result;
@@ -462,10 +478,12 @@ const filteredCompetitors = computed(() => {
     );
   }
 
-  // 按号码排序(签到拿到的号码,数值升序);默认顺序时保持后端返回顺序
+  // 按号码/签到时间排序;默认顺序时保持后端返回顺序
   const list = [...result];
   if (sortMode.value === 'NUMBER') {
     list.sort((a, b) => numberKeyOf(a.number) - numberKeyOf(b.number));
+  } else if (sortMode.value === 'CHECKIN') {
+    list.sort((a, b) => checkInTimeKeyOf(a.createTime) - checkInTimeKeyOf(b.createTime));
   }
   return list;
 });

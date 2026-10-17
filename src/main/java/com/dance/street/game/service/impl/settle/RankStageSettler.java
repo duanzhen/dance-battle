@@ -32,14 +32,18 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 排名赛结算:按圈聚合全部裁判×维度打分,计算每圈总分排名,晋级线内正常晋级;
+ * 排名赛结算:聚合全部裁判×维度打分,计算总分排名,晋级线内正常晋级;
  * 晋级线上同分并列导致名额超限时,同分者保持 PENDING,由导播台在中间态手动指定晋级者。
+ *
+ * <p>排名赛不分圈:整段只有一场(全员挂在该场),按赛段晋级名额取前 N 名。</p>
  *
  * @author duane
  */
@@ -71,7 +75,7 @@ public class RankStageSettler implements StageSettler {
         // 「任一裁判打过即可」——3 名裁判只到 1 名时照样结算,名次按 1/3 的分数算出来。
         List<String> unjudged = scoredMatchService.unjudgedNames(stage.getId());
         if (!unjudged.isEmpty()) {
-            return StageSettleOutcome.pending("圈内仍有 " + unjudged.size() + " 名选手未打分或未打满本场裁判数"
+            return StageSettleOutcome.pending("本段仍有 " + unjudged.size() + " 名选手未打分或未打满本场裁判数"
                 + "(未标记退赛): " + String.join("、", unjudged) + ",请先完成打分或标记退赛后再结算");
         }
         settleRankStage(stage);
@@ -93,17 +97,13 @@ public class RankStageSettler implements StageSettler {
             return;
         }
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        // 圈序号 / 每圈晋升名额 / 全局排名起点:与海选结算、名单取人共用同一口径
-        Map<String, StageFlowSupport.CircleQuota> quotaCtx =
-            StageFlowSupport.circleQuotaContext(stage, matches, "排名赛");
-        Map<String, Integer> zoneQuota = new HashMap<>();
-        Map<String, Integer> zoneBase = new HashMap<>();
-        quotaCtx.forEach((zone, quota) -> {
-            zoneQuota.put(zone, quota.quota());
-            zoneBase.put(zone, quota.base());
-        });
-        // 圈内已晋级数(支持重复结算幂等)
-        Map<String, Integer> zoneAdvanced = countRankAdvancedByZone(matches);
+        // 排名赛不分圈:整段共用一个名额池,晋级人数取赛段晋级名额(与海选名单取人同一口径),
+        // 已晋级者按人去重(支持重复结算幂等)。
+        int advanceQuota = StageFlowSupport.readStageAdvanceCount(stage);
+        int alreadyAdvanced = countRankAdvanced(matches);
+        // 剩余名额与"下一个要分配的最终名次"随场次依次推进
+        int[] remainingSeats = {Math.max(0, advanceQuota - alreadyAdvanced)};
+        int[] rankCursor = {alreadyAdvanced};
 
         // 批量预取参赛方/轮次/打分/参赛单位:此前每圈各发 4 条查询(K 圈 ≈ 4K 条),现在固定 4 条
         List<Long> allMatchIds = matches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
@@ -139,9 +139,7 @@ public class RankStageSettler implements StageSettler {
             if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
                 continue;
             }
-            String zone = match.getDisplayZone();
-            settleRankMatch(match, rc, zoneQuota.getOrDefault(zone, 0),
-                zoneBase.getOrDefault(zone, 0), zoneAdvanced,
+            settleRankMatch(match, rc, remainingSeats, rankCursor,
                 partsByMatch.getOrDefault(match.getId(), List.of()),
                 roundIdsByMatch.getOrDefault(match.getId(), List.of()),
                 scoresByRound, allCompById);
@@ -149,41 +147,38 @@ public class RankStageSettler implements StageSettler {
     }
 
     /**
-     * 统计排名赛各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额。
+     * 统计排名赛已晋级人数,重复结算时用它计算剩余名额。
      *
      * <p>与海选同一口径:<b>按人去重</b>。晋级结果会同步到该选手在本赛段的全部参赛行
      * (见 {@code markManualAdvanceResult}),按行计数会把同一名晋级者重复算进名额。</p>
      */
-    private Map<String, Integer> countRankAdvancedByZone(List<TMatch> matches) {
-        Map<Long, String> matchZone = new HashMap<>();
-        for (TMatch m : matches) {
-            matchZone.put(m.getId(), m.getDisplayZone());
+    private int countRankAdvanced(List<TMatch> matches) {
+        List<Long> matchIds = matches.stream().map(TMatch::getId).filter(Objects::nonNull).toList();
+        if (matchIds.isEmpty()) {
+            return 0;
         }
         List<TMatchParticipant> parts = participantMapper.selectList(
             Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchZone.keySet())
+                .in(TMatchParticipant::getMatchId, matchIds)
                 .eq(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-        Map<Long, String> advancerZone = new HashMap<>();
+        Set<Long> advancers = new HashSet<>();
         for (TMatchParticipant p : parts) {
             if (p.getCompetitorId() == null) {
                 continue;
             }
-            advancerZone.putIfAbsent(p.getCompetitorId(),
-                matchZone.getOrDefault(p.getMatchId(), ""));
+            advancers.add(p.getCompetitorId());
         }
-        Map<String, Integer> result = new HashMap<>();
-        for (String zone : advancerZone.values()) {
-            result.merge(zone, 1, Integer::sum);
-        }
-        return result;
+        return advancers.size();
     }
 
     /**
-     * 结算单场排名赛:跨本场全部轮次(每个选手一个轮次)聚合多裁判×多维度分,
-     * 用 RANKING 策略算总分排名,按本圈剩余名额晋级;晋级线同分并列时保持 PENDING。
+     * 结算单场排名赛:跨本场全部轮次聚合多裁判×多维度分,用 RANKING 策略算总分排名,
+     * 按剩余名额晋级;晋级线同分并列时保持 PENDING。
+     *
+     * @param remainingSeats 剩余晋级名额(单元素数组,跨场次依次扣减)
+     * @param rankCursor     下一个要分配的最终名次(单元素数组,跨场次依次推进)
      */
-    private void settleRankMatch(TMatch match, RuleConfigHolder rc, int advanceQuota,
-                                 int zoneBase, Map<String, Integer> zoneAdvanced,
+    private void settleRankMatch(TMatch match, RuleConfigHolder rc, int[] remainingSeats, int[] rankCursor,
                                  List<TMatchParticipant> parts, List<Long> roundIds,
                                  Map<Long, List<TRoundScore>> scoresByRound,
                                  Map<Long, TCompetitor> compMap) {
@@ -218,7 +213,7 @@ public class RankStageSettler implements StageSettler {
         if (!unjudged.isEmpty()) {
             // 兜底:{@link #settle} 已前置拦截该条件并返回 pending,
             // 这里保留守卫以防将来有人绕过 settle 直接调用本方法。
-            throw new ServiceException("圈内仍有 {} 名选手未打分(未标记退赛): {},请先完成打分或标记退赛后再结算",
+            throw new ServiceException("本段仍有 {} 名选手未打分(未标记退赛): {},请先完成打分或标记退赛后再结算",
                 unjudged.size(), unjudged);
         }
 
@@ -246,9 +241,8 @@ public class RankStageSettler implements StageSettler {
                 .eq(TMatchParticipant::getCompetitorId, r.getCompetitorId()));
         }
 
-        String zone = match.getDisplayZone();
-        int alreadyAdvanced = zoneAdvanced.getOrDefault(zone, 0);
-        int remaining = Math.max(0, advanceQuota - alreadyAdvanced);
+        int remaining = remainingSeats[0];
+        int rankBase = rankCursor[0];
 
         Map<Long, BigDecimal> scores = new HashMap<>();
         for (MatchScoreResult r : results) {
@@ -265,8 +259,9 @@ public class RankStageSettler implements StageSettler {
         if (remaining <= 0) {
             for (int i = 0; i < sortedCids.size(); i++) {
                 markRankResult(sortedCids.get(i), OutcomeStatusEnum.ELIMINATED.getCode(),
-                    (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
+                    (long) (rankBase + i + 1), ranks, match);
             }
+            rankCursor[0] = rankBase + sortedCids.size();
             settlementSupport.markMatchSettled(match);
             log.info("排名赛场次[{}]结算:晋级名额已满,{}名选手淘汰", match.getId(), sortedCids.size());
             return;
@@ -288,15 +283,16 @@ public class RankStageSettler implements StageSettler {
                 for (int i = 0; i < firstTiedPos; i++) {
                     Long cid = sortedCids.get(i);
                     markRankResult(cid, OutcomeStatusEnum.ADVANCE.getCode(),
-                        (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
+                        (long) (rankBase + i + 1), ranks, match);
                 }
                 // 明确淘汰者:同分群之后
                 for (int i = lastTiedPos + 1; i < sortedCids.size(); i++) {
                     Long cid = sortedCids.get(i);
                     markRankResult(cid, OutcomeStatusEnum.ELIMINATED.getCode(),
-                        (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
+                        (long) (rankBase + i + 1), ranks, match);
                 }
-                zoneAdvanced.put(zone, alreadyAdvanced + firstTiedPos);
+                remainingSeats[0] = remaining - firstTiedPos;
+                rankCursor[0] = rankBase + sortedCids.size();
                 // 同分者保持 PENDING,由导播台在中间态调整中手动决定晋级
                 log.info("排名赛场次[{}]晋级线出现{}名同分并列,保持待定等待导播台调整", match.getId(), tiedAtCutoff.size());
                 settlementSupport.markMatchSettled(match);
@@ -309,9 +305,10 @@ public class RankStageSettler implements StageSettler {
             Long cid = sortedCids.get(i);
             boolean advance = i < remaining;
             markRankResult(cid, advance ? OutcomeStatusEnum.ADVANCE.getCode() : OutcomeStatusEnum.ELIMINATED.getCode(),
-                (long) (zoneBase + alreadyAdvanced + i + 1), ranks, match);
+                (long) (rankBase + i + 1), ranks, match);
         }
-        zoneAdvanced.put(zone, alreadyAdvanced + Math.min(remaining, sortedCids.size()));
+        remainingSeats[0] = remaining - Math.min(remaining, sortedCids.size());
+        rankCursor[0] = rankBase + sortedCids.size();
         settlementSupport.markMatchSettled(match);
         log.info("排名赛场次[{}]已结算,共{}名选手,晋级{}名", match.getId(), sortedCids.size(),
             Math.min(remaining, sortedCids.size()));

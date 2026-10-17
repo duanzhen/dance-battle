@@ -8,6 +8,7 @@ import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
+import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -20,6 +21,7 @@ import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
+import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import org.junit.jupiter.api.BeforeAll;
@@ -37,6 +39,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 排名赛的赛段级结算:单圈多人挂同一场次,裁判按维度打分,完成赛段后按总分取前 N 名晋级
@@ -73,6 +76,7 @@ class RankSettlementTest {
     @Autowired private ITStageService stageService;
     @Autowired private ITStageLifecycleService lifecycleService;
     @Autowired private ITMatchResultService matchResultService;
+    @Autowired private ITMatchService matchService;
 
     /**
      * 排名赛:单圈 4 人,1 名裁判按单维度打分;完成赛段后按总分取前 2 名晋级,
@@ -125,6 +129,69 @@ class RankSettlementTest {
         TCompetitor top = competitorMapper.selectById(topId);
         assertEquals(OutcomeStatusEnum.ADVANCE.getCode(), top.getOutcomeStatus());
         assertEquals(1L, top.getFinalRank(), "最高分选手最终名次应为 1");
+    }
+
+    /**
+     * 排名赛段读取场次时,必须带上「上场名单 + 实时评分」:
+     * roundScores 不能只对海选填充,否则导播台看不到选手列表与分数(本轮修复的回归)。
+     * 且每个评分维度都要作为一列返回(每名选手一项维度分)。
+     */
+    @Test
+    void rankStageExposesRosterAndLiveScores() {
+        Long tid = newTournament("排名赛导播台视图");
+        Long judge = insertReferee(tid, "裁判A");
+        String twoDimRule = "{\"mode\":\"RANK\",\"advanceCount\":1,"
+            + "\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
+            + "\"refereeAggregateRule\":\"AVG\",\"aggregateRule\":\"SUM\",\"dimensions\":["
+            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":1,\"maxScore\":100},"
+            + "{\"key\":\"SHOW\",\"name\":\"表现力\",\"weight\":1,\"maxScore\":100}]}}";
+        TStageVo stage = newStage(tid, "排名赛", 3, 1, twoDimRule);
+        for (int i = 1; i <= 3; i++) {
+            insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
+        }
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        List<TMatchParticipant> parts = realParticipants(match.getId());
+        assertEquals(3, parts.size(), "3 名选手应全部挂在本场");
+
+        SubmitResultBo bo = new SubmitResultBo();
+        bo.setMatchId(match.getId());
+        bo.setRefereeId(judge);
+        List<ScoreEntryBo> scores = new ArrayList<>();
+        for (int i = 0; i < parts.size(); i++) {
+            for (String dim : new String[]{"TECH", "SHOW"}) {
+                ScoreEntryBo se = new ScoreEntryBo();
+                se.setCompetitorId(parts.get(i).getCompetitorId());
+                se.setDimension(dim);
+                se.setScore(BigDecimal.valueOf(("TECH".equals(dim) ? 90 : 80) - i * 10));
+                scores.add(se);
+            }
+        }
+        bo.setScores(scores);
+        matchResultService.submitResult(bo);
+
+        TMatchBo q = new TMatchBo();
+        q.setStageId(stage.getId());
+        var vo = matchService.queryList(q).stream()
+            .filter(m -> m.getId().equals(match.getId()))
+            .findFirst().orElseThrow();
+        assertNotNull(vo.getRoundScores(), "排名赛场次必须返回上场名单");
+        assertEquals(3, vo.getRoundScores().size(), "3 名选手都应出现在名单里");
+        assertEquals(3, vo.getRoundScores().stream().filter(r -> r.getScore() != null).count(),
+            "3 名选手都应有实时总分");
+        assertTrue(vo.getRoundScores().stream().allMatch(r -> r.getCompetitorName() != null),
+            "名单应带选手姓名");
+
+        // 每个评分维度都是一列:首名选手 TECH=90、SHOW=80,总分为两者之和
+        var top = vo.getRoundScores().get(0);
+        assertNotNull(top.getDimensions(), "排名赛应返回各维度聚合分");
+        assertEquals(2, top.getDimensions().size(), "应有两个评分维度");
+        assertEquals("TECH", top.getDimensions().get(0).getKey());
+        assertEquals("SHOW", top.getDimensions().get(1).getKey());
+        assertEquals(0, BigDecimal.valueOf(90).compareTo(top.getDimensions().get(0).getScore()));
+        assertEquals(0, BigDecimal.valueOf(80).compareTo(top.getDimensions().get(1).getScore()));
+        assertEquals(0, BigDecimal.valueOf(170).compareTo(top.getScore()), "总分应为各维度之和");
     }
 
     private Long newTournament(String name) {

@@ -33,16 +33,21 @@ import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
 import com.dance.street.game.service.impl.settle.AuditionTiebreakResult;
 import com.dance.street.game.engine.common.StageModeProfile;
 import com.dance.street.game.engine.common.StageModeProfiles;
+import com.dance.street.game.engine.common.DimensionConfig;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
+import com.dance.street.game.engine.common.ScoringConfig;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.MatchFormat;
+import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
+import com.dance.street.game.engine.scoring.ScoreAggregator;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
@@ -180,8 +185,8 @@ public class TMatchServiceImpl implements ITMatchService {
             vo.setWinnerName(winnerName);
         }
 
-        // 海选赛段:补充每轮(每名选手)的评分明细
-        fillAuditionRoundScores(matches, byMatch, nameById, numberById);
+        // 逐选手赛制(海选/排名赛):补充上场名单(每名选手一项)与评分明细
+        fillPerCompetitorRoundScores(matches, byMatch, nameById, numberById);
 
         // 公布模式 + 实时判罚投票
         fillPublishInfo(matches, byMatch);
@@ -287,27 +292,36 @@ public class TMatchServiceImpl implements ITMatchService {
     }
 
     /**
-     * 海选赛段场次补充轮次评分:每轮对应一名选手,含累计总分与各裁判打分明细。
-     * 非海选赛段不处理(避免多余查询)。
+     * 逐选手赛制(海选/排名赛)场次补充上场名单与评分:每名选手一项,含累计总分与各裁判打分明细。
+     * 非逐选手赛段不处理(避免多余查询)。
+     *
+     * <p>排名赛不分圈:整段只有一场,全员挂在该场;总分取参与方累计分
+     * (由 {@code accumulateRankScores} 按多维度聚合的权威值),裁判明细按裁判汇总。</p>
      */
-    private void fillAuditionRoundScores(List<TMatchVo> matches,
-                                         Map<Long, List<TMatchParticipant>> byMatch,
-                                         Map<Long, String> nameById,
-                                         Map<Long, String> numberById) {
+    private void fillPerCompetitorRoundScores(List<TMatchVo> matches,
+                                              Map<Long, List<TMatchParticipant>> byMatch,
+                                              Map<Long, String> nameById,
+                                              Map<Long, String> numberById) {
         List<Long> stageIds = matches.stream().map(TMatchVo::getStageId).filter(Objects::nonNull).distinct().toList();
         if (stageIds.isEmpty()) {
             return;
         }
-        Map<Long, String> stageModeById = stageMapper.selectByIds(stageIds).stream()
+        List<TStage> stageList = stageMapper.selectByIds(stageIds);
+        Map<Long, String> stageModeById = stageList.stream()
             .collect(Collectors.toMap(TStage::getId, TStage::getStageMode, (a, b) -> a));
+        // 排名赛需要读本段评分维度配置(每维度一列展示);HashMap 允许 null 值
+        Map<Long, String> stageRuleConfigById = new HashMap<>();
+        for (TStage s : stageList) {
+            stageRuleConfigById.put(s.getId(), s.getRuleConfig());
+        }
 
-        List<TMatchVo> auditionMatches = matches.stream()
-            .filter(m -> stageCap(stageModeById.get(m.getStageId())).audition())
+        List<TMatchVo> perCompetitorMatches = matches.stream()
+            .filter(m -> stageCap(stageModeById.get(m.getStageId())).result().perCompetitor())
             .toList();
-        if (auditionMatches.isEmpty()) {
+        if (perCompetitorMatches.isEmpty()) {
             return;
         }
-        List<Long> matchIds = auditionMatches.stream().map(TMatchVo::getId).filter(Objects::nonNull).toList();
+        List<Long> matchIds = perCompetitorMatches.stream().map(TMatchVo::getId).filter(Objects::nonNull).toList();
 
         // 本场当前回合:逐选手制一场一回合,全员共享;「谁在这场」由 participant(entry)承载
         List<TMatchRound> rounds = matchRoundMapper.selectList(
@@ -339,7 +353,9 @@ public class TMatchServiceImpl implements ITMatchService {
             : refereeMapper.selectByIds(refereeIds).stream()
                 .collect(Collectors.toMap(TReferee::getId, TReferee::getName, (a, b) -> a));
 
-        for (TMatchVo vo : auditionMatches) {
+        for (TMatchVo vo : perCompetitorMatches) {
+            boolean rankStage = stageCap(stageModeById.get(vo.getStageId())).rank();
+            RuleConfigHolder rankRc = rankStage ? RuleConfigParser.parse(stageRuleConfigById.get(vo.getStageId())) : null;
             // 上场名单 = 本场参赛行(按入场顺序),不再按「一人一轮」推导
             List<TMatchParticipant> partList = (byMatch.get(vo.getId()) == null
                 ? List.<TMatchParticipant>of() : byMatch.get(vo.getId())).stream()
@@ -360,8 +376,8 @@ public class TMatchServiceImpl implements ITMatchService {
                         .flatMap(rid -> scoresByRound.getOrDefault(rid, List.of()).stream())
                         .filter(s -> Objects.equals(s.getCompetitorId(), cid))
                         .toList();
-                MatchRoundScoreVo item = buildAuditionRoundItem(round, cid, rs,
-                    nameById, numberById, p, refereeNameById);
+                MatchRoundScoreVo item = buildPerCompetitorRoundItem(round, cid, rs,
+                    nameById, numberById, p, refereeNameById, rankStage, rankRc);
                 // 展示序号取入场顺序(上场第几位),round 序号不再等于人
                 item.setRoundSequence(p.getDisplaySlotIndex());
                 roundScores.add(item);
@@ -371,15 +387,20 @@ public class TMatchServiceImpl implements ITMatchService {
     }
 
     /**
-     * 构建海选单轮评分项:总分优先取参与方累计分(与海选结算口径一致),无累计时用裁判分求和兜底;
-     * 结算后带出结果状态(晋级/淘汰),供导播台在确认晋级前展示二海晋级者。
+     * 构建逐选手评分项:含累计总分与各裁判打分明细;结算后带出结果状态(晋级/淘汰)。
+     *
+     * <p>总分口径:<b>排名赛</b>取参与方累计分(多维度聚合的权威值,与结算/大屏同口径);
+     * <b>海选</b>按打分明细现算(participant.score_value 只是提交时刷新的缓存,并发提交或
+     * 一场残留多回合时可能只含部分裁判,不能作为展示口径)。</p>
      */
-    private MatchRoundScoreVo buildAuditionRoundItem(TMatchRound r, Long competitorId,
-                                                     List<TRoundScore> scores,
-                                                     Map<Long, String> nameById,
-                                                     Map<Long, String> numberById,
-                                                     TMatchParticipant p,
-                                                     Map<Long, String> refereeNameById) {
+    private MatchRoundScoreVo buildPerCompetitorRoundItem(TMatchRound r, Long competitorId,
+                                                          List<TRoundScore> scores,
+                                                          Map<Long, String> nameById,
+                                                          Map<Long, String> numberById,
+                                                          TMatchParticipant p,
+                                                          Map<Long, String> refereeNameById,
+                                                          boolean rankStage,
+                                                          RuleConfigHolder rankRc) {
         MatchRoundScoreVo item = new MatchRoundScoreVo();
         item.setRoundId(r == null ? null : r.getId());
         item.setRoundSequence(r == null ? null : r.getRoundSequence());
@@ -390,26 +411,97 @@ public class TMatchServiceImpl implements ITMatchService {
         List<MatchRoundScoreVo.RefereeScore> refScores = new ArrayList<>();
         BigDecimal sum = BigDecimal.ZERO;
         if (scores != null) {
-            for (TRoundScore s : scores) {
-                if (s.getScore() == null) {
-                    continue;
+            if (rankStage) {
+                // 排名赛:一个裁判有多个维度分 → 按裁判汇总(每个裁判一条),便于导播台看清谁还没交分
+                Map<Long, BigDecimal> byReferee = new LinkedHashMap<>();
+                for (TRoundScore s : scores) {
+                    if (s.getScore() == null) {
+                        continue;
+                    }
+                    byReferee.merge(s.getRefereeId() == null ? 0L : s.getRefereeId(), s.getScore(), BigDecimal::add);
                 }
-                sum = sum.add(s.getScore());
-                MatchRoundScoreVo.RefereeScore ref = new MatchRoundScoreVo.RefereeScore();
-                ref.setRefereeId(s.getRefereeId());
-                ref.setRefereeName(s.getRefereeId() == null ? null : refereeNameById.get(s.getRefereeId()));
-                ref.setScore(s.getScore());
-                refScores.add(ref);
+                byReferee.forEach((refId, refScore) -> {
+                    MatchRoundScoreVo.RefereeScore ref = new MatchRoundScoreVo.RefereeScore();
+                    ref.setRefereeId(refId);
+                    ref.setRefereeName(refereeNameById.get(refId));
+                    ref.setScore(refScore);
+                    refScores.add(ref);
+                });
+            } else {
+                for (TRoundScore s : scores) {
+                    if (s.getScore() == null) {
+                        continue;
+                    }
+                    sum = sum.add(s.getScore());
+                    MatchRoundScoreVo.RefereeScore ref = new MatchRoundScoreVo.RefereeScore();
+                    ref.setRefereeId(s.getRefereeId());
+                    ref.setRefereeName(s.getRefereeId() == null ? null : refereeNameById.get(s.getRefereeId()));
+                    ref.setScore(s.getScore());
+                    refScores.add(ref);
+                }
             }
         }
-        // 总分以打分明细现算(与结算/导出口径一致):participant.score_value 只是提交时刷新的缓存,
-        // 并发提交或一场残留多回合时可能只含部分裁判,不能作为展示口径。
-        item.setScore(refScores.isEmpty() ? null : sum);
+        item.setScore(rankStage
+            ? (p == null ? null : p.getScoreValue())
+            : (refScores.isEmpty() ? null : sum));
         item.setRefereeScores(refScores.isEmpty() ? null : refScores);
+        if (rankStage) {
+            // 排名赛:按维度输出各子项聚合分(与 MultiDimStrategy 第一步「同维度多裁判合并」同口径)
+            item.setDimensions(buildDimensionScores(scores, rankRc));
+        }
         if (p != null && p.getOutcomeStatus() != null) {
             item.setOutcomeStatus(p.getOutcomeStatus());
         }
         return item;
+    }
+
+    /**
+     * 排名赛单名选手的「各维度聚合分」:同维度多裁判先按 {@code refereeAggregateRule} 合并。
+     * 按配置的维度顺序输出(未配置维度的历史数据按实际出现顺序追加);无人打分的维度为 null。
+     */
+    private List<MatchRoundScoreVo.DimensionScore> buildDimensionScores(List<TRoundScore> scores, RuleConfigHolder rc) {
+        ScoringConfig sc = rc != null ? rc.getScoring() : null;
+        AggregateRuleEnum refRule = AggregateRuleEnum.fromCode(sc != null ? sc.getRefereeAggregateRule() : null);
+        BigDecimal trimRatio = sc != null ? sc.getTrimRatio() : null;
+        List<DimensionConfig> dims = sc != null ? sc.getDimensions() : null;
+
+        // 按维度分组(同维度可能有多名裁判的分)
+        Map<String, List<BigDecimal>> byDim = new LinkedHashMap<>();
+        if (scores != null) {
+            for (TRoundScore s : scores) {
+                if (s.getScore() == null) {
+                    continue;
+                }
+                String dim = StringUtils.isNotBlank(s.getDimension()) ? s.getDimension() : StageConstants.DIMENSION_MAIN;
+                byDim.computeIfAbsent(dim, k -> new ArrayList<>()).add(s.getScore());
+            }
+        }
+        List<MatchRoundScoreVo.DimensionScore> out = new ArrayList<>();
+        Set<String> used = new HashSet<>();
+        if (dims != null) {
+            for (DimensionConfig d : dims) {
+                if (d == null || StringUtils.isBlank(d.getKey()) || !used.add(d.getKey())) {
+                    continue;
+                }
+                out.add(dimensionItem(d.getKey(), d.getName(), byDim.get(d.getKey()), refRule, trimRatio));
+            }
+        }
+        // 配置之外的维度(异常/旧数据)追加在末尾,避免丢分
+        for (Map.Entry<String, List<BigDecimal>> e : byDim.entrySet()) {
+            if (used.add(e.getKey())) {
+                out.add(dimensionItem(e.getKey(), e.getKey(), e.getValue(), refRule, trimRatio));
+            }
+        }
+        return out;
+    }
+
+    private MatchRoundScoreVo.DimensionScore dimensionItem(String key, String name, List<BigDecimal> values,
+                                                           AggregateRuleEnum refRule, BigDecimal trimRatio) {
+        MatchRoundScoreVo.DimensionScore d = new MatchRoundScoreVo.DimensionScore();
+        d.setKey(key);
+        d.setName(name);
+        d.setScore(values == null || values.isEmpty() ? null : ScoreAggregator.aggregate(values, refRule, trimRatio));
+        return d;
     }
 
     /**

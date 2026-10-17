@@ -62,6 +62,15 @@
           <Settings2 class="w-3.5 h-3.5 hidden sm:block" />
           <span>赛事配置</span>
         </button>
+        <!-- 帮助:编排 / 开赛过程中随时可查,不用退回赛事大厅 -->
+        <button
+          @click="showHelp = true"
+          title="帮助中心"
+          class="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded transition-all duration-200 flex-none bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-amber-400"
+        >
+          <CircleHelp class="w-3.5 h-3.5" />
+          <span class="hidden sm:block">帮助</span>
+        </button>
         <!-- <div class="w-8 h-8 rounded-full bg-neutral-800 border border-neutral-700 hover:border-amber-500 transition-colors cursor-pointer"></div> -->
       </div>
     </header>
@@ -74,18 +83,21 @@
         <ConfigPanel v-else-if="activeTab === 'config'" :tournament-id="tournamentId" />
       </KeepAlive>
     </div>
+
+    <HelpCenter v-model="showHelp" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { MonitorPlay, ListTree, Settings2 } from 'lucide-vue-next';
+import { MonitorPlay, ListTree, Settings2, CircleHelp } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
 import { useDirectorStore } from '@/store/modules/directorStore';
 import DirectorLayout from './DirectorLayout.vue';
 import StageFlow from './StageFlow.vue';
 import ConfigPanel from './ConfigPanel.vue';
+import HelpCenter from '@/components/HelpCenter/index.vue';
 import logoFlat from '@/assets/logo/logo_flat.png';
 import MobileDirectorEntry from './MobileDirectorEntry.vue';
 
@@ -98,6 +110,8 @@ const directorStore = useDirectorStore();
 const activeTab = ref(
   localStorage.getItem('tournamentActiveTab') || (window.innerWidth < 640 ? 'config' : 'director')
 );
+// 帮助中心弹窗
+const showHelp = ref(false);
 // 刷新/切换后记住当前 tab
 watch(activeTab, (v) => {
   localStorage.setItem('tournamentActiveTab', v);

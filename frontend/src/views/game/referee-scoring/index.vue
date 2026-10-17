@@ -610,7 +610,8 @@
               </div>
             </div>
 
-            <div v-if="!isAudition && participants.length > 0" class="mt-6 px-1">
+            <!-- 逐选手赛制(海选/排名赛)一律用上方的「提交并下一个」逐人提交,不再出现整批提交按钮 -->
+            <div v-if="!isPerCompetitor && participants.length > 0" class="mt-6 px-1">
               <button
                 @click="handleSubmit"
                 :disabled="submitting || !hasChanges"
@@ -1220,9 +1221,15 @@ const myTotal = (competitorId: number): number => {
  * <p>海选允许打 0 分(缺席/弃权,0 分不参与晋级),所以「已评」不能再用「总分 &gt; 0」判断:
  * 那样 0 分会被当成没填——胶囊一直显示"未评"、"提交并下一个"又会跳回同一个人,
  * 裁判的体感就是「0 分填不进去」。判定口径必须是"有没有这一行的记录",不是分值大小。</p>
+ *
+ * <p>不传 {@code dim} 时按「任一维度已评」判断:排名赛是多维度打分,明细里没有 MAIN 这一列,
+ * 若默认仍按 MAIN 查,排名赛选手胶囊会永远显示"未评"。海选只有单一维度,行为不变。</p>
  */
-const myScored = (competitorId: number, dim = 'MAIN'): boolean => {
-  return myScores.value.some((s) => s.competitorId === competitorId && (s.dimension || 'MAIN') === dim);
+const myScored = (competitorId: number, dim?: string): boolean => {
+  if (dim) {
+    return myScores.value.some((s) => s.competitorId === competitorId && (s.dimension || 'MAIN') === dim);
+  }
+  return myScores.value.some((s) => s.competitorId === competitorId);
 };
 
 /**

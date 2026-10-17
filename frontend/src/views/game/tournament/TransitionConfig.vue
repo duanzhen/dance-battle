@@ -359,15 +359,14 @@
             <div v-if="rosterRows.length === 0" class="text-[11px] text-neutral-600 text-center py-2">还没有人进来;点右上角「＋ 加人」添加</div>
           </div>
 
-          <!-- 排名赛:圈分配预览 -->
-          <div v-else-if="targetMode === 'RANK'" class="grid grid-cols-2 gap-2">
-            <div v-for="(ccl, ci) in circlePreview" :key="ci" class="rounded-lg bg-black border border-neutral-800 p-2">
-              <div class="text-[10px] font-bold text-amber-500 mb-1">{{ circleLabel(ci + 1) }}</div>
-              <div v-for="c in ccl" :key="c.id" class="text-xs text-neutral-300 truncate py-0.5">
-                {{ c.name }}<span v-if="entryTagLabel(c.entryTag)" class="text-neutral-500"> ·{{ entryTagLabel(c.entryTag) }}</span>
-              </div>
-              <div v-if="ccl.length === 0" class="text-[10px] text-neutral-600">空圈</div>
+          <!-- 排名赛:名单预览(排名赛不分圈,整段一场) -->
+          <div v-else-if="targetMode === 'RANK'" class="rounded-lg bg-black border border-neutral-800 p-2 space-y-0.5">
+            <div v-for="(c, ci) in rosterRows" :key="itemKeyOf(c) + '-' + ci" class="flex items-center gap-2 text-xs text-neutral-300">
+              <span class="w-5 text-right text-neutral-600 font-mono flex-none">{{ ci + 1 }}</span>
+              <span class="flex-1 min-w-0 truncate">{{ c.name }}</span>
+              <span v-if="entryTagLabel(c.entryTag)" class="text-neutral-500 flex-none">·{{ entryTagLabel(c.entryTag) }}</span>
             </div>
+            <div v-if="rosterRows.length === 0" class="text-[10px] text-neutral-600 text-center py-2">还没有人进来;点右上角「＋ 加人」添加</div>
           </div>
         </div>
 
@@ -1738,8 +1737,6 @@ const directPairingMode = computed(() => {
   // 配对方式只看本赛段配置;未配置 = 顺序相邻。不按来源赛制/链上前一段推断。
   return 'SEQUENTIAL';
 });
-const directCircles = computed(() => Number(targetRuleConfig.value?.circles) || 1);
-
 /** 晋级是否已确认:目标赛段名单快照已物化(唯一口径) */
 const advancementConfirmed = computed(() => !!overridePreview.value?.applied || rosters.value.some((p) => p.state === 'CONFIRMED'));
 
@@ -1772,24 +1769,6 @@ const handleConfirmAdvancement = async () => {
 
 /** 海选→首个淘汰赛(SEED 模式)的中间态随机交换入口 */
 const isSeedKnockoutTransition = computed(() => targetMode.value === 'KNOCKOUT' && directPairingMode.value === 'SEED');
-
-/** 排名赛落位预览:非随机分圈时按种子顺序均分(与 RankGenerator 一致) */
-const circlePreview = computed(() => {
-  if (targetMode.value !== 'RANK') return [];
-  const rows = rosterRows.value;
-  const n = rows.length;
-  const circles = Math.max(1, directCircles.value);
-  const base = Math.floor(n / circles);
-  const rem = n % circles;
-  const out: any[][] = [];
-  let cursor = 0;
-  for (let c = 0; c < circles; c++) {
-    const count = base + (c < rem ? 1 : 0);
-    out.push(rows.slice(cursor, cursor + count));
-    cursor += count;
-  }
-  return out;
-});
 
 const loadAll = () => {
   loadSourceConfig();

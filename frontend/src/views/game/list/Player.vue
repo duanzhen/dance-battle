@@ -711,7 +711,8 @@ const handleBulkCheckIn = async () => {
   bulkCheckingIn.value = true;
   try {
     const stage = ((await getStage(firstStageId.value)).data ?? {}) as any;
-    const needCircle = stage.stageMode === 'AUDITION' || stage.stageMode === 'RANK';
+    // 只有海选需要分圈落位;排名赛不分圈(整段一场,后端自动挂人)
+    const needCircle = stage.stageMode === 'AUDITION';
     let circles: any[] = [];
     if (needCircle) {
       // 圈必须先存在:没有圈时后端会拒绝落圈(圈只由配置侧产生),这里先按配置补齐

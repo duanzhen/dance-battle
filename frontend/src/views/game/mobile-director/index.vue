@@ -209,7 +209,7 @@
 
         <div v-if="matches.length > 0" class="mt-3">
           <h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-2 px-1">
-            {{ currentStage?.stageMode === 'AUDITION' ? '海选评分' : '场次' }}
+            {{ isPerCompetitorStage ? (isRankStage ? '排名评分' : '海选评分') : '场次' }}
             <span
               v-if="currentStage?.stageMode === 'AUDITION' && auditionStageAdvanceCount > 0"
               class="ml-2 text-amber-400 normal-case tracking-normal"
@@ -218,7 +218,7 @@
             </span>
           </h4>
           <!-- 淘汰赛:左红右蓝指示点,与下方选手名字列对齐 -->
-          <div v-if="currentStage?.stageMode !== 'AUDITION'" class="flex items-center gap-2 mb-1.5 px-1">
+          <div v-if="!isPerCompetitorStage" class="flex items-center gap-2 mb-1.5 px-1">
             <div class="flex-1 flex justify-center">
               <span class="w-2 h-2 rounded-full" :class="sideDotClass('LEFT')"></span>
             </div>
@@ -227,11 +227,14 @@
               <span class="w-2 h-2 rounded-full" :class="sideDotClass('RIGHT')"></span>
             </div>
           </div>
-          <!-- 海选赛:圈(match) → 轮次(round) → 评分(支持分圈) -->
-          <div v-if="currentStage?.stageMode === 'AUDITION'" class="space-y-2">
+          <!-- 逐选手赛制(海选/排名赛):场次(match) → 上场名单 + 实时评分 -->
+          <div v-if="isPerCompetitorStage" class="space-y-2">
             <div v-for="match in matches" :key="match.id" class="bg-neutral-900 rounded-lg border border-neutral-800 p-3">
               <!-- 海选加赛·手动指定晋级:列出参赛方,勾选谁晋级(不打分) -->
-              <div v-if="match.tiebreakMode === 'MANUAL'" class="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1">
+              <div
+                v-if="isAuditionStage && match.tiebreakMode === 'MANUAL'"
+                class="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1"
+              >
                 <div class="flex items-center justify-between">
                   <span class="text-[10px] font-bold text-amber-400">手动指定晋级({{ manualSelCount(match) }}/{{ match.advanceCount }})</span>
                   <span class="text-[9px] text-neutral-500">按号码牌升序定位次</span>
@@ -277,14 +280,106 @@
                   {{ match.status === 'SETTLED' ? '已结束' : match.status === 'GAMING' ? '进行中' : '待开始' }}
                 </span>
                 <span
-                  v-if="match.status === 'GAMING' && auditionAllScored(match)"
+                  v-if="isAuditionStage && match.status === 'GAMING' && auditionAllScored(match)"
                   class="text-[8px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30"
                 >
                   已全部评完
                 </span>
               </div>
 
-              <div class="space-y-1">
+              <!-- 排名赛:表格(序 / 号牌 / 选手 / 各评分维度一列 / 总分 / 状态) -->
+              <div v-if="isRankStage" class="overflow-x-auto -mx-1">
+                <table class="w-full border-collapse text-left">
+                  <thead>
+                    <tr class="text-[9px] text-neutral-500 uppercase tracking-wider">
+                      <th class="py-1 px-1.5 font-normal w-9 text-center">序</th>
+                      <th class="py-1 px-1.5 font-normal w-14">号牌</th>
+                      <th class="py-1 px-1.5 font-normal">选手</th>
+                      <th
+                        v-for="d in rankDimensions"
+                        :key="'h-' + d.key"
+                        class="py-1 px-1.5 font-normal min-w-[52px] text-right whitespace-nowrap"
+                        :title="d.name"
+                      >
+                        {{ d.name }}
+                      </th>
+                      <th class="py-1 px-1.5 font-normal w-16 text-right">总分</th>
+                      <th class="py-1 px-1.5 font-normal w-12 text-center">状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="r in match.roundScores"
+                      :key="String(r.roundId) + '-' + String(r.competitorId ?? '')"
+                      @click="r.competitorId != null && handleMarkCurrent(match, r)"
+                      class="border-t border-neutral-800/60 cursor-pointer transition-colors"
+                      :class="
+                        String(currentCompetitorByMatch[String(match.id)] ?? '') === String(r.competitorId ?? '')
+                          ? 'bg-amber-500/10'
+                          : 'hover:bg-neutral-800/40'
+                      "
+                    >
+                      <td class="py-1.5 px-1.5 text-center text-[10px] text-neutral-500 font-mono">{{ r.roundSequence ?? '—' }}</td>
+                      <td class="py-1.5 px-1.5">
+                        <!-- 号牌:现场靠号码喊人/对号 -->
+                        <span
+                          class="inline-block text-[10px] font-mono px-1.5 py-0.5 rounded"
+                          :class="r.competitorNumber ? 'bg-amber-500/10 text-amber-400' : 'text-neutral-700'"
+                        >
+                          {{ r.competitorNumber || '—' }}
+                        </span>
+                      </td>
+                      <td class="py-1.5 px-1.5">
+                        <div
+                          class="text-xs font-bold truncate max-w-[40vw]"
+                          :class="
+                            String(currentCompetitorByMatch[String(match.id)] ?? '') === String(r.competitorId ?? '')
+                              ? 'text-amber-400'
+                              : 'text-neutral-300'
+                          "
+                        >
+                          {{ r.competitorName || '待定' }}
+                        </div>
+                      </td>
+                      <td
+                        v-for="d in rankDimensions"
+                        :key="'c-' + d.key"
+                        class="py-1.5 px-1.5 text-right text-xs font-mono tabular-nums text-neutral-300"
+                      >
+                        {{ fmtScore(dimScore(r, d.key)) }}
+                      </td>
+                      <td class="py-1.5 px-1.5 text-right text-xs font-bold text-amber-400 font-mono tabular-nums">
+                        {{ fmtScore(r.score) }}
+                      </td>
+                      <td class="py-1.5 px-1.5 text-center">
+                        <span
+                          v-if="String(currentCompetitorByMatch[String(match.id)] ?? '') === String(r.competitorId ?? '')"
+                          class="text-[8px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400"
+                        >
+                          当前
+                        </span>
+                        <span
+                          v-else-if="r.outcomeStatus === 'ADVANCE'"
+                          class="text-[8px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30"
+                        >
+                          晋级
+                        </span>
+                        <span
+                          v-else-if="r.outcomeStatus === 'ELIMINATED'"
+                          class="text-[8px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20"
+                        >
+                          淘汰
+                        </span>
+                        <span v-else class="text-[9px] text-neutral-700">–</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="!match.roundScores || match.roundScores.length === 0" class="text-[10px] text-neutral-600 py-1 px-1.5">暂无名单 / 评分</p>
+              </div>
+
+              <!-- 海选:列表样式(保持原样) -->
+              <div v-else class="space-y-1">
                 <div
                   v-for="r in match.roundScores"
                   :key="String(r.roundId) + '-' + String(r.competitorId ?? '')"
@@ -995,6 +1090,8 @@ interface Stage {
   skipConfirm?: boolean;
   prevStageId: string | null;
   nextStageId: string | null;
+  /** 赛段规则配置(JSON 串):排名赛据此取评分维度,按「每维度一列」展示 */
+  ruleConfig?: string;
 }
 
 interface MatchInfo {
@@ -1063,6 +1160,8 @@ interface MatchRoundScore {
   score?: number | null;
   outcomeStatus?: string | null;
   refereeScores?: { refereeId?: string | number; refereeName?: string; score?: number }[];
+  /** 排名赛:各评分维度的聚合分(按配置维度顺序) */
+  dimensions?: { key?: string; name?: string; score?: number | null }[];
 }
 
 const stages = ref<Stage[]>([]);
@@ -1132,6 +1231,42 @@ watch(arenaNextPair, (val, old) => {
 
 /** 当前赛段是否由导播台直接判定(淘汰赛/擂台赛共用 publishMode=DIRECTOR) */
 const isDirectorJudge = computed(() => matches.value.some((m) => m.publishMode === 'DIRECTOR'));
+/** 当前赛段赛制(集中取一次,模板里复用) */
+const isAuditionStage = computed(() => currentStage.value?.stageMode === 'AUDITION');
+const isRankStage = computed(() => currentStage.value?.stageMode === 'RANK');
+/** 逐选手赛制:海选/排名赛,按选手名单逐个评分 */
+const isPerCompetitorStage = computed(() => isAuditionStage.value || isRankStage.value);
+/** 排名赛评分维度(每维度一列):优先取赛段配置,缺失时按场次明细里的维度并集兜底 */
+const rankDimensions = computed<{ key: string; name: string }[]>(() => {
+  if (!isRankStage.value) return [];
+  const cfg = currentStage.value?.ruleConfig;
+  if (cfg) {
+    try {
+      const dims = JSON.parse(cfg)?.scoring?.dimensions;
+      if (Array.isArray(dims) && dims.length) {
+        return dims.filter((d: any) => d && d.key).map((d: any) => ({ key: String(d.key), name: d.name || String(d.key) }));
+      }
+    } catch {
+      // 配置解析失败:回退到明细并集
+    }
+  }
+  const seen = new Map<string, string>();
+  matches.value.forEach((m) => {
+    (m.roundScores || []).forEach((r) => {
+      (r.dimensions || []).forEach((d) => {
+        const k = d?.key != null ? String(d.key) : '';
+        if (k && !seen.has(k)) seen.set(k, d.name || k);
+      });
+    });
+  });
+  return Array.from(seen, ([key, name]) => ({ key, name }));
+});
+
+/** 某选手在某维度上的聚合分(未打分返回 null → 表格显示 -) */
+const dimScore = (r: any, key: string): number | null => {
+  const hit = (r?.dimensions || []).find((d: any) => d?.key != null && String(d.key) === key);
+  return hit?.score ?? null;
+};
 /** 海选:本赛段计划晋级总人数(取自场次上的同口径字段) */
 const auditionStageAdvanceCount = computed(() => Number(matches.value[0]?.stageAdvanceCount) || 0);
 /** 临时弃权(擂台赛):按钮唤起弹窗,选择哪位选手本轮跳过(排到队尾,后续仍参与排名) */
@@ -1205,7 +1340,8 @@ const loadStages = async () => {
       awaitingAdvancement: !!item.awaitingAdvancement,
       skipConfirm: !!item.skipConfirm,
       prevStageId: safeId(item.prevStageId),
-      nextStageId: safeId(item.nextStageId)
+      nextStageId: safeId(item.nextStageId),
+      ruleConfig: item.ruleConfig
     }));
 
     const stageMap = new Map<string, Stage>();
@@ -1334,9 +1470,10 @@ const loadMatchesForStage = async (stageId: string) => {
   }
   // 自由对抗:同步拉本赛段选手名单,供「添加对战」「选择晋级」使用
   await loadFreeMatchCompetitors(stageId);
-  // 海选:拉取各场次当前标记的上场选手,供导播台高亮(大屏 widget 同步显示)
+  // 逐选手赛制(海选/排名赛):拉取各场次当前标记的上场选手,供导播台高亮(大屏 widget 同步显示)
   currentCompetitorByMatch.value = {};
-  if (currentStage.value?.stageMode === 'AUDITION' && matches.value.length > 0) {
+  const perCompetitor = currentStage.value?.stageMode === 'AUDITION' || currentStage.value?.stageMode === 'RANK';
+  if (perCompetitor && matches.value.length > 0) {
     await Promise.all(
       matches.value.map(async (m) => {
         try {

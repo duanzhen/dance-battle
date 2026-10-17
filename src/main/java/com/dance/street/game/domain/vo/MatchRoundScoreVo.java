@@ -43,6 +43,27 @@ public class MatchRoundScoreVo implements Serializable {
     /** 各裁判打分明细 */
     private List<RefereeScore> refereeScores;
 
+    /**
+     * 排名赛各评分维度的聚合分(按维度配置顺序);海选为空。
+     * 供导播台/大屏按「每维度一列」展示。
+     */
+    private List<DimensionScore> dimensions;
+
+    @Data
+    public static class DimensionScore implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        /** 维度标识(如 TECH/CREATE/SHOW) */
+        private String key;
+
+        /** 维度名称 */
+        private String name;
+
+        /** 该维度聚合分(多裁判按裁判间汇总规则合并;无人打分时为 null) */
+        private BigDecimal score;
+    }
+
     @Data
     public static class RefereeScore implements Serializable {
 

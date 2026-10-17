@@ -151,6 +151,9 @@ public class StageCheckInService {
                 throw new ServiceException("目标圈[第{}圈]不存在或不可用", zoneIndex);
             }
             target = candidates.get(zoneIndex - 1);
+        } else if (!auditionSplit) {
+            // 排名赛不分圈:整段只有一场,直接落到唯一可用的正式场次,无需客户端指定圈
+            target = candidates.get(0);
         } else {
             // 落圈一律由客户端决定:后端不再按号码/名额择优推导,
             // 否则同一批号码会因「先建圈后签到 / 签完再生成」等调用顺序不同而落到不同的圈。

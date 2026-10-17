@@ -3,15 +3,12 @@ package com.dance.street.game.service.impl.stage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
-import com.dance.street.game.domain.TMatchParticipant;
-import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
@@ -39,7 +36,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -64,8 +60,6 @@ public class StageRunService {
     private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
     private final TMatchMapper matchMapper;
-    private final TMatchParticipantMapper participantMapper;
-    private final TMatchRefereeMapper matchRefereeMapper;
     private final ITStageRosterService rosterService;
     private final AuditionCircleSupport auditionCircleSupport;
     /** 开赛时先初始化并生成对阵 */

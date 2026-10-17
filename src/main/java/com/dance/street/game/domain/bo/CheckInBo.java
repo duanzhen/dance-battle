@@ -52,8 +52,9 @@ public class CheckInBo implements Serializable {
     private String avatar;
 
     /**
-     * 目标圈场次ID（可选）：海选/排名赛分圈时指定新选手挂入的圈。
+     * 目标圈场次ID（可选）：海选分圈时指定新选手挂入的圈。
      * 多圈时必传（后端不再自行推导圈位），仅单圈时可省略；与 zoneIndex 二选一。
+     * 排名赛不分圈，留空由后端自动挂入唯一场次。
      */
     private Long matchId;
 

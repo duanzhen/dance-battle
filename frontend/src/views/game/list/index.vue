@@ -317,22 +317,32 @@
               <span class="text-neutral-500">大屏匿名投射，裁判扫码判罚</span>
             </div>
           </div>
-          <a
-            href="https://docs.dancebattle.win/"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="mt-4 inline-flex items-center gap-1.5 text-xs text-amber-500 hover:text-amber-400 transition-colors"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-              />
-            </svg>
-            查看完整使用文档
-          </a>
+          <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <button
+              type="button"
+              @click="showHelp = true"
+              class="inline-flex items-center gap-1.5 text-xs text-amber-500 hover:text-amber-400 transition-colors"
+            >
+              <CircleHelp class="w-3.5 h-3.5" />
+              打开帮助中心
+            </button>
+            <a
+              href="https://docs.dancebattle.win/"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                />
+              </svg>
+              查看完整使用文档
+            </a>
+          </div>
         </div>
       </div>
 
@@ -379,53 +389,8 @@
     <!-- 修改密码对话框 -->
     <PasswordDialog ref="passwordDialogRef" />
 
-    <!-- 使用帮助:整体流程介绍 -->
-    <GameDialog
-      v-model="showHelp"
-      width="680px"
-      title="使用流程"
-      subtitle="从建赛到开赛,几步走完一整场比赛"
-      :icon="CircleHelp"
-      dialog-class="help-dialog"
-    >
-      <div class="space-y-2.5 max-h-[64vh] overflow-y-auto pr-1">
-        <div
-          v-for="(step, i) in helpSteps"
-          :key="i"
-          class="flex items-start gap-3 rounded-xl border border-neutral-800 bg-neutral-950/60 p-3"
-        >
-          <div class="flex-none w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center text-xs font-bold">
-            {{ i + 1 }}
-          </div>
-          <div class="min-w-0">
-            <h4 class="text-sm font-bold text-neutral-100">
-              {{ step.title }}
-              <span v-if="step.where" class="ml-1 text-[11px] font-normal text-amber-500/80">· {{ step.where }}</span>
-            </h4>
-            <p class="text-xs text-neutral-400 mt-1 leading-relaxed">{{ step.desc }}</p>
-          </div>
-        </div>
-      </div>
-
-      <template #footer>
-        <div class="flex items-center justify-between gap-3">
-          <a
-            href="https://docs.dancebattle.win/"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-xs text-amber-500 hover:text-amber-400 transition-colors"
-          >
-            查看完整文档
-          </a>
-          <button
-            @click="showHelp = false"
-            class="px-5 py-2 rounded-lg text-sm font-bold text-neutral-900 bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all"
-          >
-            知道了
-          </button>
-        </div>
-      </template>
-    </GameDialog>
+    <!-- 使用帮助:流程 / 角色入口 / 常见问题 -->
+    <HelpCenter v-model="showHelp" />
   </div>
 </template>
 
@@ -436,7 +401,7 @@ import { ElMessageBox } from 'element-plus';
 import { CircleHelp } from 'lucide-vue-next';
 import { useUserStore } from '@/store/modules/user';
 import PasswordDialog from '@/components/PasswordDialog/index.vue';
-import GameDialog from '@/components/GameDialog/index.vue';
+import HelpCenter from '@/components/HelpCenter/index.vue';
 import TournamentForm from './TournamentForm.vue';
 import { listTournament } from '@/api/game/tournament';
 import logoFlat from '@/assets/logo/logo_flat.png';
@@ -471,39 +436,6 @@ const showForm = ref(false);
 
 // --- 使用帮助弹窗 ---
 const showHelp = ref(false);
-// 整体使用流程:从建赛到开赛,每步标注在哪个入口完成
-const helpSteps = [
-  {
-    title: '创建赛事',
-    where: '管理端 · 赛事大厅',
-    desc: '点「创建赛事」填名称、选裁判与模版。选模版会自动生成赛段链、场景与对战树；也可以留空后手动编排。'
-  },
-  {
-    title: '导入选手并签到',
-    where: '管理端 · 赛事配置 → 参赛阵容',
-    desc: '用「批量导入」上传 Excel，或逐个添加选手。现场按签到给选手编号落圈；海选进行中签到会自动加入场次。'
-  },
-  {
-    title: '编排赛段与名单来源',
-    where: '管理端 · 赛段流程',
-    desc: '增删赛段、设置赛制规则，配置「谁晋级进哪一段」。上一段结束后，在中间态确认晋级名单，下一段才能开赛。'
-  },
-  {
-    title: '开赛',
-    where: '手机导播台（MC 扫码进入）',
-    desc: '点「开始赛段」自动生成对阵，逐场推进；每场判完点「下一场」，赛段打完点「完成赛段」结算排名。'
-  },
-  {
-    title: '裁判判罚',
-    where: '裁判端（裁判扫码进入）',
-    desc: '在赛事配置的「裁判组」里给每名裁判生成专属二维码；裁判扫码进入打分页，只看到自己该看的内容。'
-  },
-  {
-    title: '大屏投射',
-    where: '大屏（无需登录）',
-    desc: '打开「赛事大屏」，实时同步对战树、记分板与倒计时给观众；多台机器可互相联动。'
-  }
-];
 
 // --- 定义页面使用的赛事数据结构 ---
 interface TournamentItem {
@@ -652,10 +584,10 @@ const isFiltering = computed(() => currentTab.value !== 'ALL' || searchQuery.val
 
 // 首次使用引导步骤
 const onboardingSteps = [
-  { title: '创建赛事', desc: '填名称、选裁判与模版，赛段链/场景/对战树会自动生成' },
-  { title: '导入选手并签到', desc: '导入 Excel 或逐个添加，现场按号码签到落圈' },
-  { title: '手机导播台开赛', desc: 'MC 扫码进入，开始赛段、逐场推进、完成结算' },
-  { title: '大屏投射', desc: '打开赛事大屏，对战树与记分板实时同步到观众' }
+  { title: '创建赛事', desc: '填名称、封面，选裁判（必填）与模版；选模版会自动生成赛段链、场景与对战树' },
+  { title: '导入选手并签到', desc: '导入 Excel 或逐个添加；现场按号码签到落圈，海选进行中自动加入场次' },
+  { title: '手机导播台开赛', desc: 'MC 扫码进入：开始赛段、逐场推进、完成赛段结算' },
+  { title: '大屏投射', desc: '打开赛事大屏，对战树、记分板与倒计时实时同步给观众' }
 ];
 
 const resetFilters = () => {
@@ -772,10 +704,5 @@ html {
 .user-menu-popper .el-popper__arrow::before {
   background: #171717;
   border-color: #262626;
-}
-
-/* 使用帮助弹窗:窄屏下不超出视口 */
-.el-overlay .help-dialog {
-  max-width: 92vw;
 }
 </style>

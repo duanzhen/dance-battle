@@ -525,8 +525,12 @@ const targetCircleName = computed(() => {
  * 海选多圈一律手动指定:未选圈时不带圈位(提交前会拦截)。
  */
 const targetCirclePayload = (): { matchId?: string | number; zoneIndex?: number } => {
-  // 单圈(含排名赛的单场):唯一圈即第 1 圈,无需手动选择
-  if ((stageMode.value === 'AUDITION' || stageMode.value === 'RANK') && effectiveCircleCount.value <= 1) {
+  // 排名赛不分圈:整段只有一场,由后端自动落到唯一场次,前端不传圈位
+  if (stageMode.value === 'RANK') {
+    return {};
+  }
+  // 海选单圈:唯一圈即第 1 圈,无需手动选择
+  if (stageMode.value === 'AUDITION' && effectiveCircleCount.value <= 1) {
     const only = circleBar.value[0];
     return only?.matchId != null ? { matchId: only.matchId } : { zoneIndex: 1 };
   }

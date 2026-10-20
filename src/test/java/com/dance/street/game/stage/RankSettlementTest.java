@@ -10,6 +10,7 @@ import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.TStageBo;
+import com.dance.street.game.domain.vo.MatchRoundScoreVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
@@ -24,6 +25,7 @@ import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
+import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +41,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -139,12 +142,13 @@ class RankSettlementTest {
     @Test
     void rankStageExposesRosterAndLiveScores() {
         Long tid = newTournament("排名赛导播台视图");
-        Long judge = insertReferee(tid, "裁判A");
+        Long judgeA = insertReferee(tid, "裁判A");
+        Long judgeB = insertReferee(tid, "裁判B");
         String twoDimRule = "{\"mode\":\"RANK\",\"advanceCount\":1,"
             + "\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
-            + "\"refereeAggregateRule\":\"AVG\",\"aggregateRule\":\"SUM\",\"dimensions\":["
-            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":1,\"maxScore\":100},"
-            + "{\"key\":\"SHOW\",\"name\":\"表现力\",\"weight\":1,\"maxScore\":100}]}}";
+            + "\"refereeAggregateRule\":\"SUM\",\"aggregateRule\":\"WEIGHTED\",\"dimensions\":["
+            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":50,\"maxScore\":100},"
+            + "{\"key\":\"SHOW\",\"name\":\"表现力\",\"weight\":50,\"maxScore\":100}]}}";
         TStageVo stage = newStage(tid, "排名赛", 3, 1, twoDimRule);
         for (int i = 1; i <= 3; i++) {
             insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
@@ -155,21 +159,8 @@ class RankSettlementTest {
         List<TMatchParticipant> parts = realParticipants(match.getId());
         assertEquals(3, parts.size(), "3 名选手应全部挂在本场");
 
-        SubmitResultBo bo = new SubmitResultBo();
-        bo.setMatchId(match.getId());
-        bo.setRefereeId(judge);
-        List<ScoreEntryBo> scores = new ArrayList<>();
-        for (int i = 0; i < parts.size(); i++) {
-            for (String dim : new String[]{"TECH", "SHOW"}) {
-                ScoreEntryBo se = new ScoreEntryBo();
-                se.setCompetitorId(parts.get(i).getCompetitorId());
-                se.setDimension(dim);
-                se.setScore(BigDecimal.valueOf(("TECH".equals(dim) ? 90 : 80) - i * 10));
-                scores.add(se);
-            }
-        }
-        bo.setScores(scores);
-        matchResultService.submitResult(bo);
+        submitDimScores(match, judgeA, parts, 90, 80);
+        submitDimScores(match, judgeB, parts, 70, 60);
 
         TMatchBo q = new TMatchBo();
         q.setStageId(stage.getId());
@@ -183,15 +174,68 @@ class RankSettlementTest {
         assertTrue(vo.getRoundScores().stream().allMatch(r -> r.getCompetitorName() != null),
             "名单应带选手姓名");
 
-        // 每个评分维度都是一列:首名选手 TECH=90、SHOW=80,总分为两者之和
+        // 每个评分维度都是一列;多裁判时维度分求和,维度间按 50/50 加权,同时保留每个裁判的原始单项分
         var top = vo.getRoundScores().get(0);
         assertNotNull(top.getDimensions(), "排名赛应返回各维度聚合分");
         assertEquals(2, top.getDimensions().size(), "应有两个评分维度");
         assertEquals("TECH", top.getDimensions().get(0).getKey());
         assertEquals("SHOW", top.getDimensions().get(1).getKey());
-        assertEquals(0, BigDecimal.valueOf(90).compareTo(top.getDimensions().get(0).getScore()));
-        assertEquals(0, BigDecimal.valueOf(80).compareTo(top.getDimensions().get(1).getScore()));
-        assertEquals(0, BigDecimal.valueOf(170).compareTo(top.getScore()), "总分应为各维度之和");
+        assertEquals(0, BigDecimal.valueOf(160).compareTo(top.getDimensions().get(0).getScore()), "技术维度应为两裁判求和");
+        assertEquals(0, BigDecimal.valueOf(140).compareTo(top.getDimensions().get(1).getScore()), "表现力维度应为两裁判求和");
+        assertEquals(0, BigDecimal.valueOf(150).compareTo(top.getScore()), "总分应为维度分按 50/50 加权");
+        assertRefereeScores(top.getDimensions().get(0).getRefereeScores(), 90, 70);
+        assertRefereeScores(top.getDimensions().get(1).getRefereeScores(), 80, 60);
+    }
+
+    /**
+     * 维度权重合计 100% 在「开始赛段」时校验:配置可以边改边存,开赛这一刻必须合法。
+     */
+    @Test
+    void rankStageStartRejectsWeightsNotSummingTo100() {
+        Long tid = newTournament("排名赛权重校验");
+        String badRule = "{\"mode\":\"RANK\",\"advanceCount\":1,"
+            + "\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
+            + "\"refereeAggregateRule\":\"AVG\",\"aggregateRule\":\"WEIGHTED\",\"dimensions\":["
+            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":50,\"maxScore\":100},"
+            + "{\"key\":\"SHOW\",\"name\":\"表现力\",\"weight\":40,\"maxScore\":100}]}}";
+        TStageVo stage = newStage(tid, "排名赛", 3, 1, badRule);
+        for (int i = 1; i <= 3; i++) {
+            insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
+        }
+
+        ServiceException ex = assertThrows(ServiceException.class, () -> lifecycleService.startStage(stage.getId()));
+        assertTrue(ex.getMessage().contains("100%"), "开赛应提示权重合计需为 100%: " + ex.getMessage());
+    }
+
+    /** 提交一名裁判对全场选手两个维度的分(按选手顺序递减) */
+    private void submitDimScores(TMatch match, Long refereeId, List<TMatchParticipant> parts, int techBase, int showBase) {
+        SubmitResultBo bo = new SubmitResultBo();
+        bo.setMatchId(match.getId());
+        bo.setRefereeId(refereeId);
+        List<ScoreEntryBo> scores = new ArrayList<>();
+        for (int i = 0; i < parts.size(); i++) {
+            for (String dim : new String[]{"TECH", "SHOW"}) {
+                ScoreEntryBo se = new ScoreEntryBo();
+                se.setCompetitorId(parts.get(i).getCompetitorId());
+                se.setDimension(dim);
+                se.setScore(BigDecimal.valueOf(("TECH".equals(dim) ? techBase : showBase) - i * 10));
+                scores.add(se);
+            }
+        }
+        bo.setScores(scores);
+        matchResultService.submitResult(bo);
+    }
+
+    /** 断言某维度包含指定裁判原始分(顺序无关) */
+    private void assertRefereeScores(List<MatchRoundScoreVo.RefereeScore> refScores, int... expected) {
+        assertNotNull(refScores, "应返回每个裁判的单项分");
+        assertEquals(expected.length, refScores.size());
+        List<BigDecimal> actual = refScores.stream().map(MatchRoundScoreVo.RefereeScore::getScore).toList();
+        for (int e : expected) {
+            assertTrue(actual.stream().anyMatch(v -> v != null && v.compareTo(BigDecimal.valueOf(e)) == 0),
+                "缺少裁判分 " + e + ",实际: " + actual);
+        }
+        assertTrue(refScores.stream().allMatch(r -> r.getRefereeName() != null), "应带裁判姓名");
     }
 
     private Long newTournament(String name) {
@@ -259,6 +303,6 @@ class RankSettlementTest {
         return "{\"mode\":\"RANK\",\"circles\":1,\"advanceCount\":" + advanceCount
             + ",\"maxScore\":100,\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
             + "\"refereeAggregateRule\":\"AVG\",\"dimensions\":["
-            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":1,\"maxScore\":100}]}}";
+            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":100,\"maxScore\":100}]}}";
     }
 }

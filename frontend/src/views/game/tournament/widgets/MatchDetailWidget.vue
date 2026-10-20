@@ -7,7 +7,7 @@
           v-if="match"
           :key="match?.id"
           class="w-full h-full relative bg-cover bg-center flex items-center justify-between px-[2%]"
-          :style="bgImage ? { backgroundImage: `url(${bgImage})` } : { backgroundColor: '#0a0a0a' }"
+          :style="rootStyle"
         >
           <!-- 顶部信息:赛段 · 场次 · 轮次 -->
           <div class="absolute top-[4%] left-0 right-0 flex items-center justify-center gap-2 text-white/90">
@@ -24,7 +24,7 @@
             :style="playerClass('LEFT')"
           >
             <!-- 照片区域固定正方形:背景色铺满,人像 object-contain 居中内嵌;50% 圆角裁成圆形 -->
-            <div class="h-[46%] aspect-square max-w-full rounded-[50%] flex items-center justify-center overflow-hidden" :style="avatarStyle">
+            <div class="aspect-square max-w-full flex items-center justify-center overflow-hidden" :style="avatarBoxStyle">
               <img v-if="leftAvatar" :src="leftAvatar" class="w-full h-full object-contain" @error="onImgError" />
             </div>
             <span
@@ -58,7 +58,7 @@
             :style="playerClass('RIGHT')"
           >
             <!-- 照片区域固定正方形:背景色铺满,人像 object-contain 居中内嵌;50% 圆角裁成圆形 -->
-            <div class="h-[46%] aspect-square max-w-full rounded-[50%] flex items-center justify-center overflow-hidden" :style="avatarStyle">
+            <div class="aspect-square max-w-full flex items-center justify-center overflow-hidden" :style="avatarBoxStyle">
               <img v-if="rightAvatar" :src="rightAvatar" class="w-full h-full object-contain" @error="onImgError" />
             </div>
             <span
@@ -169,10 +169,44 @@
         <div class="mt-3">
           <CheckboxGroup
             label="显示选项"
-            :model-value="{ showVotePanel }"
-            :options="[{ key: 'showVotePanel', label: '显示裁判判罚' }]"
+            :model-value="{ showVotePanel, roundAvatar: roundAvatarEnabled }"
+            :options="[
+              { key: 'showVotePanel', label: '显示裁判判罚' },
+              { key: 'roundAvatar', label: '圆形头像框' }
+            ]"
             @update:item="handleOptionUpdate"
           />
+        </div>
+        <div class="mt-3">
+          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">图片大小</label>
+          <div class="flex items-center gap-3">
+            <input
+              type="range"
+              min="20"
+              max="80"
+              step="1"
+              :value="avatarSizePct"
+              class="flex-1 accent-amber-500"
+              @change="$emit('update:avatarSize', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ avatarSizePct }}%</span>
+          </div>
+        </div>
+        <div class="mt-3">
+          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">选手距离</label>
+          <div class="flex items-center gap-3">
+            <input
+              type="range"
+              min="0"
+              max="20"
+              step="1"
+              :value="playerGapPct"
+              class="flex-1 accent-amber-500"
+              @change="$emit('update:playerGap', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ playerGapPct }}%</span>
+          </div>
+          <p class="text-[10px] text-neutral-600 mt-1">左右两名选手之间的水平间距(占控件宽度)</p>
         </div>
         <div class="mt-3">
           <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">选手照片背景颜色</span>
@@ -230,6 +264,12 @@ const props = defineProps<{
   showVotePanel?: boolean;
   /** 选手照片背景颜色:空字符串 = 透明(默认) */
   avatarBgColor?: string;
+  /** 图片大小:选手头像高度占控件的百分比(默认 46) */
+  avatarSize?: number;
+  /** 选手距离:左右两名选手之间的水平间距,占控件宽度的百分比(默认 0) */
+  playerGap?: number;
+  /** 是否圆形头像框:默认 true;false = 方形 */
+  roundAvatar?: boolean;
 }>();
 /** 事件:编辑面板的选项开关统一走 update:<key>,由 PropertyPanel 写回 dataConfig */
 const emit = defineEmits<{
@@ -237,6 +277,9 @@ const emit = defineEmits<{
   'update:stageId': [v: string | number | null];
   'update:showVotePanel': [v: boolean];
   'update:avatarBgColor': [v: string];
+  'update:avatarSize': [v: number];
+  'update:playerGap': [v: number];
+  'update:roundAvatar': [v: boolean];
 }>();
 const handleOptionUpdate = (key: string, value: boolean) => {
   emit(`update:${key}` as any, value);
@@ -523,6 +566,32 @@ const rightAvatar = computed(() => avatarOf(rightP.value));
  */
 const avatarStyle = computed(() => ({
   backgroundColor: props.avatarBgColor === '' ? 'transparent' : props.avatarBgColor || undefined
+}));
+
+/** 图片大小默认值(占控件高度百分比) */
+const DEFAULT_AVATAR_SIZE = 46;
+/** 图片大小:限制在 10%~90%,配置异常时不至于头像消失或撑满整屏 */
+const avatarSizePct = computed(() => {
+  const v = Number(props.avatarSize);
+  return Number.isFinite(v) && v > 0 ? Math.min(90, Math.max(10, v)) : DEFAULT_AVATAR_SIZE;
+});
+/** 选手距离:左右两名选手之间的水平间距(占控件宽度),0%~30% */
+const playerGapPct = computed(() => {
+  const v = Number(props.playerGap);
+  return Number.isFinite(v) && v > 0 ? Math.min(30, v) : 0;
+});
+/** 是否圆形头像框:未配置时保持原有圆形 */
+const roundAvatarEnabled = computed(() => props.roundAvatar !== false);
+/** 头像外框:图片大小 / 圆角(圆形或方形) / 背景色 */
+const avatarBoxStyle = computed(() => ({
+  height: `${avatarSizePct.value}%`,
+  borderRadius: roundAvatarEnabled.value ? '50%' : '0',
+  ...avatarStyle.value
+}));
+/** 根容器:背景图 + 左右选手间距 */
+const rootStyle = computed(() => ({
+  ...(props.bgImage ? { backgroundImage: `url(${props.bgImage})` } : { backgroundColor: '#0a0a0a' }),
+  gap: `${playerGapPct.value}%`
 }));
 const leftScore = computed(() => (leftP.value?.scoreValue == null ? '–' : String(leftP.value.scoreValue)));
 const rightScore = computed(() => (rightP.value?.scoreValue == null ? '–' : String(rightP.value.scoreValue)));

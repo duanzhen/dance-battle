@@ -447,7 +447,7 @@ public class TMatchServiceImpl implements ITMatchService {
         item.setRefereeScores(refScores.isEmpty() ? null : refScores);
         if (rankStage) {
             // 排名赛:按维度输出各子项聚合分(与 MultiDimStrategy 第一步「同维度多裁判合并」同口径)
-            item.setDimensions(buildDimensionScores(scores, rankRc));
+            item.setDimensions(buildDimensionScores(scores, rankRc, refereeNameById));
         }
         if (p != null && p.getOutcomeStatus() != null) {
             item.setOutcomeStatus(p.getOutcomeStatus());
@@ -459,21 +459,23 @@ public class TMatchServiceImpl implements ITMatchService {
      * 排名赛单名选手的「各维度聚合分」:同维度多裁判先按 {@code refereeAggregateRule} 合并。
      * 按配置的维度顺序输出(未配置维度的历史数据按实际出现顺序追加);无人打分的维度为 null。
      */
-    private List<MatchRoundScoreVo.DimensionScore> buildDimensionScores(List<TRoundScore> scores, RuleConfigHolder rc) {
+    private List<MatchRoundScoreVo.DimensionScore> buildDimensionScores(List<TRoundScore> scores,
+                                                                        RuleConfigHolder rc,
+                                                                        Map<Long, String> refereeNameById) {
         ScoringConfig sc = rc != null ? rc.getScoring() : null;
         AggregateRuleEnum refRule = AggregateRuleEnum.fromCode(sc != null ? sc.getRefereeAggregateRule() : null);
         BigDecimal trimRatio = sc != null ? sc.getTrimRatio() : null;
         List<DimensionConfig> dims = sc != null ? sc.getDimensions() : null;
 
-        // 按维度分组(同维度可能有多名裁判的分)
-        Map<String, List<BigDecimal>> byDim = new LinkedHashMap<>();
+        // 按维度分组(维度下可能有多名裁判的分)
+        Map<String, List<TRoundScore>> byDim = new LinkedHashMap<>();
         if (scores != null) {
             for (TRoundScore s : scores) {
                 if (s.getScore() == null) {
                     continue;
                 }
                 String dim = StringUtils.isNotBlank(s.getDimension()) ? s.getDimension() : StageConstants.DIMENSION_MAIN;
-                byDim.computeIfAbsent(dim, k -> new ArrayList<>()).add(s.getScore());
+                byDim.computeIfAbsent(dim, k -> new ArrayList<>()).add(s);
             }
         }
         List<MatchRoundScoreVo.DimensionScore> out = new ArrayList<>();
@@ -483,24 +485,48 @@ public class TMatchServiceImpl implements ITMatchService {
                 if (d == null || StringUtils.isBlank(d.getKey()) || !used.add(d.getKey())) {
                     continue;
                 }
-                out.add(dimensionItem(d.getKey(), d.getName(), byDim.get(d.getKey()), refRule, trimRatio));
+                out.add(dimensionItem(d.getKey(), d.getName(), byDim.get(d.getKey()), refRule, trimRatio, refereeNameById));
             }
         }
         // 配置之外的维度(异常/旧数据)追加在末尾,避免丢分
-        for (Map.Entry<String, List<BigDecimal>> e : byDim.entrySet()) {
+        for (Map.Entry<String, List<TRoundScore>> e : byDim.entrySet()) {
             if (used.add(e.getKey())) {
-                out.add(dimensionItem(e.getKey(), e.getKey(), e.getValue(), refRule, trimRatio));
+                out.add(dimensionItem(e.getKey(), e.getKey(), e.getValue(), refRule, trimRatio, refereeNameById));
             }
         }
         return out;
     }
 
-    private MatchRoundScoreVo.DimensionScore dimensionItem(String key, String name, List<BigDecimal> values,
-                                                           AggregateRuleEnum refRule, BigDecimal trimRatio) {
+    private MatchRoundScoreVo.DimensionScore dimensionItem(String key, String name, List<TRoundScore> rows,
+                                                           AggregateRuleEnum refRule, BigDecimal trimRatio,
+                                                           Map<Long, String> refereeNameById) {
         MatchRoundScoreVo.DimensionScore d = new MatchRoundScoreVo.DimensionScore();
         d.setKey(key);
         d.setName(name);
-        d.setScore(values == null || values.isEmpty() ? null : ScoreAggregator.aggregate(values, refRule, trimRatio));
+        if (rows == null || rows.isEmpty()) {
+            return d;
+        }
+        // 同一裁判同一维度先合并(正常写路径已覆盖,这里兜底重复行)
+        Map<Long, BigDecimal> byReferee = new LinkedHashMap<>();
+        for (TRoundScore s : rows) {
+            if (s.getScore() == null) {
+                continue;
+            }
+            byReferee.merge(s.getRefereeId() == null ? 0L : s.getRefereeId(), s.getScore(), BigDecimal::add);
+        }
+        if (byReferee.isEmpty()) {
+            return d;
+        }
+        d.setScore(ScoreAggregator.aggregate(new ArrayList<>(byReferee.values()), refRule, trimRatio));
+        List<MatchRoundScoreVo.RefereeScore> refScores = new ArrayList<>();
+        byReferee.forEach((refId, score) -> {
+            MatchRoundScoreVo.RefereeScore ref = new MatchRoundScoreVo.RefereeScore();
+            ref.setRefereeId(refId);
+            ref.setRefereeName(refereeNameById.get(refId));
+            ref.setScore(score);
+            refScores.add(ref);
+        });
+        d.setRefereeScores(refScores);
         return d;
     }
 

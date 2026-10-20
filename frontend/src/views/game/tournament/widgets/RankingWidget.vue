@@ -1,9 +1,7 @@
 <template>
   <div class="w-full h-full">
     <!-- 查看模式:排名赛排行榜,按圈分列展示全部选手排名 -->
-    <div v-if="mode !== 'edit'" ref="viewRef" class="w-full h-full rounded-lg overflow-hidden relative">
-      <!-- 遮罩层:透明度仅作用于深色底,文字与表格内容保持不透明 -->
-      <div class="absolute inset-0 rounded-lg bg-neutral-950" :style="maskStyle"></div>
+    <div v-if="mode !== 'edit'" ref="viewRef" class="w-full h-full rounded-lg overflow-hidden relative" :style="{ backgroundColor: bgColorValue }">
       <div v-if="loading" class="relative w-full h-full flex items-center justify-center text-white/50" :style="fz(15)">加载中...</div>
       <div v-else-if="error" class="relative w-full h-full flex items-center justify-center text-white/40 px-4 text-center" :style="fz(13)">{{ error }}</div>
       <div v-else-if="!stageId" class="relative w-full h-full flex items-center justify-center text-white/40" :style="fz(13)">未绑定排名赛赛段</div>
@@ -73,22 +71,24 @@
           @update:model-value="$emit('update:stageId', $event)"
         />
         <div class="mt-3">
-          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">遮罩透明度</label>
-          <div class="flex items-center gap-3">
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="5"
-              :value="maskTransparency"
-              class="flex-1 accent-amber-500"
-              @change="$emit('update:opacity', 100 - Number(($event.target as HTMLInputElement).value))"
-            />
-            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ maskTransparency }}%</span>
+          <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">背景颜色</span>
+          <div class="flex items-center gap-1.5">
+            <div class="flex-1 min-w-0">
+              <ColorInput :model-value="bgColor ?? ''" @update:model-value="$emit('update:bgColor', $event)" />
+            </div>
+            <button
+              class="shrink-0 w-7 h-7 rounded flex items-center justify-center transition-colors"
+              :class="bgColor === '' ? 'text-amber-400 bg-amber-500/10' : 'text-neutral-500 hover:text-amber-400 hover:bg-neutral-800'"
+              title="设为透明"
+              @click="$emit('update:bgColor', '')"
+            >
+              <Ban class="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
         <p class="text-[10px] text-neutral-600 mt-2">
-          展示排名赛(多维度打分)的选手排名,以表格展示,分圈时每圈一张表;是否显示分数由赛段配置决定,手动/批量公布模式下公布前自动隐藏。遮罩透明度仅作用于深色背景,不影响文字与表格内容。
+          展示排名赛(多维度打分)的选手排名,以表格展示,分圈时每圈一张表;是否显示分数由赛段配置决定,手动/批量公布模式下公布前自动隐藏。
+          背景颜色可设为透明,不影响文字与表格内容。
         </p>
       </section>
     </div>
@@ -98,7 +98,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
+import { Ban } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
+import ColorInput from './common/ColorInput.vue';
 import {
   getStage,
   getStageRankDetail,
@@ -114,11 +116,12 @@ const props = defineProps<{
   stageId?: string | number | null;
   mode?: 'view' | 'edit';
   tournamentId?: string | number | null;
-  opacity?: number;
+  /** 背景颜色;空字符串 = 透明(默认深色底) */
+  bgColor?: string;
 }>();
-const emit = defineEmits<{
+defineEmits<{
   'update:stageId': [v: string | number | null];
-  'update:opacity': [v: number];
+  'update:bgColor': [v: string];
 }>();
 
 const route = useRoute();
@@ -152,17 +155,8 @@ const loading = ref(false);
 const loadedOnce = ref(false);
 const error = ref('');
 
-/** 遮罩不透明度 0-100(dataConfig.opacity),默认 85 与旧版 bg-neutral-950/85 视觉一致 */
-const maskOpacity = computed(() => {
-  const v = Number.isFinite(Number(props.opacity)) ? Number(props.opacity) : 85;
-  return Math.max(0, Math.min(100, v));
-});
-
-/** 滑块方向:遮罩透明度 = 100 - 不透明度,右滑更透明 */
-const maskTransparency = computed(() => Math.round(100 - maskOpacity.value));
-
-/** 遮罩层样式:只作用于深色背景,内容保持不透明 */
-const maskStyle = computed(() => ({ opacity: maskOpacity.value / 100 }));
+/** 背景颜色:空字符串 = 透明;未配置时使用深色底(与原遮罩观感一致) */
+const bgColorValue = computed(() => (props.bgColor === '' ? 'transparent' : props.bgColor || '#0a0a0a'));
 
 const stageName = ref('');
 const advanceCount = ref(0);

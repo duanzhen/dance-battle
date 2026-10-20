@@ -233,7 +233,7 @@ class StageSettlementStrategyTest {
     private String rankRule() {
         return "{\"mode\":\"RANK\",\"circles\":1,\"advanceCount\":2,\"maxScore\":100,"
             + "\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
-            + "\"dimensions\":[{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":1,\"maxScore\":100}]}}";
+            + "\"dimensions\":[{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":100,\"maxScore\":100}]}}";
     }
 
     private TStageVo newStage(Long tid, String name, String mode, int teams, int advance, String ruleConfig) {

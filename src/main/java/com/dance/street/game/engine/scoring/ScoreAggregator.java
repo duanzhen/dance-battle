@@ -43,7 +43,10 @@ public final class ScoreAggregator {
     }
 
     /**
-     * 加权求和:sum(value[i] * weight[i])。常用于多维度按权重合成(维度权重和通常为 1)。
+     * 加权求和:各维度按百分比权重合成,sum(value[i] * weight[i]) / 100。
+     *
+     * <p>权重为 0~100 的百分比,配置层要求合计 100%(开始赛段时校验)。
+     * 权重为空/0 的维度按 0 参与计算。</p>
      */
     public static BigDecimal weightedSum(List<BigDecimal> values, List<BigDecimal> weights) {
         if (values == null || values.isEmpty()) {
@@ -56,7 +59,7 @@ public final class ScoreAggregator {
             BigDecimal v = values.get(i) != null ? values.get(i) : BigDecimal.ZERO;
             total = total.add(v.multiply(w));
         }
-        return total.setScale(SCALE, RoundingMode.HALF_UP);
+        return total.divide(BigDecimal.valueOf(100), SCALE, RoundingMode.HALF_UP);
     }
 
     public static BigDecimal sum(List<BigDecimal> values) {

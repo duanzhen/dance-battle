@@ -46,10 +46,10 @@ class ScoreAggregatorTest {
 
     @Test
     void weightedSum() {
-        BigDecimal r1 = ScoreAggregator.weightedSum(List.of(bd(10), bd(20)), List.of(bd("0.5"), bd("0.5")));
+        BigDecimal r1 = ScoreAggregator.weightedSum(List.of(bd(10), bd(20)), List.of(bd("50"), bd("50")));
         assertValue(bd(15), r1);
 
-        BigDecimal r2 = ScoreAggregator.weightedSum(List.of(bd(10), bd(20)), List.of(bd("0.3"), bd("0.7")));
+        BigDecimal r2 = ScoreAggregator.weightedSum(List.of(bd(10), bd(20)), List.of(bd("30"), bd("70")));
         assertValue(bd(17), r2);
     }
 

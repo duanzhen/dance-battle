@@ -155,14 +155,14 @@ class ScoringEngineTest {
 
         DimensionConfig tech = new DimensionConfig();
         tech.setKey("TECH");
-        tech.setWeight(bd("0.5"));
+        tech.setWeight(bd("50"));
         DimensionConfig show = new DimensionConfig();
         show.setKey("SHOW");
-        show.setWeight(bd("0.5"));
+        show.setWeight(bd("50"));
         cfg.setDimensions(List.of(tech, show));
 
-        // cid1: TECH(80,90)->avg 85; SHOW(70,80)->avg 75; weighted=85*0.5+75*0.5=80
-        // cid2: TECH(60,60)->60;      SHOW(90,90)->90;     weighted=60*0.5+90*0.5=75
+        // cid1: TECH(80,90)->avg 85; SHOW(70,80)->avg 75; weighted=85*50%+75*50%=80
+        // cid2: TECH(60,60)->60;      SHOW(90,90)->90;     weighted=60*50%+90*50%=75
         MatchScoreInput input = MatchScoreInput.builder()
             .matchMode(MatchModeEnum.RANKING)
             .scoringConfig(cfg)
@@ -178,6 +178,35 @@ class ScoringEngineTest {
         List<MatchScoreResult> results = engine.compute(input);
         assertResult(find(results, 1L), bd(80), 1, null);
         assertResult(find(results, 2L), bd(75), 2, null);
+    }
+
+    @Test
+    void multiDim_weightedDim_acceptsPercentWeights() {
+        ScoringConfig cfg = new ScoringConfig();
+        cfg.setRefereeAggregateRule("AVG");
+        cfg.setAggregateRule("WEIGHTED");
+
+        DimensionConfig tech = new DimensionConfig();
+        tech.setKey("TECH");
+        tech.setWeight(bd("40"));
+        DimensionConfig show = new DimensionConfig();
+        show.setKey("SHOW");
+        show.setWeight(bd("60"));
+        cfg.setDimensions(List.of(tech, show));
+
+        // 百分比权重与小数权重等价:80*40% + 60*60% = 68
+        MatchScoreInput input = MatchScoreInput.builder()
+            .matchMode(MatchModeEnum.RANKING)
+            .scoringConfig(cfg)
+            .competitorIds(List.of(1L))
+            .rawScores(List.of(
+                rs(1L, 11L, "TECH", bd(80)),
+                rs(1L, 11L, "SHOW", bd(60))
+            ))
+            .build();
+
+        List<MatchScoreResult> results = engine.compute(input);
+        assertResult(find(results, 1L), bd(68), 1, null);
     }
 
     // ---------------- helpers ----------------

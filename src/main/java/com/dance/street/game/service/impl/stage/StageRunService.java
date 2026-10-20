@@ -7,7 +7,11 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
 import com.dance.street.game.domain.bo.SeedOrderBo;
+import com.dance.street.game.engine.common.DimensionConfig;
+import com.dance.street.game.engine.common.RuleConfigHolder;
+import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
@@ -32,6 +36,7 @@ import org.dromara.common.core.exception.ServiceException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -251,6 +256,9 @@ public class StageRunService {
         }
         // 赛制专属开赛守卫(海选:必须先配置至少一圈(人数/裁判/去向))
         StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        if (profile.rank()) {
+            assertRankWeightsSumTo100(stage);
+        }
         if (profile.setup().has(Trait.REQUIRES_CIRCLES) && auditionCircleSupport.plannedCircleCount(stage) < 1) {
             throw new ServiceException("海选尚未配置圈,请先在赛段配置中新增至少一圈(人数/裁判/去向)");
         }
@@ -260,6 +268,38 @@ public class StageRunService {
         // 不会被"链上前一段还在跑"拦住(这正是多赛段同时进行的前提)。
         // 名单守卫(规则+覆盖+快照模型):语义见 ITStageRosterService#assertStageStartable
         rosterService.assertStageStartable(stage.getId());
+    }
+
+    /**
+     * 排名赛开赛校验:仅当维度间汇总为 WEIGHTED 时,评分维度权重按百分比配置且合计必须为 100%。
+     *
+     * <p>配置保存时不拦截(允许一边改一边存),到"开始赛段"这一刻统一校验,
+     * 避免编辑过程中因中间态不合法而卡住。非加权汇总或未配置维度时不做权重校验。</p>
+     */
+    private void assertRankWeightsSumTo100(TStage stage) {
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        if (rc == null || rc.getScoring() == null
+            || !AggregateRuleEnum.WEIGHTED.getCode().equalsIgnoreCase(rc.getScoring().getAggregateRule())) {
+            return;
+        }
+        List<DimensionConfig> dims = rc != null && rc.getScoring() != null ? rc.getScoring().getDimensions() : null;
+        if (dims == null || dims.isEmpty()) {
+            return;
+        }
+        BigDecimal total = BigDecimal.ZERO;
+        for (DimensionConfig d : dims) {
+            if (d == null || d.getWeight() == null) {
+                throw new ServiceException("排名赛评分维度权重不能为空,请按百分比配置且合计 100%");
+            }
+            if (d.getWeight().signum() < 0) {
+                throw new ServiceException("排名赛评分维度权重不能为负数");
+            }
+            total = total.add(d.getWeight());
+        }
+        if (total.compareTo(BigDecimal.valueOf(100)) != 0) {
+            throw new ServiceException("排名赛各维度权重合计需为 100%(当前 {}%),请调整后再开始赛段",
+                total.stripTrailingZeros().toPlainString());
+        }
     }
 
 }

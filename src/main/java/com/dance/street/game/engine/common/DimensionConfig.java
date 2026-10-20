@@ -23,7 +23,9 @@ public class DimensionConfig implements Serializable {
     private String key;
     /** 维度名称 */
     private String name;
-    /** 权重(aggregateRule=WEIGHTED 时使用) */
+    /**
+     * 权重(aggregateRule=WEIGHTED 时使用):百分比(0~100),各维度合计 100%。
+     */
     private BigDecimal weight;
     /** 该维度满分 */
     private BigDecimal maxScore;

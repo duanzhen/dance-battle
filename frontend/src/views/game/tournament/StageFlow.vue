@@ -540,13 +540,13 @@ const defaultConfigs: Record<StageMode, any> = {
     scoring: {
       type: 'MULTI_DIM',
       matchMode: 'RANKING',
-      refereeAggregateRule: 'AVG',
-      aggregateRule: 'SUM',
+      refereeAggregateRule: 'SUM',
+      aggregateRule: 'WEIGHTED',
       trimRatio: 0.1,
       dimensions: [
-        { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
-        { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
-        { key: 'CREAT', name: '创意', weight: 0.3, maxScore: 100 }
+        { key: 'TECH', name: '技术', weight: 40, maxScore: 10 },
+        { key: 'SHOW', name: '表现力', weight: 30, maxScore: 10 },
+        { key: 'CREAT', name: '创意', weight: 30, maxScore: 10 }
       ]
     }
   }
@@ -716,6 +716,23 @@ const handleTempStageUpdate = (updated: StageData) => {
   tempStage.value = { ...tempStage.value, ...updated };
 };
 
+/**
+ * 排名赛创建校验:参赛人数、晋级名额必填,且至少配置一个评分维度。
+ * 维度权重合计 100% 在「开始赛段」时统一校验(配置允许边改边存)。
+ *
+ * @returns 错误提示;null 表示通过
+ */
+const rankConfigError = (parsed: any): string | null => {
+  const scale = Number(parsed?.scale);
+  const advance = Number(parsed?.advanceCount);
+  if (!Number.isFinite(scale) || scale < 2) return '请设置参赛人数(至少 2 人)';
+  if (!Number.isFinite(advance) || advance < 1 || advance >= scale) return '请设置晋级名额(需大于 0 且小于参赛人数)';
+  const dims = parsed?.scoring?.dimensions;
+  if (!Array.isArray(dims) || dims.length === 0) return '请至少配置一个评分维度';
+  if (dims.some((d: any) => !String(d?.name || '').trim())) return '请填写所有评分维度的名称';
+  return null;
+};
+
 // 验证是否可以完成创建
 const canCompleteCreate = computed(() => {
   if (!newStageData.value.name.trim()) return false;
@@ -732,7 +749,7 @@ const canCompleteCreate = computed(() => {
       return parsed.scale > 0 || parsed.challengerCount > 0;
     }
     if (selectedCreateMode.value === StageMode.RANK) {
-      return parsed.scale > 0 && parsed.advanceCount > 0 && parsed.scoring?.dimensions?.length > 0;
+      return rankConfigError(parsed) == null;
     }
     return true;
   } catch (e) {
@@ -799,13 +816,13 @@ const handleCreateStage = async (stageMode: StageMode, name: string, status: str
         scoring: {
           type: 'MULTI_DIM',
           matchMode: 'RANKING',
-          refereeAggregateRule: 'AVG',
-          aggregateRule: 'SUM',
+          refereeAggregateRule: 'SUM',
+          aggregateRule: 'WEIGHTED',
           trimRatio: 0.1,
           dimensions: [
-            { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
-            { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
-            { key: 'CREAT', name: '创意', weight: 0.3, maxScore: 100 }
+            { key: 'TECH', name: '技术', weight: 40, maxScore: 10 },
+            { key: 'SHOW', name: '表现力', weight: 30, maxScore: 10 },
+            { key: 'CREAT', name: '创意', weight: 30, maxScore: 10 }
           ]
         }
       }

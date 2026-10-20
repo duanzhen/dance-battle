@@ -1417,7 +1417,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
     }
 
-    /** 排名赛维度满分:取打分配置中该维度 maxScore,未配置/未命中时默认 100 */
+    /** 排名赛维度满分:取打分配置中该维度 maxScore,未配置/未命中时默认 10 */
     private java.math.BigDecimal rankMaxScore(ScoringConfig sc, String dimension) {
         if (sc != null && sc.getDimensions() != null) {
             for (var d : sc.getDimensions()) {
@@ -1426,7 +1426,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 }
             }
         }
-        return java.math.BigDecimal.valueOf(100);
+        return java.math.BigDecimal.TEN;
     }
 
     /**

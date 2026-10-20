@@ -4,8 +4,8 @@
       <h3 class="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-6 flex items-center gap-2"><Trophy class="w-4 h-4" /> 排名赛配置</h3>
 
       <div class="space-y-6">
-        <!-- 规模/晋级:参赛人数为创建配置;晋级名额为初始配置(开始前可改);排名赛不分圈 -->
-        <div class="grid gap-4" :class="currentMode === ConfigMode.CREATE ? 'grid-cols-1' : 'grid-cols-2'">
+        <!-- 规模/晋级:创建时两项都必须设置;开始前可改;排名赛不分圈 -->
+        <div class="grid grid-cols-2 gap-4">
           <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-1">参赛人数</div>
             <template v-if="currentMode === ConfigMode.CREATE">
@@ -26,7 +26,7 @@
             </template>
           </div>
 
-          <div v-if="currentMode !== ConfigMode.CREATE" class="bg-black/50 border border-neutral-800 rounded-lg p-4">
+          <div class="bg-black/50 border border-neutral-800 rounded-lg p-4">
             <div class="text-xs text-neutral-500 mb-1">晋级名额</div>
             <template v-if="canEditAdvance">
               <div class="relative">
@@ -46,6 +46,9 @@
             </template>
           </div>
         </div>
+        <p v-if="!scaleValid || !advanceValid" class="text-[10px] text-red-400 -mt-4">
+          {{ !scaleValid ? '参赛人数至少 2 人' : '晋级名额需大于 0 且小于参赛人数' }}
+        </p>
 
         <!-- 结果公布:开始后参数,非创建模式始终可编辑 -->
         <template v-if="currentMode !== ConfigMode.CREATE">
@@ -91,35 +94,33 @@
             </div>
             <div v-if="scoring.dimensions.length === 0" class="text-xs text-neutral-600">未配置维度(将按单一总分处理)</div>
             <div class="grid grid-cols-12 gap-2 mb-1 text-[10px] text-neutral-500 font-bold uppercase tracking-wider">
-              <span class="col-span-3">标识 (Key)</span>
-              <span class="col-span-3">名称</span>
-              <span class="col-span-2">权重</span>
+              <span :class="isWeighted ? 'col-span-5' : 'col-span-8'">名称</span>
+              <span v-if="isWeighted" class="col-span-3">权重(%)</span>
               <span class="col-span-2">满分</span>
               <span class="col-span-2 text-right">操作</span>
             </div>
             <div v-for="(d, i) in scoring.dimensions" :key="i" class="grid grid-cols-12 gap-2 mb-2 items-center">
               <template v-if="canEditDimensions">
                 <input
-                  v-model="d.key"
-                  placeholder="标识(TECH)"
-                  class="col-span-3 bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @input="handleUpdate"
-                />
-                <input
                   v-model="d.name"
-                  placeholder="名称(技术)"
-                  class="col-span-3 bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
+                  placeholder="维度名称(如:技术)"
+                  class="bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
+                  :class="isWeighted ? 'col-span-5' : 'col-span-8'"
                   @input="handleUpdate"
                 />
-                <input
-                  v-model.number="d.weight"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  placeholder="权重"
-                  class="col-span-2 bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @input="handleUpdate"
-                />
+                <div v-if="isWeighted" class="col-span-3 relative">
+                  <input
+                    v-model.number="d.weight"
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="100"
+                    placeholder="权重"
+                    class="w-full bg-black border border-neutral-700 rounded p-2 pr-7 text-sm text-white focus:border-amber-500 outline-none"
+                    @input="handleUpdate"
+                  />
+                  <div class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-600">%</div>
+                </div>
                 <input
                   v-model.number="d.maxScore"
                   type="number"
@@ -132,13 +133,19 @@
                 <button @click="removeDim(i)" class="col-span-2 text-xs text-red-400 hover:text-red-300">删除</button>
               </template>
               <template v-else>
-                <span class="col-span-3 text-sm text-neutral-300 font-mono">{{ d.key }}</span>
-                <span class="col-span-3 text-sm text-neutral-200">{{ d.name }}</span>
-                <span class="col-span-2 text-sm text-neutral-400 font-mono">{{ d.weight }}</span>
+                <span class="text-sm text-neutral-200" :class="isWeighted ? 'col-span-5' : 'col-span-8'">{{ d.name }}</span>
+                <span v-if="isWeighted" class="col-span-3 text-sm text-neutral-400 font-mono">{{ d.weight }}%</span>
                 <span class="col-span-2 text-sm text-neutral-400 font-mono">{{ d.maxScore }}</span>
                 <span class="col-span-2"></span>
               </template>
             </div>
+            <div v-if="isWeighted && scoring.dimensions.length > 0" class="flex items-center justify-between text-[11px] mb-1">
+              <span :class="weightValid ? 'text-neutral-500' : 'text-red-400'">
+                权重合计 {{ weightTotal }}%{{ weightValid ? '' : '，需等于 100%' }}
+              </span>
+              <span v-if="!weightValid" class="text-red-400">请调整</span>
+            </div>
+            <p v-if="scoring.dimensions.length > 0 && !dimNamesValid" class="text-[10px] text-red-400 mb-1">请填写所有评分维度的名称</p>
             <div v-if="scoring.dimensions.length > 0" class="grid grid-cols-2 gap-4 mt-3">
               <div>
                 <label class="text-xs text-neutral-600 mb-1 block">裁判间汇总</label>
@@ -221,13 +228,13 @@ const config = ref<any>({
 const scoring = ref<any>({
   type: 'MULTI_DIM',
   matchMode: 'RANKING',
-  refereeAggregateRule: 'AVG',
-  aggregateRule: 'SUM',
+  refereeAggregateRule: 'SUM',
+  aggregateRule: 'WEIGHTED',
   trimRatio: 0.1,
   dimensions: [
-    { key: 'TECH', name: '技术', weight: 0.4, maxScore: 100 },
-    { key: 'SHOW', name: '表现力', weight: 0.3, maxScore: 100 },
-    { key: 'CREAT', name: '创意', weight: 0.3, maxScore: 100 }
+    { key: 'TECH', name: '技术', weight: 40, maxScore: 10 },
+    { key: 'SHOW', name: '表现力', weight: 30, maxScore: 10 },
+    { key: 'CREAT', name: '创意', weight: 30, maxScore: 10 }
   ]
 });
 
@@ -241,6 +248,21 @@ const canEditDimensions = computed(() => {
   return currentMode.value === ConfigMode.CREATE || currentMode.value === ConfigMode.INIT;
 });
 
+/** 规模校验:参赛人数至少 2 人;晋级名额 1 ~ 参赛人数-1 */
+const scaleValid = computed(() => Number(config.value.scale) >= 2);
+const advanceValid = computed(() => {
+  const scale = Number(config.value.scale);
+  const advance = Number(config.value.advanceCount);
+  return Number.isFinite(advance) && advance >= 1 && advance < scale;
+});
+
+/** 维度权重按百分比展示,合计必须为 100% */
+const isWeighted = computed(() => scoring.value.aggregateRule === 'WEIGHTED');
+const weightTotal = computed(() => scoring.value.dimensions.reduce((sum: number, d: any) => sum + (Number(d?.weight) || 0), 0));
+const weightValid = computed(() => scoring.value.dimensions.length === 0 || Math.abs(weightTotal.value - 100) < 0.001);
+/** 每个维度都必须有名称(配置界面不再暴露内部 key) */
+const dimNamesValid = computed(() => scoring.value.dimensions.every((d: any) => String(d?.name || '').trim() !== ''));
+
 const aggregateLabels: Record<string, string> = {
   SUM: '求和',
   AVG: '平均',
@@ -249,6 +271,13 @@ const aggregateLabels: Record<string, string> = {
 };
 const aggregateLabel = (v?: string) => aggregateLabels[v || ''] || v || '—';
 
+/**
+ * 维度内部标识:配置界面只展示名称,标识在新建维度时自动生成。
+ * 名称可随时修改,标识保持稳定,历史打分不会因为改名而失联。
+ */
+let dimKeySeq = 0;
+const newDimensionKey = () => `DIM_${Date.now().toString(36)}_${(dimKeySeq++).toString(36)}`;
+
 // 解析配置:兼容旧数据(顶层扁平结构或嵌套 scoring)
 const parseConfig = () => {
   try {
@@ -256,10 +285,13 @@ const parseConfig = () => {
       const parsed = JSON.parse(props.stage.ruleConfig);
       config.value = { ...config.value, ...parsed };
       if (parsed.scoring) {
+        const sourceDims = parsed.scoring.dimensions?.length ? parsed.scoring.dimensions : scoring.value.dimensions;
+        // 旧配置/手工配置可能缺 key:补一个稳定标识,界面不展示
+        const dims = sourceDims.map((d: any) => ({ ...d, key: d?.key || newDimensionKey() }));
         scoring.value = {
           ...scoring.value,
           ...parsed.scoring,
-          dimensions: parsed.scoring.dimensions?.length ? parsed.scoring.dimensions : scoring.value.dimensions
+          dimensions: dims
         };
       }
     }
@@ -277,7 +309,7 @@ const serializeConfig = () => {
 };
 
 const addDim = () => {
-  scoring.value.dimensions.push({ key: '', name: '', weight: 0, maxScore: 100 });
+  scoring.value.dimensions.push({ key: newDimensionKey(), name: '', weight: 0, maxScore: 10 });
   handleUpdate();
 };
 

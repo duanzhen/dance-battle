@@ -62,6 +62,9 @@ public class MatchRoundScoreVo implements Serializable {
 
         /** 该维度聚合分(多裁判按裁判间汇总规则合并;无人打分时为 null) */
         private BigDecimal score;
+
+        /** 该维度下各裁判的原始分(多裁判时导播台可看到每个裁判的单项分) */
+        private List<RefereeScore> refereeScores;
     }
 
     @Data

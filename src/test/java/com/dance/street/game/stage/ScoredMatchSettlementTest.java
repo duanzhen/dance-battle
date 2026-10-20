@@ -190,6 +190,8 @@ class ScoredMatchSettlementTest {
         byCompetitor.forEach((cid, score) -> {
             ScoreEntryBo se = new ScoreEntryBo();
             se.setCompetitorId(cid);
+            // 排名赛按维度配置校验满分;测试统一用 TECH(淘汰/擂台等 VOTING 测试会忽略维度)
+            se.setDimension("TECH");
             se.setScore(score);
             scores.add(se);
         });
@@ -215,7 +217,7 @@ class ScoredMatchSettlementTest {
         return "{\"mode\":\"RANK\",\"circles\":1,\"advanceCount\":" + advanceCount
             + ",\"maxScore\":100,\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
             + "\"refereeAggregateRule\":\"AVG\",\"dimensions\":["
-            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":1,\"maxScore\":100}]}}";
+            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":100,\"maxScore\":100}]}}";
     }
 
     // ------------------------------------------------------------------

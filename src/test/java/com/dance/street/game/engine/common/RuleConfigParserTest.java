@@ -23,8 +23,8 @@ class RuleConfigParserTest {
                 "type": "MULTI_DIM", "matchMode": "RANKING",
                 "aggregateRule": "WEIGHTED", "refereeAggregateRule": "AVG", "trimRatio": 0.1,
                 "dimensions": [
-                  { "key": "TECH", "name": "技术", "weight": 0.5, "maxScore": 100 },
-                  { "key": "CREATE", "name": "创意", "weight": 0.3, "maxScore": 100 }
+                  { "key": "TECH", "name": "技术", "weight": 50, "maxScore": 100 },
+                  { "key": "CREATE", "name": "创意", "weight": 30, "maxScore": 100 }
                 ],
                 "outcomeRules": { "winScore": 1, "drawScore": 0.5, "lossScore": 0 }
               },
@@ -43,8 +43,8 @@ class RuleConfigParserTest {
         assertEquals("WEIGHTED", holder.getScoring().getAggregateRule());
         assertEquals("AVG", holder.getScoring().getRefereeAggregateRule());
         assertEquals(2, holder.getScoring().getDimensions().size());
-        // BigDecimal 数值比较(0.5 反序列化后精度可能不同,用 compareTo)
-        assertEquals(0, new BigDecimal("0.5").compareTo(holder.getScoring().getDimensions().get(0).getWeight()));
+        // BigDecimal 数值比较(反序列化后精度可能不同,用 compareTo)
+        assertEquals(0, new BigDecimal("50").compareTo(holder.getScoring().getDimensions().get(0).getWeight()));
         // 往返:再序列化后解析,关键字段保持
         String json2 = RuleConfigParser.toJson(holder);
         RuleConfigHolder holder2 = RuleConfigParser.parse(json2);

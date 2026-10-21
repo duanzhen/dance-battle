@@ -164,6 +164,8 @@
                   @update:avatarSize="handleUpdateProp('avatarSize', $event)"
                   @update:playerGap="handleUpdateProp('playerGap', $event)"
                   @update:roundAvatar="handleUpdateProp('roundAvatar', $event)"
+                  @update:nameBgSize="handleUpdateProp('nameBgSize', $event)"
+                  @update:nameBgOpacity="handleUpdateProp('nameBgOpacity', $event)"
                   @update:showScore="handleUpdateProp('showScore', $event)"
                   @update:opacity="handleUpdateProp('opacity', $event)"
                   @update:textColor="handleUpdateProp('textColor', $event)"

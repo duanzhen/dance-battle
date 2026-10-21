@@ -19,7 +19,7 @@
 
           <!-- 左方 -->
           <div
-            class="player-col flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center"
+            class="player-col relative flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center"
             :class="{ celebrating: celebration.active }"
             :style="playerClass('LEFT')"
           >
@@ -28,32 +28,31 @@
               <img v-if="leftAvatar" :src="leftAvatar" class="w-full h-full object-contain" @error="onImgError" />
             </div>
             <span
-              class="font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate w-full"
-              :class="leftLead ? 'text-amber-400' : 'text-white'"
+              class="absolute left-1/2 -translate-x-1/2 bottom-[22%] z-20 font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate max-w-full px-3 py-1 rounded-xl"
+              :class="leftLead ? 'text-amber-300' : 'text-white'"
+              :style="nameBgStyle('LEFT')"
               :title="leftName"
               >{{ leftName }}</span
             >
-            <span v-if="leftOutcome" class="text-[clamp(8px,1vw,14px)] font-bold" :class="leftLead ? 'text-green-400' : 'text-white/60'">
+            <span
+              v-if="leftOutcome"
+              class="absolute left-1/2 -translate-x-1/2 bottom-[10%] z-20 text-[clamp(8px,1vw,14px)] font-bold"
+              :class="leftLead ? 'text-green-400' : 'text-white/60'"
+            >
               {{ outcomeText(leftOutcome) }}
             </span>
           </div>
 
-          <!-- 中间:比分 -->
-          <div class="flex flex-col items-center gap-2 px-4">
-            <div class="flex items-center gap-4 text-white font-mono font-black drop-shadow">
-              <span class="text-[clamp(20px,3.5vw,56px)]" :class="leftLead ? 'text-amber-400' : ''">{{ leftScore }}</span>
-              <span class="opacity-50 text-[clamp(16px,2.5vw,40px)]">:</span>
-              <span class="text-[clamp(20px,3.5vw,56px)]" :class="rightLead ? 'text-amber-400' : ''">{{ rightScore }}</span>
-            </div>
-            <!-- 最终结果 -->
-            <div v-if="finalVerdict" class="px-4 py-1 rounded-full border font-bold text-[clamp(10px,1.3vw,18px)]" :class="finalVerdictClass">
+          <!-- 中间:最终结果(不再显示 -:- 比分占位) -->
+          <div v-if="finalVerdict" class="flex flex-col items-center px-4">
+            <div class="px-4 py-1 rounded-full border font-bold text-[clamp(10px,1.3vw,18px)]" :class="finalVerdictClass">
               {{ finalVerdict }}
             </div>
           </div>
 
           <!-- 右方 -->
           <div
-            class="player-col flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center"
+            class="player-col relative flex flex-col items-center gap-2 flex-1 min-w-0 h-full justify-center"
             :class="{ celebrating: celebration.active }"
             :style="playerClass('RIGHT')"
           >
@@ -62,12 +61,17 @@
               <img v-if="rightAvatar" :src="rightAvatar" class="w-full h-full object-contain" @error="onImgError" />
             </div>
             <span
-              class="font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate w-full"
-              :class="rightLead ? 'text-amber-400' : 'text-white'"
+              class="absolute left-1/2 -translate-x-1/2 bottom-[22%] z-20 font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate max-w-full px-3 py-1 rounded-xl"
+              :class="rightLead ? 'text-amber-300' : 'text-white'"
+              :style="nameBgStyle('RIGHT')"
               :title="rightName"
               >{{ rightName }}</span
             >
-            <span v-if="rightOutcome" class="text-[clamp(8px,1vw,14px)] font-bold" :class="rightLead ? 'text-green-400' : 'text-white/60'">
+            <span
+              v-if="rightOutcome"
+              class="absolute left-1/2 -translate-x-1/2 bottom-[10%] z-20 text-[clamp(8px,1vw,14px)] font-bold"
+              :class="rightLead ? 'text-green-400' : 'text-white/60'"
+            >
               {{ outcomeText(rightOutcome) }}
             </span>
           </div>
@@ -99,39 +103,59 @@
                 </template>
               </template>
             </div>
-            <div
-              v-for="(r, ri) in voteRounds"
-              :key="r.roundId ?? ri"
-              class="w-full rounded-xl bg-black/60 border border-white/10 backdrop-blur px-4 py-1.5"
-            >
-              <div class="flex items-center justify-center gap-1.5 flex-wrap">
-                <span class="text-[clamp(8px,0.9vw,13px)] font-bold flex-none" :class="r.status === 'SETTLED' ? 'text-white/60' : 'text-amber-400'">
-                  R{{ r.roundSequence }} · {{ roundStatusText(r) }}
-                </span>
-                <span v-if="r.winnerSide" class="text-[clamp(8px,0.9vw,13px)] font-bold flex-none" :class="roundWinnerClass(r.winnerSide)">
-                  {{ roundWinnerText(r.winnerSide) }}
-                </span>
-                <span class="w-px h-3 bg-white/15 flex-none"></span>
-                <span class="text-[clamp(8px,0.9vw,13px)] text-white/70 font-semibold flex-none">{{ r.leftName }}</span>
-                <span
-                  v-for="ref in r.refereeVotes || []"
-                  :key="ref.refereeId"
-                  class="flex items-center gap-1 px-2 py-0.5 rounded-md text-[clamp(8px,0.9vw,13px)] font-bold border"
-                  :class="voteChipClass(ref.vote)"
-                >
-                  <span class="max-w-[7vw] truncate">{{ ref.refereeName }}</span>
-                  <span>{{ voteText(ref.vote) }}</span>
-                </span>
-                <span class="text-[clamp(8px,0.9vw,13px)] text-white/70 font-semibold flex-none">{{ r.rightName }}</span>
-                <span v-if="!(r.refereeVotes || []).length" class="text-[clamp(8px,0.9vw,13px)] text-white/40">无裁判分配</span>
-              </div>
-              <!-- 本轮票数与判定 -->
-              <div v-if="roundVoteCounts(r).total > 0" class="flex items-center justify-center gap-3 mt-0.5 text-[clamp(8px,0.9vw,13px)] font-mono">
-                <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ roundVoteCounts(r).left }}</span>
-                <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ roundVoteCounts(r).right }}</span>
-                <span class="text-neutral-400">平 {{ roundVoteCounts(r).draw }}</span>
-                <span class="text-white/50">已判 {{ roundVoteCounts(r).voted }}/{{ roundVoteCounts(r).total }}</span>
-              </div>
+            <!-- 判罚矩阵:每轮一行,每个裁判一列,格子颜色代表该裁判本轮红/蓝/平的判罚 -->
+            <div class="w-full rounded-xl bg-black/60 border border-white/10 backdrop-blur px-3 py-1.5 overflow-x-auto">
+              <table class="w-full border-collapse table-fixed">
+                <colgroup>
+                  <col style="width: 22%" />
+                  <col v-for="ref in voteReferees" :key="'col-' + String(ref.refereeId ?? ref.refereeName)" />
+                  <col style="width: 28%" />
+                </colgroup>
+                <thead>
+                  <tr class="text-[clamp(9px,1vw,15px)] text-white/50">
+                    <th class="py-1 pr-2 text-left font-bold whitespace-nowrap">轮次</th>
+                    <th
+                      v-for="ref in voteReferees"
+                      :key="'vh-' + String(ref.refereeId ?? ref.refereeName)"
+                      class="py-1 px-2 text-center font-bold whitespace-nowrap"
+                    >
+                      {{ ref.refereeName || '裁判' }}
+                    </th>
+                    <th class="py-1 pl-2 text-right font-bold whitespace-nowrap">结果</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(r, ri) in voteRounds" :key="r.roundId ?? ri" class="border-t border-white/10" style="height: clamp(22px, 2.4vw, 36px)">
+                    <td class="py-1 pr-2 whitespace-nowrap">
+                      <span class="text-[clamp(9px,1vw,15px)] font-bold" :class="r.status === 'SETTLED' ? 'text-white/60' : 'text-amber-400'">
+                        R{{ r.roundSequence }} · {{ roundStatusText(r) }}
+                      </span>
+                    </td>
+                    <td
+                      v-for="ref in voteReferees"
+                      :key="'vc-' + String(r.roundId ?? ri) + '-' + String(ref.refereeId ?? ref.refereeName)"
+                      class="py-1 px-2 text-center align-middle"
+                    >
+                      <div
+                        class="inline-block rounded-[2px]"
+                        :class="voteBlockClass(refereeVote(r, ref))"
+                        :style="voteBlockStyle"
+                        :title="`${ref.refereeName || '裁判'}:${voteText(refereeVote(r, ref))}`"
+                      ></div>
+                    </td>
+                    <td class="py-1 pl-2 text-right whitespace-nowrap">
+                      <span v-if="r.winnerSide" class="text-[clamp(11px,1.35vw,20px)] font-black" :class="roundWinnerClass(r.winnerSide)">
+                        {{ roundWinnerText(r.winnerSide) }}
+                      </span>
+                      <span v-if="roundVoteCounts(r).total > 0" class="text-[clamp(9px,1.05vw,15px)] font-mono text-white/50 ml-2">
+                        {{ sideLabel('LEFT') }} {{ roundVoteCounts(r).left }} · {{ sideLabel('RIGHT') }} {{ roundVoteCounts(r).right }}
+                        <template v-if="roundVoteCounts(r).draw > 0"> · 平 {{ roundVoteCounts(r).draw }}</template>
+                      </span>
+                      <span v-else class="text-[clamp(9px,1vw,14px)] text-white/40">无裁判分配</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -183,7 +207,7 @@
             <input
               type="range"
               min="20"
-              max="80"
+              max="90"
               step="1"
               :value="avatarSizePct"
               class="flex-1 accent-amber-500"
@@ -224,8 +248,38 @@
             </button>
           </div>
         </div>
+        <div class="mt-3">
+          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">姓名背景大小</label>
+          <div class="flex items-center gap-3">
+            <input
+              type="range"
+              min="20"
+              max="100"
+              step="1"
+              :value="nameBgSizePct"
+              class="flex-1 accent-amber-500"
+              @change="$emit('update:nameBgSize', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ nameBgSizePct }}%</span>
+          </div>
+        </div>
+        <div class="mt-3">
+          <label class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">姓名背景透明度</label>
+          <div class="flex items-center gap-3">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              :value="nameBgOpacityPct"
+              class="flex-1 accent-amber-500"
+              @change="$emit('update:nameBgOpacity', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="text-xs text-neutral-400 font-mono w-10 text-right flex-none">{{ nameBgOpacityPct }}%</span>
+          </div>
+        </div>
         <p class="text-[10px] text-neutral-600 mt-2">
-          显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像/实时比分，领先方高亮。
+          显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像，领先方高亮。姓名背景跟随红蓝方配色，可调大小与透明度。
           选手照片背景颜色默认透明（抠图人像可直接叠在背景上）；底部裁判判罚明细默认关闭，
           需要时在「显示选项」里开启；非淘汰赛赛段或暂无进行中场次时控件保持透明。
         </p>
@@ -264,12 +318,16 @@ const props = defineProps<{
   showVotePanel?: boolean;
   /** 选手照片背景颜色:空字符串 = 透明(默认) */
   avatarBgColor?: string;
-  /** 图片大小:选手头像高度占控件的百分比(默认 46) */
+  /** 图片大小:选手头像高度占控件的百分比(默认 75) */
   avatarSize?: number;
   /** 选手距离:左右两名选手之间的水平间距,占控件宽度的百分比(默认 0) */
   playerGap?: number;
   /** 是否圆形头像框:默认 true;false = 方形 */
   roundAvatar?: boolean;
+  /** 选手姓名背景宽度:占选手列的百分比(默认 70) */
+  nameBgSize?: number;
+  /** 选手姓名背景透明度:0~100(默认 50) */
+  nameBgOpacity?: number;
 }>();
 /** 事件:编辑面板的选项开关统一走 update:<key>,由 PropertyPanel 写回 dataConfig */
 const emit = defineEmits<{
@@ -280,6 +338,8 @@ const emit = defineEmits<{
   'update:avatarSize': [v: number];
   'update:playerGap': [v: number];
   'update:roundAvatar': [v: boolean];
+  'update:nameBgSize': [v: number];
+  'update:nameBgOpacity': [v: number];
 }>();
 const handleOptionUpdate = (key: string, value: boolean) => {
   emit(`update:${key}` as any, value);
@@ -405,6 +465,25 @@ const mirrorParticipants = (list: any[]) => {
 const sideColorClass = (side: 'LEFT' | 'RIGHT') => {
   const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
   return red ? 'text-red-400' : 'text-blue-400';
+};
+/** 姓名背景宽度(占选手列百分比),限制 20~100 防止过窄/溢出 */
+const nameBgSizePct = computed(() => {
+  const v = Number(props.nameBgSize);
+  return Number.isFinite(v) && v > 0 ? Math.min(100, Math.max(20, v)) : 70;
+});
+/** 姓名背景透明度 0~100,默认 50 */
+const nameBgOpacityPct = computed(() => {
+  const v = Number(props.nameBgOpacity);
+  return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 50;
+});
+/** LEFT/RIGHT 对应的红蓝姓名底色:宽度与透明度均可配置 */
+const nameBgStyle = (side: 'LEFT' | 'RIGHT') => {
+  const red = side === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
+  const alpha = nameBgOpacityPct.value / 100;
+  return {
+    width: `${nameBgSizePct.value}%`,
+    backgroundColor: red ? `rgba(220, 38, 38, ${alpha})` : `rgba(37, 99, 235, ${alpha})`
+  };
 };
 /** LEFT/RIGHT 对应的红蓝文案 */
 const sideLabel = (side: 'LEFT' | 'RIGHT') => {
@@ -569,7 +648,7 @@ const avatarStyle = computed(() => ({
 }));
 
 /** 图片大小默认值(占控件高度百分比) */
-const DEFAULT_AVATAR_SIZE = 46;
+const DEFAULT_AVATAR_SIZE = 75;
 /** 图片大小:限制在 10%~90%,配置异常时不至于头像消失或撑满整屏 */
 const avatarSizePct = computed(() => {
   const v = Number(props.avatarSize);
@@ -593,8 +672,6 @@ const rootStyle = computed(() => ({
   ...(props.bgImage ? { backgroundImage: `url(${props.bgImage})` } : { backgroundColor: '#0a0a0a' }),
   gap: `${playerGapPct.value}%`
 }));
-const leftScore = computed(() => (leftP.value?.scoreValue == null ? '–' : String(leftP.value.scoreValue)));
-const rightScore = computed(() => (rightP.value?.scoreValue == null ? '–' : String(rightP.value.scoreValue)));
 const leftLead = computed(() => {
   if (matchDetail.value?.leftWin === true) return true;
   if (matchDetail.value?.rightWin === true) return false;
@@ -621,14 +698,41 @@ const votePanelVisible = computed(() => props.showVotePanel === true && hasVoteD
 
 const voteText = (v: string | null | undefined) =>
   v === 'LEFT' ? sideLabel('LEFT') : v === 'RIGHT' ? sideLabel('RIGHT') : v === 'DRAW' ? '平' : '未判';
-const voteChipClass = (v: string | null | undefined) => {
+
+/** 判罚矩阵列:所有轮次出现过的裁判(按首次出现顺序,列顺序稳定) */
+const voteReferees = computed(() => {
+  const map = new Map<string, { refereeId?: string | number; refereeName?: string }>();
+  for (const r of voteRounds.value) {
+    for (const v of r.refereeVotes || []) {
+      const key = String(v.refereeId ?? v.refereeName ?? '');
+      if (key && !map.has(key)) {
+        map.set(key, { refereeId: v.refereeId, refereeName: v.refereeName });
+      }
+    }
+  }
+  return Array.from(map.values());
+});
+
+/** 某轮某裁判的判罚:LEFT / RIGHT / DRAW / null(未判) */
+const refereeVote = (r: any, ref: { refereeId?: string | number; refereeName?: string }): string | null => {
+  const votes: any[] = r?.refereeVotes || [];
+  const hit = votes.find((v) =>
+    ref.refereeId != null ? String(v.refereeId) === String(ref.refereeId) : String(v.refereeName || '') === String(ref.refereeName || '')
+  );
+  return hit?.vote ?? null;
+};
+
+/** 判罚色块:红/蓝实心、平局灰色、未判深色空块 */
+const voteBlockClass = (v: string | null | undefined) => {
   if (v === 'LEFT' || v === 'RIGHT') {
     const red = v === 'LEFT' ? isLeftRed.value : !isLeftRed.value;
-    return red ? 'bg-red-500/15 text-red-400 border-red-500/40' : 'bg-blue-500/15 text-blue-400 border-blue-500/40';
+    return red ? 'bg-red-500' : 'bg-blue-500';
   }
-  if (v === 'DRAW') return 'bg-neutral-500/15 text-neutral-300 border-neutral-500/40';
-  return 'bg-neutral-800/60 text-neutral-500 border-neutral-800';
+  if (v === 'DRAW') return 'bg-neutral-500';
+  return 'bg-neutral-800 border border-neutral-700';
 };
+/** 色块尺寸随大屏缩放 */
+const voteBlockStyle = { width: 'clamp(12px, 1.5vw, 28px)', height: 'clamp(10px, 1.1vw, 20px)' };
 
 const roundStatusText = (r: any) => {
   if (r.outcome === 'DRAW') return '平局加赛';

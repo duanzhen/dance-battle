@@ -1085,16 +1085,18 @@ export const useDirectorStore = defineStore('director', () => {
       // stageId: 绑定的赛段(空=跟随链上第一个进行中赛段,多赛段并行时可按屏绑定具体分支)
       // showVotePanel: 底部裁判判罚明细,默认不显示,按需在组件属性里开启
       // avatarBgColor: 选手照片背景色,空字符串 = 透明(默认)
-      // avatarSize: 头像高度占控件高度百分比(默认 46);playerGap: 左右选手水平间距百分比(默认 0)
+      // avatarSize: 头像高度占控件高度百分比(默认 75);playerGap: 左右选手水平间距百分比(默认 0)
       // roundAvatar: 圆形头像框默认开启(false = 方形)
       dataConfig = {
         stageId: null,
         bgImage: '',
         showVotePanel: false,
         avatarBgColor: '',
-        avatarSize: 46,
+        avatarSize: 75,
         playerGap: 0,
-        roundAvatar: true
+        roundAvatar: true,
+        nameBgSize: 70,
+        nameBgOpacity: 50
       };
       defaultWidth = 800;
       defaultHeight = 300;

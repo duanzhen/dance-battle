@@ -27,6 +27,7 @@
 		<fastexcel.version>0.19.0</fastexcel.version>
 		<mapstruct-plus.version>1.5.0</mapstruct-plus.version>
 		<mapstruct-plus.lombok.version>0.2.0</mapstruct-plus.lombok.version>
+		<mcp-sdk.version>2.1.0</mcp-sdk.version>
 		<lombok.version>1.18.40</lombok.version>
 		<!-- native-image 优化级别:s=按体积优化(256MB 小内存容器默认,代码区更小);
 		     发布大机器可 -Dnative.optimize=2 换回性能;本地迭代可 -Dnative.optimize=b 加快编译 -->
@@ -88,6 +89,18 @@
 			<groupId>cn.hutool</groupId>
 			<artifactId>hutool-all</artifactId>
 			<version>${hutool.version}</version>
+		</dependency>
+
+		<!-- MCP Streamable HTTP server。JSON 模块独立于项目使用的 Jackson 3。 -->
+		<dependency>
+			<groupId>io.modelcontextprotocol.sdk</groupId>
+			<artifactId>mcp-core</artifactId>
+			<version>${mcp-sdk.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.modelcontextprotocol.sdk</groupId>
+			<artifactId>mcp-json-jackson2</artifactId>
+			<version>${mcp-sdk.version}</version>
 		</dependency>
 
 		<!-- xlsx 写出(纯 StAX) -->

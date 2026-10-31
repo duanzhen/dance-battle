@@ -168,6 +168,8 @@ public class NativeRuntimeHints implements RuntimeHintsRegistrar {
 	 */
 	private static final String[] REFLECTIVE_PACKAGES = {
 			"com.dance.street.game.domain",
+			// MCP SDK 使用 Jackson 2 反序列化 Jackson 3 看不到的协议 record。
+			"io.modelcontextprotocol.spec",
 			"org.dromara.common",
 	};
 

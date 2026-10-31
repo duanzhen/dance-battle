@@ -43,6 +43,13 @@ export const constantRoutes: RouteRecordRaw[] = [
     hidden: true
   },
   {
+    path: '/mcp/authorize',
+    component: () => import('@/views/mcp/authorize.vue'),
+    name: 'McpAuthorize',
+    hidden: true,
+    meta: { title: 'MCP 授权' }
+  },
+  {
     path: '/:pathMatch(.*)*',
     component: () => import('@/views/error/404.vue'),
     hidden: true

@@ -22,7 +22,7 @@ export const isRelogin = { show: false };
  * 这些页面上的 401 不是"管理员登录过期",不能弹重新登录框把大屏/判罚挡住——
  * 只把错误抛给调用方,由各页自己内联提示或降级。
  */
-const PUBLIC_PAGES = ['/tournament/projection', '/tournament/referee-scoring', '/tournament/mobile-director'];
+const PUBLIC_PAGES = ['/mcp/authorize', '/tournament/projection', '/tournament/referee-scoring', '/tournament/mobile-director'];
 const isPublicPage = () => {
   const path = router.currentRoute.value.path || '';
   return PUBLIC_PAGES.some((p) => path === p || path.startsWith(p + '/'));

@@ -150,6 +150,52 @@ docker run -d -p 80:80 -v app-data:/data dance-game-app:latest
 - **重置密码**:删除数据表 `t_login_account` 中的记录,下次登录会重新按环境变量初始化。
 - **裁判 / 导播**:不使用管理端账号,各自凭赛事生成的专属凭证进入对应页面,可随时重置。
 
+## MCP 接入
+
+前后端同域部署时，MCP 入口就是当前域名下的:
+
+```text
+https://<当前域名>/mcp
+```
+
+支持 Streamable HTTP。客户端首次访问会收到带
+`resource_metadata` 的 `401 WWW-Authenticate`，随后自动发现:
+
+- `GET /.well-known/oauth-protected-resource/mcp`
+- `GET /.well-known/oauth-authorization-server`
+- `POST /register`：Dynamic Client Registration
+- `GET /authorize`：跳转前端管理员授权页，使用 PKCE S256
+- `POST /token`：authorization_code 换 Bearer JWT
+
+这是用于 MCP 客户端接入的简化 OAuth 实现，不包含 consent、client secret、
+refresh token、scope 管理或撤销列表。`client_id` 和 authorization code 本身都是
+短期签名 JWT，注册信息、redirect URI、PKCE challenge 和 resource 直接编码在 token
+中，服务端不保存注册表或授权码表。当前授权码在过期前可重复换取 token，接入生产环境
+前应改为一次性存储或其他防重放机制。
+
+浏览器 OAuth 请求会进入 `/mcp/authorize`：已有管理端登录态时直接签发授权码并返回
+MCP 客户端；没有登录时先跳转 `/login`，登录成功后自动回到授权页继续。
+
+首次提供的工具是只读的 `list_tournaments`，支持可选 `limit`（1-50，默认 20）。
+默认 issuer/resource 按当前请求的 Host 推断；反向代理无法正确传递 Host 时可显式设置
+`MCP_PUBLIC_BASE_URL=https://<当前域名>`。
+
+新增 MCP 工具时，在 `com.dance.street.game.mcp.tools` 包内实现
+`com.dance.street.game.mcp.IMcpTool` 并注册为 Spring Bean，即可自动进入
+`tools/list`，无需修改服务器配置:
+
+```java
+@Service
+public class MyMcpTool implements IMcpTool {
+    public McpSchema.Tool definition() { /* name + inputSchema */ }
+    public McpSchema.CallToolResult execute(McpTransportContext ctx, McpSchema.CallToolRequest req) {
+        /* 业务逻辑；写操作需从 ctx 读取 claims 并校验权限 */
+    }
+}
+```
+
+工具名必须全局唯一，重复名称会在应用启动时直接失败。
+
 ## 开发
 
 ```bash

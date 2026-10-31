@@ -90,6 +90,14 @@ login:
     max-failures: 5
     window-minutes: 15
 
+# MCP 对外入口。不配置 public-base-url 时按当前请求的 Host/X-Forwarded-* 推断。
+mcp:
+  public-base-url: ${MCP_PUBLIC_BASE_URL:}
+  oauth:
+    authorization-code-ttl-seconds: 300
+    access-token-ttl-seconds: 3600
+    client-registration-ttl-seconds: 2592000
+
 # 本地文件上传(替代对象存储)
 file:
   upload:

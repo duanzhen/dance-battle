@@ -12,7 +12,7 @@ import { getPasswordStatus } from '@/api/login';
 import { ElMessage } from 'element-plus/es';
 
 NProgress.configure({ showSpinner: false });
-const whiteList = ['/login', '/tournament/projection', '/tournament/referee-scoring', '/tournament/mobile-director'];
+const whiteList = ['/login', '/mcp/authorize', '/tournament/projection', '/tournament/referee-scoring', '/tournament/mobile-director'];
 
 const isWhiteList = (path: string) => {
   return whiteList.some((pattern) => isPathMatch(pattern, path));

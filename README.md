@@ -176,9 +176,62 @@ refresh token、scope 管理或撤销列表。`client_id` 和 authorization code
 浏览器 OAuth 请求会进入 `/mcp/authorize`：已有管理端登录态时直接签发授权码并返回
 MCP 客户端；没有登录时先跳转 `/login`，登录成功后自动回到授权页继续。
 
-首次提供的工具是只读的 `list_tournaments`，支持可选 `limit`（1-50，默认 20）。
 默认 issuer/resource 按当前请求的 Host 推断；反向代理无法正确传递 Host 时可显式设置
 `MCP_PUBLIC_BASE_URL=https://<当前域名>`。
+
+MCP 业务工具按领域分组，写操作通过 `action` 分派并直接复用 Controller 背后的 Service，
+因此事务、状态机、资源归属和赛制校验与网页端保持一致：
+
+| 工具 | 覆盖的业务 |
+| --- | --- |
+| `list_tournaments` | 轻量赛事列表 |
+| `manage_tournaments` | 赛事增删改查、模板建赛、导播凭证读取与轮换 |
+| `manage_stages` | 赛段配置与链、初始化、生成对阵、开赛/完成/重置、擂台轮转、种子与晋级操作 |
+| `manage_rosters` | 名单来源组、候选与预览、排位、加人/移出、人工覆盖、确认与跳过 |
+| `manage_players` | 选手档案、签到/改签/解签、结构化批量导入 |
+| `manage_competitors` | 参赛单位、成员关系、场次参赛明细 |
+| `manage_referees` | 裁判档案与凭证、赛段/场次分配、裁判工作台、打分提交 |
+| `manage_matches` | 场次/轮次/原始分数、开赛与结果发布、自由对抗和当前上场选手 |
+| `manage_displays` | 场景、控件、屏幕、图层与计时/视频状态、场景投射 |
+
+写工具要求请求携带 OAuth 签发的 MCP access token，并在工具执行层再次校验
+`sub=mcp-agent` 和 `scope` 中包含 `mcp`。SSE 长连接仍属于实时传输，不作为 MCP 工具；
+但通过 `manage_displays` 投射场景会同时持久化屏幕状态并广播给已连接的大屏。
+
+Agent 在开始复杂的多步任务前，可先通过 `prompts/list` 找到业务理解模板
+`dance_battle_operator`，再调用 `prompts/get`：
+
+```json
+{
+  "name": "dance_battle_operator",
+  "arguments": {
+    "goal": "检查淘汰赛名单为什么还不能开始",
+    "focus": "roster",
+    "tournamentId": "123",
+    "stageId": "456"
+  }
+}
+```
+
+`goal` 必填；`focus` 可选 `general`、`setup`、`roster`、`competition`、`judging`、
+`display` 或 `troubleshoot`；`tournamentId`、`stageId`、`matchId` 为可选的已知上下文。
+模板会注入领域模型、状态机、工具映射、推荐执行顺序和高影响写操作约束。Prompt 本身
+只生成上下文，不直接修改业务数据。
+
+调用统一使用 `action`，主键、分页和领域对象分别是独立参数。例如：
+
+```json
+{
+  "name": "manage_stages",
+  "arguments": {
+    "action": "complete",
+    "stageId": 123456789
+  }
+}
+```
+
+每个 `action` 的枚举、参数和领域对象字段可从 `tools/list` 的 input schema 获取。
+返回同时包含可读文本和 `structuredContent`，业务异常通过 `isError=true` 返回。
 
 新增 MCP 工具时，在 `com.dance.street.game.mcp.tools` 包内实现
 `com.dance.street.game.mcp.IMcpTool` 并注册为 Spring Bean，即可自动进入

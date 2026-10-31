@@ -61,13 +61,16 @@ public class McpServerConfig implements WebMvcConfigurer {
     McpStatelessSyncServer mcpServer(HttpServletStatelessServerTransport transport,
                                      McpJsonMapper mapper,
                                      JsonSchemaValidator schemaValidator,
-                                     McpToolRegistry toolRegistry) {
+                                     McpToolRegistry toolRegistry,
+                                     McpBusinessPrompt businessPrompt) {
         return McpServer.sync(transport)
             .jsonMapper(mapper)
             .jsonSchemaValidator(schemaValidator)
             .serverInfo("dance-battle-mcp", "1.0.0")
-            .instructions("Use the available tools to inspect and manage dance-battle data.")
+            .instructions("Use the dance_battle_operator prompt to load the business model before complex "
+                + "tournament operations, then use the domain tools to inspect current state and execute changes.")
             .tools(toolRegistry.specifications())
+            .prompts(businessPrompt.toSpecification())
             .build();
     }
 

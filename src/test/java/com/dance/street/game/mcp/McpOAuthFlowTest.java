@@ -180,7 +180,13 @@ class McpOAuthFlowTest {
         HttpResponse<String> tools = postJson(client, baseUrl + "/mcp",
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}", accessToken);
         assertEquals(200, tools.statusCode(), tools.body());
-        assertTrue(tools.body().contains("list_tournaments"));
+        for (String toolName : List.of(
+            "list_tournaments", "manage_tournaments", "manage_stages", "manage_rosters",
+            "manage_players", "manage_competitors", "manage_referees", "manage_matches",
+            "manage_displays"
+        )) {
+            assertTrue(tools.body().contains(toolName), tools.body());
+        }
 
         HttpResponse<String> call = postJson(client, baseUrl + "/mcp",
             "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{"
@@ -188,6 +194,38 @@ class McpOAuthFlowTest {
             accessToken);
         assertEquals(200, call.statusCode(), call.body());
         assertTrue(call.body().contains("MCP 测试赛事"), call.body());
+
+        HttpResponse<String> managementCall = postJson(client, baseUrl + "/mcp",
+            "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{"
+                + "\"name\":\"manage_tournaments\",\"arguments\":{\"action\":\"get\",\"id\":"
+                + tournament.getId() + "}}}",
+            accessToken);
+        assertEquals(200, managementCall.statusCode(), managementCall.body());
+        assertTrue(managementCall.body().contains("MCP 测试赛事"), managementCall.body());
+
+        HttpResponse<String> managementWrite = postJson(client, baseUrl + "/mcp",
+            "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{"
+                + "\"name\":\"manage_tournaments\",\"arguments\":{\"action\":\"create\",\"data\":{"
+                + "\"name\":\"MCP 写入测试\",\"status\":0,\"logicalWidth\":1920,\"logicalHeight\":1080}}}}",
+            accessToken);
+        assertEquals(200, managementWrite.statusCode(), managementWrite.body());
+        assertTrue(managementWrite.body().contains("MCP 写入测试"), managementWrite.body());
+
+        HttpResponse<String> prompts = postJson(client, baseUrl + "/mcp",
+            "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"prompts/list\",\"params\":{}}",
+            accessToken);
+        assertEquals(200, prompts.statusCode(), prompts.body());
+        assertTrue(prompts.body().contains("dance_battle_operator"), prompts.body());
+
+        HttpResponse<String> prompt = postJson(client, baseUrl + "/mcp",
+            "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"prompts/get\",\"params\":{"
+                + "\"name\":\"dance_battle_operator\",\"arguments\":{"
+                + "\"goal\":\"检查当前赛段\",\"focus\":\"roster\",\"tournamentId\":\""
+                + tournament.getId() + "\"}}}",
+            accessToken);
+        assertEquals(200, prompt.statusCode(), prompt.body());
+        assertTrue(prompt.body().contains("当前重点：名单"), prompt.body());
+        assertTrue(prompt.body().contains("manage_rosters"), prompt.body());
     }
 
     private static HttpResponse<String> get(HttpClient client, String url) throws Exception {

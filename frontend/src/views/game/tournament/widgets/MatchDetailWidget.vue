@@ -88,22 +88,31 @@
             >
               <template v-if="matchDetail && (matchDetail.bestOf || 1) > 1">
                 <span class="text-neutral-300">BO{{ matchDetail.bestOf }} · 第{{ matchDetail.currentGame || 1 }}ROUND</span>
-                <span class="text-white/40 mx-2">·</span>
-                <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ matchDetail.seriesLeftWins || 0 }}</span>
-                <span class="text-white/40 mx-2">·</span>
-                <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ matchDetail.seriesRightWins || 0 }}</span>
-              </template>
-              <template v-else>
-                <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ roundWins.left }} 胜</span>
-                <span class="text-white/40 mx-2">·</span>
-                <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ roundWins.right }} 胜</span>
-                <template v-if="roundWins.draw > 0">
+                <template v-if="!manualPending">
                   <span class="text-white/40 mx-2">·</span>
-                  <span class="text-neutral-400">平 {{ roundWins.draw }} 轮</span>
+                  <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ matchDetail.seriesLeftWins || 0 }}</span>
+                  <span class="text-white/40 mx-2">·</span>
+                  <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ matchDetail.seriesRightWins || 0 }}</span>
+                </template>
+                <template v-else>
+                  <span class="text-white/40 mx-2">·</span>
+                  <span class="text-white/50">等待公布</span>
                 </template>
               </template>
+              <template v-else>
+                <template v-if="!manualPending">
+                  <span :class="sideColorClass('LEFT')">{{ sideLabel('LEFT') }} {{ roundWins.left }} 胜</span>
+                  <span class="text-white/40 mx-2">·</span>
+                  <span :class="sideColorClass('RIGHT')">{{ sideLabel('RIGHT') }} {{ roundWins.right }} 胜</span>
+                  <template v-if="roundWins.draw > 0">
+                    <span class="text-white/40 mx-2">·</span>
+                    <span class="text-neutral-400">平 {{ roundWins.draw }} 轮</span>
+                  </template>
+                </template>
+                <span v-else class="text-white/50">等待公布</span>
+              </template>
             </div>
-            <!-- 判罚矩阵:每轮一行,每个裁判一列,格子颜色代表该裁判本轮红/蓝/平的判罚 -->
+            <!-- 判罚矩阵:每轮一行,每个裁判一列;实时公布显示红/蓝/平色块,手动公布未公布前显示 √ -->
             <div class="w-full rounded-xl bg-black/60 border border-white/10 backdrop-blur px-3 py-1.5 overflow-x-auto">
               <table class="w-full border-collapse table-fixed">
                 <colgroup>
@@ -136,7 +145,24 @@
                       :key="'vc-' + String(r.roundId ?? ri) + '-' + String(ref.refereeId ?? ref.refereeName)"
                       class="py-1 px-2 text-center align-middle"
                     >
+                      <!-- 手动公布:只显示裁判是否已判,不提前露出红蓝结果 -->
+                      <template v-if="manualPending">
+                        <span
+                          v-if="refereeVote(r, ref)"
+                          class="inline-flex items-center justify-center rounded-[2px] text-green-400 font-black leading-none text-[clamp(10px,1.3vw,20px)]"
+                          :style="voteBlockStyle"
+                          title="裁判已判"
+                          >✓</span
+                        >
+                        <div
+                          v-else
+                          class="inline-block rounded-[2px] bg-neutral-800 border border-neutral-700"
+                          :style="voteBlockStyle"
+                          title="未判"
+                        ></div>
+                      </template>
                       <div
+                        v-else
                         class="inline-block rounded-[2px]"
                         :class="voteBlockClass(refereeVote(r, ref))"
                         :style="voteBlockStyle"
@@ -144,14 +170,21 @@
                       ></div>
                     </td>
                     <td class="py-1 pl-2 text-right whitespace-nowrap">
-                      <span v-if="r.winnerSide" class="text-[clamp(11px,1.35vw,20px)] font-black" :class="roundWinnerClass(r.winnerSide)">
-                        {{ roundWinnerText(r.winnerSide) }}
-                      </span>
-                      <span v-if="roundVoteCounts(r).total > 0" class="text-[clamp(9px,1.05vw,15px)] font-mono text-white/50 ml-2">
-                        {{ sideLabel('LEFT') }} {{ roundVoteCounts(r).left }} · {{ sideLabel('RIGHT') }} {{ roundVoteCounts(r).right }}
-                        <template v-if="roundVoteCounts(r).draw > 0"> · 平 {{ roundVoteCounts(r).draw }}</template>
-                      </span>
-                      <span v-else class="text-[clamp(9px,1vw,14px)] text-white/40">无裁判分配</span>
+                      <template v-if="manualPending">
+                        <span class="text-[clamp(9px,1.05vw,15px)] font-mono text-white/50">
+                          {{ roundVoteCounts(r).total > 0 ? `已判 ${roundVoteCounts(r).voted}/${roundVoteCounts(r).total}` : '无裁判分配' }}
+                        </span>
+                      </template>
+                      <template v-else>
+                        <span v-if="r.winnerSide" class="text-[clamp(11px,1.35vw,20px)] font-black" :class="roundWinnerClass(r.winnerSide)">
+                          {{ roundWinnerText(r.winnerSide) }}
+                        </span>
+                        <span v-if="roundVoteCounts(r).total > 0" class="text-[clamp(9px,1.05vw,15px)] font-mono text-white/50 ml-2">
+                          {{ sideLabel('LEFT') }} {{ roundVoteCounts(r).left }} · {{ sideLabel('RIGHT') }} {{ roundVoteCounts(r).right }}
+                          <template v-if="roundVoteCounts(r).draw > 0"> · 平 {{ roundVoteCounts(r).draw }}</template>
+                        </span>
+                        <span v-else class="text-[clamp(9px,1vw,14px)] text-white/40">无裁判分配</span>
+                      </template>
                     </td>
                   </tr>
                 </tbody>
@@ -695,6 +728,11 @@ const hasVoteData = computed(() => {
 });
 /** 底部判罚面板:需在组件属性里显式开启(默认关闭),且本场确有判罚数据 */
 const votePanelVisible = computed(() => props.showVotePanel === true && hasVoteData.value);
+/** 手动公布模式且尚未公布:只显示裁判是否已判(√),不提前露出红蓝结果 */
+const manualPending = computed(() => {
+  const d = matchDetail.value;
+  return !!d && String(d.publishMode || '').toUpperCase() === 'MANUAL' && d.status !== 'SETTLED';
+});
 
 const voteText = (v: string | null | undefined) =>
   v === 'LEFT' ? sideLabel('LEFT') : v === 'RIGHT' ? sideLabel('RIGHT') : v === 'DRAW' ? '平' : '未判';

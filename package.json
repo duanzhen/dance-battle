@@ -1,0 +1,25 @@
+{
+  "name": "dance-battle",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">   <img src=\"./frontend/src/assets/logo/logo.png\" alt=\"无败 Logo\" width=\"220\" /> </p>",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/duanzhen/dance-battle.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/duanzhen/dance-battle/issues"
+  },
+  "homepage": "https://github.com/duanzhen/dance-battle#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.6"
+  }
+}

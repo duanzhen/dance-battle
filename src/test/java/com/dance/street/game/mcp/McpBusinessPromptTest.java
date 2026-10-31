@@ -55,6 +55,23 @@ class McpBusinessPromptTest {
         assertTrue(text.contains("汇合"));
         assertTrue(text.contains("rosterApplied=1"));
         assertTrue(text.contains("待落位区"));
+        assertTrue(text.contains("clarification_required"));
+        assertTrue(text.contains("禁止用临时名称"));
+        assertTrue(text.contains("templateCode 只能是 AUDITION_32"));
+        assertTrue(text.contains("create_blank"));
+        assertTrue(text.contains("create_from_template"));
+        assertTrue(text.contains("afterStageId"));
+        assertTrue(text.contains("teamCountStart"));
+        assertTrue(text.contains("teamCountEnd"));
+        assertTrue(text.contains("AUDITION 默认自动创建 1 个圈"));
+        assertTrue(text.contains("add_circle"));
+        assertTrue(text.contains("activeTournamentId"));
+        assertTrue(text.contains("默认都指这个刚创建的赛事"));
+        assertTrue(text.contains("clarification_required、isError=true 或业务失败不会更新上下文"));
+        assertTrue(text.contains("players=[{name,idCard?,tags?,remark?}]"));
+        assertTrue(text.contains("执行常规赛事操作时无需搜索项目源码"));
+        assertTrue(text.contains("Player 与 Competitor 是两个领域"));
+        assertTrue(text.contains("manage_competitors.register_player"));
     }
 
     @Test

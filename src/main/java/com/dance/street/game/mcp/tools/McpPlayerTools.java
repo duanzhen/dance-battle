@@ -1,7 +1,5 @@
 package com.dance.street.game.mcp.tools;
 
-import com.dance.street.game.domain.bo.CheckInBo;
-import com.dance.street.game.domain.bo.CheckInEditBo;
 import com.dance.street.game.domain.bo.TPlayerBo;
 import com.dance.street.game.domain.vo.PlayerImportVo;
 import com.dance.street.game.mcp.IMcpTool;
@@ -9,6 +7,7 @@ import com.dance.street.game.service.ITPlayerService;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.dromara.common.core.exception.ServiceException;
+import org.dromara.common.json.utils.JsonUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -24,8 +23,7 @@ import java.util.Set;
 public class McpPlayerTools implements IMcpTool {
 
     private static final Set<String> ACTIONS = McpToolSupport.actions(
-        "list", "get", "create", "update", "delete", "checkin", "edit_checkin",
-        "cancel_checkin", "import"
+        "list", "get", "create", "update", "delete", "import"
     );
 
     private final ITPlayerService playerService;
@@ -39,17 +37,47 @@ public class McpPlayerTools implements IMcpTool {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("id", McpToolSupport.idProperty("Player id."));
         properties.put("ids", McpToolSupport.idsProperty());
-        properties.put("tournamentId", McpToolSupport.idProperty("Tournament id for import."));
-        properties.put("data", McpToolSupport.objectProperty(
-            "TPlayerBo for create/update/list, CheckInBo, CheckInEditBo, "
-                + "or an array of PlayerImportVo records when action=import."
+        properties.put("tournamentId", McpToolSupport.idProperty(
+            "Tournament id for list/import. Use the active tournament when the user continues the current context."));
+        Map<String, Object> playerImportSchema = new LinkedHashMap<>();
+        playerImportSchema.put("type", "object");
+        playerImportSchema.put("additionalProperties", false);
+        playerImportSchema.put("properties", Map.of(
+            "name", Map.of("type", "string", "minLength", 1,
+                "description", "Player display name."),
+            "idCard", Map.of("type", "string",
+                "description", "Optional identity value; omit when not provided."),
+            "tags", Map.of(
+                "type", List.of("string", "array"),
+                "items", Map.of("type", "string"),
+                "description", "Optional string or string array."),
+            "remark", Map.of("type", "string", "description", "Optional remark.")
+        ));
+        playerImportSchema.put("required", List.of("name"));
+        properties.put("players", Map.of(
+            "type", "array",
+            "items", playerImportSchema,
+            "minItems", 1,
+            "description", "Structured player records for action=import. Example: "
+                + "[{\"name\":\"林晓\"},{\"name\":\"陈宇\"}]."
+        ));
+        properties.put("data", Map.of(
+            "anyOf", List.of(
+                Map.of("type", "object"),
+                Map.of("type", "array", "items", playerImportSchema)
+            ),
+            "description", "Object for create/update/list/check-in. For legacy import calls, "
+                + "an array is also accepted; new callers should use players[]."
         ));
         properties.putAll(McpToolSupport.pagingProperties());
         return McpToolSupport.definition(
             "manage_players",
-            "Manage players and check-in",
-            "Manage player profiles and the on-site check-in lifecycle. Import accepts structured player records, "
-                + "so the MCP caller can populate a tournament without uploading an Excel file.",
+            "Manage player profiles",
+            "Manage the Player (natural person) domain only. Player records are not Competitor entries. "
+                + "For action=import, pass "
+                + "tournamentId plus players=[{name,idCard?,tags?,remark?}]. This creates player records only; "
+                + "use manage_competitors.register_player to enter a Player as a stage Competitor. "
+                + "Import returns the imported count and active context.",
             ACTIONS,
             properties,
             false
@@ -67,8 +95,13 @@ public class McpPlayerTools implements IMcpTool {
             Object result = switch (action) {
                 case "list" -> {
                     TPlayerBo bo = McpToolSupport.optionalObject(arguments, "data", TPlayerBo.class);
+                    bo = bo == null ? new TPlayerBo() : bo;
+                    Long tournamentId = McpToolSupport.optionalLong(arguments, "tournamentId");
+                    if (tournamentId != null) {
+                        bo.setTournamentId(tournamentId);
+                    }
                     yield playerService.queryPageList(
-                        bo == null ? new TPlayerBo() : bo,
+                        bo,
                         McpToolSupport.pageQuery(arguments)
                     );
                 }
@@ -79,23 +112,20 @@ public class McpPlayerTools implements IMcpTool {
                 case "update" -> playerService.updateByBo(
                     McpToolSupport.requiredObject(arguments, "data", TPlayerBo.class));
                 case "delete" -> playerService.deleteWithValidByIds(requiredIds(arguments), true);
-                case "checkin" -> playerService.checkIn(
-                    McpToolSupport.requiredObject(arguments, "data", CheckInBo.class));
-                case "edit_checkin" -> playerService.editCheckIn(
-                    McpToolSupport.requiredObject(arguments, "data", CheckInEditBo.class));
-                case "cancel_checkin" -> {
-                    playerService.cancelCheckIn(McpToolSupport.requiredLong(arguments, "id"));
-                    yield Map.of("cancelled", true);
-                }
                 case "import" -> {
+                    long tournamentId = McpToolSupport.requiredLong(arguments, "tournamentId");
                     List<PlayerImportVo> players = importRecords(arguments);
-                    yield Map.of("imported", playerService.importPlayers(
-                        players,
-                        McpToolSupport.requiredLong(arguments, "tournamentId")
-                    ));
+                    Map<String, Object> imported = new LinkedHashMap<>();
+                    imported.put("imported", playerService.importPlayers(players, tournamentId));
+                    imported.put("tournamentId", tournamentId);
+                    yield McpToolSupport.result("import", imported,
+                        McpToolSupport.activeContext(tournamentId, null, null));
                 }
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
+            if (result instanceof McpSchema.CallToolResult toolResult) {
+                return toolResult;
+            }
             return McpToolSupport.result(action, result);
         } catch (Exception error) {
             return McpToolSupport.failure(action, error);
@@ -111,14 +141,41 @@ public class McpPlayerTools implements IMcpTool {
     }
 
     private static List<PlayerImportVo> importRecords(Map<String, Object> arguments) {
-        Object raw = arguments.get("data");
+        Object raw = arguments.get("players");
+        if (raw == null) {
+            raw = arguments.get("data");
+        }
         if (!(raw instanceof List<?> values)) {
-            throw new ServiceException("data 必须是选手数组");
+            throw new ServiceException("import 需要 players 数组，每项至少包含 name");
         }
         List<PlayerImportVo> players = new ArrayList<>(values.size());
         for (Object value : values) {
-            players.add(McpToolSupport.convert(value, PlayerImportVo.class));
+            players.add(toImportRecord(value));
         }
         return players;
+    }
+
+    private static PlayerImportVo toImportRecord(Object value) {
+        if (value instanceof PlayerImportVo player) {
+            return player;
+        }
+        if (!(value instanceof Map<?, ?> record)) {
+            throw new ServiceException("players 数组中的每一项都必须是对象");
+        }
+        PlayerImportVo player = new PlayerImportVo();
+        player.setName(stringValue(record.get("name")));
+        player.setIdCard(stringValue(record.get("idCard")));
+        player.setRemark(stringValue(record.get("remark")));
+        Object tags = record.get("tags");
+        if (tags instanceof List<?> || tags instanceof Object[]) {
+            player.setTags(JsonUtils.toJsonString(tags));
+        } else {
+            player.setTags(stringValue(tags));
+        }
+        return player;
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? null : value.toString();
     }
 }

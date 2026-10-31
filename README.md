@@ -188,8 +188,8 @@ MCP 业务工具按领域分组，写操作通过 `action` 分派并直接复用
 | `manage_tournaments` | 赛事增删改查、模板建赛、导播凭证读取与轮换 |
 | `manage_stages` | 赛段配置与链、初始化、生成对阵、开赛/完成/重置、擂台轮转、种子与晋级操作 |
 | `manage_rosters` | 名单来源组、候选与预览、排位、加人/移出、人工覆盖、确认与跳过 |
-| `manage_players` | 选手档案、签到/改签/解签、结构化批量导入 |
-| `manage_competitors` | 参赛单位、成员关系、场次参赛明细 |
+| `manage_players` | 独立的自然人 Player 档案与 `players[]` 结构化导入 |
+| `manage_competitors` | Competitor 参赛领域、签到/改签/解签、成员关系和场次参赛明细 |
 | `manage_referees` | 裁判档案与凭证、赛段/场次分配、裁判工作台、打分提交 |
 | `manage_matches` | 场次/轮次/原始分数、开赛与结果发布、自由对抗和当前上场选手 |
 | `manage_displays` | 场景、控件、屏幕、图层与计时/视频状态、场景投射 |
@@ -218,6 +218,26 @@ Agent 在开始复杂的多步任务前，可先通过 `prompts/list` 找到业�
 模板会注入领域模型、状态机、工具映射、推荐执行顺序和高影响写操作约束。Prompt 本身
 只生成上下文，不直接修改业务数据。
 
+MCP Resource 用于放置只读上下文，不计入 Tool 数量。当前提供：
+
+| Resource URI | 内容 |
+| --- | --- |
+| `dance://guide/business` | 建赛模式、操作纪律、工具选择和写入前检查 |
+| `dance://guide/stage-modes` | 五种赛制的差异与结算要点 |
+| `dance://guide/roster-dag` | 赛段链、名单有向无环图、中间态和物化规则 |
+| `dance://tournaments` | 实时赛事索引 |
+| `dance://tournaments/{tournamentId}/overview` | 赛事、赛段链、名单就绪度、场次状态和当前比赛摘要 |
+| `dance://stages/{stageId}/overview` | 赛段配置、来源组、参赛方、裁判和场次摘要 |
+
+Resource 全部为只读且继续受 MCP Bearer 认证保护。动态资源只返回操作摘要，
+不会暴露导播/裁判 `authKey`，也不返回完整敏感明细。
+
+创建类工具会返回 `context`，其中包含 `activeTournamentId`、`activeStageId` 和
+`activeMatchId`。Agent 在当前对话中延续这些 ID：新建赛事后，后续未明确切换对象的操作默认
+作用于刚创建的赛事；创建 Stage 后，后续名单、裁判和比赛操作默认作用于该 Stage。
+只有用户明确切换对象或成功创建了新对象时才更新上下文，`clarification_required` 和失败结果
+不会推进上下文。
+
 调用统一使用 `action`，主键、分页和领域对象分别是独立参数。例如：
 
 ```json
@@ -232,6 +252,96 @@ Agent 在开始复杂的多步任务前，可先通过 `prompts/list` 找到业�
 
 每个 `action` 的枚举、参数和领域对象字段可从 `tools/list` 的 input schema 获取。
 返回同时包含可读文本和 `structuredContent`，业务异常通过 `isError=true` 返回。
+
+批量导入选手使用独立的 `players` 数组：
+
+```json
+{
+  "name": "manage_players",
+  "arguments": {
+    "action": "import",
+    "tournamentId": 123456789,
+    "players": [
+      {"name": "林晓"},
+      {"name": "陈宇", "tags": ["种子"]}
+    ]
+  }
+}
+```
+
+该操作只创建 Player 档案，不会自动签到生成 Competitor。签到入口属于 Competitor 领域，
+动作名是 `manage_competitors.register_player`；
+取消参赛使用 `cancel_player_entry`，只解除参赛关系，不删除 Player。
+
+多人签到时使用 `register_players`，一次提交 `entries[]`：
+
+```json
+{
+  "action": "register_players",
+  "entries": [
+    {"playerId": "211...", "checkInType": "CREATE", "competitorNumber": "11", "zoneIndex": 1},
+    {"playerId": "212...", "checkInType": "CREATE", "competitorNumber": "12", "zoneIndex": 1}
+  ]
+}
+```
+
+`checkInType=CREATE` 必须提供号码，`JOIN` 必须提供 `competitorId`。批量结果包含
+`requested`、`succeeded`、`failed`、`registered` 和逐项 `errors`。
+海选创建后会自动建立默认单圈，可以直接签到；单圈可省略 `zoneIndex`，
+多圈时每项必须指定 `matchId` 或 `zoneIndex`。
+
+涉及创建、更新、删除、重置、名单确认或结果发布时，Agent 必须先确认请求是否包含完整业务意图。
+工具不会猜测用户没有明确表达的名称、赛制或模板。例如赛事创建缺少信息时，
+`manage_tournaments` 返回：
+
+```json
+{
+  "status": "clarification_required",
+  "missing": ["data.name", "data.templateCode", "confirmed"],
+  "questions": [
+    "请确认新赛事的名称。",
+    "请选择赛事模式：AUDITION_32、AUDITION_16 或 AUDITION_ARENA。"
+  ]
+}
+```
+
+此时 Agent 应先向用户确认，不能使用临时名称、复制现有赛事或根据相似赛事推断模式。
+用户明确确认后，创建请求才传 `confirmed: true`。
+
+赛事创建有两种明确模式：
+
+- `create_from_template`：创建赛事，并按 `AUDITION_32`、`AUDITION_16` 或
+  `AUDITION_ARENA` 生成完整赛段链。
+- `create_blank`：只创建空白赛事草稿，不生成任何 Stage。之后用 `manage_stages`
+  的 `create` 动作逐个创建赛段。
+
+空白赛事创建阶段时，用户需要明确每个 Stage 的名称、`stageMode`、`teamCountStart`、
+`teamCountEnd`，以及它在现有赛段链中的 `afterStageId`。除链头赛段外，缺少
+`afterStageId` 会返回 `clarification_required`；Stage 创建还需要 `confirmed: true`。
+Agent 不得根据模板或现有赛事自动补全这些信息。
+
+`manage_stages.create` 支持直接传这些顶层字段，不需要包装到 `data`：
+
+```json
+{
+  "action": "create",
+  "tournamentId": "123",
+  "name": "海选",
+  "stageMode": "AUDITION",
+  "teamCountStart": 32,
+  "teamCountEnd": 16,
+  "confirmed": true
+}
+```
+
+`AUDITION` 未提供 `ruleConfig.circles` 或配置为 `0` 时默认使用 1 圈，并自动创建圈场次。
+只有多圈时才需要明确圈数、每圈裁判与签到落圈方式。
+
+圈管理可使用 `manage_stages`：
+
+- `list_circles`：查看计划圈数、已创建圈场次及其状态。
+- `add_circle`：追加一圈；必须提供新增圈的 `circleAdvanceCount`，也可提供
+  `refereeIds` 或完整 `circleAdvanceCounts`。缺少晋级名额时返回 `clarification_required`。
 
 新增 MCP 工具时，在 `com.dance.street.game.mcp.tools` 包内实现
 `com.dance.street.game.mcp.IMcpTool` 并注册为 Spring Bean，即可自动进入

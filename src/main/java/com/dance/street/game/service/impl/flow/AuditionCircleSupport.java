@@ -66,10 +66,13 @@ public class AuditionCircleSupport {
             .toList();
     }
 
-    /** 配置里计划的圈数(ruleConfig.circles),未配置为 0 */
+    /**
+     * 配置里计划的圈数(ruleConfig.circles)。海选默认单圈，未配置或配置为 0 时按 1 圈处理。
+     */
     public int plannedCircleCount(TStage stage) {
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        return (rc != null && rc.getCircles() != null) ? Math.max(0, rc.getCircles()) : 0;
+        return rc != null && rc.getCircles() != null && rc.getCircles() > 0
+            ? rc.getCircles() : 1;
     }
 
     /**

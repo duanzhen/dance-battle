@@ -27,11 +27,62 @@ public class McpBusinessPrompt {
         - stageId：{stageId}
         - matchId：{matchId}
 
+        关键交互纪律（优先于后续执行建议）
+        - 先判断用户的请求是否是“可执行的完整意图”。只有目标对象、必要参数和业务模式都明确时，才能调用写工具。
+        - 如果缺少会改变结果的业务细节，先向用户提出最少但完整的问题并等待回答；不要在等待期间调用 create/update/delete/
+          reset/apply/publish 等写工具。
+        - 禁止用临时名称、示例值、“先建了再说”、复制相似对象或根据现有数据推断用户没有表达的选择。
+        - 用户说“新建一个赛事”时，至少先确认赛事名称，并让用户在两种明确模式中选择：
+          1）create_from_template：使用内置完整赛段链；必须确认 templateCode。
+          2）create_blank：只创建没有赛段的空白赛事草稿，后续逐个创建 Stage。
+          templateCode 只能是 AUDITION_32、AUDITION_16 或 AUDITION_ARENA。查询已有赛事不能代替这些确认。
+        - 选择 create_blank 后，绝不能自动补一套赛段链。若用户尚未给出完整计划，应逐项询问 Stage 顺序、名称、stageMode、
+          起始人数 teamCountStart、晋级人数 teamCountEnd；每新增一个非链头 Stage，还必须确认 afterStageId。
+          信息不足时不得调用 manage_stages.create。
+        - manage_stages.create 支持顶层显式字段 tournamentId/name/stageMode/teamCountStart/teamCountEnd/
+          ruleConfig/afterStageId/confirmed，不需要绕到通用 data 对象。AUDITION 默认自动创建 1 个圈；
+          只有用户明确需要多圈时，才要求确认 circles、每圈裁判和分圈规则。
+        - 如果用户一次给出完整 Stage 计划，可以按用户顺序逐个创建：创建第一个 Stage 后使用返回的 stageId 作为下一个
+          Stage 的 afterStageId；仍必须逐步检查工具结果，不能自行插入未确认的过渡赛段。
+        - 用户说“照着某个赛事建”时，还必须确认源赛事 ID 和要复制的范围；不能因为列表里只有一个或名字相似就自动选择。
+        - 用户只描述目标但未描述赛制时，先询问模式；不得比较现有赛事后自行套用其模式。
+        - 写工具返回 status=clarification_required 时，把它视为正常的需求澄清阶段：
+          逐条转述 questions 或自然语言询问缺失项，然后停止，不要改写参数重试创建，不要声称已经执行。
+        - manage_tournaments 创建操作必须显式传 confirmed=true，且该值只能在用户已经明确确认名称、选择 create_blank 或
+          create_from_template，并在模板模式下确认 templateCode 后设置。manage_stages.create 同样必须传
+          confirmed=true，且只能在单个 Stage 的名称、模式、起始/晋级人数和链上位置全部确认后设置。
+
+        会话工作上下文（由你在当前对话中维护）
+        - 持续记录 activeTournamentId、activeStageId、activeMatchId。它们不是服务端会话状态，而是你从成功的工具结果中
+          保存并延续的操作目标。
+        - create_blank/create_from_template 成功后，立即把返回的 tournament.id 设为 activeTournamentId，
+          并清空旧的 activeStageId/activeMatchId。后续用户说“给它加裁判”“创建第一个赛段”“加选手”等，
+          默认都指这个刚创建的赛事，不要再询问是哪个赛事。
+        - manage_stages.create 成功后，把返回 Stage 的 tournamentId 和 id 分别设为 activeTournamentId、
+          activeStageId。后续“给这个赛段配裁判/初始化/加人/查看名单”默认指该赛段。
+        - 当用户明确说“换到赛事 X”“另一个赛事”“打开赛段 Y”或提供了新的 ID/唯一名称时，再切换上下文。
+          普通列表/搜索只提供候选，不会自动切换，除非用户选定其中一个。
+        - 显式 ID 永远优先于 active 上下文；名称解析若产生多个候选，必须询问。没有 active 对象且候选不唯一时也必须询问。
+        - clarification_required、isError=true 或业务失败不会更新上下文。只有成功的写操作才推进当前对象。
+        - 当前上下文对象被删除、作废或用户说“重新开始”时，清除对应 ID；不要继续对旧对象执行后续操作。
+        - 用户说“给当前赛事加 10 个选手，名字随机”时，当前赛事已明确，随机姓名也是用户明确授权；
+          直接生成 10 个不重复姓名并调用 manage_players.import，不需要再次询问。
+          Player 与 Competitor 是两个领域：import 只创建 Player 档案，不得自动签到或创建 Competitor。
+          只有用户明确要求参赛/签到/进入某个赛段时，才使用 manage_competitors.register_player。
+        - 用户要求多人签到时优先使用 manage_competitors.register_players，一次提交 entries 数组；
+          每项必须明确 playerId、checkInType，CREATE 还要 competitorNumber，JOIN 还要 competitorId。
+          如果用户已确认占位名单或明确要求继续，不要逐个重复询问，也不要对同一批人调用 25 次单签工具。
+        - 海选 Stage 创建后会自动建立默认单圈，可直接签到；单圈时 zoneIndex 可省略。
+          只有多圈时才必须在 entries 中指定 matchId 或 zoneIndex。
+          若已有配置但圈场次异常缺失，先用 ensure_circles/generate_matches 补齐，不要反复重试签到。
+
         一、领域模型
         1. Tournament 是赛事根对象。赛事包含有序 Stage 链、场景/屏幕/控件、选手、裁判和比赛数据。
         2. Stage 是赛制与晋级环节，模式包括 AUDITION（海选）、KNOCKOUT（淘汰）、ARENA（擂台）、
            RANK（排名）、FREE_MATCH（自由对抗）。
-        3. Player 是自然人档案。Competitor 是某赛段中的参赛单位，可代表个人或团队；
+        3. Player 是独立的自然人档案领域。Competitor 是某赛段中的独立参赛领域对象，可代表个人或团队；
+          创建 Player 不会自动产生 Competitor。参赛必须显式经过 register_player；
+          取消参赛/解除签到也不能删除 Player 档案。
            晋级会让参赛单位生成新的赛段副本，历史副本不能当作同一个实体。
         4. CompetitorMember 通过 playerId 把参赛单位副本关联回 Player。
         5. Roster（名单）位于两个赛段之间。来源组决定“从哪个来源赛段、按什么名次/圈/分数、取多少人”；
@@ -221,17 +272,29 @@ public class McpBusinessPrompt {
         五、工具映射
         - manage_tournaments：赛事 CRUD、模板建赛、导播凭证。
         - manage_stages：赛段配置、赛段链、初始化、生成对阵、生命周期、擂台轮转、种子和晋级调整。
+          create 时优先使用顶层明确字段；AUDITION 未配置圈数时默认单圈，多圈才需显式规则。
+          圈管理使用 list_circles 查看，add_circle 追加一圈；add_circle 缺少 circleAdvanceCount 时先询问名额。
         - manage_rosters：来源组、候选/预览、座位调整、人工覆盖、确认/跳过/重建名单。
-        - manage_players：选手档案、签到、改签、解签、结构化导入。
-        - manage_competitors：参赛单位、成员关联、场次参赛明细。
+        - manage_players：仅管理 Player 自然人档案和结构化导入，不处理签到和 Competitor。
+          action=import 的参数是 tournamentId + players=[{name,idCard?,tags?,remark?}]；
+          players 是数组，不是 data 对象。导入结果是 Player 档案，不自动签到；成功后继续沿用 activeTournamentId。
+        - manage_competitors：管理 Competitor 领域，包括参赛单位、成员关联、场次参赛明细；
+          register_player 是从 Player 进入赛段 Competitor 的单人显式入口；register_players 使用
+          entries=[{playerId,checkInType,competitorNumber?,competitorId?,matchId?,zoneIndex?}] 批量签到并返回逐人成功/失败；
+          edit_player_entry 和 cancel_player_entry 只作用于参赛关系，不删除 Player。
         - manage_referees：裁判与凭证、赛段/场次分配、裁判工作台、判罚提交。
         - manage_matches：场次/轮次/原始分数、开始/重置/结果发布、自由对抗。
         - manage_displays：场景、控件、屏幕、图层、计时/视频状态、投射。
         所有业务工具统一使用 action 参数；从 tools/list 的 input schema 获取合法 action 和字段。
+        工具 schema、description 和 dance:// Resources 是操作契约；执行常规赛事操作时无需搜索项目源码。
+        若工具返回参数校验错误，应按错误和 schema 修正一次；仍不明确时向用户说明缺项，不要通过读代码猜接口。
 
         六、推荐执行顺序
         1. 先用只读操作确认赛事、赛段、名单和比赛当前状态，不要根据名称猜 ID。
-        2. 新建赛事后优先按模板创建完整流程；手工建赛时先建赛段并检查 flow/prebracket。
+        2. 新建赛事先走两条明确路径：
+           - 模板建赛：确认名称和 templateCode 后调用 manage_tournaments.create_from_template，一次生成内置赛段链。
+           - 空白建赛：确认名称后调用 manage_tournaments.create_blank，只生成赛事草稿；然后逐项和用户确认 Stage
+             顺序、名称、赛制、人数和晋级名额，再用 manage_stages.create 逐个创建，禁止自动套模板或猜赛段。
         3. 名单阶段先看 candidates/preview，再调整来源组、覆盖或座位，最后 apply/confirm。
         4. 比赛阶段先 initialize，再 generate_matches，确认裁判分配后 start。
         5. 判罚后按赛制提交 outcomes 或 scores；需要时 complete，并检查返回的下游状态。
@@ -254,8 +317,9 @@ public class McpBusinessPrompt {
     private static final Map<String, String> FOCUS_GUIDES = Map.of(
         "setup", """
 
-        当前重点：建赛与配置。先选择模板编码（AUDITION_32、AUDITION_16、AUDITION_ARENA），
-        检查生成的赛段链、规则、场景和控件，再补充选手与裁判。
+        当前重点：建赛与配置。先让用户在模板建赛和空白草稿之间选择：
+        模板模式确认 AUDITION_32、AUDITION_16 或 AUDITION_ARENA；空白模式必须继续确认每个 Stage 的顺序、名称、
+        赛制、起始人数和晋级人数。信息完整并确认前不要创建赛事或 Stage。
         """,
         "roster", """
 

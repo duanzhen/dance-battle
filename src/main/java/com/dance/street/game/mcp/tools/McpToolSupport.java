@@ -55,17 +55,20 @@ final class McpToolSupport {
     }
 
     static Map<String, Object> idProperty() {
-        return Map.of("type", "integer", "minimum", 1,
-            "description", "Primary resource id.");
+        return idProperty("Primary resource id.");
     }
 
     static Map<String, Object> idsProperty() {
-        return Map.of("type", "array", "items", Map.of("type", "integer", "minimum", 1),
+        return Map.of("type", "array", "items", numericIdSchema(),
             "minItems", 1, "description", "Primary resource ids.");
     }
 
     static Map<String, Object> idProperty(String description) {
-        return Map.of("type", "integer", "minimum", 1, "description", description);
+        return Map.of("anyOf", List.of(
+                Map.of("type", "integer", "minimum", 1),
+                Map.of("type", "string", "pattern", "^[1-9][0-9]*$")
+            ),
+            "description", description + " Accepts an integer or numeric string.");
     }
 
     static Map<String, Object> stringProperty(String description) {
@@ -82,7 +85,7 @@ final class McpToolSupport {
     }
 
     static Map<String, Object> idListProperty(String description) {
-        return Map.of("type", "array", "items", Map.of("type", "integer", "minimum", 1),
+        return Map.of("type", "array", "items", numericIdSchema(),
             "description", description);
     }
 
@@ -265,14 +268,31 @@ final class McpToolSupport {
     }
 
     static McpSchema.CallToolResult result(String action, Object value) {
+        return result(action, value, null);
+    }
+
+    static McpSchema.CallToolResult result(String action, Object value,
+                                           Map<String, Object> context) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("action", action);
         result.put("result", value);
+        if (context != null && !context.isEmpty()) {
+            result.put("context", context);
+        }
         return McpSchema.CallToolResult.builder()
             .addTextContent(JsonUtils.toJsonString(result))
             .structuredContent(result)
             .isError(false)
             .build();
+    }
+
+    static Map<String, Object> activeContext(Long tournamentId, Long stageId, Long matchId) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("activeTournamentId", tournamentId);
+        context.put("activeStageId", stageId);
+        context.put("activeMatchId", matchId);
+        context.put("scope", "Continue using these ids until the user explicitly switches context.");
+        return context;
     }
 
     static McpSchema.CallToolResult failure(String action, Throwable error) {
@@ -289,7 +309,28 @@ final class McpToolSupport {
             .build();
     }
 
+    static McpSchema.CallToolResult clarification(String action, List<String> missing,
+                                                   List<String> questions) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("action", action);
+        result.put("status", "clarification_required");
+        result.put("missing", List.copyOf(missing));
+        result.put("questions", List.copyOf(questions));
+        return McpSchema.CallToolResult.builder()
+            .addTextContent(JsonUtils.toJsonString(result))
+            .structuredContent(result)
+            .isError(false)
+            .build();
+    }
+
     static Set<String> actions(String... actions) {
         return new LinkedHashSet<>(List.of(actions));
+    }
+
+    private static Map<String, Object> numericIdSchema() {
+        return Map.of("anyOf", List.of(
+            Map.of("type", "integer", "minimum", 1),
+            Map.of("type", "string", "pattern", "^[1-9][0-9]*$")
+        ));
     }
 }

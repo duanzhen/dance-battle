@@ -62,14 +62,20 @@ public class McpServerConfig implements WebMvcConfigurer {
                                      McpJsonMapper mapper,
                                      JsonSchemaValidator schemaValidator,
                                      McpToolRegistry toolRegistry,
+                                     McpBusinessResources businessResources,
                                      McpBusinessPrompt businessPrompt) {
         return McpServer.sync(transport)
             .jsonMapper(mapper)
             .jsonSchemaValidator(schemaValidator)
             .serverInfo("dance-battle-mcp", "1.0.0")
             .instructions("Use the dance_battle_operator prompt to load the business model before complex "
-                + "tournament operations, then use the domain tools to inspect current state and execute changes.")
+                + "tournament operations. Read the dance:// resource guide and live overviews when useful, "
+                + "then use the domain tools to inspect current state and execute changes. After a successful "
+                + "create, retain the returned context ids and continue using that object until the user "
+                + "explicitly switches context.")
             .tools(toolRegistry.specifications())
+            .resources(businessResources.resources())
+            .resourceTemplates(businessResources.resourceTemplates())
             .prompts(businessPrompt.toSpecification())
             .build();
     }

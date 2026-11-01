@@ -320,6 +320,9 @@ public class TTournamentServiceImpl implements ITTournamentService {
      */
     private TTournament insertTournamentOnly(TTournamentBo bo) {
         TTournament add = MapstructUtils.convert(bo, TTournament.class);
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("赛事名称不能为空");
+        }
         // 手机导播台登录凭证:创建赛事时自动生成,泄露后可调用 regenerateAuthKey 重置
         add.setAuthKey(UUID.randomUUID().toString(true));
         validEntityBeforeSave(add);
@@ -760,8 +763,16 @@ public class TTournamentServiceImpl implements ITTournamentService {
      * @return 修改后的赛事主
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TTournamentVo updateByBo(TTournamentBo bo) {
         TTournament update = MapstructUtils.convert(bo, TTournament.class);
+        TTournament before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("赛事不存在: {}", update.getId());
+        }
+        if (update.getName() != null && StringUtils.isBlank(update.getName())) {
+            throw new ServiceException("赛事名称不能为空");
+        }
         validEntityBeforeSave(update);
         baseMapper.updateById(update);
         return MapstructUtils.convert(update, TTournamentVo.class);

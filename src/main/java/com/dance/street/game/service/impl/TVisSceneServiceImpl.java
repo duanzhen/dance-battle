@@ -14,7 +14,9 @@ import com.dance.street.game.domain.bo.TVisSceneBo;
 import com.dance.street.game.domain.vo.TVisSceneVo;
 import com.dance.street.game.domain.TVisScene;
 import com.dance.street.game.mapper.TVisSceneMapper;
+import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITVisSceneService;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.sse.utils.TournamentSseMessageUtils;
 
 import java.util.List;
@@ -33,6 +35,7 @@ import java.util.Collection;
 public class TVisSceneServiceImpl implements ITVisSceneService {
 
     private final TVisSceneMapper baseMapper;
+    private final TTournamentMapper tournamentMapper;
 
     /**
      * 查询可视化场景配置
@@ -91,6 +94,13 @@ public class TVisSceneServiceImpl implements ITVisSceneService {
     @Override
     public TVisSceneVo insertByBo(TVisSceneBo bo) {
         TVisScene add = MapstructUtils.convert(bo, TVisScene.class);
+        if (add.getTournamentId() == null
+            || tournamentMapper.selectById(add.getTournamentId()) == null) {
+            throw new ServiceException("场景必须归属一个有效赛事");
+        }
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("场景名称不能为空");
+        }
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
@@ -110,6 +120,17 @@ public class TVisSceneServiceImpl implements ITVisSceneService {
     @Override
     public TVisSceneVo updateByBo(TVisSceneBo bo) {
         TVisScene update = MapstructUtils.convert(bo, TVisScene.class);
+        TVisScene before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("场景不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !java.util.Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("场景不允许变更所属赛事");
+        }
+        if (update.getName() != null && StringUtils.isBlank(update.getName())) {
+            throw new ServiceException("场景名称不能为空");
+        }
         validEntityBeforeSave(update);
         baseMapper.updateById(update);
 

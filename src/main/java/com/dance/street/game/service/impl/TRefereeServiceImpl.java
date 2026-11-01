@@ -15,9 +15,14 @@ import com.dance.street.game.domain.bo.TRefereeBo;
 import com.dance.street.game.domain.vo.TRefereeVo;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRefereeStage;
+import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
+import com.dance.street.game.mapper.TMatchRefereeMapper;
+import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITRefereeService;
+import org.dromara.common.core.exception.ServiceException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -37,6 +42,8 @@ public class TRefereeServiceImpl implements ITRefereeService {
 
     private final TRefereeMapper baseMapper;
     private final TRefereeStageMapper refereeStageMapper;
+    private final TMatchRefereeMapper matchRefereeMapper;
+    private final TTournamentMapper tournamentMapper;
 
     /**
      * 查询裁判
@@ -114,8 +121,16 @@ public class TRefereeServiceImpl implements ITRefereeService {
      * @return 是否新增成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean insertByBo(TRefereeBo bo) {
         TReferee add = MapstructUtils.convert(bo, TReferee.class);
+        if (add.getTournamentId() == null
+            || tournamentMapper.selectById(add.getTournamentId()) == null) {
+            throw new ServiceException("裁判必须归属一个有效赛事");
+        }
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("裁判姓名不能为空");
+        }
         add.setAuthKey(UUID.randomUUID().toString(true));
         validEntityBeforeSave(add);
         boolean flag = baseMapper.insert(add) > 0;
@@ -132,8 +147,20 @@ public class TRefereeServiceImpl implements ITRefereeService {
      * @return 是否修改成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean updateByBo(TRefereeBo bo) {
         TReferee update = MapstructUtils.convert(bo, TReferee.class);
+        TReferee before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("裁判不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !java.util.Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("裁判不允许变更所属赛事");
+        }
+        if (update.getName() != null && StringUtils.isBlank(update.getName())) {
+            throw new ServiceException("裁判姓名不能为空");
+        }
         validEntityBeforeSave(update);
         return baseMapper.updateById(update) > 0;
     }
@@ -153,9 +180,21 @@ public class TRefereeServiceImpl implements ITRefereeService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
+        if (Boolean.TRUE.equals(isValid)) {
+            if (ids == null || ids.isEmpty()) {
+                throw new ServiceException("裁判ID不能为空");
+            }
+            for (Long id : ids) {
+                long stages = refereeStageMapper.selectCount(Wrappers.<TRefereeStage>lambdaQuery()
+                    .eq(TRefereeStage::getRefereeId, id));
+                long matches = matchRefereeMapper.selectCount(Wrappers.<TMatchReferee>lambdaQuery()
+                    .eq(TMatchReferee::getRefereeId, id));
+                if (stages > 0 || matches > 0) {
+                    throw new ServiceException("裁判[{}]仍分配到赛段或场次，不能删除", id);
+                }
+            }
         }
         return baseMapper.deleteByIds(ids) > 0;
     }

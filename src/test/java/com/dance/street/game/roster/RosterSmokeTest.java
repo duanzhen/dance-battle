@@ -1070,11 +1070,18 @@ class RosterSmokeTest {
         assertEquals(RosterConstants.ROSTER_CONFIRMED,
             rosterService.listByTarget(fin.getId()).get(0).getState());
 
-        // 前端「开始赛段/完成赛段」后会回写整段(指针与库内一致)→ 不应因名单已装而被拦
+        // 状态不能借整段回写迁移；生命周期的状态推进由专用接口负责。
         TStageBo sameLink = baseStage(tournament.getId(), "决赛", "KNOCKOUT", 2L, 1L, audition.getId());
         sameLink.setId(fin.getId());
         sameLink.setStatus(StageConstants.STAGE_GAMING);
+        assertThrows(ServiceException.class, () -> stageService.updateByBo(sameLink),
+            "配置回写不能绕过开赛守卫");
+
+        // 不带状态迁移的普通配置保存仍应正常，且不能因名单已装而被拦。
+        sameLink.setStatus(StageConstants.STAGE_DRAFT);
+        sameLink.setName("决赛-配置保存");
         assertDoesNotThrow(() -> stageService.updateByBo(sameLink));
+        assertEquals("决赛-配置保存", stageService.queryById(fin.getId()).getName());
 
         // 配置入口回传指针不再改链:名单已装配也不会因为"保存赛段"被拦
         TStageVo anotherAudition = stageService.insertByBo(

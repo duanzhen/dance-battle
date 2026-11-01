@@ -3,6 +3,7 @@ package com.dance.street.game.service.impl.stage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
+import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
@@ -65,6 +66,7 @@ public class StageRunService {
     private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
     private final TMatchMapper matchMapper;
+    private final TMatchParticipantMapper participantMapper;
     private final ITStageRosterService rosterService;
     private final AuditionCircleSupport auditionCircleSupport;
     /** 开赛时先初始化并生成对阵 */
@@ -234,6 +236,16 @@ public class StageRunService {
         TMatch match = matchMapper.selectById(matchId);
         if (match == null) {
             throw new ServiceException("场次不存在");
+        }
+        if (competitorId != null) {
+            long attached = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, match.getId())
+                .eq(TMatchParticipant::getCompetitorId, competitorId)
+                .eq(TMatchParticipant::getTournamentId, match.getTournamentId()));
+            if (attached == 0) {
+                throw new ServiceException("参赛方[{}]不属于场次[{}]，不能标记为当前上场选手",
+                    competitorId, match.getId());
+            }
         }
         // 现场标记走跨实例缓存(Redis,单机降级为进程内),不落库——见 MatchCurrentCompetitorStore
         currentCompetitorStore.mark(matchId, competitorId);

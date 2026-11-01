@@ -15,15 +15,24 @@ import com.dance.street.game.domain.vo.TMatchParticipantVo;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TCompetitor;
+import com.dance.street.game.domain.TMatchRound;
+import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
+import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.mapper.TCompetitorMapper;
+import com.dance.street.game.mapper.TMatchRoundMapper;
+import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.service.ITMatchParticipantService;
 import com.dance.street.game.engine.common.StageModeProfiles;
+import org.dromara.common.core.exception.ServiceException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -46,6 +55,9 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
     private final TMatchParticipantMapper baseMapper;
     private final TMatchMapper matchMapper;
     private final TStageMapper stageMapper;
+    private final TCompetitorMapper competitorMapper;
+    private final TMatchRoundMapper roundMapper;
+    private final TRoundScoreMapper scoreMapper;
 
     /**
      * 查询场次参赛人员记录
@@ -165,8 +177,32 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
      * @return 新增后的场次参赛人员记录
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TMatchParticipantVo insertByBo(TMatchParticipantBo bo) {
         TMatchParticipant add = MapstructUtils.convert(bo, TMatchParticipant.class);
+        if (add.getTournamentId() == null || add.getMatchId() == null) {
+            throw new ServiceException("参赛明细必须归属赛事和场次");
+        }
+        TMatch match = matchMapper.selectById(add.getMatchId());
+        if (match == null || !Objects.equals(match.getTournamentId(), add.getTournamentId())) {
+            throw new ServiceException("参赛明细与场次不属于同一赛事");
+        }
+        if (add.getCompetitorId() != null) {
+            TCompetitor competitor = competitorMapper.selectById(add.getCompetitorId());
+            if (competitor == null
+                || !Objects.equals(competitor.getStageId(), match.getStageId())
+                || !Objects.equals(competitor.getTournamentId(), match.getTournamentId())) {
+                throw new ServiceException("参赛方不属于场次所在赛段");
+            }
+        }
+        guardParticipantMutable(add.getMatchId());
+        if (StringUtils.isBlank(add.getSlotKind())) {
+            add.setSlotKind(StageConstants.SLOT_PLAYER);
+        }
+        if (StringUtils.isBlank(add.getOutcomeStatus())) {
+            add.setOutcomeStatus(MatchOutcomeEnum.PENDING.getCode());
+        }
+        guardParticipantDuplicates(add, null);
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
@@ -180,8 +216,26 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
      * @return 修改后的场次参赛人员记录
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TMatchParticipantVo updateByBo(TMatchParticipantBo bo) {
         TMatchParticipant update = MapstructUtils.convert(bo, TMatchParticipant.class);
+        TMatchParticipant before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("参赛明细不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("参赛明细不允许变更所属赛事");
+        }
+        if (update.getMatchId() != null && !Objects.equals(before.getMatchId(), update.getMatchId())) {
+            throw new ServiceException("参赛明细不允许变更所属场次");
+        }
+        if (update.getCompetitorId() != null
+            && !Objects.equals(before.getCompetitorId(), update.getCompetitorId())) {
+            throw new ServiceException("参赛明细不允许通过通用更新更换参赛方");
+        }
+        guardParticipantMutable(before.getMatchId());
+        guardParticipantDuplicates(update, before.getId());
         validEntityBeforeSave(update);
         baseMapper.updateById(update);
         return MapstructUtils.convert(update, TMatchParticipantVo.class);
@@ -202,10 +256,72 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
+        if (Boolean.TRUE.equals(isValid)) {
+            if (ids == null || ids.isEmpty()) {
+                throw new ServiceException("参赛明细ID不能为空");
+            }
+            for (Long id : ids) {
+                TMatchParticipant participant = baseMapper.selectById(id);
+                if (participant == null) {
+                    continue;
+                }
+                guardParticipantMutable(participant.getMatchId());
+                if (participant.getCompetitorId() != null) {
+                    List<Long> roundIds = roundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+                            .eq(TMatchRound::getMatchId, participant.getMatchId())
+                            .select(TMatchRound::getId))
+                        .stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+                    long scores = roundIds.isEmpty() ? 0 : scoreMapper.selectCount(
+                        Wrappers.<TRoundScore>lambdaQuery()
+                            .in(TRoundScore::getRoundId, roundIds)
+                            .eq(TRoundScore::getCompetitorId, participant.getCompetitorId()));
+                    if (scores > 0) {
+                        throw new ServiceException("参赛方[{}]已在本场留有打分，不能删除参赛明细",
+                            participant.getCompetitorId());
+                    }
+                }
+            }
         }
         return baseMapper.deleteByIds(ids) > 0;
     }
+
+    private void guardParticipantMutable(Long matchId) {
+        TMatch match = matchId == null ? null : matchMapper.selectById(matchId);
+        TStage stage = match == null ? null : stageMapper.selectById(match.getStageId());
+        if (stage == null || !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("赛段已开始，场次参赛明细已锁定");
+        }
+        if (!StageConstants.MATCH_PENDING.equals(match.getStatus())) {
+            throw new ServiceException("场次已开始，参赛明细已锁定");
+        }
+    }
+
+    private void guardParticipantDuplicates(TMatchParticipant participant, Long excludedId) {
+        if (participant.getCompetitorId() != null) {
+            var query = Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, participant.getMatchId())
+                .eq(TMatchParticipant::getCompetitorId, participant.getCompetitorId());
+            if (excludedId != null) {
+                query.ne(TMatchParticipant::getId, excludedId);
+            }
+            if (baseMapper.selectCount(query) > 0) {
+                throw new ServiceException("参赛方[{}]已在该场次中", participant.getCompetitorId());
+            }
+        }
+        if (participant.getDisplaySlotIndex() != null) {
+            var query = Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, participant.getMatchId())
+                .eq(TMatchParticipant::getDisplaySlotIndex, participant.getDisplaySlotIndex());
+            if (excludedId != null) {
+                query.ne(TMatchParticipant::getId, excludedId);
+            }
+            if (baseMapper.selectCount(query) > 0) {
+                throw new ServiceException("场次[{}]的显示槽位 {} 已被占用",
+                    participant.getMatchId(), participant.getDisplaySlotIndex());
+            }
+        }
+    }
+
 }

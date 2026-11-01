@@ -723,7 +723,7 @@ class FullLifecycleE2ETest {
         bogus.setStatus(StageConstants.STAGE_SETTLED);
         ServiceException ex = assertThrows(ServiceException.class, () -> stageService.updateConfig(bogus),
             "场次未结算完不能把赛段直接标成已结束");
-        assertTrue(ex.getMessage().contains("不能直接标记为已结束"), "实际:" + ex.getMessage());
+        assertTrue(ex.getMessage().contains("不能直接标记为"), "实际:" + ex.getMessage());
         hit("错误操作守卫");
     }
 

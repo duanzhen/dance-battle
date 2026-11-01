@@ -219,6 +219,16 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
     @Transactional(rollbackFor = Exception.class)
     public TVisWidgetVo insertByBo(TVisWidgetBo bo) {
         TVisWidget add = MapstructUtils.convert(bo, TVisWidget.class);
+        if (add.getSceneId() == null || add.getTournamentId() == null) {
+            throw new ServiceException("控件必须归属赛事和场景");
+        }
+        TVisScene scene = sceneMapper.selectById(add.getSceneId());
+        if (scene == null || !Objects.equals(scene.getTournamentId(), add.getTournamentId())) {
+            throw new ServiceException("控件与场景不属于同一赛事");
+        }
+        if (StringUtils.isBlank(add.getType())) {
+            throw new ServiceException("控件类型不能为空");
+        }
         validEntityBeforeSave(add);
         Long sceneId = add.getSceneId();
         withSceneLock(sceneId, () -> {
@@ -249,11 +259,24 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
     @Override
     public TVisWidgetVo updateByBo(TVisWidgetBo bo) {
         TVisWidget update = MapstructUtils.convert(bo, TVisWidget.class);
+        TVisWidget before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("控件不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("控件不允许变更所属赛事");
+        }
+        if (update.getSceneId() != null && !Objects.equals(before.getSceneId(), update.getSceneId())) {
+            throw new ServiceException("控件不允许变更所属场景");
+        }
+        if (update.getType() != null && StringUtils.isBlank(update.getType())) {
+            throw new ServiceException("控件类型不能为空");
+        }
         // 锁定保护:已锁定控件仅允许切换可见性(visible)或解除锁定(locked),禁止修改其他字段
         if (update.getId() != null) {
-            TVisWidget existing = baseMapper.selectById(update.getId());
-            if (existing != null && isLocked(existing)) {
-                assertNotLockedEdit(existing, update);
+            if (isLocked(before)) {
+                assertNotLockedEdit(before, update);
             }
         }
         validEntityBeforeSave(update);

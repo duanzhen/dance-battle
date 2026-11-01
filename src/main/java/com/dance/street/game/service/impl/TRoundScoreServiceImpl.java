@@ -13,12 +13,25 @@ import org.springframework.stereotype.Service;
 import com.dance.street.game.domain.bo.TRoundScoreBo;
 import com.dance.street.game.domain.vo.TRoundScoreVo;
 import com.dance.street.game.domain.TRoundScore;
+import com.dance.street.game.domain.TMatch;
+import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TMatchRound;
+import com.dance.street.game.domain.TStage;
+import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.mapper.TMatchMapper;
+import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITRoundScoreService;
+import org.dromara.common.core.exception.ServiceException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * 轮次打分结果Service业务层处理
@@ -32,6 +45,14 @@ import java.util.Collection;
 public class TRoundScoreServiceImpl implements ITRoundScoreService {
 
     private final TRoundScoreMapper baseMapper;
+    private final TMatchRoundMapper roundMapper;
+    private final TMatchMapper matchMapper;
+    private final TStageMapper stageMapper;
+    private final TMatchParticipantMapper participantMapper;
+    private static final Set<String> SCORE_ACTIONS = Set.of(
+        StageConstants.SCORE_ACTION_SCORE,
+        StageConstants.SCORE_ACTION_VOTE
+    );
 
     /**
      * 查询轮次打分结果
@@ -91,8 +112,40 @@ public class TRoundScoreServiceImpl implements ITRoundScoreService {
      * @return 是否新增成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean insertByBo(TRoundScoreBo bo) {
         TRoundScore add = MapstructUtils.convert(bo, TRoundScore.class);
+        if (add.getTournamentId() == null || add.getRoundId() == null || add.getCompetitorId() == null) {
+            throw new ServiceException("打分必须同时包含赛事、轮次和参赛方");
+        }
+        TMatchRound round = roundMapper.selectById(add.getRoundId());
+        TMatch match = round == null ? null : matchMapper.selectById(round.getMatchId());
+        if (match == null) {
+            throw new ServiceException("打分所属场次不存在");
+        }
+        if (!Objects.equals(match.getTournamentId(), add.getTournamentId())
+            || !Objects.equals(round.getTournamentId(), add.getTournamentId())) {
+            throw new ServiceException("打分、轮次和场次不属于同一赛事");
+        }
+        long attached = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+            .eq(TMatchParticipant::getMatchId, match.getId())
+            .eq(TMatchParticipant::getCompetitorId, add.getCompetitorId())
+            .eq(TMatchParticipant::getTournamentId, add.getTournamentId()));
+        if (attached == 0) {
+            throw new ServiceException("参赛方[{}]不属于场次[{}]，不能写入打分",
+                add.getCompetitorId(), match.getId());
+        }
+        guardScoreGaming(add.getRoundId());
+        if (StringUtils.isBlank(add.getAction())) {
+            add.setAction(StageConstants.SCORE_ACTION_SCORE);
+        }
+        if (StringUtils.isBlank(add.getDimension())) {
+            add.setDimension(StageConstants.DIMENSION_MAIN);
+        }
+        if (!SCORE_ACTIONS.contains(add.getAction())) {
+            throw new ServiceException("不支持的打分动作: {}", add.getAction());
+        }
+        guardScoreValue(add.getScore());
         validEntityBeforeSave(add);
         boolean flag = baseMapper.insert(add) > 0;
         if (flag) {
@@ -108,8 +161,29 @@ public class TRoundScoreServiceImpl implements ITRoundScoreService {
      * @return 是否修改成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean updateByBo(TRoundScoreBo bo) {
         TRoundScore update = MapstructUtils.convert(bo, TRoundScore.class);
+        TRoundScore before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("打分记录不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("打分记录不允许变更所属赛事");
+        }
+        if (update.getRoundId() != null && !Objects.equals(before.getRoundId(), update.getRoundId())) {
+            throw new ServiceException("打分记录不允许变更所属轮次");
+        }
+        if (update.getCompetitorId() != null
+            && !Objects.equals(before.getCompetitorId(), update.getCompetitorId())) {
+            throw new ServiceException("打分记录不允许变更参赛方");
+        }
+        guardScoreGaming(before.getRoundId());
+        if (update.getAction() != null && !SCORE_ACTIONS.contains(update.getAction())) {
+            throw new ServiceException("不支持的打分动作: {}", update.getAction());
+        }
+        guardScoreValue(update.getScore() == null ? before.getScore() : update.getScore());
         validEntityBeforeSave(update);
         return baseMapper.updateById(update) > 0;
     }
@@ -129,10 +203,40 @@ public class TRoundScoreServiceImpl implements ITRoundScoreService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
+        if (Boolean.TRUE.equals(isValid)) {
+            if (ids == null || ids.isEmpty()) {
+                throw new ServiceException("打分ID不能为空");
+            }
+            for (Long id : ids) {
+                TRoundScore score = baseMapper.selectById(id);
+                if (score != null) {
+                    guardScoreGaming(score.getRoundId());
+                }
+            }
         }
         return baseMapper.deleteByIds(ids) > 0;
+    }
+
+    private void guardScoreGaming(Long roundId) {
+        TMatchRound round = roundId == null ? null : roundMapper.selectById(roundId);
+        TMatch match = round == null ? null : matchMapper.selectById(round.getMatchId());
+        TStage stage = match == null ? null : stageMapper.selectById(match.getStageId());
+        if (stage == null
+            || !StageConstants.STAGE_GAMING.equals(stage.getStatus())
+            || !StageConstants.MATCH_GAMING.equals(match.getStatus())
+            || !StageConstants.MATCH_GAMING.equals(round.getStatus())) {
+            throw new ServiceException("仅进行中的赛段、场次和轮次可以写入或修改原始分数");
+        }
+    }
+
+    private static void guardScoreValue(java.math.BigDecimal score) {
+        if (score == null) {
+            throw new ServiceException("分数不能为空");
+        }
+        if (score.signum() < 0) {
+            throw new ServiceException("分数不能为负数");
+        }
     }
 }

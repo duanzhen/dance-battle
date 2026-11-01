@@ -55,6 +55,8 @@ import java.util.Comparator;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.springframework.transaction.annotation.Transactional;
+import org.dromara.common.core.exception.ServiceException;
 
 /**
  * 比赛场次Service业务层处理
@@ -959,8 +961,29 @@ public class TMatchServiceImpl implements ITMatchService {
      * @return 新增后的比赛场次
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TMatchVo insertByBo(TMatchBo bo) {
         TMatch add = MapstructUtils.convert(bo, TMatch.class);
+        if (add.getTournamentId() == null || add.getStageId() == null) {
+            throw new ServiceException("场次必须归属赛事和赛段");
+        }
+        TStage stage = stageMapper.selectById(add.getStageId());
+        if (stage == null || !Objects.equals(stage.getTournamentId(), add.getTournamentId())) {
+            throw new ServiceException("场次与赛段不属于同一赛事");
+        }
+        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("赛段[{}]已开始，不能通过通用 CRUD 新建场次；请使用对应赛制流程",
+                stage.getName());
+        }
+        if (StringUtils.isBlank(add.getStatus())) {
+            add.setStatus(StageConstants.MATCH_PENDING);
+        }
+        if (!StageConstants.MATCH_PENDING.equals(add.getStatus())) {
+            throw new ServiceException("新建场次必须从 PENDING 开始");
+        }
+        if (StringUtils.isBlank(add.getMatchMode())) {
+            add.setMatchMode("STANDARD");
+        }
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
@@ -974,8 +997,25 @@ public class TMatchServiceImpl implements ITMatchService {
      * @return 修改后的比赛场次
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TMatchVo updateByBo(TMatchBo bo) {
         TMatch update = MapstructUtils.convert(bo, TMatch.class);
+        TMatch before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("场次不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("场次不允许变更所属赛事");
+        }
+        if (update.getStageId() != null && !Objects.equals(before.getStageId(), update.getStageId())) {
+            throw new ServiceException("场次不允许变更所属赛段");
+        }
+        if (update.getStatus() != null && !Objects.equals(before.getStatus(), update.getStatus())) {
+            throw new ServiceException("场次状态只能通过开始、提交结果或重置流程变更，通用更新不能把 {} 改为 {}",
+                before.getStatus(), update.getStatus());
+        }
+        guardMatchMutable(before.getStageId(), before.getId());
         validEntityBeforeSave(update);
         baseMapper.updateById(update);
         return MapstructUtils.convert(update, TMatchVo.class);
@@ -996,11 +1036,41 @@ public class TMatchServiceImpl implements ITMatchService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
+        if (Boolean.TRUE.equals(isValid)) {
+            if (ids == null || ids.isEmpty()) {
+                throw new ServiceException("场次ID不能为空");
+            }
+            for (Long id : ids) {
+                TMatch match = baseMapper.selectById(id);
+                if (match == null) {
+                    continue;
+                }
+                guardMatchMutable(match.getStageId(), id);
+                long rounds = matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
+                    .eq(TMatchRound::getMatchId, id));
+                long participants = matchParticipantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .eq(TMatchParticipant::getMatchId, id));
+                if (rounds > 0 || participants > 0) {
+                    throw new ServiceException(
+                        "场次[{}]已包含轮次或参赛明细，不能通过通用 CRUD 删除；请重置并重新生成对阵",
+                        match.getName());
+                }
+            }
         }
         return baseMapper.deleteByIds(ids) > 0;
+    }
+
+    private void guardMatchMutable(Long stageId, Long matchId) {
+        TStage stage = stageMapper.selectById(stageId);
+        if (stage == null || !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("赛段已开始，场次结构已锁定；请使用场次生命周期或重置流程");
+        }
+        TMatch match = baseMapper.selectById(matchId);
+        if (match == null || !StageConstants.MATCH_PENDING.equals(match.getStatus())) {
+            throw new ServiceException("场次已开始，结构已锁定；请使用结果、重置或取消开始流程");
+        }
     }
 
     /** 赛制画像(读模型里替代 mode 字符串/枚举比较)。 */

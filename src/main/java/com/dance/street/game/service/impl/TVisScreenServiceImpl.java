@@ -7,7 +7,10 @@ import com.dance.street.game.domain.TVisScreen;
 import com.dance.street.game.domain.bo.TVisScreenBo;
 import com.dance.street.game.domain.vo.TVisScreenVo;
 import com.dance.street.game.mapper.TVisScreenMapper;
+import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITVisScreenService;
+import org.dromara.common.core.exception.ServiceException;
+import org.dromara.common.core.utils.StringUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.utils.MapstructUtils;
@@ -17,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -33,6 +37,7 @@ import java.util.Set;
 public class TVisScreenServiceImpl implements ITVisScreenService {
 
     private final TVisScreenMapper baseMapper;
+    private final TTournamentMapper tournamentMapper;
 
     /** 赛事级建默认屏的 JVM 内串行锁:并发首屏请求不至于各建一块(多实例下仍需业务侧容忍极小概率重复) */
     private static final Object DEFAULT_LOCK = new Object();
@@ -65,6 +70,13 @@ public class TVisScreenServiceImpl implements ITVisScreenService {
     @Override
     public TVisScreenVo insertByBo(TVisScreenBo bo) {
         TVisScreen add = MapstructUtils.convert(bo, TVisScreen.class);
+        if (add.getTournamentId() == null
+            || tournamentMapper.selectById(add.getTournamentId()) == null) {
+            throw new ServiceException("屏幕必须归属一个有效赛事");
+        }
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("屏幕名称不能为空");
+        }
         if (add.getSortOrder() == null) {
             add.setSortOrder((long) baseMapper.selectVoList(buildQueryWrapper(bo.getTournamentId())).size());
         }
@@ -76,10 +88,21 @@ public class TVisScreenServiceImpl implements ITVisScreenService {
     @Override
     public TVisScreenVo updateByBo(TVisScreenBo bo) {
         TVisScreen update = MapstructUtils.convert(bo, TVisScreen.class);
+        TVisScreen before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("屏幕不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("屏幕不允许变更所属赛事");
+        }
+        if (update.getName() != null && StringUtils.isBlank(update.getName())) {
+            throw new ServiceException("屏幕名称不能为空");
+        }
         // 改名/排序不覆盖投射状态:投射状态只由投射入口改写
         update.setCurrentSceneId(null);
         baseMapper.updateById(update);
-        notifyScreenListChanged(bo.getTournamentId());
+        notifyScreenListChanged(before.getTournamentId());
         return MapstructUtils.convert(update, TVisScreenVo.class);
     }
 

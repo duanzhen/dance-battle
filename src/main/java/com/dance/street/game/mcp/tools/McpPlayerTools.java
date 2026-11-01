@@ -40,9 +40,13 @@ public class McpPlayerTools implements IMcpTool {
         properties.put("id", McpToolSupport.idProperty("Player id."));
         properties.put("ids", McpToolSupport.idsProperty());
         properties.put("tournamentId", McpToolSupport.idProperty("Tournament id for import."));
-        properties.put("data", McpToolSupport.objectProperty(
-            "TPlayerBo for create/update/list, CheckInBo, CheckInEditBo, "
-                + "or an array of PlayerImportVo records when action=import."
+        properties.put("data", Map.of(
+            "description", "TPlayerBo for create/update/list, CheckInBo, CheckInEditBo, "
+                + "or an array of PlayerImportVo records when action=import.",
+            "anyOf", List.of(
+                Map.of("type", "object"),
+                Map.of("type", "array", "items", Map.of("type", "object"))
+            )
         ));
         properties.putAll(McpToolSupport.pagingProperties());
         return McpToolSupport.definition(

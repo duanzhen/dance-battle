@@ -6,17 +6,24 @@ import lombok.extern.slf4j.Slf4j;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TRefereeStage;
+import com.dance.street.game.domain.TReferee;
+import com.dance.street.game.domain.TStage;
+import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.domain.bo.StageRefereeBo;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
+import com.dance.street.game.mapper.TRefereeMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITRefereeStageService;
+import org.dromara.common.core.exception.ServiceException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -32,6 +39,8 @@ public class TRefereeStageServiceImpl implements ITRefereeStageService {
     private final TRefereeStageMapper refereeStageMapper;
     private final TMatchRefereeMapper matchRefereeMapper;
     private final TMatchMapper matchMapper;
+    private final TStageMapper stageMapper;
+    private final TRefereeMapper refereeMapper;
 
     @Override
     public List<Long> getRefereeIdsByStageId(Long stageId) {
@@ -46,6 +55,25 @@ public class TRefereeStageServiceImpl implements ITRefereeStageService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void assignReferees(StageRefereeBo bo) {
+        TStage stage = bo.getStageId() == null ? null : stageMapper.selectById(bo.getStageId());
+        if (stage == null || !Objects.equals(stage.getTournamentId(), bo.getTournamentId())) {
+            throw new ServiceException("赛段不存在或不属于当前赛事");
+        }
+        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("赛段[{}]已开始，裁判配置已锁定", stage.getName());
+        }
+        List<Long> ids = bo.getRefereeIds() == null ? List.of()
+            : bo.getRefereeIds().stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.size() != (bo.getRefereeIds() == null ? 0 : bo.getRefereeIds().size())) {
+            throw new ServiceException("裁判ID不能为空");
+        }
+        if (!ids.isEmpty()) {
+            List<TReferee> referees = refereeMapper.selectByIds(ids);
+            if (referees.size() != ids.size()
+                || referees.stream().anyMatch(r -> !Objects.equals(r.getTournamentId(), bo.getTournamentId()))) {
+                throw new ServiceException("不能分配不存在或其他赛事的裁判");
+            }
+        }
         // 删除该赛段的旧关联
         refereeStageMapper.delete(
             Wrappers.<TRefereeStage>lambdaQuery()

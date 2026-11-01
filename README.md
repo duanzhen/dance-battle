@@ -152,110 +152,23 @@ docker run -d -p 80:80 -v app-data:/data dance-game-app:latest
 
 ## MCP 接入
 
-前后端同域部署时，MCP 入口就是当前域名下的:
+支持 AI 客户端通过 Streamable HTTP 连接并调用赛事业务:
 
 ```text
 https://<当前域名>/mcp
 ```
 
-支持 Streamable HTTP。客户端首次访问会收到带
-`resource_metadata` 的 `401 WWW-Authenticate`，随后自动发现:
+首次连接会通过标准 OAuth 自动发现进入管理员授权；未登录时先跳转登录页，授权完成后
 
-- `GET /.well-known/oauth-protected-resource/mcp`
-- `GET /.well-known/oauth-authorization-server`
-- `POST /register`：Dynamic Client Registration
-- `GET /authorize`：跳转前端管理员授权页，使用 PKCE S256
-- `POST /token`：authorization_code 或 refresh_token 换 Bearer JWT
+提供赛事、赛段、名单、选手、参赛单位、裁判、场次和大屏管理等工具；各工具支持的
+操作及参数可通过 `tools/list` 查询。写操作复用网页端 Service，并校验 OAuth
+access token 中的 `mcp` scope，因此事务、状态机和业务校验保持一致。
 
-这是用于 MCP 客户端接入的简化 OAuth 实现，不包含 consent、client secret、
-scope 管理或撤销列表。`client_id`、authorization code、access token 和 refresh token
-本身都是
-短期签名 JWT，注册信息、redirect URI、PKCE challenge 和 resource 直接编码在 token
-中，服务端不保存注册表或授权码表。当前授权码在过期前可重复换取 token，接入生产环境
-前应改为一次性存储或其他防重放机制。
-
-默认 access token 有效期为 24 小时，refresh token 有效期为 30 天。使用
-`grant_type=refresh_token` 刷新时会同时签发新的 access token 和 refresh token；
-由于当前是无状态实现，旧 refresh token 在自然过期前仍可重复使用，也没有服务端撤销能力。
-
-浏览器 OAuth 请求会进入 `/mcp/authorize`：已有管理端登录态时直接签发授权码并返回
-MCP 客户端；没有登录时先跳转 `/login`，登录成功后自动回到授权页继续。
-
-默认 issuer/resource 按当前请求的 Host 推断；反向代理无法正确传递 Host 时可显式设置
-`MCP_PUBLIC_BASE_URL=https://<当前域名>`。
-
-MCP 业务工具按领域分组，写操作通过 `action` 分派并直接复用 Controller 背后的 Service，
-因此事务、状态机、资源归属和赛制校验与网页端保持一致：
-
-| 工具 | 覆盖的业务 |
-| --- | --- |
-| `list_tournaments` | 轻量赛事列表 |
-| `manage_tournaments` | 赛事增删改查、模板建赛、导播凭证读取与轮换 |
-| `manage_stages` | 赛段配置与链、初始化、生成对阵、开赛/完成/重置、擂台轮转、种子与晋级操作 |
-| `manage_rosters` | 名单来源组、候选与预览、排位、加人/移出、人工覆盖、确认与跳过 |
-| `manage_players` | 选手档案、签到/改签/解签、结构化批量导入 |
-| `manage_competitors` | 参赛单位、成员关系、场次参赛明细 |
-| `manage_referees` | 裁判档案与凭证、赛段/场次分配、裁判工作台、打分提交 |
-| `manage_matches` | 场次/轮次/原始分数、开赛与结果发布、自由对抗和当前上场选手 |
-| `manage_displays` | 场景、控件、屏幕、图层与计时/视频状态、场景投射 |
-
-写工具要求请求携带 OAuth 签发的 MCP access token，并在工具执行层再次校验
-`sub=mcp-agent` 和 `scope` 中包含 `mcp`。SSE 长连接仍属于实时传输，不作为 MCP 工具；
-但通过 `manage_displays` 投射场景会同时持久化屏幕状态并广播给已连接的大屏。
-
-Agent 在开始复杂的多步任务前，可先通过 `prompts/list` 找到业务理解模板
-`dance_battle_operator`，再调用 `prompts/get`：
-
-```json
-{
-  "name": "dance_battle_operator",
-  "arguments": {
-    "goal": "检查淘汰赛名单为什么还不能开始",
-    "focus": "roster",
-    "tournamentId": "123",
-    "stageId": "456"
-  }
-}
-```
-
-`goal` 必填；`focus` 可选 `general`、`setup`、`roster`、`competition`、`judging`、
-`display` 或 `troubleshoot`；`tournamentId`、`stageId`、`matchId` 为可选的已知上下文。
-模板会注入领域模型、状态机、工具映射、推荐执行顺序和高影响写操作约束。Prompt 本身
-只生成上下文，不直接修改业务数据。
-
-调用统一使用 `action`，主键、分页和领域对象分别是独立参数。例如：
-
-```json
-{
-  "name": "manage_stages",
-  "arguments": {
-    "action": "complete",
-    "stageId": 123456789
-  }
-}
-```
-
-每个 `action` 的枚举、参数和领域对象字段可从 `tools/list` 的 input schema 获取。
-返回同时包含可读文本和 `structuredContent`，业务异常通过 `isError=true` 返回。
-成功和失败结果都包含 `context`，其中输出本次调用可识别的最新
-`tournamentId`、`stageId`、`matchId`、`playerId`、`refereeId` 等对象 ID。
-Agent 应将本次非空字段合并到工作上下文，后续调用优先复用，无需服务端保存会话状态。
-
-新增 MCP 工具时，在 `com.dance.street.game.mcp.tools` 包内实现
-`com.dance.street.game.mcp.IMcpTool` 并注册为 Spring Bean，即可自动进入
-`tools/list`，无需修改服务器配置:
-
-```java
-@Service
-public class MyMcpTool implements IMcpTool {
-    public McpSchema.Tool definition() { /* name + inputSchema */ }
-    public McpSchema.CallToolResult execute(McpTransportContext ctx, McpSchema.CallToolRequest req) {
-        /* 业务逻辑；写操作需从 ctx 读取 claims 并校验权限 */
-    }
-}
-```
-
-工具名必须全局唯一，重复名称会在应用启动时直接失败。
+Agent 在准备使用该 MCP、首次调用业务工具前，必须先通过 `prompts/get` 加载
+`dance_battle_operator`，以理解业务模型、状态机和操作约束。可附带已知的赛事、
+赛段或场次 ID。加载一次后，同一对话中的后续任务和工具调用
+直接复用已进入上下文的业务逻辑，无需重复获取。业务工具统一通过 `action` 指定操作；结果中的
+`structuredContent` 和 `context` 可供 Agent 继续多步调用。
 
 ## 开发
 

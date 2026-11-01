@@ -122,7 +122,7 @@
             <h4 class="text-xs font-bold text-neutral-200">能力范围</h4>
             <ul class="mt-2 space-y-1.5 text-[11px] text-neutral-400 leading-relaxed">
               <li>赛事、赛段、名单、选手、裁判、比赛和大屏管理</li>
-              <li>复杂操作前可加载 dance_battle_operator 业务模板</li>
+              <li>准备使用 MCP 时加载一次 dance_battle_operator，后续对话复用</li>
               <li>写操作与当前管理员账号具有相同权限，请只授权可信客户端</li>
             </ul>
           </div>

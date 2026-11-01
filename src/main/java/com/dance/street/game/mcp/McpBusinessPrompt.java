@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 供 Agent 在操作赛事之前加载的业务理解模板。
+ * Agent 调用任何业务工具之前必须加载的业务理解模板。
  */
 @Component
 public class McpBusinessPrompt {
@@ -20,12 +20,12 @@ public class McpBusinessPrompt {
     private static final String BASE_GUIDE = """
         你是「无败 · 街舞赛事管理系统」的业务操作 Agent。你负责把用户的自然语言目标转换成可验证的 MCP 操作。
 
-        本次请求
-        - 目标：{goal}
+        当前上下文
         - 关注领域：{focus}
         - tournamentId：{tournamentId}
         - stageId：{stageId}
         - matchId：{matchId}
+        具体用户目标由 Agent 根据当前对话理解，不通过 Prompt 参数传入。
 
         一、领域模型
         1. Tournament 是赛事根对象。赛事包含有序 Stage 链、场景/屏幕/控件、选手、裁判和比赛数据。
@@ -303,14 +303,10 @@ public class McpBusinessPrompt {
     public McpSchema.Prompt definition() {
         return McpSchema.Prompt.builder(PROMPT_NAME)
             .title("Dance Battle business operator")
-            .description("Load the dance-battle domain model, stage/roster state machines, tool map, "
-                + "recommended workflow, and safety rules before operating tournaments.")
+            .description("Required once when preparing to use the MCP server, before the first dance-battle "
+                + "business tool. Loads the domain model, stage/roster state machines, tool map, recommended "
+                + "workflow, and safety rules.")
             .arguments(List.of(
-                McpSchema.PromptArgument.builder("goal")
-                    .title("Goal")
-                    .description("The user's concrete business goal.")
-                    .required(true)
-                    .build(),
                 McpSchema.PromptArgument.builder("focus")
                     .title("Focus")
                     .description("Optional focus: general, setup, roster, competition, judging, display, troubleshoot.")
@@ -339,13 +335,11 @@ public class McpBusinessPrompt {
                                               McpSchema.GetPromptRequest request) {
         Map<String, Object> arguments = request.arguments() == null
             ? Map.of() : request.arguments();
-        String goal = required(arguments, "goal");
         String focus = value(arguments, "focus", "general").toLowerCase();
         if (!FOCUS_GUIDES.containsKey(focus)) {
             throw new ServiceException("不支持的 prompt focus: {}", focus);
         }
         String content = BASE_GUIDE
-            .replace("{goal}", goal)
             .replace("{focus}", focus)
             .replace("{tournamentId}", value(arguments, "tournamentId", "未提供，需查询确认"))
             .replace("{stageId}", value(arguments, "stageId", "未提供，需查询确认"))
@@ -356,21 +350,13 @@ public class McpBusinessPrompt {
             new McpSchema.TextContent(content)
         ).build();
         return McpSchema.GetPromptResult.builder(List.of(message))
-            .description("Dance-battle business operation context for: " + goal)
+            .description("Dance-battle business operation context")
             .build();
     }
 
     public McpStatelessServerFeatures.SyncPromptSpecification toSpecification() {
         return new McpStatelessServerFeatures.SyncPromptSpecification(
             definition(), this::generate);
-    }
-
-    private static String required(Map<String, Object> arguments, String name) {
-        String value = value(arguments, name, null);
-        if (value == null || value.isBlank()) {
-            throw new ServiceException("prompt 参数 {} 不能为空", name);
-        }
-        return value;
     }
 
     private static String value(Map<String, Object> arguments, String name, String fallback) {

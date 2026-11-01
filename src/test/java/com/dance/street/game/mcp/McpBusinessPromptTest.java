@@ -18,16 +18,15 @@ class McpBusinessPromptTest {
     @Test
     void exposesBusinessGuideWithOptionalContextArguments() {
         assertEquals(McpBusinessPrompt.PROMPT_NAME, prompt.definition().name());
-        assertEquals(5, prompt.definition().arguments().size());
+        assertEquals(4, prompt.definition().arguments().size());
         assertTrue(prompt.definition().arguments().stream()
-            .anyMatch(argument -> "goal".equals(argument.name()) && argument.required()));
+            .noneMatch(McpSchema.PromptArgument::required));
     }
 
     @Test
     void rendersFocusAndCurrentBusinessContext() {
         var result = prompt.generate(McpTransportContext.EMPTY,
             new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of(
-                "goal", "检查下一赛段为什么不能开始",
                 "focus", "roster",
                 "tournamentId", "100",
                 "stageId", "200",
@@ -35,9 +34,9 @@ class McpBusinessPromptTest {
             )));
 
         String text = ((McpSchema.TextContent) result.messages().getFirst().content()).text();
-        assertTrue(text.contains("检查下一赛段为什么不能开始"));
         assertTrue(text.contains("tournamentId：100"));
         assertTrue(text.contains("stageId：200"));
+        assertTrue(text.contains("具体用户目标由 Agent 根据当前对话理解"));
         assertTrue(text.contains("当前重点：名单"));
         assertTrue(text.contains("DRAFT → GAMING → SETTLED"));
         assertTrue(text.contains("manage_rosters"));
@@ -58,14 +57,14 @@ class McpBusinessPromptTest {
     }
 
     @Test
-    void rejectsMissingGoalAndUnknownFocus() {
-        assertThrows(ServiceException.class, () -> prompt.generate(
-            McpTransportContext.EMPTY,
-            new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of())));
+    void allowsEmptyArgumentsAndRejectsUnknownFocus() {
+        var result = prompt.generate(McpTransportContext.EMPTY,
+            new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of()));
+        assertTrue(((McpSchema.TextContent) result.messages().getFirst().content()).text()
+            .contains("具体用户目标由 Agent 根据当前对话理解"));
         assertThrows(ServiceException.class, () -> prompt.generate(
             McpTransportContext.EMPTY,
             new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of(
-                "goal", "test",
                 "focus", "unknown"
             ))));
     }
@@ -74,7 +73,6 @@ class McpBusinessPromptTest {
     void setupGuideShowsAllTemplateLabelsIncludingBlank() {
         var result = prompt.generate(McpTransportContext.EMPTY,
             new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of(
-                "goal", "创建赛事",
                 "focus", "setup"
             )));
         String text = ((McpSchema.TextContent) result.messages().getFirst().content()).text();

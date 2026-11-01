@@ -206,6 +206,10 @@ class McpOAuthFlowTest {
                 + "\"clientInfo\":{\"name\":\"integration-test\",\"version\":\"1.0.0\"}}}",
             accessToken);
         assertEquals(200, initialize.statusCode(), initialize.body());
+        assertTrue(initialize.body().contains("MUST first call prompts/get"),
+            "MCP 初始化说明必须要求 Agent 先加载业务 Prompt");
+        assertTrue(initialize.body().contains("reuse the resulting context"),
+            "MCP 初始化说明必须要求后续工具调用复用业务 Prompt 上下文");
 
         HttpResponse<String> tools = postJson(client, baseUrl + "/mcp",
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}", accessToken);
@@ -252,7 +256,7 @@ class McpOAuthFlowTest {
         HttpResponse<String> prompt = postJson(client, baseUrl + "/mcp",
             "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"prompts/get\",\"params\":{"
                 + "\"name\":\"dance_battle_operator\",\"arguments\":{"
-                + "\"goal\":\"检查当前赛段\",\"focus\":\"roster\",\"tournamentId\":\""
+                + "\"focus\":\"roster\",\"tournamentId\":\""
                 + tournament.getId() + "\"}}}",
             accessToken);
         assertEquals(200, prompt.statusCode(), prompt.body());

@@ -353,6 +353,21 @@ public class TTournamentServiceImpl implements ITTournamentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public TTournamentVo createByTemplate(TTournamentTemplateBo bo) {
+        if (StringUtils.isBlank(bo.getTemplateCode())) {
+            throw new ServiceException("使用赛事模版时必须明确传 templateCode");
+        }
+        if ("BLANK".equals(bo.getTemplateCode())) {
+            TTournamentBo blank = new TTournamentBo();
+            blank.setName(bo.getName());
+            blank.setCoverImage(bo.getCoverImage());
+            blank.setStatus(0L);
+            blank.setLogicalWidth(bo.getLogicalWidth());
+            blank.setLogicalHeight(bo.getLogicalHeight());
+            blank.setThemeConfig(bo.getThemeConfig());
+            blank.setRemark(bo.getRemark());
+            blank.setRefereeNames(bo.getRefereeNames());
+            return insertByBo(blank);
+        }
         List<StageDef> defs = TEMPLATES.get(bo.getTemplateCode());
         if (defs == null || defs.isEmpty()) {
             throw new ServiceException("未知的赛事模版: " + bo.getTemplateCode());

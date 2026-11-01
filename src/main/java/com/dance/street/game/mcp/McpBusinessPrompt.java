@@ -231,7 +231,9 @@ public class McpBusinessPrompt {
 
         六、推荐执行顺序
         1. 先用只读操作确认赛事、赛段、名单和比赛当前状态，不要根据名称猜 ID。
-        2. 新建赛事后优先按模板创建完整流程；手工建赛时先建赛段并检查 flow/prebracket。
+        2. 正常新建赛事必须先用 manage_tournaments.create_from_template 创建完整流程；
+           不得绕过统一创建入口建空壳赛事。用户明确要求不使用模版时，
+           调用 create_from_template 并传 templateCode=BLANK。
         3. 名单阶段先看 candidates/preview，再调整来源组、覆盖或座位，最后 apply/confirm。
         4. 比赛阶段先 initialize，再 generate_matches，确认裁判分配后 start。
         5. 判罚后按赛制提交 outcomes 或 scores；需要时 complete，并检查返回的下游状态。
@@ -254,8 +256,16 @@ public class McpBusinessPrompt {
     private static final Map<String, String> FOCUS_GUIDES = Map.of(
         "setup", """
 
-        当前重点：建赛与配置。先选择模板编码（AUDITION_32、AUDITION_16、AUDITION_ARENA），
-        检查生成的赛段链、规则、场景和控件，再补充选手与裁判。
+        当前重点：建赛与配置。创建前必须先向用户确认：
+        - 正式赛事名称，不得自行生成“新赛事 + 日期”等占位名称；
+        - 模板编码（BLANK、AUDITION_32、AUDITION_16、AUDITION_ARENA）；
+        - 至少一名裁判，或用户明确确认“暂无裁判”。
+        画布宽高不是必填项；用户未指定时使用默认 1920×1080。
+        确认后调用 manage_tournaments.create_from_template，并传入 templateCode 和 refereeNames；
+        refereeNames 的数组长度就是裁判数量。
+        仅当用户明确选择暂无裁判时才传 noRefereeConfirmed=true；
+        只有用户明确要求不使用模版时才传 templateCode=BLANK。
+        创建后必须回查赛事以及赛段链，检查规则、场景和控件，再补充选手与裁判。
         """,
         "roster", """
 

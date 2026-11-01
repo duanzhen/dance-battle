@@ -205,8 +205,10 @@ class McpOAuthFlowTest {
 
         HttpResponse<String> managementWrite = postJson(client, baseUrl + "/mcp",
             "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{"
-                + "\"name\":\"manage_tournaments\",\"arguments\":{\"action\":\"create\",\"data\":{"
-                + "\"name\":\"MCP 写入测试\",\"status\":0,\"logicalWidth\":1920,\"logicalHeight\":1080}}}}",
+                + "\"name\":\"manage_tournaments\",\"arguments\":{\"action\":\"create_from_template\","
+                + "\"noRefereeConfirmed\":true,\"data\":{"
+                + "\"name\":\"MCP 写入测试\",\"templateCode\":\"AUDITION_16\","
+                + "\"logicalWidth\":1920,\"logicalHeight\":1080}}}}",
             accessToken);
         assertEquals(200, managementWrite.statusCode(), managementWrite.body());
         assertTrue(managementWrite.body().contains("MCP 写入测试"), managementWrite.body());

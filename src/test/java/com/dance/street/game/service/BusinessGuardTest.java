@@ -1,5 +1,6 @@
 package com.dance.street.game.service;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
@@ -12,6 +13,7 @@ import com.dance.street.game.domain.bo.TMatchParticipantBo;
 import com.dance.street.game.domain.bo.TRoundScoreBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageConfigBo;
+import com.dance.street.game.domain.bo.TTournamentTemplateBo;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
@@ -68,6 +70,7 @@ class BusinessGuardTest {
     @Autowired private TCompetitorMapper competitorMapper;
     @Autowired private TRoundScoreMapper scoreMapper;
     @Autowired private ITStageService stageService;
+    @Autowired private ITTournamentService tournamentService;
     @Autowired private ITMatchService matchService;
     @Autowired private ITMatchParticipantService participantService;
     @Autowired private ITCompetitorService competitorService;
@@ -208,6 +211,16 @@ class BusinessGuardTest {
         assertDoesNotThrow(() -> lifecycleService.setMatchCurrentCompetitor(match.getId(), attached.getId()));
         assertThrows(ServiceException.class,
             () -> lifecycleService.setMatchCurrentCompetitor(match.getId(), other.getId()));
+    }
+
+    @Test
+    void blankTemplateCreatesWithoutStages() {
+        TTournamentTemplateBo blank = new TTournamentTemplateBo();
+        blank.setName("空白模版赛事");
+        blank.setTemplateCode("BLANK");
+        Long blankTournamentId = tournamentService.createByTemplate(blank).getId();
+        assertEquals(0, stageMapper.selectCount(Wrappers.<TStage>lambdaQuery()
+            .eq(TStage::getTournamentId, blankTournamentId)));
     }
 
     private Long newTournament(String name) {

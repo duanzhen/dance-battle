@@ -70,6 +70,64 @@
         </div>
       </div>
 
+      <!-- MCP 接入:地址、OAuth 流程和客户端配置 -->
+      <div v-else-if="active === 'mcp'" class="space-y-3">
+        <div class="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+          <div class="flex items-start gap-3">
+            <div class="flex-none w-9 h-9 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+              <Bot class="w-5 h-5" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <h4 class="text-sm font-bold text-neutral-100">MCP 管理接口</h4>
+              <p class="mt-1 text-xs text-neutral-400 leading-relaxed">
+                支持 Streamable HTTP。把下面的地址添加到 MCP 客户端，客户端会自动发现 OAuth 并通过浏览器完成管理员授权。
+              </p>
+              <div class="mt-3 flex items-center gap-2 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2">
+                <code class="min-w-0 flex-1 break-all text-[11px] text-amber-300">{{ mcpEndpoint }}</code>
+                <button
+                  type="button"
+                  class="flex-none rounded-md border border-neutral-700 px-2.5 py-1.5 text-[10px] font-bold text-neutral-300 hover:border-amber-500/50 hover:text-amber-400 transition-colors"
+                  @click="copyMcpEndpoint"
+                >
+                  {{ mcpCopied ? '已复制' : '复制地址' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-neutral-800 bg-neutral-950/60 p-4">
+          <h4 class="text-sm font-bold text-neutral-100">接入流程</h4>
+          <ol class="mt-2.5 space-y-2">
+            <li v-for="(step, i) in mcpSteps" :key="i" class="flex gap-2.5 text-xs text-neutral-400 leading-relaxed">
+              <span class="flex-none w-5 h-5 rounded bg-neutral-800 text-amber-400 text-[10px] font-bold flex items-center justify-center">
+                {{ i + 1 }}
+              </span>
+              <span>{{ step }}</span>
+            </li>
+          </ol>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div class="rounded-xl border border-neutral-800 bg-neutral-950/60 p-3.5">
+            <h4 class="text-xs font-bold text-neutral-200">客户端配置</h4>
+            <ul class="mt-2 space-y-1.5 text-[11px] text-neutral-400 leading-relaxed">
+              <li>传输方式：Streamable HTTP</li>
+              <li>服务地址：当前页面展示的 MCP URL</li>
+              <li>认证：OAuth 授权码 + PKCE，无需填写密码或 Handoff Token</li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-neutral-800 bg-neutral-950/60 p-3.5">
+            <h4 class="text-xs font-bold text-neutral-200">能力范围</h4>
+            <ul class="mt-2 space-y-1.5 text-[11px] text-neutral-400 leading-relaxed">
+              <li>赛事、赛段、名单、选手、裁判、比赛和大屏管理</li>
+              <li>复杂操作前可加载 dance_battle_operator 业务模板</li>
+              <li>写操作与当前管理员账号具有相同权限，请只授权可信客户端</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- 常见问题:现场最容易卡住的点 -->
       <div v-else class="space-y-2">
         <details v-for="(f, i) in faqs" :key="i" class="group rounded-xl border border-neutral-800 bg-neutral-950/60 overflow-hidden">
@@ -116,7 +174,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { CircleHelp, MonitorPlay, Gavel, Smartphone, Settings2, ListChecks, Users, MessageCircleQuestion } from 'lucide-vue-next';
+import { Bot, CircleHelp, MonitorPlay, Gavel, Smartphone, Settings2, ListChecks, Users, MessageCircleQuestion } from 'lucide-vue-next';
 import GameDialog from '@/components/GameDialog/index.vue';
 
 defineProps<{
@@ -127,15 +185,47 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean];
 }>();
 
-type TabKey = 'flow' | 'roles' | 'faq';
+type TabKey = 'flow' | 'roles' | 'mcp' | 'faq';
 
 const active = ref<TabKey>('flow');
 
 const tabs: { key: TabKey; label: string; icon: unknown }[] = [
   { key: 'flow', label: '上手流程', icon: ListChecks },
   { key: 'roles', label: '角色与入口', icon: Users },
+  { key: 'mcp', label: 'MCP 接入', icon: Bot },
   { key: 'faq', label: '常见问题', icon: MessageCircleQuestion }
 ];
+
+const mcpEndpoint = `${window.location.origin}/mcp`;
+const mcpCopied = ref(false);
+const mcpSteps = [
+  '在 Codex、Claude Desktop 或其他 MCP 客户端中新增 Streamable HTTP 服务，并填入上方地址。',
+  '首次连接时客户端会读取 OAuth 元数据并打开本站授权页。',
+  '使用当前管理员账号登录并确认授权，客户端会获得短期 MCP Access Token。'
+];
+
+const copyMcpEndpoint = async () => {
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(mcpEndpoint);
+    copied = true;
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = mcpEndpoint;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    copied = document.execCommand('copy');
+    textarea.remove();
+  }
+  mcpCopied.value = copied;
+  if (copied) {
+    window.setTimeout(() => {
+      mcpCopied.value = false;
+    }, 1500);
+  }
+};
 
 // 上手流程:按"建赛 → 备赛 → 编排 → 开赛 → 投射"四/五个阶段组织,
 // 每段都标清在哪个入口、由谁操作,避免读者先判断"这几步是不是我的"。

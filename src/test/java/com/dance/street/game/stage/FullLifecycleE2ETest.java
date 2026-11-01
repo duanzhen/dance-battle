@@ -219,7 +219,7 @@ class FullLifecycleE2ETest {
         renameOnePlayer(checkedIn, rng);
 
         // ---------- 6. 错误操作:没选圈就签到 → 守卫应拒绝且不留半成品 ----------
-        if (withGuards) {
+        if (withGuards && plan.circles() > 1) {
             assertGuardRejectsCheckInWithoutCircle(tid, plan);
         }
 

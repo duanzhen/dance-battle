@@ -154,10 +154,15 @@ public class StageCheckInService {
         } else if (!auditionSplit) {
             // 排名赛不分圈:整段只有一场,直接落到唯一可用的正式场次,无需客户端指定圈
             target = candidates.get(0);
+        } else if (candidates.size() == 1) {
+            // 单圈只有一个合法落点,可直接自动落圈;多圈仍必须由客户端明确指定。
+            target = candidates.get(0);
         } else {
             // 落圈一律由客户端决定:后端不再按号码/名额择优推导,
             // 否则同一批号码会因「先建圈后签到 / 签完再生成」等调用顺序不同而落到不同的圈。
-            throw new ServiceException("请指定落圈:补签到必须传入目标圈场次ID或圈序号");
+            throw new ServiceException(
+                "请指定落圈:当前海选有 {} 圈,请传 matchId 或 zoneIndex=1..{}",
+                candidates.size(), candidates.size());
         }
         appendParticipant(target, competitorId);
         log.info("海选/排名赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());

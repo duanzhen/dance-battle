@@ -29,6 +29,9 @@ public class McpTournamentManagementTools implements IMcpTool {
     private static final Set<String> TEMPLATE_CODES = Set.of(
         "BLANK", "AUDITION_32", "AUDITION_16", "AUDITION_ARENA"
     );
+    private static final String TEMPLATE_DESCRIPTION =
+        "BLANK（空白赛事）；AUDITION_32（海选32人）；"
+            + "AUDITION_16（海选16人）；AUDITION_ARENA（海选32SevenToSmoke）";
     private static final Pattern PLACEHOLDER_NAME = Pattern.compile(
         "^(新赛事|新建赛事|未命名赛事|untitled|new tournament)(\\s*[-_ ]?\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2})?$",
         Pattern.CASE_INSENSITIVE
@@ -61,7 +64,7 @@ public class McpTournamentManagementTools implements IMcpTool {
         dataProperties.put("templateCode", Map.of(
             "type", "string",
             "enum", List.copyOf(TEMPLATE_CODES),
-            "description", "Required for create_from_template."
+            "description", "Required for create_from_template. Options: " + TEMPLATE_DESCRIPTION
         ));
         dataProperties.put("coverImage", Map.of("type", "string"));
         dataProperties.put("description", Map.of("type", "string"));
@@ -109,8 +112,8 @@ public class McpTournamentManagementTools implements IMcpTool {
         return McpSchema.Tool.builder("manage_tournaments", schema)
             .title("Manage tournaments")
             .description("Create every tournament through create_from_template. "
-                + "Use templateCode=BLANK only when the user explicitly confirms a blank tournament; "
-                + "otherwise use AUDITION_32, AUDITION_16 or AUDITION_ARENA.")
+                + "Available templates: " + TEMPLATE_DESCRIPTION
+                + ". Use BLANK only when the user explicitly confirms a blank tournament.")
             .annotations(McpSchema.ToolAnnotations.builder()
                 .readOnlyHint(false)
                 .destructiveHint(true)
@@ -145,7 +148,7 @@ public class McpTournamentManagementTools implements IMcpTool {
                     if (StringUtils.isBlank(bo.getTemplateCode())
                         || !TEMPLATE_CODES.contains(bo.getTemplateCode())) {
                         throw new ServiceException(
-                            "templateCode 必须是 BLANK、AUDITION_32、AUDITION_16 或 AUDITION_ARENA");
+                            "templateCode 必须是以下之一：{}", TEMPLATE_DESCRIPTION);
                     }
                     yield tournamentService.createByTemplate(bo);
                 }

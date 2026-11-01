@@ -74,6 +74,11 @@ class McpTournamentManagementToolsTest {
         assertEquals(4, ((List<?>) templateCode.get("enum")).size());
         assertTrue(((List<?>) templateCode.get("enum")).containsAll(
             List.of("BLANK", "AUDITION_32", "AUDITION_16", "AUDITION_ARENA")));
+        String description = String.valueOf(templateCode.get("description"));
+        assertTrue(description.contains("BLANK（空白赛事）"));
+        assertTrue(description.contains("AUDITION_32（海选32人）"));
+        assertTrue(description.contains("AUDITION_16（海选16人）"));
+        assertTrue(description.contains("AUDITION_ARENA（海选32SevenToSmoke）"));
         Map<String, Object> action = (Map<String, Object>) properties.get("action");
         assertFalse(((List<?>) action.get("enum")).contains("create"));
         assertFalse(((List<?>) tool.inputSchema().get("allOf")).isEmpty());

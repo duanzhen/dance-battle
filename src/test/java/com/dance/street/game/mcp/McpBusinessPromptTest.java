@@ -69,4 +69,18 @@ class McpBusinessPromptTest {
                 "focus", "unknown"
             ))));
     }
+
+    @Test
+    void setupGuideShowsAllTemplateLabelsIncludingBlank() {
+        var result = prompt.generate(McpTransportContext.EMPTY,
+            new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of(
+                "goal", "创建赛事",
+                "focus", "setup"
+            )));
+        String text = ((McpSchema.TextContent) result.messages().getFirst().content()).text();
+        assertTrue(text.contains("BLANK（空白赛事）"));
+        assertTrue(text.contains("AUDITION_32（海选32人）"));
+        assertTrue(text.contains("AUDITION_16（海选16人）"));
+        assertTrue(text.contains("AUDITION_ARENA（海选32SevenToSmoke）"));
+    }
 }

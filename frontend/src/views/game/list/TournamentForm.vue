@@ -209,7 +209,10 @@
               : 'border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-red-500/40'
           "
         >
-          <span class="text-xs font-bold">不使用模版，创建空白赛事</span>
+          <span class="text-xs font-bold">BLANK（空白赛事）</span>
+          <span class="block mt-1 text-[10px] text-neutral-500">
+            不使用赛事模版时请明确选择此项。
+          </span>
         </button>
       </div>
 
@@ -373,19 +376,19 @@ const showAdvanced = ref(false);
 const templates = [
   {
     code: 'AUDITION_32',
-    label: '32人淘汰赛',
+    label: '海选32人',
     tag: '海选32强',
     stages: ['海选', '32强', '16强', '8强', '半决赛', '决赛']
   },
   {
     code: 'AUDITION_16',
-    label: '16人淘汰赛',
+    label: '海选16人',
     tag: '海选16强',
     stages: ['海选', '16强', '8强', '半决赛', '决赛']
   },
   {
     code: 'AUDITION_ARENA',
-    label: '32人擂台赛',
+    label: '海选32SevenToSmoke',
     tag: '海选32-8强Seven To Smoke',
     stages: ['海选', '32强', '16强', '擂台赛']
   }

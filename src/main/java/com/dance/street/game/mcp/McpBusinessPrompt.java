@@ -56,6 +56,7 @@ public class McpBusinessPrompt {
           generate_matches 只创建空圈，不会自动把选手塞进圈。
         - 名单与落圈：选手必须先成为本赛段 Competitor，再通过签到或
           manage_stages.append_competitor 显式指定 matchId / zoneIndex 落圈。多圈时不能依赖后端猜圈。
+          单圈海选可省略落圈参数并自动落入唯一圈；多圈海选必须显式指定 matchId 或 zoneIndex。
           开赛前要求所有有效参赛者已落圈，且海选圈配置了裁判；任一圈不满足都会阻止 start。
         - 判分：matchMode 固定为 VOTING，使用 manage_referees.submit_score 的 scores；
           默认满分 10，可用 ruleConfig.maxScore 调整。每名选手必须被本场应到裁判全部打完，
@@ -258,7 +259,8 @@ public class McpBusinessPrompt {
 
         当前重点：建赛与配置。创建前必须先向用户确认：
         - 正式赛事名称，不得自行生成“新赛事 + 日期”等占位名称；
-        - 模板编码（BLANK、AUDITION_32、AUDITION_16、AUDITION_ARENA）；
+        - 模板编码：BLANK（空白赛事）、AUDITION_32（海选32人）、
+          AUDITION_16（海选16人）、AUDITION_ARENA（海选32SevenToSmoke）；
         - 至少一名裁判，或用户明确确认“暂无裁判”。
         画布宽高不是必填项；用户未指定时使用默认 1920×1080。
         确认后调用 manage_tournaments.create_from_template，并传入 templateCode 和 refereeNames；

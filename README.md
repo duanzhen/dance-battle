@@ -232,6 +232,9 @@ Agent 在开始复杂的多步任务前，可先通过 `prompts/list` 找到业�
 
 每个 `action` 的枚举、参数和领域对象字段可从 `tools/list` 的 input schema 获取。
 返回同时包含可读文本和 `structuredContent`，业务异常通过 `isError=true` 返回。
+成功和失败结果都包含 `context`，其中输出本次调用可识别的最新
+`tournamentId`、`stageId`、`matchId`、`playerId`、`refereeId` 等对象 ID。
+Agent 应将本次非空字段合并到工作上下文，后续调用优先复用，无需服务端保存会话状态。
 
 新增 MCP 工具时，在 `com.dance.street.game.mcp.tools` 包内实现
 `com.dance.street.game.mcp.IMcpTool` 并注册为 Spring Bean，即可自动进入

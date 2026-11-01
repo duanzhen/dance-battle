@@ -100,9 +100,10 @@ public class McpPlayerTools implements IMcpTool {
                 }
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_players", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_players", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

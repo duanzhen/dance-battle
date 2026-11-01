@@ -162,9 +162,10 @@ public class McpTournamentManagementTools implements IMcpTool {
                     tournamentService.regenerateAuthKey(McpToolSupport.requiredLong(arguments, "id")));
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_tournaments", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_tournaments", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

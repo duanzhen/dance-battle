@@ -5,6 +5,7 @@ import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.json.schema.jackson2.DefaultJsonSchemaValidator;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.util.ToolInputValidator;
+import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -111,6 +112,34 @@ class McpTournamentManagementToolsTest {
             )
         );
         assertNull(ToolInputValidator.validate(tool, complete, true, validator));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void everyResultCarriesLatestContextIds() {
+        Map<String, Object> arguments = Map.of(
+            "id", 20,
+            "data", Map.of("tournamentId", 5)
+        );
+        var result = McpToolSupport.result(
+            "manage_matches", "get", Map.of("id", 20, "stageId", 10), arguments);
+        Map<String, Object> structured = (Map<String, Object>) result.structuredContent();
+        Map<String, Object> context = (Map<String, Object>) structured.get("context");
+
+        assertEquals("manage_matches", context.get("tool"));
+        assertEquals("match", context.get("resourceType"));
+        assertEquals(20, context.get("matchId"));
+        assertEquals(5, context.get("tournamentId"));
+        assertEquals(10, context.get("stageId"));
+
+        var failure = McpToolSupport.failure(
+            "manage_referees", "match_scores", Map.of(
+                "matchId", 20, "refereeId", 30
+            ), new ServiceException("test"));
+        Map<String, Object> failedContext = (Map<String, Object>)
+            ((Map<String, Object>) failure.structuredContent()).get("context");
+        assertEquals(20, failedContext.get("matchId"));
+        assertEquals(30, failedContext.get("refereeId"));
     }
 
     private McpSchema.CallToolResult call(String action, Map<String, Object> data) {

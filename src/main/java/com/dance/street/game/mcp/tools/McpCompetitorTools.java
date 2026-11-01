@@ -111,9 +111,10 @@ public class McpCompetitorTools implements IMcpTool {
                     participantService.deleteWithValidByIds(requiredIds(arguments), true);
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_competitors", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_competitors", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

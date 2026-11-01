@@ -22,6 +22,11 @@ final class McpToolSupport {
 
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
+    private static final Set<String> CONTEXT_ID_KEYS = Set.of(
+        "tournamentId", "stageId", "matchId", "playerId", "competitorId",
+        "refereeId", "roundId", "sceneId", "screenId", "widgetId",
+        "memberId", "participantId", "scoreId", "overrideId"
+    );
 
     private McpToolSupport() {
     }
@@ -264,10 +269,12 @@ final class McpToolSupport {
         return new PageQuery(pageSize, pageNum);
     }
 
-    static McpSchema.CallToolResult result(String action, Object value) {
+    static McpSchema.CallToolResult result(String toolName, String action,
+                                          Object value, Map<String, Object> arguments) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("action", action);
         result.put("result", value);
+        result.put("context", context(toolName, action, arguments, value));
         return McpSchema.CallToolResult.builder()
             .addTextContent(JsonUtils.toJsonString(result))
             .structuredContent(result)
@@ -275,18 +282,114 @@ final class McpToolSupport {
             .build();
     }
 
-    static McpSchema.CallToolResult failure(String action, Throwable error) {
+    static McpSchema.CallToolResult failure(String toolName, String action,
+                                            Map<String, Object> arguments, Throwable error) {
         String message = error instanceof ServiceException
             ? error.getMessage()
             : "MCP 工具执行失败: " + error.getMessage();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("action", action);
         result.put("error", message);
+        result.put("context", context(toolName, action, arguments, null));
         return McpSchema.CallToolResult.builder()
             .addTextContent(JsonUtils.toJsonString(result))
             .structuredContent(result)
             .isError(true)
             .build();
+    }
+
+    static Map<String, Object> context(String toolName, String action,
+                                       Map<String, Object> arguments, Object value) {
+        Map<String, Object> ids = new LinkedHashMap<>();
+        collectContextIds(arguments, ids);
+        Map<String, Object> resultMap = asMap(value);
+        collectContextIds(resultMap, ids);
+
+        String resourceType = resourceType(toolName, action);
+        Object primaryId = arguments == null ? null : arguments.get("id");
+        if (primaryId == null && resultMap.get("id") != null) {
+            primaryId = resultMap.get("id");
+        }
+
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("tool", toolName);
+        context.put("action", action);
+        context.put("resourceType", resourceType);
+        if (primaryId != null) {
+            context.put("resourceId", primaryId);
+            String primaryKey = switch (resourceType) {
+                case "tournament" -> "tournamentId";
+                case "stage" -> "stageId";
+                case "match" -> "matchId";
+                case "player" -> "playerId";
+                case "competitor" -> "competitorId";
+                case "referee" -> "refereeId";
+                case "round" -> "roundId";
+                case "scene" -> "sceneId";
+                case "screen" -> "screenId";
+                case "widget" -> "widgetId";
+                case "competitor_member" -> "memberId";
+                case "match_participant" -> "participantId";
+                case "round_score" -> "scoreId";
+                default -> null;
+            };
+            if (primaryKey != null) {
+                context.putIfAbsent(primaryKey, primaryId);
+            }
+        }
+        ids.forEach(context::putIfAbsent);
+        return context;
+    }
+
+    private static void collectContextIds(Object source, Map<String, Object> target) {
+        if (!(source instanceof Map<?, ?> map)) {
+            return;
+        }
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            Object value = entry.getValue();
+            if (CONTEXT_ID_KEYS.contains(key) && value != null
+                && !(value instanceof Collection<?>)) {
+                target.put(key, value);
+            } else if (value instanceof Map<?, ?>) {
+                collectContextIds(value, target);
+            }
+        }
+    }
+
+    private static Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            map.forEach((key, item) -> result.put(String.valueOf(key), item));
+            return result;
+        }
+        if (value == null) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> parsed = JsonUtils.parseObject(JsonUtils.toJsonString(value), Map.class);
+            return parsed == null ? Map.of() : parsed;
+        } catch (RuntimeException ignored) {
+            return Map.of();
+        }
+    }
+
+    private static String resourceType(String toolName, String action) {
+        return switch (toolName) {
+            case "list_tournaments", "manage_tournaments" -> "tournament";
+            case "manage_stages" -> "stage";
+            case "manage_rosters" -> "roster";
+            case "manage_players" -> "player";
+            case "manage_competitors" -> action.startsWith("member_")
+                ? "competitor_member"
+                : action.startsWith("participant_") ? "match_participant" : "competitor";
+            case "manage_referees" -> "referee";
+            case "manage_matches" -> action.startsWith("round_")
+                ? "round" : action.startsWith("score_") ? "round_score" : "match";
+            case "manage_displays" -> action.startsWith("screen_")
+                ? "screen" : action.startsWith("scene_") ? "scene" : "widget";
+            default -> "unknown";
+        };
     }
 
     static Set<String> actions(String... actions) {

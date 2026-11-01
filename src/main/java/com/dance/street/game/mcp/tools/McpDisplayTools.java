@@ -152,9 +152,10 @@ public class McpDisplayTools implements IMcpTool {
                 case "clear_projection" -> clearProjection(arguments);
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_displays", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_displays", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

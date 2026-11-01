@@ -200,9 +200,10 @@ public class McpMatchTools implements IMcpTool {
                     scoreService.deleteWithValidByIds(requiredIds(arguments), true);
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_matches", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_matches", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

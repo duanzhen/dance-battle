@@ -242,6 +242,9 @@ public class McpBusinessPrompt {
 
         七、执行规约
         - 每次写入前读取最新状态；一个依赖动作或结果作为下一个写操作的前提。
+        - 每个工具成功或失败结果都包含 context。维护一份当前上下文，并用本次 context 中
+          非空的 tournamentId、stageId、matchId 等字段覆盖旧值；后续调用优先复用这些 ID。
+          若 context 中缺少本次操作必需对象，先做只读查询确认，不要根据名称猜。
         - 任何 ID 都必须来自工具结果或用户明确提供，不能编造。
         - 严格保持 tournamentId、stageId、matchId 的归属关系，不要跨赛事操作。
         - 优先使用生命周期和名单动作，不要绕过状态机直接修改底层 MatchParticipant 或结果字段。

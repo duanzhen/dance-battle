@@ -85,6 +85,8 @@ class McpOAuthFlowTest {
         assertEquals(baseUrl, metadata.get("issuer"));
         assertEquals(baseUrl + "/register", metadata.get("registration_endpoint"));
         assertEquals(baseUrl + "/token", metadata.get("token_endpoint"));
+        assertTrue(((List<?>) metadata.get("grant_types_supported"))
+            .containsAll(List.of("authorization_code", "refresh_token")));
 
         HttpResponse<String> unauthorized = postJson(client, baseUrl + "/mcp",
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}", null);
@@ -167,8 +169,36 @@ class McpOAuthFlowTest {
         assertEquals(200, tokenResponse.statusCode());
         Map<?, ?> tokenBody = JsonUtils.parseObject(tokenResponse.body(), Map.class);
         String accessToken = (String) tokenBody.get("access_token");
+        String refreshToken = (String) tokenBody.get("refresh_token");
         assertNotNull(accessToken);
+        assertNotNull(refreshToken);
         assertEquals("mcp_access_token", JWT.of(accessToken).getPayload("token_use"));
+        assertEquals("mcp_refresh_token", JWT.of(refreshToken).getPayload("token_use"));
+        assertTrue(tokenLifetime(accessToken) >= 86400, "access token 默认应至少有效 24 小时");
+        assertTrue(tokenLifetime(refreshToken) >= 2592000, "refresh token 默认应至少有效 30 天");
+
+        HttpResponse<String> refreshAsBearer = postJson(client, baseUrl + "/mcp",
+            "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"tools/list\",\"params\":{}}",
+            refreshToken);
+        assertEquals(401, refreshAsBearer.statusCode(), "refresh token 不得直接作为 Bearer token 使用");
+
+        Map<String, String> refreshRequest = new LinkedHashMap<>();
+        refreshRequest.put("grant_type", "refresh_token");
+        refreshRequest.put("client_id", clientId);
+        refreshRequest.put("refresh_token", refreshToken);
+        refreshRequest.put("resource", baseUrl + "/mcp");
+        HttpResponse<String> refreshResponse = postForm(client, baseUrl + "/token", refreshRequest);
+        assertEquals(200, refreshResponse.statusCode(), refreshResponse.body());
+        Map<?, ?> refreshBody = JsonUtils.parseObject(refreshResponse.body(), Map.class);
+        String refreshedAccessToken = (String) refreshBody.get("access_token");
+        String refreshedRefreshToken = (String) refreshBody.get("refresh_token");
+        assertNotNull(refreshedAccessToken);
+        assertNotNull(refreshedRefreshToken);
+        assertTrue(!accessToken.equals(refreshedAccessToken), "刷新后应签发新的 access token");
+        assertTrue(!refreshToken.equals(refreshedRefreshToken), "刷新后应签发新的 refresh token");
+        assertEquals("mcp_access_token", JWT.of(refreshedAccessToken).getPayload("token_use"));
+        assertEquals("mcp_refresh_token", JWT.of(refreshedRefreshToken).getPayload("token_use"));
+        accessToken = refreshedAccessToken;
 
         HttpResponse<String> initialize = postJson(client, baseUrl + "/mcp",
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
@@ -264,6 +294,12 @@ class McpOAuthFlowTest {
         byte[] digest = MessageDigest.getInstance("SHA-256")
             .digest(verifier.getBytes(StandardCharsets.US_ASCII));
         return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+    }
+
+    private static long tokenLifetime(String token) {
+        JWT jwt = JWT.of(token);
+        return ((Number) jwt.getPayload("exp")).longValue()
+            - ((Number) jwt.getPayload("iat")).longValue();
     }
 
     private static String encode(String value) {

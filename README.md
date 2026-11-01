@@ -165,13 +165,18 @@ https://<当前域名>/mcp
 - `GET /.well-known/oauth-authorization-server`
 - `POST /register`：Dynamic Client Registration
 - `GET /authorize`：跳转前端管理员授权页，使用 PKCE S256
-- `POST /token`：authorization_code 换 Bearer JWT
+- `POST /token`：authorization_code 或 refresh_token 换 Bearer JWT
 
 这是用于 MCP 客户端接入的简化 OAuth 实现，不包含 consent、client secret、
-refresh token、scope 管理或撤销列表。`client_id` 和 authorization code 本身都是
+scope 管理或撤销列表。`client_id`、authorization code、access token 和 refresh token
+本身都是
 短期签名 JWT，注册信息、redirect URI、PKCE challenge 和 resource 直接编码在 token
 中，服务端不保存注册表或授权码表。当前授权码在过期前可重复换取 token，接入生产环境
 前应改为一次性存储或其他防重放机制。
+
+默认 access token 有效期为 24 小时，refresh token 有效期为 30 天。使用
+`grant_type=refresh_token` 刷新时会同时签发新的 access token 和 refresh token；
+由于当前是无状态实现，旧 refresh token 在自然过期前仍可重复使用，也没有服务端撤销能力。
 
 浏览器 OAuth 请求会进入 `/mcp/authorize`：已有管理端登录态时直接签发授权码并返回
 MCP 客户端；没有登录时先跳转 `/login`，登录成功后自动回到授权页继续。

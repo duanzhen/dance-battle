@@ -114,7 +114,8 @@
             <ul class="mt-2 space-y-1.5 text-[11px] text-neutral-400 leading-relaxed">
               <li>传输方式：Streamable HTTP</li>
               <li>服务地址：当前页面展示的 MCP URL</li>
-              <li>认证：OAuth 授权码 + PKCE，无需填写密码或 Handoff Token</li>
+              <li>认证：OAuth 授权码 + PKCE，支持 refresh_token 自动续期</li>
+              <li>有效期：Access Token 24 小时，Refresh Token 30 天</li>
             </ul>
           </div>
           <div class="rounded-xl border border-neutral-800 bg-neutral-950/60 p-3.5">
@@ -201,7 +202,7 @@ const mcpCopied = ref(false);
 const mcpSteps = [
   '在 Codex、Claude Desktop 或其他 MCP 客户端中新增 Streamable HTTP 服务，并填入上方地址。',
   '首次连接时客户端会读取 OAuth 元数据并打开本站授权页。',
-  '使用当前管理员账号登录并确认授权，客户端会获得短期 MCP Access Token。'
+  '使用当前管理员账号登录并确认授权，客户端会获得 Access Token 和 Refresh Token。'
 ];
 
 const copyMcpEndpoint = async () => {

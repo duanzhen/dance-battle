@@ -95,7 +95,8 @@ mcp:
   public-base-url: ${MCP_PUBLIC_BASE_URL:}
   oauth:
     authorization-code-ttl-seconds: 300
-    access-token-ttl-seconds: 3600
+    access-token-ttl-seconds: 86400
+    refresh-token-ttl-seconds: 2592000
     client-registration-ttl-seconds: 2592000
 
 # 本地文件上传(替代对象存储)

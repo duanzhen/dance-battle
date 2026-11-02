@@ -431,6 +431,8 @@ public class RosterOverrideService {
                 && (occupant.getSourceCompetitorId() != null || occupant.getPlayerId() != null
                 || (occupant.getGuestName() != null && !occupant.getGuestName().isBlank()));
             if (occupantIsPerson && RosterConstants.PLACEMENT_INSERT.equalsIgnoreCase(bo.getPlacement())) {
+                // 插入会推动后面的人:与"加人 · 插入"同一门禁——上游未结算时拒绝
+                assertAllSourcesSettled(target, false);
                 // 插入:与"加人 · 插入"同一实现(原占位者及后面的人整体 +1,尾部溢出进待落位区)
                 if (row.getEntryTag() == null && row.getSourceCompetitorId() != null) {
                     row.setEntryTag(entryTagOf(row.getSourceCompetitorId()));

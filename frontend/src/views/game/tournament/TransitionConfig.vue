@@ -1151,6 +1151,12 @@ const confirmDropChoice = async () => {
     cancelDropChoice();
     return;
   }
+  // 与加人一致:上游未就绪时不能插入(会推动后面的人);不发请求,强制改成替换让导播再确认
+  if (dropChoicePlacement.value === 'INSERT' && rosterWaitingSource.value) {
+    ElMessage.warning('上游还有赛段没结束:现在只能替换,不能插入');
+    dropChoicePlacement.value = 'REPLACE';
+    return;
+  }
   dropChoiceSubmitting.value = true;
   try {
     await submitMove(moved, seed, dropChoicePlacement.value);

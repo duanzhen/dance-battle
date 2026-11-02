@@ -364,6 +364,49 @@ class RosterManualEdgeTest {
     }
 
     // =====================================================================
+    // 拖动 INSERT 门禁:与加人插入同一来源已结算校验
+    // =====================================================================
+
+    @Test
+    void dragHoldingInsertRejectedWhenSourceUnsettled() {
+        Fx f = fixture("drag-insert-unsettled", false, true);
+        override(f.target, RosterConstants.OVERRIDE_ADD_SOURCE, f.m(1), null, RosterConstants.PLACEMENT_HOLDING);
+        f.autoSource.setStatus(StageConstants.STAGE_GAMING);
+        stageMapper.updateById(f.autoSource);
+
+        ServiceException ex = assertThrows(ServiceException.class,
+            () -> move(f, f.m(1), 2L, RosterConstants.PLACEMENT_INSERT));
+        assertTrue(ex.getMessage().contains("上游还有赛段没结束"), ex.getMessage());
+        assertEquals(List.of(f.a(1), f.a(2), f.a(3), f.a(4)), seats(f.target, 1, 4));
+        assertEquals(List.of(f.m(1)), holding(f.target), "被拒绝后名单不变");
+    }
+
+    @Test
+    void dragHoldingReplaceAllowedWhenSourceUnsettled() {
+        Fx f = fixture("drag-replace-unsettled", false, true);
+        override(f.target, RosterConstants.OVERRIDE_ADD_SOURCE, f.m(1), null, RosterConstants.PLACEMENT_HOLDING);
+        f.autoSource.setStatus(StageConstants.STAGE_GAMING);
+        stageMapper.updateById(f.autoSource);
+
+        move(f, f.m(1), 2L, "REPLACE");
+
+        assertEquals(List.of(f.a(1), f.m(1), f.a(3), f.a(4)), seats(f.target, 1, 4));
+        assertEquals(List.of(f.a(2)), holding(f.target));
+    }
+
+    @Test
+    void dragHoldingInsertSucceedsWhenSourcesSettled() {
+        Fx f = fixture("drag-insert-settled-gate", false, true);
+        override(f.target, RosterConstants.OVERRIDE_ADD_SOURCE, f.m(1), null, RosterConstants.PLACEMENT_HOLDING);
+        assertTrue(rosterService.isRosterReady(f.target.getId()));
+
+        move(f, f.m(1), 2L, RosterConstants.PLACEMENT_INSERT);
+
+        assertEquals(List.of(f.a(1), f.m(1), f.a(2), f.a(3), f.a(4)), seats(f.target, 1, 5));
+        assertEquals(List.of(), holding(f.target));
+    }
+
+    // =====================================================================
     // 手动人移走后:座位留空,被挤的自动人不回填
     // =====================================================================
 

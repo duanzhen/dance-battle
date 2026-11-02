@@ -136,6 +136,8 @@ export interface RosterMoveBody {
   targetSeed?: number | null;
   /** 显式声明"移到待落位区" */
   toHolding?: boolean;
+  /** 目标座位有人时:INSERT=插到该座位(后面的人后移);REPLACE/不传=互换(待落位区来的人则占位者回待落位区) */
+  placement?: 'INSERT' | 'REPLACE';
 }
 
 export interface RosterPreviewItem {

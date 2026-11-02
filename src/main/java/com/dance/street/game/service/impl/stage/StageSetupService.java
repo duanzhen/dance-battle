@@ -21,11 +21,11 @@ import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.generator.BracketPlan;
 import com.dance.street.game.engine.generator.MatchPlan;
 import com.dance.street.game.engine.generator.SlotPlan;
-import com.dance.street.game.engine.generator.StageGeneratorFactory;
+import com.dance.street.game.service.impl.stage.handler.StageHandler;
+import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
@@ -42,7 +42,6 @@ import com.dance.street.game.engine.common.StageModeProfile;
 import com.dance.street.game.engine.common.StageModeProfile.GeneratePolicy;
 import com.dance.street.game.engine.common.StageModeProfile.SeedOrder;
 import com.dance.street.game.engine.common.StageModeProfile.Setup.Trait;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -93,7 +92,8 @@ public class StageSetupService {
     /** 海选圈口径与圈级裁判绑定 */
     private final AuditionCircleSupport auditionCircleSupport;
     private final StageHooks stageHooks;
-    private final StageGeneratorFactory generatorFactory;
+    /** 赛制 Handler:capabilities + generateBracket */
+    private final StageHandlerRegistry handlerRegistry;
 
     @Transactional(rollbackFor = Exception.class)
     public void initialize(InitializeStageBo bo) {
@@ -115,8 +115,8 @@ public class StageSetupService {
             throw new ServiceException("赛段无可初始化的参赛方");
         }
 
-        // 各赛制的种子排序口径由画像决定(海选/排名按号码,擂台保 seedRank 在前,其余按 seedRank)
-        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        // 各赛制的种子排序口径由 Handler.capabilities 决定
+        StageModeProfile profile = handlerRegistry.of(stage.getStageMode()).capabilities();
         comps.sort(seedComparator(profile.setup().seedOrder()));
         // 淘汰赛座位是"位置"而不是"出场次序":中间态允许把选手拖到轮空位互换、位置留空即轮空,
         // 因此开赛初始化不再把座位压成 1..n——否则中间态摆好的位置会被整体重排,生成的对阵与中间态对不上。
@@ -172,7 +172,8 @@ public class StageSetupService {
      */
     private void generateMatchesInternal(GenerateMatchesBo bo, boolean randomSplit) {
         TStage stage = stageLookup.get(bo.getStageId());
-        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        StageHandler handler = handlerRegistry.of(stage.getStageMode());
+        StageModeProfile profile = handler.capabilities();
         // 擂台赛不生成对阵树(由导播逐场创建);自由对抗也不生成(对手线下抽签/指认,场次由导播手动加)
         if (profile.setup().generatePolicy() == GeneratePolicy.REJECT) {
             throw new ServiceException(profile.setup().rejectMessage());
@@ -240,7 +241,6 @@ public class StageSetupService {
         if (profile.setup().has(Trait.CIRCLE_SPLIT)) {
             persistCircleSplitMode(stage, randomSplit);
         }
-        StageModeEnum mode = StageModeEnum.fromCode(stage.getStageMode());
         // 承接上一淘汰赛胜者:按胜者位置顺序配对(SEQUENTIAL),不受本赛段 SEED 配置影响;
         // 从海选赛进入的淘汰赛,未显式配置时默认标准种子对位(1-16、2-15)
         if (profile.setup().has(Trait.RESOLVES_KNOCKOUT_PAIRING) && rc != null && rc.getKnockout() != null) {
@@ -305,7 +305,7 @@ public class StageSetupService {
         if (profile.setup().has(Trait.RESOLVES_KNOCKOUT_PAIRING) && rc != null && rc.getKnockout() != null) {
             rc.getKnockout().setPairingMode(PairingModeResolver.resolve(rc.getKnockout().getPairingMode()));
         }
-        BracketPlan plan = generatorFactory.generate(mode, seededIds, rc);
+        BracketPlan plan = handler.generateBracket(seededIds, rc);
 
         List<MatchPlan> sorted = new ArrayList<>(plan.getMatches());
         sorted.sort(Comparator.comparingInt(MatchPlan::getRound).thenComparingInt(MatchPlan::getMatchIndex));

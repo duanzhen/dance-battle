@@ -168,10 +168,29 @@ public class RosterEntryStore {
                 .filter(r -> RosterConstants.ENTRY_ORIGIN_MANUAL.equals(r.getOrigin()))
                 .toList()
             : List.of();
+        // 一条自动边 + 手动边:手动的人优先 —— 他占的座位归他(自动的人进待落位区、不顺移),
+        // 同一选手只留手动那条。没有手动边的赛段保持原口径(投影说了算)。
+        boolean manualWins = keepManualAdjustments && RosterEdgeRules.hasManualEdge(groups);
+        if (manualWins) {
+            projection = rosterAssembler.manualWins(projection, manualRows);
+            // 待落位粘性:已被挤进待落位区的自动人,手动人移走后也不自动回座,座位留空
+            Set<Long> holdingIds = selectEntries(targetStageId).stream()
+                .filter(r -> r.getSlot() == null && r.getSourceCompetitorId() != null)
+                .map(TStageRosterEntry::getSourceCompetitorId)
+                .collect(Collectors.toSet());
+            projection = rosterAssembler.stickyHolding(projection, holdingIds);
+        }
+        Set<Long> manualSeats = new HashSet<>();
+        if (manualWins) {
+            manualRows.stream().map(TStageRosterEntry::getSlot).filter(Objects::nonNull).forEach(manualSeats::add);
+        }
         clearEntries(targetStageId);
         Set<Long> projectedSourceIds = new HashSet<>();
         Set<Long> projectedSlots = new HashSet<>();
         for (long slot = 1; slot <= projection.slotCount(); slot++) {
+            if (manualSeats.contains(slot)) {
+                continue;   // 座位归手动的人:下面按原行写回,这里不再铺空位
+            }
             RosterAssembler.AssembledRow r = projection.bySlot().get(slot);
             entryMapper.insert(toEntry(target, slot, r, sourceReady));
             projectedSlots.add(slot);
@@ -760,7 +779,7 @@ public class RosterEntryStore {
      * 把一个目标赛段的中间层与来源赛段当前的结果对齐:整表重建与实时同步共用同一份投影,
      * 不再有"快路径 / 通用路径 / 待落位路径"三套算法。
      *
-     * <p>座位号由来源赛段给出(见 {@link RosterAssembler#assignSeeds}),这里只做对账:
+     * <p>座位号由来源赛段经 {@link RosterExitApply} 给出,这里只做对账:
      * 该坐哪就坐哪;不再晋级的(判错重判/重置)座位还原成空位;人工调整的行原样保留。</p>
      */
     private int syncTargetPreAdvance(TStage target, Long sourceStageId, Set<Long> only) {
@@ -781,14 +800,48 @@ public class RosterEntryStore {
             return 0;
         }
         RosterAssembler.Projection projection = rosterAssembler.project(target, groups);
+        // 一条自动边 + 手动边:手动的人优先(座位归他,被占座的自动人进待落位区,同一选手只留手动)
+        Set<Long> displaced = Set.of();
+        int displacedMoved = 0;
+        if (!projection.holding() && RosterEdgeRules.hasManualEdge(groups)) {
+            Set<Long> holdingBefore = projection.holdingRows().stream()
+                .map(r -> r.source == null ? null : r.source.getId())
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+            projection = rosterAssembler.manualWins(projection, rows.stream()
+                .filter(r -> RosterConstants.ENTRY_ORIGIN_MANUAL.equals(r.getOrigin())).toList());
+            // 已在待落位区的人(含此前被挤下来的):手动人移走后也不自动回座
+            Set<Long> currentlyHolding = rows.stream()
+                .filter(r -> r.getSlot() == null && r.getSourceCompetitorId() != null)
+                .map(TStageRosterEntry::getSourceCompetitorId)
+                .collect(Collectors.toSet());
+            projection = rosterAssembler.stickyHolding(projection, currentlyHolding);
+            displaced = projection.holdingRows().stream()
+                .map(r -> r.source == null ? null : r.source.getId())
+                .filter(id -> id != null && (currentlyHolding.contains(id) || !holdingBefore.contains(id)))
+                .collect(Collectors.toSet());
+            // 被手动的人占座的自动人若还挂在原座位上:摘下来进待落位区(座位归手动的人)
+            for (TStageRosterEntry row : rows) {
+                if (row.getSlot() != null && displaced.contains(row.getSourceCompetitorId())
+                    && !RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())
+                    && !currentlyHolding.contains(row.getSourceCompetitorId())) {
+                    entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
+                        .eq(TStageRosterEntry::getId, row.getId())
+                        .set(TStageRosterEntry::getSlot, null)
+                        .set(TStageRosterEntry::getSourceSlot, null));
+                    row.setSlot(null);
+                    row.setSourceSlot(null);
+                    displacedMoved++;
+                }
+            }
+        }
         boolean sourceReady = readyByGroups(groups);
         String rowStatus = sourceReady
             ? RosterConstants.ENTRY_STATUS_READY : RosterConstants.ENTRY_STATUS_PENDING;
         String emptySlotKind = sourceReady
             ? StageConstants.SLOT_BYE : StageConstants.SLOT_PENDING;
-        int changed = projection.holding()
+        int changed = displacedMoved + (projection.holding()
             ? reconcileHolding(target, sourceStageId, projection.holdingRows(), rows, rowStatus, only)
-            : reconcileSeats(target, sourceStageId, projection, rows, rowStatus, emptySlotKind, only);
+            : reconcileSeats(target, sourceStageId, projection, rows, rowStatus, emptySlotKind, only, displaced));
         if (!projection.holding() && !projection.holdingRows().isEmpty()) {
             // 单来源里"来源座号超出本赛段容量"的人:座位留给计划内的,他们进待落座区
             changed += insertHoldingRows(target, projection.holdingRows(), rowStatus);
@@ -832,7 +885,7 @@ public class RosterEntryStore {
      */
     private int reconcileSeats(TStage target, Long sourceStageId, RosterAssembler.Projection projection,
                                List<TStageRosterEntry> rows, String rowStatus, String emptySlotKind,
-                               Set<Long> only) {
+                               Set<Long> only, Set<Long> displaced) {
         // 来源位置(finalRank) → 投影给出的新座号;人 → 它现在占的来源位置
         Map<Long, Long> seatBySourceSlot = new LinkedHashMap<>();
         Map<Long, Long> sourceSlotByCompetitor = new HashMap<>();
@@ -865,12 +918,19 @@ public class RosterEntryStore {
                 return reconcileEntries(target.getId()) ? 1 : 0;
             }
         }
+        Set<Long> projectedHolding = projection.holdingRows().stream()
+            .map(r -> r.source == null ? null : r.source.getId())
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
         int changed = 0;
         // 1) 先还原:某个来源位置已经没有结果、或这个人换了座位 → 把旧行摘掉,第 2 步重新写。
         for (TStageRosterEntry row : rows) {
             Long holder = row.getSourceCompetitorId();
             if (holder == null || RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {
                 continue;
+            }
+            if (row.getSlot() == null && (displaced.contains(holder) || projectedHolding.contains(holder))) {
+                continue;   // 待落位粘性/被挤下来的自动人:留在待落位区,等导播拖座
             }
             Long src = row.getSourceSlot();
             if (src != null && seatBySourceSlot.containsKey(src)) {

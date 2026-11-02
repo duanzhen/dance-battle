@@ -201,6 +201,7 @@
                 :stage-mode="currentStage.stageMode"
                 :stage-status="currentStage.status"
                 :is-initialized="currentStage.isInitialized"
+                :has-prev-stage="!!currentStage.prevStageId"
                 v-model:expanded="competitorExpanded"
               />
             </div>

@@ -349,7 +349,7 @@ onUnmounted(() => window.removeEventListener('resize', updateWidth));
 const form = reactive({
   name: '', // 赛事名称
   coverImage: '', // 封面图片 URL
-  status: 1, // 0:筹备 1:进行中 2:结束
+  status: 0, // 0:筹备中 1:进行中 2:已结束
   logicalWidth: 1920, // 设计稿宽度
   logicalHeight: 1080, // 设计稿高度
   themeConfig: '', // 主题配置 JSON 字符串
@@ -444,7 +444,7 @@ const resetForm = () => {
   Object.assign(form, {
     name: '',
     coverImage: '',
-    status: 1,
+    status: 0,
     logicalWidth: 1920,
     logicalHeight: 1080,
     themeConfig: '',

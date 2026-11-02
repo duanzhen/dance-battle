@@ -316,7 +316,7 @@ public class RosterViewService {
             .count();
         if (unplaced > 0) {
             vo.getWarnings().add(String.format(
-                "还有 %d 人没落位:多入口汇合的人先进待落位区,拖到座位上后才能确认名单", unplaced));
+                "待落位区还有 %d 人未处理，无法确认名单：请先在中间态把他们拖到座位上", unplaced));
         }
         return vo;
     }

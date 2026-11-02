@@ -85,9 +85,42 @@ class SqliteSchemaInitializerTest {
         assertTrue(indexes.contains("uk_username"));
         assertTrue(indexes.contains("idx_match_score"));
         assertTrue(indexes.contains("uk_referee_stage"));
+        assertTrue(indexes.contains("uk_competitor_stage_source"));
 
         // 重复执行应幂等,不抛异常
         initializer.afterSingletonsInstantiated();
+    }
+
+    @Test
+    void oldDatabaseGetsCompetitorSourceUniqueIndexAndDuplicatesDoNotBreakStartup() throws Exception {
+        DataSource dataSource = newSqliteDataSource();
+        DatabaseSchemaInitializer initializer = new DatabaseSchemaInitializer(
+            dataSource, "jdbc:sqlite::memory:", null, null, true);
+        initializer.afterSingletonsInstantiated();
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        // 老库:没有索引,且已有重复数据 → 启动自检不抛异常,索引建不上(只记日志),数据原样保留
+        jdbc.execute("DROP INDEX uk_competitor_stage_source");
+        for (long id = 1; id <= 2; id++) {
+            jdbc.update("INSERT INTO t_competitor (id, tenant_id, tournament_id, stage_id, source_competitor_id)"
+                + " VALUES (?, 1, 1, 10, 99)", id);
+        }
+        initializer.afterSingletonsInstantiated();
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM t_competitor", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'uk_competitor_stage_source'", Integer.class));
+
+        // 清掉重复后重启 → 索引补上,之后同赛段同来源再插一行会被库拦下
+        jdbc.update("DELETE FROM t_competitor WHERE id = 2");
+        initializer.afterSingletonsInstantiated();
+        assertEquals(1, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'uk_competitor_stage_source'", Integer.class));
+        assertThrows(Exception.class, () -> jdbc.update(
+            "INSERT INTO t_competitor (id, tenant_id, tournament_id, stage_id, source_competitor_id)"
+                + " VALUES (3, 1, 1, 10, 99)"));
+        // NULL 来源不受限
+        jdbc.update("INSERT INTO t_competitor (id, tenant_id, tournament_id, stage_id) VALUES (4, 1, 1, 10)");
+        jdbc.update("INSERT INTO t_competitor (id, tenant_id, tournament_id, stage_id) VALUES (5, 1, 1, 10)");
     }
 
     @Test

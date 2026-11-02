@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS `t_competitor` (
   `remark` TEXT,
   PRIMARY KEY (`id`)
 );
+-- 同一赛段内,同一个来源参赛方只能被物化一次(source_competitor_id 为 NULL 的签到/外卡/手工行不受限)
+CREATE UNIQUE INDEX IF NOT EXISTS `uk_competitor_stage_source` ON `t_competitor` (`stage_id`, `source_competitor_id`);
 
 --
 -- Table structure for table `t_competitor_member`

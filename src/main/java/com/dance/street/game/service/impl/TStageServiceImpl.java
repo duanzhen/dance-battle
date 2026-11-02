@@ -351,24 +351,13 @@ public class TStageServiceImpl implements ITStageService {
         }
         // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
         // 避免后续有人往 patch 里塞指针又把链写歪
-        // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
-        // 避免后续有人往 patch 里塞指针又把链写歪
         patch.setNextStageId(null);
+        // 状态列同理:上面的守卫已保证「要么没传、要么与库中一致」,这里清掉后 UPDATE 里不会出现 status,
+        // 配置入口无论如何不可能改状态(状态只走开始/完成/重置流程,见 StageRunService / StageSettlementService)
+        patch.setStatus(null);
 
         // 归一化 ruleConfig:补齐与 teamCountStart/teamCountEnd 对应的配置字段
         normalizeRuleConfig(patch, oldStage);
-
-        // 防悬挂状态:直接把赛段置为已结束时,要求所有场次必须已结算(与 completeStage 口径一致),
-        // 避免出现「赛段 SETTLED + 二海/场次 GAMING」的前端误写状态
-        if (patch.getStatus() != null && StageConstants.STAGE_SETTLED.equals(patch.getStatus())) {
-            long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, patch.getId())
-                .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-            if (unfinished > 0) {
-                throw new ServiceException("赛段仍有 {} 场未结算(如海选二海),不能直接标记为已结束,请通过「完成赛段」结算",
-                    unfinished);
-            }
-        }
 
         // 分圈保护:海选圈数只增不减、开始后锁定(前端已改为按钮加圈)
         validateAuditionCircleChange(patch, oldStage);

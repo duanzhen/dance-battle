@@ -556,6 +556,74 @@
         </template>
       </GameDialog>
 
+      <!-- 待落位的人拖到有人的座位:插入 / 替换(与「加人」同一套语义),取消则什么都不变 -->
+      <GameDialog
+        v-model="dropChoiceVisible"
+        width="460px"
+        title="落到这个座位"
+        :subtitle="`第 ${dropChoiceSeed} 位已有人`"
+        :icon="UserPlus"
+        :close-on-click-modal="false"
+        @closed="cancelDropChoice"
+      >
+        <div class="text-[13px] text-neutral-300 leading-relaxed" data-testid="drop-choice-text">
+          把
+          <span class="text-amber-400 font-medium">{{ dropChoiceMoved?.name || '未命名' }}</span>
+          放到第 {{ dropChoiceSeed }} 位(现在是
+          <span class="text-amber-400 font-medium">{{ dropChoiceOccupant?.name || '未命名' }}</span>
+          )。
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-testid="drop-choice-insert"
+            @click="dropChoicePlacement = 'INSERT'"
+            :disabled="rosterWaitingSource"
+            class="px-3 py-1.5 text-[12px] rounded border transition-colors disabled:opacity-40"
+            :class="dropPlacementBtnClass('INSERT')"
+            title="插到这个座位:他和他后面的人依次后移一位"
+          >
+            插入
+          </button>
+          <button
+            type="button"
+            data-testid="drop-choice-replace"
+            @click="dropChoicePlacement = 'REPLACE'"
+            class="px-3 py-1.5 text-[12px] rounded border transition-colors"
+            :class="dropPlacementBtnClass('REPLACE')"
+          >
+            替换
+          </button>
+        </div>
+        <p class="mt-2 text-[11px] text-neutral-500 leading-relaxed">
+          <template v-if="dropChoicePlacement === 'INSERT'">
+            插入:「{{ dropChoiceOccupant?.name || '未命名' }}」和他后面的人依次后移一位;名单已满时最后一位会进待落位区。
+          </template>
+          <template v-else>替换:「{{ dropChoiceOccupant?.name || '未命名' }}」进入待落位区,其他人的座位不动。</template>
+          被挤下来的人不会被删除,但待落位区有人时不能确认名单。
+        </p>
+        <p v-if="rosterWaitingSource" class="mt-1 text-[11px] text-amber-400/90 leading-relaxed">上游还有赛段没结束:现在只能替换,不能插入。</p>
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <button
+              data-testid="drop-choice-cancel"
+              class="px-3 py-1.5 text-[12px] rounded border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition-colors"
+              @click="cancelDropChoice"
+            >
+              取消
+            </button>
+            <button
+              data-testid="drop-choice-confirm"
+              class="px-3.5 py-1.5 text-[12px] rounded bg-amber-500 text-neutral-900 font-medium hover:bg-amber-400 disabled:opacity-40 transition-colors"
+              :disabled="dropChoiceSubmitting"
+              @click="confirmDropChoice"
+            >
+              {{ dropChoiceSubmitting ? '提交中...' : '确定' }}
+            </button>
+          </div>
+        </template>
+      </GameDialog>
+
       <!-- 移出确认:顶上 or 留空位 -->
       <GameDialog v-model="removeDialogVisible" width="440px" title="移出名单" subtitle="选择移出后其他人的位置怎么处理" :icon="UserMinus">
         <div class="text-[13px] text-neutral-300 leading-relaxed">
@@ -1035,7 +1103,11 @@ const onDropToRoster = async (idx: number) => {
   await submitMove(moved, Number(target.seedRank));
 };
 
-/** 把待落位的人放到指定座位号:原占位者回待落位区,其他人的座位号保持不变。 */
+/**
+ * 把待落位的人放到指定座位号。
+ * 目标座位是空的:直接落座(行为不变);目标座位有人:弹出与「加人」同一套的「插入 / 替换」选择,
+ * 取消则什么都不变。
+ */
 const placeHoldingAtSeed = async (moved: any, seed: number) => {
   if (!moved || !(seed > 0)) return;
   const occupant = listItems.value.find((it) => Number(it.seedRank) === seed && it !== moved);
@@ -1043,7 +1115,49 @@ const placeHoldingAtSeed = async (moved: any, seed: number) => {
     ElMessage.warning(`第 ${seed} 位的「${occupant.name || '选手'}」来自还没结束的赛段,现在不能挪动`);
     return;
   }
-  await submitMove(moved, seed);
+  if (!occupant) {
+    await submitMove(moved, seed);
+    return;
+  }
+  dropChoiceMoved.value = moved;
+  dropChoiceOccupant.value = occupant;
+  dropChoiceSeed.value = seed;
+  // 上游还有赛段没结束:与加人一致,不能插入(会推动后面的人),只能替换
+  // 拖动弹窗默认「替换」(与加人弹窗默认「插入」独立;用户拍板)
+  dropChoicePlacement.value = 'REPLACE';
+  dropChoiceVisible.value = true;
+};
+
+/** 拖到有人座位的「插入 / 替换」弹窗(语义同加人:插入=后面的人后移,替换=被替换的人进待落位区) */
+const dropChoiceVisible = ref(false);
+const dropChoiceMoved = ref<any>(null);
+const dropChoiceOccupant = ref<any>(null);
+const dropChoiceSeed = ref(0);
+const dropChoicePlacement = ref<'INSERT' | 'REPLACE'>('REPLACE');
+const dropChoiceSubmitting = ref(false);
+const dropPlacementBtnClass = (mode: 'INSERT' | 'REPLACE') =>
+  dropChoicePlacement.value === mode ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-neutral-700 text-neutral-400 hover:text-neutral-200';
+
+const cancelDropChoice = () => {
+  dropChoiceVisible.value = false;
+  dropChoiceMoved.value = null;
+  dropChoiceOccupant.value = null;
+};
+
+const confirmDropChoice = async () => {
+  const moved = dropChoiceMoved.value;
+  const seed = dropChoiceSeed.value;
+  if (!moved || !(seed > 0)) {
+    cancelDropChoice();
+    return;
+  }
+  dropChoiceSubmitting.value = true;
+  try {
+    await submitMove(moved, seed, dropChoicePlacement.value);
+  } finally {
+    dropChoiceSubmitting.value = false;
+    cancelDropChoice();
+  }
 };
 
 /** 待落位的人拖到座位列表的某一行 → 落到该行的座位号 */
@@ -1374,7 +1488,7 @@ const applyPreview = (data: any) => {
  * 座位计算、占位者换位、空位补全由后端做,再用返回的最新名单整份刷新。
  * 前端不再自己算种子位、也不整单回传。
  */
-const submitMove = async (item: any, targetSeed: number | null) => {
+const submitMove = async (item: any, targetSeed: number | null, placement?: 'INSERT' | 'REPLACE') => {
   const p = firstRoster.value;
   if (!p || !item) return;
   const seed = Number(targetSeed) > 0 ? Number(targetSeed) : null;
@@ -1383,7 +1497,8 @@ const submitMove = async (item: any, targetSeed: number | null) => {
       overrideId: item.overrideId ?? undefined,
       sourceCompetitorId: item.sourceCompetitorId ?? undefined,
       targetSeed: seed ?? undefined,
-      toHolding: seed == null
+      toHolding: seed == null,
+      placement: seed != null ? placement : undefined
     });
     applyPreview(resp?.data);
   } catch (e: any) {

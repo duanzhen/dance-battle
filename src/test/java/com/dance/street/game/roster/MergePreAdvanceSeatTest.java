@@ -798,6 +798,58 @@ class MergePreAdvanceSeatTest {
         assertEquals(List.of(3L, 4L, 7L), sourceSlotsOf(finals.getId()));
     }
 
+    /**
+     * 头部压紧后,中间空档必须落成轮空实体行——不是压扁编号,也不是只剩有人行。
+     *
+     * <p>海选出口取 9~24、实际只有名次 9/10/12 晋级(缺 11):压紧后座位 1/2/4,
+     * 座位 3 是 {@code slotKind=BYE} 的中间层行(轮空实体),source_slot 仍是 9/10/12。</p>
+     */
+    @Test
+    void headCompactMiddleHolesAreByeEntities() {
+        Long tid = newTournament("audition-middle-bye");
+        TStageVo audition = newStageOfMode(tid, "海选", "AUDITION", 0L, 16L, null);
+        insertCompetitors(tid, audition.getId(), 24);
+        TStageVo finals = newStage(tid, "16强", 16L, 1L, audition.getId());
+        useSingleRankRangeExit(finals.getId(), audition.getId(), 9, 24);
+        setRanksAndSettle(audition.getId(), rank -> rank == 9 || rank == 10 || rank == 12);
+
+        rosterService.rebuildEntries(finals.getId());
+
+        // 选手座位 = 头部压紧后的映射,不能压成 1/2/3
+        assertEquals(List.of(1L, 2L, 4L), seatedSlots(finals.getId()),
+            "只压头部空档:9/10/12 → 1/2/4");
+        assertEquals(List.of(9L, 10L, 12L), sourceSlotsOf(finals.getId()),
+            "source_slot 保留来源 final_rank");
+        assertTrue(holdingCompetitorIds(finals.getId()).isEmpty(), "三人都能落进计划容量");
+
+        // 中间空位 3 必须是轮空实体行(不是被删掉/重编号吃掉)
+        TStageRosterEntry middle = entryAtSlot(finals.getId(), 3L);
+        assertTrue(middle != null, "座位 3 必须有中间层行");
+        assertEquals(StageConstants.SLOT_BYE, middle.getSlotKind(),
+            "中间空档是轮空实体,不是压扁后的选手座位");
+        assertNull(middle.getSourceCompetitorId(), "纯轮空行不带来源选手");
+
+        // 计划规模 1..16 每个座位都有实体行;有人座以外全是 BYE
+        List<TStageRosterEntry> allSeated = rosterService.entriesOf(finals.getId()).stream()
+            .filter(e -> e.getSlot() != null)
+            .sorted(Comparator.comparingLong(TStageRosterEntry::getSlot))
+            .toList();
+        assertEquals(16, allSeated.size(), "1..16 每个座位一行实体");
+        assertEquals(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L, 12L, 13L, 14L, 15L, 16L),
+            allSeated.stream().map(TStageRosterEntry::getSlot).toList());
+        for (TStageRosterEntry e : allSeated) {
+            if (Long.valueOf(1L).equals(e.getSlot())
+                || Long.valueOf(2L).equals(e.getSlot())
+                || Long.valueOf(4L).equals(e.getSlot())) {
+                assertEquals(StageConstants.SLOT_PLAYER, e.getSlotKind(),
+                    "有人座位应是 PLAYER,实际 slot=" + e.getSlot());
+            } else {
+                assertEquals(StageConstants.SLOT_BYE, e.getSlotKind(),
+                    "空座位应是 BYE 实体,实际 slot=" + e.getSlot() + " kind=" + e.getSlotKind());
+            }
+        }
+    }
+
     /** 换成"取 [rankStart,rankEnd] 名"的单条出口(先加新的,再删系统补的默认衔接) */
     private void useSingleRankRangeExit(Long targetStageId, Long sourceStageId, int rankStart, int rankEnd) {
         TStageRosterGroupBo g = new TStageRosterGroupBo();
@@ -884,6 +936,12 @@ class MergePreAdvanceSeatTest {
     private TStageRosterEntry entryOfSource(Long stageId, Long sourceCompetitorId) {
         return rosterService.entriesOf(stageId).stream()
             .filter(e -> Objects.equals(e.getSourceCompetitorId(), sourceCompetitorId))
+            .findFirst().orElse(null);
+    }
+
+    private TStageRosterEntry entryAtSlot(Long stageId, Long slot) {
+        return rosterService.entriesOf(stageId).stream()
+            .filter(e -> Objects.equals(e.getSlot(), slot))
             .findFirst().orElse(null);
     }
 

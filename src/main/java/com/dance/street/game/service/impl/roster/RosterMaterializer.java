@@ -11,8 +11,10 @@ import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,7 +43,7 @@ public class RosterMaterializer {
      * 把上一赛段的参赛方复制成本赛段的参赛方(带成员行)。
      *
      * @param seedOverride 中间态指定的座位号;为空则取下一个空位
-     * @return 新增人数(恒为 1,便于调用方累加)
+     * @return 新增人数(1;并发下已被别处物化而命中唯一索引时为 0,便于调用方累加)
      */
     public int copyIntoStage(TStage target, TCompetitor source, Set<Long> occupiedSeeds,
                              List<Long> players, Long seedOverride) {
@@ -72,7 +74,18 @@ public class RosterMaterializer {
         nc.setSeedRank(seed);
         nc.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
         nc.setRemark(source.getRemark());
-        competitorMapper.insert(nc);
+        try {
+            competitorMapper.insert(nc);
+        } catch (RuntimeException e) {
+            if (!isDuplicateKey(e)) {
+                throw e;
+            }
+            // 并发的另一次"确认名单"已经把同一个来源人物化进了本赛段(唯一索引 uk_competitor_stage_source 拦下):
+            // 它的结果就是我们要的结果,按"已物化"处理——不重复建成员行、不占座,新增 0 人。
+            log.warn("赛段[{}]物化来源参赛方[{}]时命中唯一索引,视为已由并发请求物化,跳过",
+                target.getId(), source.getId());
+            return 0;
+        }
         for (TCompetitorMember sm : competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()
             .eq(TCompetitorMember::getCompetitorId, source.getId()))) {
             TCompetitorMember nm = new TCompetitorMember();
@@ -86,6 +99,31 @@ public class RosterMaterializer {
         }
         occupiedSeeds.add(seed);
         return 1;
+    }
+
+    /**
+     * 是否唯一键冲突:MySQL 经 Spring 翻译成 {@link DuplicateKeyException};
+     * SQLite 没有对应的错误码表,翻译后不一定是该类型,所以再按 SQLState 23xxx / 报错文案兜一层。
+     */
+    public static boolean isDuplicateKey(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof DuplicateKeyException) {
+                return true;
+            }
+            if (t instanceof SQLException sql) {
+                String state = sql.getSQLState();
+                String msg = sql.getMessage() == null ? "" : sql.getMessage();
+                if ((state != null && state.startsWith("23"))
+                    || msg.contains("UNIQUE constraint failed")
+                    || msg.contains("Duplicate entry")) {
+                    return true;
+                }
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 
     /** 把一张外卡写成目标赛段的参赛方(可选关联选手);号码缺省自动分配 G 开头 */

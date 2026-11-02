@@ -77,8 +77,14 @@
     <!-- 空状态 -->
     <div v-else-if="competitors.length === 0" class="flex-1 flex items-center justify-center">
       <div class="text-center">
-        <p class="text-neutral-500 text-sm mb-2">暂无参赛选手</p>
-        <p class="text-neutral-600 text-xs">请先添加参赛选手</p>
+        <template v-if="hasPrevStage">
+          <p class="text-neutral-500 text-sm mb-2">暂无选手</p>
+          <p class="text-neutral-600 text-xs">本赛段名单来自上一赛段,请在上一赛段结束并完成中间态调整后自动进入</p>
+        </template>
+        <template v-else>
+          <p class="text-neutral-500 text-sm mb-2">暂无参赛选手</p>
+          <p class="text-neutral-600 text-xs">请先在「赛事配置 → 参赛阵容」中添加参赛选手</p>
+        </template>
       </div>
     </div>
 
@@ -256,6 +262,8 @@ const props = defineProps<{
   stageMode?: string;
   stageStatus?: string;
   isInitialized?: boolean;
+  /** 是否有上一赛段(非首个赛段:名单来自上游赛段晋级,不在此手动添加) */
+  hasPrevStage?: boolean;
   /** 展开:卡片高度随名单长度自适应,由外层页面滚动(默认收起,卡片内滚动) */
   expanded?: boolean;
 }>();

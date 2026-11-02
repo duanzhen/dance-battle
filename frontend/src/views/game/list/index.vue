@@ -552,7 +552,7 @@ const handleFormSuccess = () => {
 // --- 状态配置 (针对深色背景优化) ---
 const statusConfig = {
   'REGISTERING': {
-    label: '报名中',
+    label: '筹备中',
     class: 'bg-amber-500/10 text-amber-500 border-amber-500/20'
   },
   'LIVE': {
@@ -567,10 +567,10 @@ const statusConfig = {
 };
 
 const tabs = [
-  { label: '全部赛事', value: 'ALL' },
-  { label: '正在报名', value: 'REGISTERING' },
-  { label: '比赛进行中', value: 'LIVE' },
-  { label: '历史回顾', value: 'ENDED' }
+  { label: '全部', value: 'ALL' },
+  { label: '筹备中', value: 'REGISTERING' },
+  { label: '进行中', value: 'LIVE' },
+  { label: '已结束', value: 'ENDED' }
 ];
 
 const currentTab = ref('ALL');

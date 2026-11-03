@@ -162,6 +162,7 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
                     log.error("自动建表失败: {} - {}", table, e.getMessage());
                 }
             }
+            ensureCompetitorSourceUnique(connection);
             migrateRosterGroups(connection, false);
             collapsePerCompetitorRounds(connection);
         } catch (SQLException e) {
@@ -236,6 +237,51 @@ public class DatabaseSchemaInitializer implements SmartInitializingSingleton {
             log.info("schema 自检完成: 已存在 {} 张,新建 {} 张", existed, created);
         }
         logAddedColumns(added);
+    }
+
+    private static final String COMPETITOR_TABLE = "t_competitor";
+    private static final String COMPETITOR_SOURCE_UK = "uk_competitor_stage_source";
+
+    /**
+     * MySQL 旧库补唯一索引 {@code (stage_id, source_competitor_id)}:建表脚本里的内联索引只对新建表生效,
+     * 已有表要在这里补。幂等;若库里已有重复数据则<b>只告警、不建索引、不删数据</b>(需人工清理后重启)。
+     * SQLite 走脚本里的 {@code CREATE UNIQUE INDEX IF NOT EXISTS},同样在重复数据上只报错不影响启动。
+     */
+    private void ensureCompetitorSourceUnique(Connection connection) {
+        try {
+            if (!tableExists(connection, COMPETITOR_TABLE)) {
+                return;
+            }
+            try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT COUNT(*) FROM information_schema.statistics"
+                    + " WHERE table_schema = ? AND table_name = ? AND index_name = ?")) {
+                ps.setString(1, connection.getCatalog());
+                ps.setString(2, COMPETITOR_TABLE);
+                ps.setString(3, COMPETITOR_SOURCE_UK);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next() && rs.getInt(1) > 0) {
+                        return;
+                    }
+                }
+            }
+            long duplicateGroups;
+            try (Statement st = connection.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM (SELECT 1 FROM `" + COMPETITOR_TABLE
+                     + "` WHERE source_competitor_id IS NOT NULL"
+                     + " GROUP BY stage_id, source_competitor_id HAVING COUNT(*) > 1) d")) {
+                duplicateGroups = rs.next() ? rs.getLong(1) : 0L;
+            }
+            if (duplicateGroups > 0) {
+                log.warn("schema 自检:{} 存在 {} 组 (stage_id, source_competitor_id) 重复数据,已跳过创建唯一索引 {};"
+                    + "请先人工清理重复行后重启", COMPETITOR_TABLE, duplicateGroups, COMPETITOR_SOURCE_UK);
+                return;
+            }
+            executeDdl(connection, "CREATE UNIQUE INDEX `" + COMPETITOR_SOURCE_UK + "` ON `"
+                + COMPETITOR_TABLE + "` (`stage_id`, `source_competitor_id`)");
+            log.info("schema 自检: 已为 {} 补建唯一索引 {}", COMPETITOR_TABLE, COMPETITOR_SOURCE_UK);
+        } catch (SQLException e) {
+            log.warn("补建 {} 失败(不影响启动): {}", COMPETITOR_SOURCE_UK, e.getMessage());
+        }
     }
 
     private static void logAddedColumns(int added) {

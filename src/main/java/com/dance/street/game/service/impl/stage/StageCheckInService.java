@@ -22,7 +22,7 @@ import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.settle.SettlementSupport;
 import com.dance.street.game.engine.common.StageModeProfile;
 import com.dance.street.game.engine.common.StageModeProfile.Setup.Trait;
-import com.dance.street.game.engine.common.StageModeProfiles;
+import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -52,6 +52,7 @@ import static com.dance.street.game.service.impl.settle.SettlementSupport.parseC
 @Service
 public class StageCheckInService {
 
+    private final StageHandlerRegistry handlerRegistry;
     private final StageLookup stageLookup;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
@@ -84,7 +85,7 @@ public class StageCheckInService {
         // 海选/排名赛均为逐选手轮次:签到/补签到选手直接挂入未结算圈场次,可被裁判打分。
         // 已生成对阵但尚未开赛(PENDING)时同样挂入,否则补签到选手会从打分中"消失"
         // (不参与任何场次,结算后无晋级/淘汰结果,且无任何提示)。
-        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        StageModeProfile profile = handlerRegistry.of(stage.getStageMode()).capabilities();
         boolean perCompetitor = profile.result().perCompetitor();
         if (!perCompetitor) {
             return;
@@ -154,10 +155,15 @@ public class StageCheckInService {
         } else if (!auditionSplit) {
             // 排名赛不分圈:整段只有一场,直接落到唯一可用的正式场次,无需客户端指定圈
             target = candidates.get(0);
+        } else if (candidates.size() == 1) {
+            // 单圈只有一个合法落点,可直接自动落圈;多圈仍必须由客户端明确指定。
+            target = candidates.get(0);
         } else {
             // 落圈一律由客户端决定:后端不再按号码/名额择优推导,
             // 否则同一批号码会因「先建圈后签到 / 签完再生成」等调用顺序不同而落到不同的圈。
-            throw new ServiceException("请指定落圈:补签到必须传入目标圈场次ID或圈序号");
+            throw new ServiceException(
+                "请指定落圈:当前海选有 {} 圈,请传 matchId 或 zoneIndex=1..{}",
+                candidates.size(), candidates.size());
         }
         appendParticipant(target, competitorId);
         log.info("海选/排名赛段[{}]补签到:参赛方[{}]挂入场次[{}]", stageId, competitorId, target.getId());
@@ -174,7 +180,7 @@ public class StageCheckInService {
             return;
         }
         TStage stage = stageLookup.get(stageId);
-        if (!StageModeProfiles.of(stage.getStageMode()).result().perCompetitor()) {
+        if (!handlerRegistry.of(stage.getStageMode()).capabilities().result().perCompetitor()) {
             return;
         }
         if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())
@@ -242,7 +248,7 @@ public class StageCheckInService {
             return;
         }
         TStage stage = stageLookup.get(stageId);
-        if (!StageModeProfiles.of(stage.getStageMode()).result().perCompetitor()) {
+        if (!handlerRegistry.of(stage.getStageMode()).capabilities().result().perCompetitor()) {
             return;
         }
         if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())

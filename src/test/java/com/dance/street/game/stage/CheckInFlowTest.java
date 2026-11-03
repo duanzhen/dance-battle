@@ -465,12 +465,9 @@ class CheckInFlowTest {
             "已初始化的赛段不允许再调整种子顺序");
     }
 
-    /**
-     * 后端不再自行决定圈位:多圈海选下未指定目标圈直接报错,不会"猜"一个圈把人塞进去。
-     * 只有单圈(无需选择)时才允许不传。
-     */
+    /** 多圈必须显式指定；单圈只有一个合法落点，可自动落圈。 */
     @Test
-    void backendRefusesToChooseCircle() {
+    void multiCircleRequiresExplicitTargetButSingleCircleAutoAttaches() {
         Long tid = newTournament("后端不决定圈位");
         TStageVo stage = newAuditionStage(tid, "海选", 2, 2);
         lifecycleService.ensureAuditionCircles(stage.getId());
@@ -484,7 +481,7 @@ class CheckInFlowTest {
             "应说明需要由调用方指定圈子,实际: " + ex.getMessage());
         assertEquals(0, circleCountOf(stage.getId(), cid), "被拒后不应挂入任何圈");
 
-        // 单圈海选:同样是显式配置的一个圈,同样需要客户端指定落圈
+        // 单圈海选:唯一合法落点,不传圈参数时自动挂入。
         Long tid2 = newTournament("单圈无需指定");
         TStageVo single = newAuditionStage(tid2, "海选", 1, 2);
         lifecycleService.ensureAuditionCircles(single.getId());
@@ -492,13 +489,8 @@ class CheckInFlowTest {
         assertEquals(1, singleCircles.size(), "单圈应按配置预建 1 个圈");
 
         Long only = insertPending(tid2, single.getId(), "选手2", "2");
-        ServiceException singleEx = assertThrows(ServiceException.class,
-            () -> lifecycleService.appendStageCompetitor(single.getId(), only),
-            "单圈也必须由调用方指定目标圈");
-        assertTrue(singleEx.getMessage().contains("请指定落圈"),
-            "应说明需要指定圈子,实际: " + singleEx.getMessage());
-        lifecycleService.appendStageCompetitor(single.getId(), only, singleCircles.get(0).getId());
-        assertEquals(1, circleCountOf(single.getId(), only), "指定目标圈后应挂入");
+        lifecycleService.appendStageCompetitor(single.getId(), only);
+        assertEquals(1, circleCountOf(single.getId(), only), "单圈应自动挂入唯一圈");
     }
 
     /**

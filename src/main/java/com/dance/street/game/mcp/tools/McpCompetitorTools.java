@@ -158,9 +158,10 @@ public class McpCompetitorTools implements IMcpTool {
             if (result instanceof McpSchema.CallToolResult toolResult) {
                 return toolResult;
             }
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_competitors", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_competitors", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

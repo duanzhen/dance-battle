@@ -42,7 +42,8 @@ CREATE TABLE `t_competitor` (
   `update_by` bigint DEFAULT NULL COMMENT '更新者',
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
   `remark` varchar(500) DEFAULT NULL COMMENT '备注',
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_competitor_stage_source` (`stage_id`, `source_competitor_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='参赛单位表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 

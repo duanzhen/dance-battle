@@ -152,20 +152,17 @@ docker run -d -p 80:80 -v app-data:/data dance-game-app:latest
 
 ## MCP 接入
 
-前后端同域部署时，MCP 入口就是当前域名下的:
+支持 AI 客户端通过 Streamable HTTP 连接并调用赛事业务:
 
 ```text
 https://<当前域名>/mcp
 ```
 
-支持 Streamable HTTP。客户端首次访问会收到带
-`resource_metadata` 的 `401 WWW-Authenticate`，随后自动发现:
+首次连接会通过标准 OAuth 自动发现进入管理员授权；未登录时先跳转登录页，授权完成后
 
-- `GET /.well-known/oauth-protected-resource/mcp`
-- `GET /.well-known/oauth-authorization-server`
-- `POST /register`：Dynamic Client Registration
-- `GET /authorize`：跳转前端管理员授权页，使用 PKCE S256
-- `POST /token`：authorization_code 换 Bearer JWT
+提供赛事、赛段、名单、选手、参赛单位、裁判、场次和大屏管理等工具；各工具支持的
+操作及参数可通过 `tools/list` 查询。写操作复用网页端 Service，并校验 OAuth
+access token 中的 `mcp` scope，因此事务、状态机和业务校验保持一致。
 
 这是用于 MCP 客户端接入的简化 OAuth 实现，不包含 consent、client secret、
 refresh token、scope 管理或撤销列表。`client_id` 和 authorization code 本身都是
@@ -198,8 +195,9 @@ MCP 业务工具按领域分组，写操作通过 `action` 分派并直接复用
 `sub=mcp-agent` 和 `scope` 中包含 `mcp`。SSE 长连接仍属于实时传输，不作为 MCP 工具；
 但通过 `manage_displays` 投射场景会同时持久化屏幕状态并广播给已连接的大屏。
 
-Agent 在开始复杂的多步任务前，可先通过 `prompts/list` 找到业务理解模板
-`dance_battle_operator`，再调用 `prompts/get`：
+Agent 首次调用任何业务工具前，必须先通过 `prompts/list` 找到业务理解模板
+`dance_battle_operator`，再调用 `prompts/get`。同一对话只加载一次，后续任务和工具调用
+复用已进入上下文的业务规则：
 
 ```json
 {
@@ -291,29 +289,28 @@ Resource 全部为只读且继续受 MCP Bearer 认证保护。动态资源只�
 多圈时每项必须指定 `matchId` 或 `zoneIndex`。
 
 涉及创建、更新、删除、重置、名单确认或结果发布时，Agent 必须先确认请求是否包含完整业务意图。
-工具不会猜测用户没有明确表达的名称、赛制或模板。例如赛事创建缺少信息时，
-`manage_tournaments` 返回：
+工具不会猜测用户没有明确表达的名称、模板或裁判安排。例如赛事创建缺少信息时，
+`manage_tournaments` 会拒绝写入并返回缺失项说明：
 
 ```json
 {
   "status": "clarification_required",
-  "missing": ["data.name", "data.templateCode", "confirmed"],
+  "missing": ["data.name", "data.templateCode"],
   "questions": [
     "请确认新赛事的名称。",
-    "请选择赛事模式：AUDITION_32、AUDITION_16 或 AUDITION_ARENA。"
+    "请选择赛事模式：BLANK、AUDITION_32、AUDITION_16 或 AUDITION_ARENA。"
   ]
 }
 ```
 
 此时 Agent 应先向用户确认，不能使用临时名称、复制现有赛事或根据相似赛事推断模式。
-用户明确确认后，创建请求才传 `confirmed: true`。
+所有赛事统一通过 `create_from_template` 创建：
 
-赛事创建有两种明确模式：
+- `BLANK`：只创建不含 Stage 的赛事草稿，之后用 `manage_stages.create` 逐个创建赛段。
+- `AUDITION_32`、`AUDITION_16`、`AUDITION_ARENA`：创建赛事并生成对应完整赛段链。
 
-- `create_from_template`：创建赛事，并按 `AUDITION_32`、`AUDITION_16` 或
-  `AUDITION_ARENA` 生成完整赛段链。
-- `create_blank`：只创建空白赛事草稿，不生成任何 Stage。之后用 `manage_stages`
-  的 `create` 动作逐个创建赛段。
+创建时至少配置一名 `refereeNames`，或由用户明确确认暂无裁判并传
+`noRefereeConfirmed: true`。
 
 空白赛事创建阶段时，用户需要明确每个 Stage 的名称、`stageMode`、`teamCountStart`、
 `teamCountEnd`，以及它在现有赛段链中的 `afterStageId`。除链头赛段外，缺少
@@ -358,7 +355,6 @@ public class MyMcpTool implements IMcpTool {
 ```
 
 工具名必须全局唯一，重复名称会在应用启动时直接失败。
-
 ## 开发
 
 ```bash

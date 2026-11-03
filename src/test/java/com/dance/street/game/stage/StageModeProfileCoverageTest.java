@@ -13,8 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * 赛制画像覆盖自检:每种 stageMode 都必须有 profile,漏配直接红。
- * 纯数据表,不需要 Spring/DB。
+ * 赛制画像数据表覆盖自检(Handler.capabilities 的数据源)。
+ * 编排门禁以 {@link HandlerCoverageTest} 为准;本类只锁 Profiles 行不漏配。
  */
 class StageModeProfileCoverageTest {
 

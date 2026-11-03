@@ -17,12 +17,19 @@ import com.dance.street.game.domain.vo.TPlayerVo;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TCompetitorMember;
+import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
+import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.TournamentEventNotifier;
+import com.dance.street.game.engine.common.StageConstants;
+import org.dromara.common.core.exception.ServiceException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -45,6 +52,8 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
     private final TCompetitorMemberMapper competitorMemberMapper;
     private final TPlayerMapper playerMapper;
     private final TournamentEventNotifier tournamentEventNotifier;
+    private final TStageMapper stageMapper;
+    private final TMatchParticipantMapper participantMapper;
 
     /**
      * 查询参赛单位
@@ -151,12 +160,25 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
      * @return 新增后的参赛单位
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TCompetitorVo insertByBo(TCompetitorBo bo) {
         TCompetitor add = MapstructUtils.convert(bo, TCompetitor.class);
-        // 签到/新增的参赛单位默认处于待比赛状态,否则赛段初始化(只认 PENDING)会找不到人
-        if (StringUtils.isBlank(add.getOutcomeStatus())) {
-            add.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
+        TStage stage = guardCompetitorStage(add);
+        if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
+            throw new ServiceException("赛段[{}]已结束，不能新增参赛方", stage.getName());
         }
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("参赛方名称不能为空");
+        }
+        if (StringUtils.isBlank(add.getNumber())) {
+            throw new ServiceException("参赛方号码不能为空");
+        }
+        if (StringUtils.isNotBlank(add.getOutcomeStatus())
+            && !OutcomeStatusEnum.PENDING.getCode().equals(add.getOutcomeStatus())) {
+            throw new ServiceException("新增参赛方必须从 PENDING 开始，晋级/淘汰结果只能由结算写入");
+        }
+        add.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
@@ -170,10 +192,32 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
      * @return 修改后的参赛单位
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TCompetitorVo updateByBo(TCompetitorBo bo) {
         TCompetitor update = MapstructUtils.convert(bo, TCompetitor.class);
-        validEntityBeforeSave(update);
         TCompetitor before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("参赛方不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("参赛方不允许变更所属赛事");
+        }
+        if (update.getStageId() != null && !Objects.equals(before.getStageId(), update.getStageId())) {
+            throw new ServiceException("参赛方不允许变更所属赛段");
+        }
+        TStage stage = guardCompetitorStage(before);
+        if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())
+            && (changed(before.getNumber(), update.getNumber())
+            || changed(before.getSeedRank(), update.getSeedRank())
+            || changed(before.getFinalRank(), update.getFinalRank())
+            || changed(before.getOutcomeStatus(), update.getOutcomeStatus())
+            || changed(before.getSourceCompetitorId(), update.getSourceCompetitorId())
+            || changed(before.getType(), update.getType()))) {
+            throw new ServiceException("赛段[{}]已开始，号码、种子、结果和来源字段已锁定；请使用对应生命周期接口",
+                stage.getName());
+        }
+        validEntityBeforeSave(update);
         // 改名联动 + 广播:仅在参赛单位名称实际变化时触发
         // (赛段配置内单独改名时传 syncPlayerName=false 跳过联动,广播仍保留)
         boolean renamed = before != null && StringUtils.isNotBlank(update.getName())
@@ -229,11 +273,49 @@ public class TCompetitorServiceImpl implements ITCompetitorService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
+        if (Boolean.TRUE.equals(isValid)) {
+            if (ids == null || ids.isEmpty()) {
+                throw new ServiceException("参赛方ID不能为空");
+            }
+            for (Long id : ids) {
+                TCompetitor competitor = baseMapper.selectById(id);
+                if (competitor == null) {
+                    continue;
+                }
+                TStage stage = guardCompetitorStage(competitor);
+                if (!StageConstants.STAGE_DRAFT.equals(stage.getStatus())
+                    || Long.valueOf(1L).equals(stage.getRosterApplied())
+                    || Long.valueOf(1L).equals(stage.getRosterSkipped())) {
+                    throw new ServiceException("赛段[{}]名单已锁定或已开始，不能通用删除参赛方",
+                        stage.getName());
+                }
+                long used = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                    .eq(TMatchParticipant::getCompetitorId, id));
+                long referenced = baseMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
+                    .eq(TCompetitor::getSourceCompetitorId, id));
+                if (used > 0 || referenced > 0) {
+                    throw new ServiceException("参赛方[{}]已被场次或下游名单引用，不能删除", id);
+                }
+            }
         }
         return baseMapper.deleteByIds(ids) > 0;
+    }
+
+    private TStage guardCompetitorStage(TCompetitor competitor) {
+        if (competitor.getTournamentId() == null || competitor.getStageId() == null) {
+            throw new ServiceException("参赛方必须同时归属赛事和赛段");
+        }
+        TStage stage = stageMapper.selectById(competitor.getStageId());
+        if (stage == null || !Objects.equals(stage.getTournamentId(), competitor.getTournamentId())) {
+            throw new ServiceException("参赛方与赛段不属于同一赛事");
+        }
+        return stage;
+    }
+
+    private static boolean changed(Object before, Object requested) {
+        return requested != null && !Objects.equals(before, requested);
     }
 
     /**

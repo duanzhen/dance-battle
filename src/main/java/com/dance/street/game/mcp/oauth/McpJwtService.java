@@ -25,8 +25,8 @@ import java.util.UUID;
 /**
  * 为 MCP OAuth 流程签发的无状态 JWT。
  *
- * <p>这是演示用的最小实现：token 可以验证签名、issuer、audience、有效期和令牌用途，
- * 但不实现 refresh token、撤销列表或 scope 授权服务。</p>
+ * <p>token 可以验证签名、issuer、audience、有效期和令牌用途。
+ * Refresh token 同样使用无状态 JWT，不提供服务端撤销列表。</p>
  */
 @Service
 public class McpJwtService {
@@ -34,11 +34,15 @@ public class McpJwtService {
     private static final String CLIENT_TOKEN_USE = "mcp_client_registration";
     private static final String AUTH_CODE_TOKEN_USE = "mcp_authorization_code";
     private static final String ACCESS_TOKEN_USE = "mcp_access_token";
+    private static final String REFRESH_TOKEN_USE = "mcp_refresh_token";
 
     private final McpPublicUrlResolver urlResolver;
 
-    @Value("${mcp.oauth.access-token-ttl-seconds:3600}")
+    @Value("${mcp.oauth.access-token-ttl-seconds:86400}")
     private long accessTokenTtlSeconds;
+
+    @Value("${mcp.oauth.refresh-token-ttl-seconds:2592000}")
+    private long refreshTokenTtlSeconds;
 
     @Value("${mcp.oauth.client-registration-ttl-seconds:2592000}")
     private long clientRegistrationTtlSeconds;
@@ -133,6 +137,21 @@ public class McpJwtService {
         return JWTUtil.createToken(payload, signer());
     }
 
+    public String issueRefreshToken(HttpServletRequest request, String clientId, String scope, String resource) {
+        long now = Instant.now().getEpochSecond();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("iss", urlResolver.baseUrl(request));
+        payload.put("sub", "mcp-agent");
+        payload.put("aud", resource);
+        payload.put("client_id", clientId);
+        payload.put("scope", scope);
+        payload.put("token_use", REFRESH_TOKEN_USE);
+        payload.put("iat", now);
+        payload.put("exp", now + refreshTokenTtlSeconds());
+        payload.put("jti", UUID.randomUUID().toString());
+        return JWTUtil.createToken(payload, signer());
+    }
+
     public Optional<McpTokenClaims> verify(HttpServletRequest request, String token) {
         if (StringUtils.isBlank(token)) {
             return Optional.empty();
@@ -160,8 +179,38 @@ public class McpJwtService {
         }
     }
 
+    public Optional<McpTokenClaims> verifyRefreshToken(HttpServletRequest request, String token) {
+        if (StringUtils.isBlank(token)) {
+            return Optional.empty();
+        }
+        try {
+            JWT jwt = verifiedJwt(request, token, REFRESH_TOKEN_USE);
+            String subject = Convert.toStr(jwt.getPayload("sub"));
+            String clientId = Convert.toStr(jwt.getPayload("client_id"));
+            String scope = Convert.toStr(jwt.getPayload("scope"));
+            if (!"mcp-agent".equals(subject)
+                || StringUtils.isBlank(clientId)
+                || StringUtils.isBlank(scope)
+                || !urlResolver.mcpResource(request).equals(Convert.toStr(jwt.getPayload("aud")))) {
+                return Optional.empty();
+            }
+            return Optional.of(new McpTokenClaims(
+                subject,
+                clientId,
+                scope,
+                Convert.toStr(jwt.getPayload("jti"))
+            ));
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
+    }
+
     public long accessTokenTtlSeconds() {
         return Math.max(60, accessTokenTtlSeconds);
+    }
+
+    public long refreshTokenTtlSeconds() {
+        return Math.max(3600, refreshTokenTtlSeconds);
     }
 
     private JWT verifiedJwt(HttpServletRequest request, String token, String expectedUse) {

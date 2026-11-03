@@ -175,8 +175,18 @@ public class TPlayerServiceImpl implements ITPlayerService {
      * @return 新增后的选手自然人
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TPlayerVo insertByBo(TPlayerBo bo) {
         TPlayer add = MapstructUtils.convert(bo, TPlayer.class);
+        if (add.getTournamentId() == null || tournamentService.queryById(add.getTournamentId()) == null) {
+            throw new ServiceException("选手必须归属一个有效赛事");
+        }
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("选手姓名不能为空");
+        }
+        if (add.getCompetitorId() != null) {
+            throw new ServiceException("新增选手不能直接绑定参赛方，请使用签到流程");
+        }
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
@@ -190,10 +200,22 @@ public class TPlayerServiceImpl implements ITPlayerService {
      * @return 修改后的选手自然人
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TPlayerVo updateByBo(TPlayerBo bo) {
         TPlayer update = MapstructUtils.convert(bo, TPlayer.class);
-        validEntityBeforeSave(update);
         TPlayer before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("选手不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("选手不允许变更所属赛事");
+        }
+        if (update.getCompetitorId() != null
+            && !Objects.equals(before.getCompetitorId(), update.getCompetitorId())) {
+            throw new ServiceException("选手与参赛方的绑定只能通过签到/解除签到流程变更");
+        }
+        validEntityBeforeSave(update);
         boolean nameChanged = before != null && StringUtils.isNotBlank(update.getName())
             && !Objects.equals(before.getName(), update.getName());
         // 头像判空只看 null:空串是「清除照片」,同样算一次变更需要广播

@@ -82,7 +82,12 @@
       </div>
 
       <div v-if="!props.tournament" class="col-span-2">
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5"> 裁判配置 <span class="text-red-500">*</span> </label>
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5">
+          裁判配置 <span class="text-red-500">*</span>
+          <span class="text-neutral-500 font-normal">
+            （{{ form.refereeNone ? '已明确暂无裁判' : `已选 ${form.refereeNames.length} 名` }}）
+          </span>
+        </label>
         <div class="flex gap-2">
           <el-select
             v-model="form.refereeNames"
@@ -159,7 +164,7 @@
           <button
             v-for="tpl in templates"
             :key="tpl.code"
-            @click="selectedTemplate = selectedTemplate === tpl.code ? null : tpl.code"
+            @click="selectTemplate(tpl.code)"
             :disabled="isSubmitting"
             :class="[
               'text-left w-full rounded-xl border transition-all px-3.5 py-2.5 group disabled:opacity-50 disabled:cursor-not-allowed',
@@ -193,6 +198,22 @@
             </div>
           </button>
         </div>
+        <button
+          type="button"
+          :disabled="isSubmitting"
+          @click="toggleNoTemplate"
+          class="mt-2 w-full rounded-xl border px-3.5 py-2.5 text-left transition-all disabled:opacity-50"
+          :class="
+            selectedTemplate === 'BLANK'
+              ? 'border-red-500/60 bg-red-500/10 text-red-300'
+              : 'border-neutral-800 bg-neutral-950 text-neutral-400 hover:border-red-500/40'
+          "
+        >
+          <span class="text-xs font-bold">BLANK（空白赛事）</span>
+          <span class="block mt-1 text-[10px] text-neutral-500">
+            不使用赛事模版时请明确选择此项。
+          </span>
+        </button>
       </div>
 
       <!-- 高级配置(默认折叠):赛事级红蓝配色,所有下属淘汰赛共享 -->
@@ -281,7 +302,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
-import { addTournament, updateTournament, createTournamentByTemplate } from '@/api/game/tournament';
+import { updateTournament, createTournamentByTemplate } from '@/api/game/tournament';
 import { parseTournamentThemeConfig } from '@/utils/tournamentColorConfig';
 import request from '@/utils/request';
 import { ElMessage } from 'element-plus';
@@ -328,7 +349,7 @@ onUnmounted(() => window.removeEventListener('resize', updateWidth));
 const form = reactive({
   name: '', // 赛事名称
   coverImage: '', // 封面图片 URL
-  status: 1, // 0:筹备 1:进行中 2:结束
+  status: 0, // 0:筹备中 1:进行中 2:已结束
   logicalWidth: 1920, // 设计稿宽度
   logicalHeight: 1080, // 设计稿高度
   themeConfig: '', // 主题配置 JSON 字符串
@@ -355,19 +376,19 @@ const showAdvanced = ref(false);
 const templates = [
   {
     code: 'AUDITION_32',
-    label: '32人淘汰赛',
+    label: '海选32人',
     tag: '海选32强',
     stages: ['海选', '32强', '16强', '8强', '半决赛', '决赛']
   },
   {
     code: 'AUDITION_16',
-    label: '16人淘汰赛',
+    label: '海选16人',
     tag: '海选16强',
     stages: ['海选', '16强', '8强', '半决赛', '决赛']
   },
   {
     code: 'AUDITION_ARENA',
-    label: '32人擂台赛',
+    label: '海选32SevenToSmoke',
     tag: '海选32-8强Seven To Smoke',
     stages: ['海选', '32强', '16强', '擂台赛']
   }
@@ -423,7 +444,7 @@ const resetForm = () => {
   Object.assign(form, {
     name: '',
     coverImage: '',
-    status: 1,
+    status: 0,
     logicalWidth: 1920,
     logicalHeight: 1080,
     themeConfig: '',
@@ -477,6 +498,14 @@ const handleRefereeConfigChange = (val) => {
   }
 };
 
+const selectTemplate = (code) => {
+  selectedTemplate.value = selectedTemplate.value === code ? null : code;
+};
+
+const toggleNoTemplate = () => {
+  selectedTemplate.value = selectedTemplate.value === 'BLANK' ? null : 'BLANK';
+};
+
 // 暂无裁判:点击输入框右侧 X 标记;再次点击取消
 const toggleRefereeNone = () => {
   form.refereeNone = !form.refereeNone;
@@ -492,8 +521,16 @@ const submitForm = async () => {
     ElMessage.warning('请输入赛事名称');
     return;
   }
+  if (!props.tournament && !selectedTemplate.value) {
+    ElMessage.warning('请选择赛事模版；如需空白手工建赛，请明确选择“不使用模版”');
+    return;
+  }
   // 裁判配置为必选项:要么添加至少一名裁判,要么点击右侧 X 标记「暂无裁判」
-  if (!props.tournament && !form.refereeNone && (!form.refereeNames || form.refereeNames.length === 0)) {
+  const refereeNames = Array.from(
+    new Set((form.refereeNames || []).map((name) => String(name || '').trim()).filter(Boolean))
+  );
+  form.refereeNames = refereeNames;
+  if (!props.tournament && !form.refereeNone && refereeNames.length === 0) {
     ElMessage.warning('请配置裁判：添加至少一名裁判，或点击右侧 X 标记「暂无裁判」');
     return;
   }
@@ -510,15 +547,16 @@ const submitForm = async () => {
 
     const submitData = {
       ...form,
-      themeConfig: JSON.stringify(themeConfig)
+      themeConfig: JSON.stringify(themeConfig),
+      refereeNames
     };
 
     if (props.tournament?.id) {
       // 编辑模式
       await updateTournament({ ...submitData, id: props.tournament.id });
       ElMessage.success('赛事更新成功');
-    } else if (selectedTemplate.value) {
-      // 按模版创建:自动生成赛段链 + 场景 + 对战树关联
+    } else {
+      // 所有新赛事统一走模版创建；BLANK 表示用户明确选择空白赛事。
       await createTournamentByTemplate({
         name: form.name,
         themeConfig: JSON.stringify(themeConfig),
@@ -528,13 +566,9 @@ const submitForm = async () => {
         logicalWidth: Number(form.logicalWidth) || 1920,
         logicalHeight: Number(form.logicalHeight) || 1080,
         remark: form.remark,
-        refereeNames: form.refereeNames
+        refereeNames
       });
-      ElMessage.success('赛事模版创建成功');
-    } else {
-      // 创建模式
-      await addTournament(submitData);
-      ElMessage.success('赛事创建成功');
+      ElMessage.success(selectedTemplate.value === 'BLANK' ? '空白赛事创建成功' : '赛事模版创建成功');
     }
 
     // 通知父组件刷新列表

@@ -106,15 +106,20 @@ const router = useRouter();
 const directorStore = useDirectorStore();
 
 // 当前激活的 tab
-// 移动端默认进入「赛事配置」;有历史记录时优先恢复上次的 tab
+// 优先使用 URL 显式指定的 ?tab=(director | stage | config);
+// 未指定时:移动端默认进入「赛事配置」,其余默认进入「赛段流程」
+const VALID_TABS = ['director', 'stage', 'config'];
+const queryTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab;
 const activeTab = ref(
-  localStorage.getItem('tournamentActiveTab') || (window.innerWidth < 640 ? 'config' : 'director')
+  queryTab && VALID_TABS.includes(queryTab) ? queryTab : window.innerWidth < 640 ? 'config' : 'stage'
 );
 // 帮助中心弹窗
 const showHelp = ref(false);
-// 刷新/切换后记住当前 tab
+// 切换后把当前 tab 写回 URL,刷新时通过显式参数恢复
 watch(activeTab, (v) => {
-  localStorage.setItem('tournamentActiveTab', v);
+  if (route.query.tab !== v) {
+    router.replace({ query: { ...route.query, tab: v } });
+  }
 });
 
 // 从 URL 获取 tournamentId:在 setup 阶段就取值,子组件(赛事配置)挂载时才能拿到 id——

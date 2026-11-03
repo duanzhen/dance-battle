@@ -30,4 +30,11 @@ public class TStageRosterMoveBo implements Serializable {
 
     /** true = 移到待落位区(没有座位号) */
     private Boolean toHolding;
+
+    /**
+     * 目标座位上有人时的放置方式(与"加人"同一套语义):
+     * INSERT = 插到该座位,原占位者及后面的人整体 +1(超出计划规模的尾部进待落位区);
+     * REPLACE 或不传 = 与占位者互换,待落位区来的人则占位者回待落位区。目标座位没人时忽略。
+     */
+    private String placement;
 }

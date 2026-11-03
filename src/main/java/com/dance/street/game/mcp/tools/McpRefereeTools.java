@@ -122,15 +122,16 @@ public class McpRefereeTools implements IMcpTool {
                 case "my_match" -> myMatch(arguments);
                 case "match_scores" -> refereeMatchService.matchScores(
                     McpToolSupport.requiredLong(arguments, "matchId"),
-                    McpToolSupport.requiredLong(arguments, "tournamentId"),
+                    McpToolSupport.optionalLong(arguments, "tournamentId"),
                     McpToolSupport.requiredLong(arguments, "refereeId")
                 );
                 case "submit_score" -> submitScore(arguments);
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_referees", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_referees", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

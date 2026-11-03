@@ -427,6 +427,21 @@ public class RosterOverrideService {
                 return;   // 已经在目标座位
             }
             TStageRosterEntry occupant = entryOfSlot(stageId, seed);
+            boolean occupantIsPerson = occupant != null && !Objects.equals(occupant.getId(), row.getId())
+                && (occupant.getSourceCompetitorId() != null || occupant.getPlayerId() != null
+                || (occupant.getGuestName() != null && !occupant.getGuestName().isBlank()));
+            if (occupantIsPerson && RosterConstants.PLACEMENT_INSERT.equalsIgnoreCase(bo.getPlacement())) {
+                // 插入会推动后面的人:与"加人 · 插入"同一门禁——上游未结算时拒绝
+                assertAllSourcesSettled(target, false);
+                // 插入:与"加人 · 插入"同一实现(原占位者及后面的人整体 +1,尾部溢出进待落位区)
+                if (row.getEntryTag() == null && row.getSourceCompetitorId() != null) {
+                    row.setEntryTag(entryTagOf(row.getSourceCompetitorId()));
+                }
+                seatExistingRow(target, stageId, row, seed, true);
+                rosterGroupStore.notifyTarget(stageId);
+                log.info("赛段[{}]名单行[{}]插入到座位 {}", stageId, row.getId(), seed);
+                return;
+            }
             if (occupant != null && !Objects.equals(occupant.getId(), row.getId())) {
                 entryMapper.update(null, Wrappers.<TStageRosterEntry>lambdaUpdate()
                     .eq(TStageRosterEntry::getId, occupant.getId())

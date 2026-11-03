@@ -21,7 +21,7 @@ import java.util.Set;
  *
  * <p>client_id 与 authorization code 本身就是签名 JWT，注册信息和授权信息直接编码在
  * token 中，服务端不保存注册表或授权码表。授权码只能由已登录管理员通过确认接口签发；
- * 不实现 client secret、refresh token、撤销列表和授权码一次性消费。</p>
+ * 不实现 client secret、撤销列表和授权码一次性消费。</p>
  */
 @Service
 public class McpOAuthService {
@@ -60,7 +60,7 @@ public class McpOAuthService {
         response.put("client_id_issued_at", issuedAt);
         response.put("client_name", clientName);
         response.put("redirect_uris", redirectUris);
-        response.put("grant_types", List.of("authorization_code"));
+        response.put("grant_types", List.of("authorization_code", "refresh_token"));
         response.put("response_types", List.of("code"));
         response.put("token_endpoint_auth_method", "none");
         return response;
@@ -96,10 +96,16 @@ public class McpOAuthService {
     }
 
     public Map<String, Object> exchangeToken(HttpServletRequest request, Map<String, String> params) {
-        if (!"authorization_code".equals(params.get("grant_type"))) {
-            throw new McpOAuthException("unsupported_grant_type",
-                "only authorization_code is supported", HttpStatus.BAD_REQUEST);
-        }
+        return switch (params.get("grant_type")) {
+            case "authorization_code" -> exchangeAuthorizationCode(request, params);
+            case "refresh_token" -> exchangeRefreshToken(request, params);
+            default -> throw new McpOAuthException("unsupported_grant_type",
+                "only authorization_code and refresh_token are supported", HttpStatus.BAD_REQUEST);
+        };
+    }
+
+    private Map<String, Object> exchangeAuthorizationCode(HttpServletRequest request,
+                                                           Map<String, String> params) {
         String codeValue = require(params, "code");
         McpJwtService.AuthorizationCodeClaims code = jwtService
             .verifyAuthorizationCode(request, codeValue)
@@ -131,12 +137,49 @@ public class McpOAuthService {
             throw McpOAuthException.invalidGrant("resource does not match authorization code");
         }
 
-        String accessToken = jwtService.issueAccessToken(request, clientId, code.scope(), code.resource());
+        return tokenResponse(request, clientId, code.scope(), code.resource());
+    }
+
+    private Map<String, Object> exchangeRefreshToken(HttpServletRequest request,
+                                                      Map<String, String> params) {
+        String refreshToken = require(params, "refresh_token");
+        String clientId = require(params, "client_id");
+        McpJwtService.RegisteredClientClaims client = jwtService
+            .verifyClientRegistration(request, clientId)
+            .orElse(null);
+        McpJwtService.McpTokenClaims claims = jwtService
+            .verifyRefreshToken(request, refreshToken)
+            .orElse(null);
+        if (client == null || (claims != null && !clientId.equals(claims.clientId()))) {
+            throw McpOAuthException.invalidClient("client_id does not match refresh token");
+        }
+        if (claims == null) {
+            throw McpOAuthException.invalidGrant("refresh token is invalid or expired");
+        }
+        String scope = normalizeScope(params.get("scope"));
+        if (!scope.equals(claims.scope())) {
+            throw new McpOAuthException("invalid_scope",
+                "the requested scope exceeds the original grant", HttpStatus.BAD_REQUEST);
+        }
+        String requestedResource = params.get("resource");
+        if (StringUtils.isNotBlank(requestedResource)
+            && !urlResolver.mcpResource(request).equals(requestedResource.trim())) {
+            throw McpOAuthException.invalidGrant("resource does not match this MCP server");
+        }
+        return tokenResponse(request, clientId, claims.scope(), urlResolver.mcpResource(request));
+    }
+
+    private Map<String, Object> tokenResponse(HttpServletRequest request, String clientId,
+                                              String scope, String resource) {
+        String accessToken = jwtService.issueAccessToken(request, clientId, scope, resource);
+        String refreshToken = jwtService.issueRefreshToken(request, clientId, scope, resource);
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("access_token", accessToken);
         response.put("token_type", "Bearer");
         response.put("expires_in", jwtService.accessTokenTtlSeconds());
-        response.put("scope", code.scope());
+        response.put("refresh_token", refreshToken);
+        response.put("refresh_token_expires_in", jwtService.refreshTokenTtlSeconds());
+        response.put("scope", scope);
         return response;
     }
 

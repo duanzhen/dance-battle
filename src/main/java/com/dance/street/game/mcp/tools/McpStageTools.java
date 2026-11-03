@@ -218,9 +218,10 @@ public class McpStageTools implements IMcpTool {
             if (result instanceof McpSchema.CallToolResult toolResult) {
                 return toolResult;
             }
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_stages", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_stages", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

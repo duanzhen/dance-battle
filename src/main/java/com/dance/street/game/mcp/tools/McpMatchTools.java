@@ -66,8 +66,13 @@ public class McpMatchTools implements IMcpTool {
         properties.put("competitorIds", McpToolSupport.idListProperty(
             "Free-match advancing competitors in seed order."));
         properties.put("roundSequence", McpToolSupport.idProperty("One-based round sequence to reset."));
-        properties.put("currentCompetitorId", McpToolSupport.idProperty(
-            "Current on-stage competitor. Omit to leave unchanged; pass null to clear."));
+        properties.put("currentCompetitorId", Map.of(
+            "description", "Current on-stage competitor. Omit to leave unchanged; pass null to clear.",
+            "anyOf", List.of(
+                McpToolSupport.idProperty("Current on-stage competitor."),
+                Map.of("type", "null")
+            )
+        ));
         properties.put("data", McpToolSupport.objectProperty(
             "TMatchBo, SubmitResultBo, TMatchRoundBo, or TRoundScoreBo depending on action; "
                 + "also used as list filters."
@@ -131,11 +136,12 @@ public class McpMatchTools implements IMcpTool {
                 case "current_competitor" -> lifecycleService.getMatchCurrentCompetitor(
                     McpToolSupport.requiredLong(arguments, "matchId"));
                 case "set_current_competitor" -> {
+                    if (!arguments.containsKey("currentCompetitorId")) {
+                        yield Map.of("updated", false, "unchanged", true);
+                    }
                     lifecycleService.setMatchCurrentCompetitor(
                         McpToolSupport.requiredLong(arguments, "matchId"),
-                        arguments.containsKey("currentCompetitorId")
-                            ? McpToolSupport.optionalLong(arguments, "currentCompetitorId")
-                            : null
+                        McpToolSupport.optionalLong(arguments, "currentCompetitorId")
                     );
                     yield Map.of("updated", true);
                 }
@@ -194,9 +200,10 @@ public class McpMatchTools implements IMcpTool {
                     scoreService.deleteWithValidByIds(requiredIds(arguments), true);
                 default -> throw new ServiceException("不支持的 action: {}", action);
             };
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_matches", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_matches", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

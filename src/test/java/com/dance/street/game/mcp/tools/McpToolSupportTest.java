@@ -10,6 +10,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class McpToolSupportTest {
 
@@ -45,6 +46,24 @@ class McpToolSupportTest {
         var page = McpToolSupport.pageQuery(arguments);
         assertEquals(1, page.getPageNum());
         assertEquals(100, page.getPageSize());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void schemasAllowArrayImportAndNullableCurrentCompetitor() {
+        var playerProperties = (Map<String, Object>) new McpPlayerTools(null).definition()
+            .inputSchema().get("properties");
+        Map<String, Object> playerData = (Map<String, Object>) playerProperties.get("data");
+        assertEquals(List.of("object", "array"),
+            ((List<Map<String, Object>>) playerData.get("anyOf")).stream()
+                .map(item -> item.get("type")).toList());
+
+        var matchProperties = (Map<String, Object>) new McpMatchTools(
+            null, null, null, null, null).definition().inputSchema().get("properties");
+        Map<String, Object> currentCompetitor =
+            (Map<String, Object>) matchProperties.get("currentCompetitorId");
+        assertTrue(((List<Map<String, Object>>) currentCompetitor.get("anyOf")).stream()
+            .anyMatch(item -> "null".equals(item.get("type"))));
     }
 
     private static McpTransportContext context(McpTokenClaims claims) {

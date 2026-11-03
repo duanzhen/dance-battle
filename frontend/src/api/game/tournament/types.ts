@@ -100,6 +100,10 @@ export interface TournamentForm extends BaseEntity {
    * 备注
    */
   remark?: string;
+
+  /** 创建赛事时传入的裁判姓名，数组长度即裁判数量 */
+  refereeNames?: string[];
+
 }
 
 export interface TournamentQuery extends PageQuery {

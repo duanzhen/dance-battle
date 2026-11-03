@@ -13,12 +13,22 @@ import org.springframework.stereotype.Service;
 import com.dance.street.game.domain.bo.TMatchRoundBo;
 import com.dance.street.game.domain.vo.TMatchRoundVo;
 import com.dance.street.game.domain.TMatchRound;
+import com.dance.street.game.domain.TMatch;
+import com.dance.street.game.domain.TStage;
+import com.dance.street.game.domain.TRoundScore;
+import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
+import com.dance.street.game.mapper.TRoundScoreMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchRoundService;
+import org.dromara.common.core.exception.ServiceException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Collection;
+import java.util.Objects;
 
 /**
  * 比赛轮次Service业务层处理
@@ -32,6 +42,9 @@ import java.util.Collection;
 public class TMatchRoundServiceImpl implements ITMatchRoundService {
 
     private final TMatchRoundMapper baseMapper;
+    private final TMatchMapper matchMapper;
+    private final TStageMapper stageMapper;
+    private final TRoundScoreMapper scoreMapper;
 
     /**
      * 查询比赛轮次
@@ -88,8 +101,31 @@ public class TMatchRoundServiceImpl implements ITMatchRoundService {
      * @return 新增后的比赛轮次
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TMatchRoundVo insertByBo(TMatchRoundBo bo) {
         TMatchRound add = MapstructUtils.convert(bo, TMatchRound.class);
+        if (add.getTournamentId() == null || add.getMatchId() == null) {
+            throw new ServiceException("轮次必须归属赛事和场次");
+        }
+        TMatch match = requireMutableMatch(add.getMatchId());
+        if (!Objects.equals(match.getTournamentId(), add.getTournamentId())) {
+            throw new ServiceException("轮次与场次不属于同一赛事");
+        }
+        if (StringUtils.isBlank(add.getStatus())) {
+            add.setStatus(StageConstants.MATCH_PENDING);
+        }
+        if (!StageConstants.MATCH_PENDING.equals(add.getStatus())) {
+            throw new ServiceException("新建轮次必须从 PENDING 开始");
+        }
+        if (add.getRoundSequence() == null || add.getRoundSequence() < 1) {
+            throw new ServiceException("轮次序号必须大于 0");
+        }
+        long duplicate = baseMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, add.getMatchId())
+            .eq(TMatchRound::getRoundSequence, add.getRoundSequence()));
+        if (duplicate > 0) {
+            throw new ServiceException("场次[{}]已存在第 {} 轮", add.getMatchId(), add.getRoundSequence());
+        }
         validEntityBeforeSave(add);
         baseMapper.insert(add);
         bo.setId(add.getId());
@@ -103,8 +139,29 @@ public class TMatchRoundServiceImpl implements ITMatchRoundService {
      * @return 修改后的比赛轮次
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TMatchRoundVo updateByBo(TMatchRoundBo bo) {
         TMatchRound update = MapstructUtils.convert(bo, TMatchRound.class);
+        TMatchRound before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("轮次不存在: {}", update.getId());
+        }
+        if (update.getTournamentId() != null
+            && !Objects.equals(before.getTournamentId(), update.getTournamentId())) {
+            throw new ServiceException("轮次不允许变更所属赛事");
+        }
+        if (update.getMatchId() != null && !Objects.equals(before.getMatchId(), update.getMatchId())) {
+            throw new ServiceException("轮次不允许变更所属场次");
+        }
+        if (update.getRoundSequence() != null
+            && !Objects.equals(before.getRoundSequence(), update.getRoundSequence())) {
+            throw new ServiceException("轮次序号不允许通过通用更新变更");
+        }
+        if (update.getStatus() != null && !Objects.equals(before.getStatus(), update.getStatus())) {
+            throw new ServiceException("轮次状态由场次生命周期统一推进，通用更新不能把 {} 改为 {}",
+                before.getStatus(), update.getStatus());
+        }
+        requireMutableMatch(before.getMatchId());
         validEntityBeforeSave(update);
         baseMapper.updateById(update);
         return MapstructUtils.convert(update, TMatchRoundVo.class);
@@ -125,10 +182,40 @@ public class TMatchRoundServiceImpl implements ITMatchRoundService {
      * @return 是否删除成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if(isValid){
-            //TODO 做一些业务上的校验,判断是否需要校验
+        if (Boolean.TRUE.equals(isValid)) {
+            if (ids == null || ids.isEmpty()) {
+                throw new ServiceException("轮次ID不能为空");
+            }
+            for (Long id : ids) {
+                TMatchRound round = baseMapper.selectById(id);
+                if (round == null) {
+                    continue;
+                }
+                requireMutableMatch(round.getMatchId());
+                long scores = scoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
+                    .eq(TRoundScore::getRoundId, id));
+                if (scores > 0) {
+                    throw new ServiceException("轮次[{}]已有打分记录，不能通过通用 CRUD 删除", id);
+                }
+            }
         }
         return baseMapper.deleteByIds(ids) > 0;
+    }
+
+    private TMatch requireMutableMatch(Long matchId) {
+        TMatch match = matchId == null ? null : matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在: {}", matchId);
+        }
+        TStage stage = match.getStageId() == null ? null : stageMapper.selectById(match.getStageId());
+        if (stage == null || !StageConstants.STAGE_DRAFT.equals(stage.getStatus())) {
+            throw new ServiceException("赛段已开始，轮次结构已锁定");
+        }
+        if (!StageConstants.MATCH_PENDING.equals(match.getStatus())) {
+            throw new ServiceException("场次已开始，轮次结构已锁定");
+        }
+        return match;
     }
 }

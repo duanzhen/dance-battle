@@ -51,6 +51,7 @@ import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
+import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITRefereeStageService;
@@ -74,6 +75,7 @@ import java.util.stream.Collectors;
 public class TStageServiceImpl implements ITStageService {
 
     private final TStageMapper baseMapper;
+    private final TTournamentMapper tournamentMapper;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
     private final TMatchRoundMapper matchRoundMapper;
@@ -211,6 +213,22 @@ public class TStageServiceImpl implements ITStageService {
     @Transactional(rollbackFor = Exception.class)
     public TStageVo insertByBo(TStageBo bo) {
         TStage add = MapstructUtils.convert(bo, TStage.class);
+        if (add.getTournamentId() == null || tournamentMapper.selectById(add.getTournamentId()) == null) {
+            throw new ServiceException("赛段必须归属一个有效赛事");
+        }
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("赛段名称不能为空");
+        }
+        if (StringUtils.isBlank(add.getStageMode())) {
+            throw new ServiceException("赛段模式不能为空");
+        }
+        StageModeProfiles.of(add.getStageMode());
+        if (StringUtils.isBlank(add.getStatus())) {
+            add.setStatus(StageConstants.STAGE_DRAFT);
+        }
+        if (!StageConstants.STAGE_DRAFT.equals(add.getStatus())) {
+            throw new ServiceException("新建赛段必须从 DRAFT 开始，不能直接写入状态 {}", add.getStatus());
+        }
 
         // 归一化 ruleConfig:补齐与 teamCountStart/teamCountEnd 对应的配置字段
         normalizeRuleConfig(add, null);
@@ -298,6 +316,10 @@ public class TStageServiceImpl implements ITStageService {
         }
     }
 
+    private static boolean changed(Object before, Object requested) {
+        return requested != null && !Objects.equals(before, requested);
+    }
+
     /**
      * 配置写入的公共实现:只写 patch 上显式提供的配置列。
      *
@@ -313,26 +335,29 @@ public class TStageServiceImpl implements ITStageService {
         if (oldStage == null) {
             throw new ServiceException("赛段不存在: {}", patch.getId());
         }
-        // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
-        // 避免后续有人往 patch 里塞指针又把链写歪
+        if (patch.getStatus() != null && !Objects.equals(oldStage.getStatus(), patch.getStatus())) {
+            throw new ServiceException(
+                "赛段状态只能通过开始、完成或重置流程变更，不能直接标记为 {}（当前 {}）",
+                patch.getStatus(), oldStage.getStatus());
+        }
+        if (!StageConstants.STAGE_DRAFT.equals(oldStage.getStatus())
+            && (changed(oldStage.getStageMode(), patch.getStageMode())
+            || changed(oldStage.getMembers(), patch.getMembers())
+            || changed(oldStage.getTeamCountStart(), patch.getTeamCountStart())
+            || changed(oldStage.getTeamCountEnd(), patch.getTeamCountEnd())
+            || changed(oldStage.getRuleConfig(), patch.getRuleConfig()))) {
+            throw new ServiceException("赛段[{}]已开始，赛制、人数和规则配置已锁定；如需调整请先重置为草稿",
+                oldStage.getName());
+        }
         // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
         // 避免后续有人往 patch 里塞指针又把链写歪
         patch.setNextStageId(null);
+        // 状态列同理:上面的守卫已保证「要么没传、要么与库中一致」,这里清掉后 UPDATE 里不会出现 status,
+        // 配置入口无论如何不可能改状态(状态只走开始/完成/重置流程,见 StageRunService / StageSettlementService)
+        patch.setStatus(null);
 
         // 归一化 ruleConfig:补齐与 teamCountStart/teamCountEnd 对应的配置字段
         normalizeRuleConfig(patch, oldStage);
-
-        // 防悬挂状态:直接把赛段置为已结束时,要求所有场次必须已结算(与 completeStage 口径一致),
-        // 避免出现「赛段 SETTLED + 二海/场次 GAMING」的前端误写状态
-        if (patch.getStatus() != null && StageConstants.STAGE_SETTLED.equals(patch.getStatus())) {
-            long unfinished = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
-                .eq(TMatch::getStageId, patch.getId())
-                .ne(TMatch::getStatus, StageConstants.MATCH_SETTLED));
-            if (unfinished > 0) {
-                throw new ServiceException("赛段仍有 {} 场未结算(如海选二海),不能直接标记为已结束,请通过「完成赛段」结算",
-                    unfinished);
-            }
-        }
 
         // 分圈保护:海选圈数只增不减、开始后锁定(前端已改为按钮加圈)
         validateAuditionCircleChange(patch, oldStage);

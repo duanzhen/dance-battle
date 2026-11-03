@@ -20,12 +20,13 @@ import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
-import com.dance.street.game.service.impl.settle.ArenaStageSettler;
-import com.dance.street.game.service.impl.settle.AuditionStageSettler;
-import com.dance.street.game.service.impl.settle.RankStageSettler;
-import com.dance.street.game.service.impl.settle.ScoredStageSettler;
-import com.dance.street.game.service.impl.settle.StageSettler;
-import com.dance.street.game.service.impl.settle.StageSettlerRegistry;
+import com.dance.street.game.service.impl.stage.handler.ArenaStageHandler;
+import com.dance.street.game.service.impl.stage.handler.AuditionStageHandler;
+import com.dance.street.game.service.impl.stage.handler.FreeMatchStageHandler;
+import com.dance.street.game.service.impl.stage.handler.KnockoutStageHandler;
+import com.dance.street.game.service.impl.stage.handler.RankStageHandler;
+import com.dance.street.game.service.impl.stage.handler.StageHandler;
+import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,7 +81,7 @@ class StageSettlementStrategyTest {
     }
 
     @Autowired
-    private StageSettlerRegistry settlerRegistry;
+    private StageHandlerRegistry handlerRegistry;
     @Autowired
     private TTournamentMapper tournamentMapper;
     @Autowired
@@ -99,32 +100,33 @@ class StageSettlementStrategyTest {
     private ITMatchResultService matchResultService;
 
     /**
-     * 注册表覆盖性:每个 {@link StageModeEnum} 都能解析出结算策略。
-     * 新增赛制却忘了加策略时,这条会先红,而不是线上点「完成赛段」才报错。
+     * Handler 覆盖性:每个 {@link StageModeEnum} 都能经 Registry 解析出 Handler(含 settle)。
+     * 新增赛制却忘了加 Handler 时,这条会先红,而不是线上点「完成赛段」才报错。
      */
     @Test
-    void everyStageModeHasSettler() {
-        List<String> uncovered = settlerRegistry.uncoveredModes();
-        assertTrue(uncovered.isEmpty(), "以下赛制没有结算策略: " + uncovered);
+    void everyStageModeHasHandlerWithSettle() {
+        List<String> uncovered = handlerRegistry.uncoveredModes();
+        assertTrue(uncovered.isEmpty(), "以下赛制没有 StageHandler: " + uncovered);
         for (StageModeEnum mode : StageModeEnum.values()) {
-            StageSettler settler = settlerRegistry.of(mode.getCode());
-            assertNotNull(settler, "赛制 " + mode.getCode() + " 无策略");
+            StageHandler handler = handlerRegistry.of(mode.getCode());
+            assertNotNull(handler, "赛制 " + mode.getCode() + " 无 Handler");
+            assertNotNull(handler.capabilities());
         }
     }
 
-    /** 分派正确性:每种赛制落到预期策略(淘汰赛与自由对抗共用计分策略)。 */
+    /** 分派正确性:每种赛制落到预期 Handler。 */
     @Test
-    void registryDispatchesToExpectedSettler() {
-        assertInstanceOf(AuditionStageSettler.class,
-            settlerRegistry.of(StageModeEnum.AUDITION.getCode()));
-        assertInstanceOf(RankStageSettler.class,
-            settlerRegistry.of(StageModeEnum.RANK.getCode()));
-        assertInstanceOf(ArenaStageSettler.class,
-            settlerRegistry.of(StageModeEnum.ARENA.getCode()));
-        assertInstanceOf(ScoredStageSettler.class,
-            settlerRegistry.of(StageModeEnum.KNOCKOUT.getCode()));
-        assertInstanceOf(ScoredStageSettler.class,
-            settlerRegistry.of(StageModeEnum.FREE_MATCH.getCode()));
+    void registryDispatchesToExpectedHandler() {
+        assertInstanceOf(AuditionStageHandler.class,
+            handlerRegistry.of(StageModeEnum.AUDITION.getCode()));
+        assertInstanceOf(RankStageHandler.class,
+            handlerRegistry.of(StageModeEnum.RANK.getCode()));
+        assertInstanceOf(ArenaStageHandler.class,
+            handlerRegistry.of(StageModeEnum.ARENA.getCode()));
+        assertInstanceOf(KnockoutStageHandler.class,
+            handlerRegistry.of(StageModeEnum.KNOCKOUT.getCode()));
+        assertInstanceOf(FreeMatchStageHandler.class,
+            handlerRegistry.of(StageModeEnum.FREE_MATCH.getCode()));
     }
 
     /**

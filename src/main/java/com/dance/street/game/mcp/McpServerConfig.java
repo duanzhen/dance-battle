@@ -68,11 +68,15 @@ public class McpServerConfig implements WebMvcConfigurer {
             .jsonMapper(mapper)
             .jsonSchemaValidator(schemaValidator)
             .serverInfo("dance-battle-mcp", "1.0.0")
-            .instructions("Use the dance_battle_operator prompt to load the business model before complex "
-                + "tournament operations. Read the dance:// resource guide and live overviews when useful, "
-                + "then use the domain tools to inspect current state and execute changes. After a successful "
-                + "create, retain the returned context ids and continue using that object until the user "
-                + "explicitly switches context.")
+            .instructions("IMPORTANT: Before calling any dance-battle business tool, you MUST first call "
+                + "prompts/get with name 'dance_battle_operator'. Include any known tournamentId, stageId, "
+                + "or matchId. Use the returned business context as the required "
+                + "foundation for understanding the domain model, state machines, tool mapping, and safety rules. "
+                + "Do not invoke business tools before loading this prompt. Load it once when preparing to use "
+                + "this MCP server, then reuse the resulting context for every subsequent tool call and task "
+                + "in the same conversation. Do not call prompts/get again. Reload only in a new isolated "
+                + "conversation or if the context is lost. After loading the prompt, use dance:// guides "
+                + "and live overviews when additional state is useful.")
             .tools(toolRegistry.specifications())
             .resources(businessResources.resources())
             .resourceTemplates(businessResources.resourceTemplates())

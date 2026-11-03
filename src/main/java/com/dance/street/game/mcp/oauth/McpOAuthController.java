@@ -48,7 +48,7 @@ public class McpOAuthController {
         metadata.put("token_endpoint", baseUrl + "/token");
         metadata.put("registration_endpoint", baseUrl + "/register");
         metadata.put("response_types_supported", List.of("code"));
-        metadata.put("grant_types_supported", List.of("authorization_code"));
+        metadata.put("grant_types_supported", List.of("authorization_code", "refresh_token"));
         metadata.put("token_endpoint_auth_methods_supported", List.of("none"));
         metadata.put("code_challenge_methods_supported", List.of("S256"));
         metadata.put("scopes_supported", List.of("mcp"));

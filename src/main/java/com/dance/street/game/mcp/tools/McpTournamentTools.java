@@ -78,6 +78,8 @@ public class McpTournamentTools implements IMcpTool {
         result.put("total", page.getTotal());
         result.put("returned", tournaments.size());
         result.put("tournaments", tournaments);
+        result.put("context", McpToolSupport.context(
+            "list_tournaments", "list", arguments == null ? Map.of() : arguments, page));
         return McpSchema.CallToolResult.builder()
             .addTextContent(JsonUtils.toJsonString(result))
             .structuredContent(result)

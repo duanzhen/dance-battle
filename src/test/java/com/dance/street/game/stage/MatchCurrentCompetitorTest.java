@@ -2,12 +2,14 @@ package com.dance.street.game.stage;
 
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
+import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
+import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageLifecycleService;
@@ -67,6 +69,8 @@ class MatchCurrentCompetitorTest {
     @Autowired
     private TMatchMapper matchMapper;
     @Autowired
+    private TMatchParticipantMapper participantMapper;
+    @Autowired
     private TCompetitorMapper competitorMapper;
     @Autowired
     private ITStageLifecycleService lifecycleService;
@@ -100,6 +104,15 @@ class MatchCurrentCompetitorTest {
         c.setNumber("1");
         c.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
         competitorMapper.insert(c);
+
+        TMatchParticipant participant = new TMatchParticipant();
+        participant.setTournamentId(t.getId());
+        participant.setMatchId(match.getId());
+        participant.setCompetitorId(c.getId());
+        participant.setDisplaySlotIndex(0L);
+        participant.setSlotKind(StageConstants.SLOT_PLAYER);
+        participant.setOutcomeStatus("PENDING");
+        participantMapper.insert(participant);
 
         lifecycleService.setMatchCurrentCompetitor(match.getId(), c.getId());
 

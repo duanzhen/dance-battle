@@ -62,12 +62,12 @@ public class McpPlayerTools implements IMcpTool {
                 + "[{\"name\":\"林晓\"},{\"name\":\"陈宇\"}]."
         ));
         properties.put("data", Map.of(
+            "description", "TPlayerBo for create/update/list. For legacy import calls, "
+                + "an array is also accepted; new callers should use players[].",
             "anyOf", List.of(
                 Map.of("type", "object"),
                 Map.of("type", "array", "items", playerImportSchema)
-            ),
-            "description", "Object for create/update/list/check-in. For legacy import calls, "
-                + "an array is also accepted; new callers should use players[]."
+            )
         ));
         properties.putAll(McpToolSupport.pagingProperties());
         return McpToolSupport.definition(
@@ -126,9 +126,10 @@ public class McpPlayerTools implements IMcpTool {
             if (result instanceof McpSchema.CallToolResult toolResult) {
                 return toolResult;
             }
-            return McpToolSupport.result(action, result);
+            return McpToolSupport.result("manage_players", action, result, arguments);
         } catch (Exception error) {
-            return McpToolSupport.failure(action, error);
+            return McpToolSupport.failure("manage_players", action,
+                request.arguments() == null ? Map.of() : request.arguments(), error);
         }
     }
 

@@ -113,8 +113,7 @@ public class RosterApplyService {
             .filter(e -> e.getSlot() == null || e.getSlot() < 1L)
             .count();
         if (unplaced > 0) {
-            throw new ServiceException("还有 {} 人没落位(多入口汇合需要先拖到座位上),确认名单前请先在中间态把人拖到座位",
-                unplaced);
+            throw new ServiceException("待落位区还有 {} 人未处理，无法确认名单（请先在中间态把他们拖到座位上）", unplaced);
         }
         if (plan > 0 && players.size() > plan) {
             throw new ServiceException("名单装配 {} 人超出赛段计划 {} 人,请先调整来源组或人工调整后再确认",

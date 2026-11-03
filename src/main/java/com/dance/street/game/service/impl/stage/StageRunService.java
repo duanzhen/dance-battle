@@ -3,6 +3,7 @@ package com.dance.street.game.service.impl.stage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
+import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.bo.GenerateMatchesBo;
 import com.dance.street.game.domain.bo.InitializeStageBo;
@@ -29,7 +30,7 @@ import com.dance.street.game.service.impl.stage.hook.StageHooks;
 import com.dance.street.game.engine.common.StageModeProfile;
 import com.dance.street.game.engine.common.StageModeProfile.GeneratePolicy;
 import com.dance.street.game.engine.common.StageModeProfile.Setup.Trait;
-import com.dance.street.game.engine.common.StageModeProfiles;
+import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -65,12 +66,11 @@ public class StageRunService {
     private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
     private final TMatchMapper matchMapper;
+    private final TMatchParticipantMapper participantMapper;
     private final ITStageRosterService rosterService;
     private final AuditionCircleSupport auditionCircleSupport;
     /** 开赛时先初始化并生成对阵 */
     private final StageSetupService stageSetupService;
-    /** 擂台赛开赛后要立刻开第一场对决 */
-    private final ArenaRunService arenaRunService;
     /** 场次状态推进唯一入口(场次 + 轮次成套写) */
     private final MatchStateWriter matchStateWriter;
     /** 当前上场选手标记的跨实例存储(Redis,单机降级为进程内) */
@@ -78,13 +78,14 @@ public class StageRunService {
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final StageHooks stageHooks;
+    private final StageHandlerRegistry handlerRegistry;
 
     /** 开赛:一键完成初始化、生成对阵、开赛守卫与状态推进。 */
     @Transactional(rollbackFor = Exception.class)
     public void startStage(Long stageId) {
         TStage stage = stageLookup.get(stageId);
         assertCanStart(stage);
-        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        StageModeProfile profile = handlerRegistry.of(stage.getStageMode()).capabilities();
         // 一键开赛:无对阵时自动初始化(如未初始化)并生成对阵,淘汰赛/海选均适用
         long exist = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery().eq(TMatch::getStageId, stageId));
         // 擂台赛/自由对抗不生成对阵(擂台由导播逐场创建,自由对抗对手线下抽签),其余赛制一键生成
@@ -134,9 +135,9 @@ public class StageRunService {
             .ifPresent(guard -> guard.assertPostGenerate(stageLookup.get(stageId)));
         ensureStageGaming(stageId);
 
-        // 擂台赛:开赛后自动创建并开始第一场对决(队首擂主 vs 队次挑战者)
+        // 模式 afterStart(擂台开首场等):仅在 profile 要求自动开首场时调用,经 Handler 无赛制 if
         if (profile.run().autoStartFirstMatch()) {
-            arenaRunService.startNextArenaMatch(stageId);
+            handlerRegistry.of(stage.getStageMode()).afterStart(stageId);
             return;
         }
 
@@ -235,6 +236,16 @@ public class StageRunService {
         if (match == null) {
             throw new ServiceException("场次不存在");
         }
+        if (competitorId != null) {
+            long attached = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
+                .eq(TMatchParticipant::getMatchId, match.getId())
+                .eq(TMatchParticipant::getCompetitorId, competitorId)
+                .eq(TMatchParticipant::getTournamentId, match.getTournamentId()));
+            if (attached == 0) {
+                throw new ServiceException("参赛方[{}]不属于场次[{}]，不能标记为当前上场选手",
+                    competitorId, match.getId());
+            }
+        }
         // 现场标记走跨实例缓存(Redis,单机降级为进程内),不落库——见 MatchCurrentCompetitorStore
         currentCompetitorStore.mark(matchId, competitorId);
         // 广播:大屏 widget 与导播台按事件刷新当前标记
@@ -255,7 +266,7 @@ public class StageRunService {
             throw new ServiceException("仅规划中(DRAFT)状态的赛段可开始,当前: {}", stage.getStatus());
         }
         // 赛制专属开赛守卫(海选:必须先配置至少一圈(人数/裁判/去向))
-        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        StageModeProfile profile = handlerRegistry.of(stage.getStageMode()).capabilities();
         if (profile.rank()) {
             assertRankWeightsSumTo100(stage);
         }

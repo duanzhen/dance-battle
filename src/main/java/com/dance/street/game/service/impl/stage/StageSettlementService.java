@@ -37,8 +37,7 @@ import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.settle.StageSettleOutcome;
-import com.dance.street.game.service.impl.settle.StageSettlerRegistry;
-import com.dance.street.game.engine.common.StageModeProfiles;
+import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -81,8 +80,8 @@ public class StageSettlementService {
     /** 赛段级结果(晋级/淘汰/名次)的唯一写入口 */
     private final CompetitorOutcomeWriter outcomeWriter;
     private final TTournamentMapper tournamentMapper;
-    /** 结算策略注册表:按赛制分派(见 settle 包) */
-    private final StageSettlerRegistry settlerRegistry;
+    /** 赛制 Handler 注册表:settle 经 StageHandler(适配器委托原 Settler) */
+    private final StageHandlerRegistry handlerRegistry;
     /** 名单服务:中间层重建、来源边关系与快照回退 */
     private final ITStageRosterService rosterService;
     private final RefereeSseNotifier refereeSseNotifier;
@@ -95,9 +94,8 @@ public class StageSettlementService {
         if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
             throw new ServiceException("仅 GAMING 状态的赛段可完成,当前: {}", stage.getStatus());
         }
-        // 按赛制选结算策略(见 settle 包):每种赛制的结算规则独立成类,
-        // 这里只负责"选策略 → 置状态 → 广播"。
-        StageSettleOutcome outcome = settlerRegistry.of(stage.getStageMode()).settle(stage);
+        // 按赛制经 StageHandler 结算(适配器委托原 Settler):编排只负责置状态与广播。
+        StageSettleOutcome outcome = handlerRegistry.of(stage.getStageMode()).settle(stage);
         if (!outcome.closable()) {
             // 结算产生了后续工作(二海加赛、仍有场次未结算…):赛段保持进行中。
             // 「还不能结束」统一用返回值表达,不再与异常混用——导播台只需看 message。
@@ -107,8 +105,16 @@ public class StageSettlementService {
                 ? StageCompleteVo.pendingTiebreaker(outcome.reason())
                 : StageCompleteVo.pending(outcome.reason());
         }
-        stage.setStatus(StageConstants.STAGE_SETTLED);
-        stageMapper.updateById(stage);
+        // 只写 status 一列(不整行回写读到的旧快照,避免盖掉并发写入的其他列);
+        // 带 status=GAMING 条件:并发的重复完成/重置只会有一方生效,另一方在此被拦下。
+        TStage settled = new TStage();
+        settled.setStatus(StageConstants.STAGE_SETTLED);
+        int rows = stageMapper.update(settled, Wrappers.<TStage>lambdaUpdate()
+            .eq(TStage::getId, stageId)
+            .eq(TStage::getStatus, StageConstants.STAGE_GAMING));
+        if (rows == 0) {
+            throw new ServiceException("赛段[{}]状态已变化,无法完成,请刷新后重试", stageId);
+        }
         // 上游结算完成:重建所有引用本赛段的下游中间层名单(上游一变就全部重新来)
         rosterService.rebuildEntriesOfDownstream(stageId);
         // 上游结束了:下游对阵里那些"等上游填入"的座位,此刻没人来就是真轮空(待定→轮空)
@@ -354,7 +360,7 @@ public class StageSettlementService {
     @Transactional(rollbackFor = Exception.class)
     public int adjustAdvancement(Long stageId, List<Long> competitorIds) {
         TStage stage = stageLookup.get(stageId);
-        if (!StageModeProfiles.of(stage.getStageMode()).view().advancementAdjustment()) {
+        if (!handlerRegistry.of(stage.getStageMode()).capabilities().view().advancementAdjustment()) {
             throw new ServiceException("仅排名赛赛段支持手动调整同分晋级");
         }
         if (!StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
@@ -439,7 +445,7 @@ public class StageSettlementService {
     /** 排名赛名次明细(按圈/维度),MANUAL/BATCH 未公布前隐藏分数。 */
     public RankDetailVo getRankDetail(Long stageId) {
         TStage stage = stageLookup.get(stageId);
-        if (!StageModeProfiles.of(stage.getStageMode()).view().rankDetail()) {
+        if (!handlerRegistry.of(stage.getStageMode()).capabilities().view().rankDetail()) {
             throw new ServiceException("仅排名赛赛段支持排名明细");
         }
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());

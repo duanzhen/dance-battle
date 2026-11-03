@@ -376,17 +376,19 @@ public class McpBusinessResources {
         - Do not copy a similar tournament, use temporary names, or invent a stage plan.
 
         ## Tournament creation
-        1. Ask for the tournament name and choose exactly one creation mode.
-        2. `create_from_template` requires `templateCode`:
-           AUDITION_32, AUDITION_16, or AUDITION_ARENA. It creates the full stage chain.
-        3. `create_blank` creates only a tournament draft.
-           Before `manage_stages.create`, ask for each stage's order, name, `stageMode`,
+        1. Ask for the tournament name, template code, and referee decision.
+        2. Every tournament uses `create_from_template` with one `templateCode`:
+           BLANK, AUDITION_32, AUDITION_16, or AUDITION_ARENA.
+        3. BLANK creates only a tournament draft. For other templates, the full stage chain is generated.
+           Before `manage_stages.create` on a blank tournament, ask for each stage's order, name, `stageMode`,
            `teamCountStart`, `teamCountEnd`, and `afterStageId` for non-head stages.
-        4. Send `confirmed=true` only after the user confirmed those values.
-        5. `clarification_required` means stop and ask the listed questions.
+        4. Configure at least one `refereeNames` entry, or pass `noRefereeConfirmed=true`
+           only after the user explicitly confirms that there are no referees.
+        5. Send `confirmed=true` to `manage_stages.create` only after the user confirmed the stage values.
+        6. `clarification_required` means stop and ask the listed questions.
 
         ## Main tools
-        - `manage_tournaments`: tournament CRUD and the two creation modes.
+        - `manage_tournaments`: tournament CRUD and unified creation through `create_from_template`.
         - `manage_stages`: stage chain, initialization, generation, execution and settlement.
         - `manage_rosters`: source edges, intermediate seats, overrides and roster confirmation.
         - `manage_players`: player profiles, check-in and import.

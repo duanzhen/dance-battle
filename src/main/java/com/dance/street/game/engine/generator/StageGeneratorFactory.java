@@ -16,7 +16,7 @@ import java.util.Map;
  * 赛段对阵生成器注册表(按 stageMode 路由)。
  *
  * <p>实现由 Spring 自动收集:每个 {@link StageGenerator} 实现标注 {@code @Component} 即被注册,
- * 新增赛制只加一个实现类,无须改动本类(与 {@code StageSettlerRegistry} 同一套机制)。
+ * 新增赛制只加一个实现类,无须改动本类(与 Spring 收集 StageHandler 同一套机制)。
  * 生成器本身无状态,单测仍可直接 {@code new}。</p>
  *
  * <p>{@link #uncoveredModes()} 供测试断言:画像声明需要生成对阵

@@ -320,6 +320,9 @@ public class TTournamentServiceImpl implements ITTournamentService {
      */
     private TTournament insertTournamentOnly(TTournamentBo bo) {
         TTournament add = MapstructUtils.convert(bo, TTournament.class);
+        if (StringUtils.isBlank(add.getName())) {
+            throw new ServiceException("赛事名称不能为空");
+        }
         // 手机导播台登录凭证:创建赛事时自动生成,泄露后可调用 regenerateAuthKey 重置
         add.setAuthKey(UUID.randomUUID().toString(true));
         validEntityBeforeSave(add);
@@ -350,6 +353,21 @@ public class TTournamentServiceImpl implements ITTournamentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public TTournamentVo createByTemplate(TTournamentTemplateBo bo) {
+        if (StringUtils.isBlank(bo.getTemplateCode())) {
+            throw new ServiceException("使用赛事模版时必须明确传 templateCode");
+        }
+        if ("BLANK".equals(bo.getTemplateCode())) {
+            TTournamentBo blank = new TTournamentBo();
+            blank.setName(bo.getName());
+            blank.setCoverImage(bo.getCoverImage());
+            blank.setStatus(0L);
+            blank.setLogicalWidth(bo.getLogicalWidth());
+            blank.setLogicalHeight(bo.getLogicalHeight());
+            blank.setThemeConfig(bo.getThemeConfig());
+            blank.setRemark(bo.getRemark());
+            blank.setRefereeNames(bo.getRefereeNames());
+            return insertByBo(blank);
+        }
         List<StageDef> defs = TEMPLATES.get(bo.getTemplateCode());
         if (defs == null || defs.isEmpty()) {
             throw new ServiceException("未知的赛事模版: " + bo.getTemplateCode());
@@ -760,8 +778,16 @@ public class TTournamentServiceImpl implements ITTournamentService {
      * @return 修改后的赛事主
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public TTournamentVo updateByBo(TTournamentBo bo) {
         TTournament update = MapstructUtils.convert(bo, TTournament.class);
+        TTournament before = update.getId() == null ? null : baseMapper.selectById(update.getId());
+        if (before == null) {
+            throw new ServiceException("赛事不存在: {}", update.getId());
+        }
+        if (update.getName() != null && StringUtils.isBlank(update.getName())) {
+            throw new ServiceException("赛事名称不能为空");
+        }
         validEntityBeforeSave(update);
         baseMapper.updateById(update);
         return MapstructUtils.convert(update, TTournamentVo.class);

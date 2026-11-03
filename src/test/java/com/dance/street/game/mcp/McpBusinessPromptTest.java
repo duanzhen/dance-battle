@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,16 +19,15 @@ class McpBusinessPromptTest {
     @Test
     void exposesBusinessGuideWithOptionalContextArguments() {
         assertEquals(McpBusinessPrompt.PROMPT_NAME, prompt.definition().name());
-        assertEquals(5, prompt.definition().arguments().size());
+        assertEquals(4, prompt.definition().arguments().size());
         assertTrue(prompt.definition().arguments().stream()
-            .anyMatch(argument -> "goal".equals(argument.name()) && argument.required()));
+            .noneMatch(McpSchema.PromptArgument::required));
     }
 
     @Test
     void rendersFocusAndCurrentBusinessContext() {
         var result = prompt.generate(McpTransportContext.EMPTY,
             new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of(
-                "goal", "检查下一赛段为什么不能开始",
                 "focus", "roster",
                 "tournamentId", "100",
                 "stageId", "200",
@@ -35,9 +35,9 @@ class McpBusinessPromptTest {
             )));
 
         String text = ((McpSchema.TextContent) result.messages().getFirst().content()).text();
-        assertTrue(text.contains("检查下一赛段为什么不能开始"));
         assertTrue(text.contains("tournamentId：100"));
         assertTrue(text.contains("stageId：200"));
+        assertTrue(text.contains("具体用户目标由 Agent 根据当前对话理解"));
         assertTrue(text.contains("当前重点：名单"));
         assertTrue(text.contains("DRAFT → GAMING → SETTLED"));
         assertTrue(text.contains("manage_rosters"));
@@ -57,9 +57,10 @@ class McpBusinessPromptTest {
         assertTrue(text.contains("待落位区"));
         assertTrue(text.contains("clarification_required"));
         assertTrue(text.contains("禁止用临时名称"));
-        assertTrue(text.contains("templateCode 只能是 AUDITION_32"));
-        assertTrue(text.contains("create_blank"));
+        assertTrue(text.contains("BLANK、AUDITION_32"));
         assertTrue(text.contains("create_from_template"));
+        assertTrue(text.contains("noRefereeConfirmed=true"));
+        assertFalse(text.contains("create_blank"));
         assertTrue(text.contains("afterStageId"));
         assertTrue(text.contains("teamCountStart"));
         assertTrue(text.contains("teamCountEnd"));
@@ -75,15 +76,28 @@ class McpBusinessPromptTest {
     }
 
     @Test
-    void rejectsMissingGoalAndUnknownFocus() {
-        assertThrows(ServiceException.class, () -> prompt.generate(
-            McpTransportContext.EMPTY,
-            new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of())));
+    void allowsEmptyArgumentsAndRejectsUnknownFocus() {
+        var result = prompt.generate(McpTransportContext.EMPTY,
+            new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of()));
+        assertTrue(((McpSchema.TextContent) result.messages().getFirst().content()).text()
+            .contains("具体用户目标由 Agent 根据当前对话理解"));
         assertThrows(ServiceException.class, () -> prompt.generate(
             McpTransportContext.EMPTY,
             new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of(
-                "goal", "test",
                 "focus", "unknown"
             ))));
+    }
+
+    @Test
+    void setupGuideShowsAllTemplateLabelsIncludingBlank() {
+        var result = prompt.generate(McpTransportContext.EMPTY,
+            new McpSchema.GetPromptRequest(McpBusinessPrompt.PROMPT_NAME, Map.of(
+                "focus", "setup"
+            )));
+        String text = ((McpSchema.TextContent) result.messages().getFirst().content()).text();
+        assertTrue(text.contains("BLANK（空白赛事）"));
+        assertTrue(text.contains("AUDITION_32（海选32人）"));
+        assertTrue(text.contains("AUDITION_16（海选16人）"));
+        assertTrue(text.contains("AUDITION_ARENA（海选32SevenToSmoke）"));
     }
 }

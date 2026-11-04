@@ -398,4 +398,25 @@ public class TStageController extends BaseController {
     public R<RankDetailVo> rankDetail(@NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
         return R.ok(tStageLifecycleService.getRankDetail(id));
     }
+
+    /**
+     * 排名赛结果:官方总分/名次、维度聚合分及每位裁判的原始分。
+     */
+    @SaCheckPermission("game:stage:query")
+    @GetMapping("/{id}/rank-result")
+    public R<com.dance.street.game.domain.vo.RankResultVo> rankResult(
+        @NotNull(message = "赛段ID不能为空") @PathVariable Long id) {
+        return R.ok(tStageLifecycleService.queryRankResult(id));
+    }
+
+    /**
+     * 导出排名赛原始数据:每个维度下每位裁判的原始分、官方总分、排名与结果。
+     */
+    @SaCheckPermission("game:stage:query")
+    @Log(title = "导出排名赛原始数据", businessType = BusinessType.EXPORT)
+    @GetMapping("/{id}/export-rank-result")
+    public void exportRankResult(@NotNull(message = "赛段ID不能为空") @PathVariable Long id,
+                                 HttpServletResponse response) {
+        tStageLifecycleService.exportRankResult(id, response);
+    }
 }

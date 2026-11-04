@@ -12,6 +12,7 @@ import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.MatchRoundScoreVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
+import com.dance.street.game.domain.vo.RankResultVo;
 import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
@@ -25,14 +26,20 @@ import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
+import com.dance.street.game.service.impl.stage.RankResultService;
+import org.dhatim.fastexcel.reader.ReadableWorkbook;
+import org.dhatim.fastexcel.reader.Row;
+import org.dhatim.fastexcel.reader.Sheet;
 import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -80,6 +87,7 @@ class RankSettlementTest {
     @Autowired private ITStageLifecycleService lifecycleService;
     @Autowired private ITMatchResultService matchResultService;
     @Autowired private ITMatchService matchService;
+    @Autowired private RankResultService rankResultService;
 
     /**
      * 排名赛:单圈 4 人,1 名裁判按单维度打分;完成赛段后按总分取前 2 名晋级,
@@ -205,6 +213,58 @@ class RankSettlementTest {
 
         ServiceException ex = assertThrows(ServiceException.class, () -> lifecycleService.startStage(stage.getId()));
         assertTrue(ex.getMessage().contains("100%"), "开赛应提示权重合计需为 100%: " + ex.getMessage());
+    }
+
+    /** 名单页/导出使用的统一结果:官方加权总分、维度聚合分与每个裁判原始分。 */
+    @Test
+    void rankResultProvidesScoresAndRawDataExport() throws Exception {
+        Long tid = newTournament("排名赛结果导出");
+        Long judgeA = insertReferee(tid, "裁判A");
+        Long judgeB = insertReferee(tid, "裁判B");
+        String twoDimRule = "{\"mode\":\"RANK\",\"advanceCount\":2,"
+            + "\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
+            + "\"refereeAggregateRule\":\"SUM\",\"aggregateRule\":\"WEIGHTED\",\"dimensions\":["
+            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":50,\"maxScore\":100},"
+            + "{\"key\":\"SHOW\",\"name\":\"表现力\",\"weight\":50,\"maxScore\":100}]}}";
+        TStageVo stage = newStage(tid, "排名赛结果", 3, 2, twoDimRule);
+        for (int i = 1; i <= 3; i++) {
+            insertPending(tid, stage.getId(), "选手" + i, String.valueOf(i), i);
+        }
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        List<TMatchParticipant> parts = realParticipants(match.getId());
+        submitDimScores(match, judgeA, parts, 90, 80);
+        submitDimScores(match, judgeB, parts, 70, 60);
+
+        RankResultVo result = rankResultService.queryRankResult(stage.getId());
+        RankResultVo.CompetitorItem top = result.getCompetitors().stream()
+            .filter(c -> "1".equals(c.getNumber())).findFirst().orElseThrow();
+        assertEquals(0, new BigDecimal("150").compareTo(top.getScore()), "官方总分应为维度 160/140 的 50/50 加权");
+        assertEquals(1L, top.getRankInMatch());
+        RankResultVo.DimensionScore tech = top.getDimensions().stream()
+            .filter(d -> "TECH".equals(d.getKey())).findFirst().orElseThrow();
+        assertEquals(0, new BigDecimal("160").compareTo(tech.getScore()), "技术维度应聚合两名裁判");
+        assertEquals(2, tech.getRefereeScores().size(), "应保留每位裁判的原始分");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        rankResultService.exportRankResult(stage.getId(), response);
+        assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
+            response.getContentType());
+        try (ReadableWorkbook wb = new ReadableWorkbook(
+            new ByteArrayInputStream(response.getContentAsByteArray()))) {
+            Sheet sheet = wb.getFirstSheet();
+            List<Row> rows = sheet.read();
+            List<String> header = rows.get(0).getCells(0, rows.get(0).getCellCount()).stream()
+                .map(c -> c.asString()).toList();
+            assertEquals(List.of("号码", "选手名", "技术-裁判A", "技术-裁判B",
+                "表现力-裁判A", "表现力-裁判B", "总分", "排名", "结果"), header);
+            Row first = rows.get(1);
+            assertEquals("1", first.getCellText(0));
+            assertEquals("90", first.getCellText(2));
+            assertEquals("70", first.getCellText(3));
+            assertEquals("150", first.getCellText(6));
+            assertEquals("1", first.getCellText(7));
+        }
     }
 
     /** 提交一名裁判对全场选手两个维度的分(按选手顺序递减) */

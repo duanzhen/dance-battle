@@ -6,6 +6,7 @@ import com.dance.street.game.domain.bo.SeedOrderBo;
 import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.AuditionResultVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
+import com.dance.street.game.domain.vo.RankResultVo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
@@ -13,6 +14,7 @@ import com.dance.street.game.service.impl.stage.ArenaRunService;
 import com.dance.street.game.service.impl.stage.AuditionResultService;
 import com.dance.street.game.service.impl.stage.ByeSettlementService;
 import com.dance.street.game.service.impl.stage.FreeMatchService;
+import com.dance.street.game.service.impl.stage.RankResultService;
 import com.dance.street.game.service.impl.stage.StageCheckInService;
 import com.dance.street.game.service.impl.stage.StageRunService;
 import com.dance.street.game.service.impl.stage.StageSettlementService;
@@ -48,6 +50,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final AuditionCircleSupport auditionCircleSupport;
     /** 海选结果口径与导出 */
     private final AuditionResultService auditionResultService;
+    /** 排名赛结果口径与原始数据导出 */
+    private final RankResultService rankResultService;
     /** 擂台赛运行与总览 */
     private final ArenaRunService arenaRunService;
     /** 轮空场次结算(淘汰赛) */
@@ -206,6 +210,16 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Override
     public AuditionResultVo queryAuditionResult(Long stageId) {
         return auditionResultService.queryAuditionResult(stageId);
+    }
+
+    @Override
+    public RankResultVo queryRankResult(Long stageId) {
+        return rankResultService.queryRankResult(stageId);
+    }
+
+    @Override
+    public void exportRankResult(Long stageId, jakarta.servlet.http.HttpServletResponse response) {
+        rankResultService.exportRankResult(stageId, response);
     }
 
     @Override

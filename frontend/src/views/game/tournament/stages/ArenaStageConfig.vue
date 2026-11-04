@@ -82,7 +82,7 @@
                 :min="2"
                 :max="512"
                 class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
-                @input="handleUpdate"
+                @change="handleUpdate"
               />
             </div>
             <p class="text-[11px] text-neutral-500 mt-2">

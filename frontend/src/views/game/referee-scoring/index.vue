@@ -348,6 +348,9 @@
                     <div class="min-w-[72px]">
                       <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
                       <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
+                      <div v-if="scoringAggregateRule === 'WEIGHTED'" class="text-[9px] text-amber-500/80">
+                        权重 {{ Number(dim.weight) || 0 }}%
+                      </div>
                     </div>
                     <div class="flex items-center gap-2">
                       <button
@@ -377,7 +380,7 @@
                     </div>
                   </div>
                   <p v-if="keypadTarget?.competitorId != null && myScored(keypadTarget.competitorId)" class="text-[9px] text-neutral-500 text-center">
-                    我的总分 {{ myTotal(keypadTarget.competitorId).toFixed(2) }}
+                    {{ myTotalLabel }} {{ myTotal(keypadTarget.competitorId).toFixed(2) }}
                   </p>
                   <div class="grid grid-cols-2 gap-2 mt-3">
                     <button
@@ -539,6 +542,9 @@
                     <div class="min-w-[72px]">
                       <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
                       <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
+                      <div v-if="scoringAggregateRule === 'WEIGHTED'" class="text-[9px] text-amber-500/80">
+                        权重 {{ Number(dim.weight) || 0 }}%
+                      </div>
                     </div>
                     <div class="flex items-center gap-2">
                       <button
@@ -566,7 +572,7 @@
                     </div>
                   </div>
                   <p v-if="myScored(p.competitorId!)" class="text-[9px] text-neutral-500 text-center">
-                    我的总分 {{ myTotal(p.competitorId!).toFixed(2) }} · 当前累计 {{ p.currentScore == null ? 0 : Number(p.currentScore).toFixed(2) }}
+                    {{ myTotalLabel }} {{ myTotal(p.competitorId!).toFixed(2) }} · 当前累计 {{ p.currentScore == null ? 0 : Number(p.currentScore).toFixed(2) }}
                   </p>
                 </div>
 
@@ -703,6 +709,9 @@ const stageId = ref<number | null>(null);
 const stageName = ref('');
 const stageMode = ref('');
 const scoreType = ref('');
+/** 维度间汇总规则:排名赛裁判端“我的总分”与后端结算使用同一口径 */
+const scoringAggregateRule = ref('SUM');
+const scoringTrimRatio = ref(0.1);
 const matchId = ref<number | null>(null);
 const matchName = ref('');
 const matchMode = ref('');
@@ -1211,8 +1220,41 @@ const selectOutcome = (competitorId: number, outcome: string) => {
   submitted.value = false;
 };
 
+const myTotalLabel = computed(() =>
+  isRanking.value && scoringAggregateRule.value === 'WEIGHTED' ? '我的加权总分' : '我的总分'
+);
+
+/** 当前裁判自己的合计:排名赛按维度间规则计算,加权时使用维度百分比权重。 */
 const myTotal = (competitorId: number): number => {
-  return myScores.value.filter((s) => s.competitorId === competitorId).reduce((sum, s) => sum + (s.score || 0), 0);
+  const rows = myScores.value.filter((s) => s.competitorId === competitorId);
+  if (!isRanking.value || dimensions.value.length === 0) {
+    return rows.reduce((sum, s) => sum + (Number(s.score) || 0), 0);
+  }
+  const byDimension = new Map(rows.map((s) => [s.dimension || 'MAIN', Number(s.score) || 0]));
+  if (scoringAggregateRule.value === 'WEIGHTED') {
+    return dimensions.value.reduce(
+      (sum, d) => sum + (byDimension.get(d.key) || 0) * (Number(d.weight) || 0) / 100,
+      0
+    );
+  }
+  const values = dimensions.value
+    .map((d) => byDimension.get(d.key))
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  if (values.length === 0) return 0;
+  if (scoringAggregateRule.value === 'AVG') {
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  }
+  if (scoringAggregateRule.value === 'TRIMMED_MEAN') {
+    const sorted = [...values].sort((a, b) => a - b);
+    if (sorted.length <= 2) return sorted.reduce((sum, v) => sum + v, 0) / sorted.length;
+    const drop = Math.min(
+      Math.ceil(sorted.length * (Number(scoringTrimRatio.value) || 0)),
+      Math.floor((sorted.length - 1) / 2)
+    );
+    const kept = sorted.slice(drop, sorted.length - drop);
+    return kept.reduce((sum, v) => sum + v, 0) / kept.length;
+  }
+  return values.reduce((sum, v) => sum + v, 0);
 };
 
 /**
@@ -1332,6 +1374,8 @@ const applyData = (data: any) => {
   stageName.value = data?.stage?.name || '';
   stageMode.value = data?.stage?.stageMode || '';
   scoreType.value = data?.scoreType || '';
+  scoringAggregateRule.value = String(data?.aggregateRule || 'SUM').toUpperCase();
+  scoringTrimRatio.value = data?.trimRatio != null ? Number(data.trimRatio) : 0.1;
   auditionMaxScore.value = data?.maxScore != null ? Number(data.maxScore) : 10;
   matchId.value = data?.match?.id;
   matchName.value = fmtMatchName(data?.match?.name || '');
@@ -1587,8 +1631,8 @@ const refresh = async () => {
       const keep = keepCid == null ? null : participants.value.find((p) => p.competitorId === keepCid);
       if (keep) {
         selectParticipant(keep);
-      } else if (isAudition.value) {
-        // 海选逐选手评分:上下文变化(如 一海→二海)后重新选中第一位未评选手,
+      } else if (isPerCompetitor.value) {
+        // 海选/排名赛逐选手评分:上下文变化后重新选中第一位未评选手,
         // 与 loadData 口径一致(applyData 已清掉旧选中态,不补选的话页面会停在"未选中")。
         autoSelectNext(null);
       }
@@ -1611,8 +1655,8 @@ const loadData = async (stageIdParam?: number, matchIdParam?: number, selectAfte
     applyData(payloadOf<any>(resp));
     // 拿到 tournamentId 后加载赛事展示配置(朝向/红蓝),供本页左右位置与上色使用
     await loadColorConfig();
-    // 海选:刷新后按需选中选手(默认第一个未评;提交后跳下一位),只滚动一次
-    if (isAudition.value) {
+    // 海选/排名赛:刷新后按需选中选手(默认第一个未评;提交后跳下一位),只滚动一次
+    if (isPerCompetitor.value) {
       autoSelectNext(selectAfter ?? null);
     }
   } catch (e: any) {

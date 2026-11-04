@@ -119,7 +119,7 @@
                   v-model.number="config.teamsCount"
                   :disabled="config.template !== KnockoutTemplate.CUSTOM"
                   class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  @input="handleUpdate"
+                  @change="handleUpdate"
                 />
                 <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">名选手</div>
               </div>
@@ -132,7 +132,7 @@
                   v-model.number="config.advanceCount"
                   :disabled="config.template !== KnockoutTemplate.CUSTOM"
                   class="w-full bg-black border border-neutral-700 rounded p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  @input="handleUpdate"
+                  @change="handleUpdate"
                 />
                 <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-600">名晋级</div>
               </div>

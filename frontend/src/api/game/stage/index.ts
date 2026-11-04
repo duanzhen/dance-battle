@@ -172,6 +172,29 @@ export const getStageRankDetail = (stageId: string | number) => {
 };
 
 /**
+ * 排名赛结果:官方总分/名次、各维度聚合分及每位裁判的原始分。
+ * 名单页用于分数展示与号码/名次排序切换。
+ */
+export const getStageRankResult = (stageId: string | number) => {
+  return request({
+    url: '/game/stage/' + stageId + '/rank-result',
+    method: 'get'
+  });
+};
+
+/**
+ * 导出排名赛原始数据 Excel:
+ * 号码 / 选手名 / 每个维度下每位裁判的原始分 / 官方总分 / 排名 / 结果。
+ */
+export const exportRankResult = (stageId: string | number) => {
+  return request({
+    url: '/game/stage/' + stageId + '/export-rank-result',
+    method: 'get',
+    responseType: 'blob'
+  });
+};
+
+/**
  * 导出海选结果 Excel:号码 / 选手名 / 各裁判分数(每裁判一列) / 总平均分 / 排名
  * @param stageId 海选赛赛段ID
  */

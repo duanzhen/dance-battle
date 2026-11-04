@@ -43,6 +43,12 @@ public class RefereeMatchVo implements Serializable {
     /** 打分维度(RANKING 模式使用) */
     private List<RefereeDimensionInfo> dimensions;
 
+    /** 维度间汇总规则(SUM / AVG / TRIMMED_MEAN / WEIGHTED),裁判端用于实时显示自己的合计 */
+    private String aggregateRule;
+
+    /** TRIMMED_MEAN 去极值比例 */
+    private BigDecimal trimRatio;
+
     /** 当前比赛场次 */
     private RefereeMatchInfo match;
 

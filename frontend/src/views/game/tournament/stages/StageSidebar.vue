@@ -17,7 +17,7 @@
           v-model="localStage.name"
           class="w-full bg-black border border-neutral-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500 focus:outline-none transition-colors"
           placeholder="输入赛段名称"
-          @input="handleUpdate"
+          @change="handleUpdate"
         />
       </div>
 

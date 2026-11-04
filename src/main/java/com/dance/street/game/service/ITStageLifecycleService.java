@@ -211,4 +211,16 @@ public interface ITStageLifecycleService {
 
     /** 排名赛排名明细:按圈返回每位参赛者的总分与各维度聚合分(未公布时隐藏分数) */
     RankDetailVo getRankDetail(Long stageId);
+
+    /**
+     * 排名赛结果统一视图:官方总分/名次、各维度聚合分及各裁判原始分。
+     * 名单页用于结果分数展示与排序切换。
+     */
+    com.dance.street.game.domain.vo.RankResultVo queryRankResult(Long stageId);
+
+    /**
+     * 导出排名赛原始数据 Excel:
+     * 号码 / 选手名 / 每个维度下每位裁判的原始分 / 官方总分 / 排名 / 结果。
+     */
+    void exportRankResult(Long stageId, jakarta.servlet.http.HttpServletResponse response);
 }

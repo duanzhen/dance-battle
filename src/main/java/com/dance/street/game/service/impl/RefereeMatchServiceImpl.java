@@ -254,6 +254,8 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
         if (rc != null && rc.getScoring() != null) {
             vo.setScoreType(rc.getScoring().getType());
+            vo.setAggregateRule(rc.getScoring().getAggregateRule());
+            vo.setTrimRatio(rc.getScoring().getTrimRatio());
             if (rc.getScoring().getDimensions() != null) {
                 List<RefereeMatchVo.RefereeDimensionInfo> dims = new ArrayList<>();
                 for (var d : rc.getScoring().getDimensions()) {

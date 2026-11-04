@@ -16,7 +16,7 @@
                   :min="2"
                   :max="512"
                   class="w-full bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @input="handleUpdate"
+                  @change="handleUpdate"
                 />
                 <div class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-600">人</div>
               </div>
@@ -36,7 +36,7 @@
                   :min="1"
                   :max="Math.max(1, (config.scale || 1) - 1)"
                   class="w-full bg-black border border-amber-500/40 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @input="handleUpdate"
+                  @change="handleUpdate"
                 />
                 <div class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-600">人</div>
               </div>
@@ -106,7 +106,7 @@
                   placeholder="维度名称(如:技术)"
                   class="bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
                   :class="isWeighted ? 'col-span-5' : 'col-span-8'"
-                  @input="handleUpdate"
+                  @change="handleUpdate"
                 />
                 <div v-if="isWeighted" class="col-span-3 relative">
                   <input
@@ -117,7 +117,7 @@
                     max="100"
                     placeholder="权重"
                     class="w-full bg-black border border-neutral-700 rounded p-2 pr-7 text-sm text-white focus:border-amber-500 outline-none"
-                    @input="handleUpdate"
+                    @change="handleUpdate"
                   />
                   <div class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-600">%</div>
                 </div>
@@ -128,7 +128,7 @@
                   max="1000"
                   placeholder="满分"
                   class="col-span-2 bg-black border border-neutral-700 rounded p-2 text-sm text-white focus:border-amber-500 outline-none"
-                  @input="handleUpdate"
+                  @change="handleUpdate"
                 />
                 <button @click="removeDim(i)" class="col-span-2 text-xs text-red-400 hover:text-red-300">删除</button>
               </template>

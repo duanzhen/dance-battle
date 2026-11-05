@@ -4,7 +4,12 @@
 
     <div
       class="canvas-wrapper"
-      :class="{ 'has-image': hasProcessedImg, 'is-dragging': isFileDragging, 'is-uploading': isUploading }"
+      :class="{
+        'has-image': hasProcessedImg,
+        'is-dragging': isFileDragging,
+        'is-uploading': isUploading,
+        'is-original': useOriginal
+      }"
       @click="!hasProcessedImg && triggerFileSelect()"
       @dragover.prevent="handleFileDragOver"
       @dragleave.prevent="handleFileDragLeave"
@@ -12,8 +17,18 @@
       @wheel.prevent="handleWheel"
     >
       <!-- v-if 而不是直接绑 src:清空 src 时浏览器会当成一次加载失败(触发 error),
-           而且卸载元素能让浏览器回收那张全分辨率位图 -->
-      <img v-if="imgSrc" ref="sourceImg" :src="imgSrc" @load="onImageLoad" @error="onImageError" style="display: none" />
+           而且卸载元素能让浏览器回收那张全分辨率位图。
+           勾选「使用原图」时同一个元素直接显示,避免再解码一份全分辨率位图。 -->
+      <img
+        v-if="imgSrc"
+        ref="sourceImg"
+        :src="imgSrc"
+        @load="onImageLoad"
+        @error="onImageError"
+        :class="useOriginal ? 'original-preview' : 'source-img'"
+        :alt="useOriginal ? '原图预览' : ''"
+        draggable="false"
+      />
 
       <div v-if="isProcessing" class="loading-overlay">
         <span>AI 正在处理中...</span>
@@ -28,14 +43,14 @@
         ref="canvasRef"
         width="500"
         height="500"
-        @mousedown="hasProcessedImg && handleMouseDown($event)"
+        @mousedown="canAdjust && handleMouseDown($event)"
         @touchstart.prevent="handleTouchStart"
         @touchmove.prevent="handleTouchMove"
         @touchend="handleTouchEnd"
       ></canvas>
 
       <!-- 人像单线轮廓:辅助把人物摆到统一位置(头/肩对齐,人靠画布底部),不挡拖拽缩放 -->
-      <svg v-if="hasProcessedImg && showPoseGuide" class="pose-guide" viewBox="0 0 1024 1024" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <svg v-if="canAdjust && showPoseGuide" class="pose-guide" viewBox="0 0 1024 1024" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         <!--
           头 + 肩单线轮廓:以"肩线中点"为锚点等比放大后,把该锚点落在画布底边中点 ——
           人靠底、只放大不拉伸。改 scale 的倍数即可整体放大/缩小。
@@ -54,7 +69,7 @@
         <div class="placeholder-hint">请选择JPG/PNG 支持拖拽</div>
       </div>
 
-      <div v-if="hasProcessedImg" class="canvas-hint">
+      <div v-if="canAdjust" class="canvas-hint">
         <span class="hidden sm:inline">拖动移动 滚轮缩放</span>
         <span class="sm:hidden">单指拖动 双指缩放</span>
       </div>
@@ -66,7 +81,7 @@
 
       <!-- 左上角:对齐轮廓显隐开关 -->
       <button
-        v-if="hasProcessedImg"
+        v-if="canAdjust"
         type="button"
         class="guide-btn"
         :class="{ 'is-off': !showPoseGuide }"
@@ -76,11 +91,17 @@
         <User :size="16" />
       </button>
     </div>
+
+    <!-- 透明底才出现。勾选后锁定位置/大小,提交时直传原文件;不勾选仍可调整,并按 500 画布导出 -->
+    <label v-if="showUseOriginal" class="use-original">
+      <input v-model="useOriginal" type="checkbox" :disabled="isUploading" @change="handleUseOriginalChange" />
+      <span>使用原图</span>
+    </label>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue';
 import { Upload, User, X } from 'lucide-vue-next';
 import { acquireSelfieSegmentation, releaseSelfieSegmentation } from '@/utils/selfieSegmentation';
 import request from '@/utils/request';
@@ -127,6 +148,12 @@ const isFileDragging = ref(false);
 const hasProcessedImg = ref(false);
 /** 对齐轮廓(半透明人形)显隐:默认开启,便于把人物摆到统一位置 */
 const showPoseGuide = ref(true);
+/** 当前上传图被判定为透明底时才显示「使用原图」 */
+const showUseOriginal = ref(false);
+/** 勾选后锁定位置/大小,预览与提交都用原文件,不再走画布重采样 */
+const useOriginal = ref(false);
+/** 未勾选「使用原图」时才允许拖拽、缩放和对齐轮廓 */
+const canAdjust = computed(() => hasProcessedImg.value && !useOriginal.value);
 /**
  * 0 = 通用模型(256x256),1 = 横向模型(256x144)。
  * 这里处理的是竖构图人像,通用模型的人像边缘明显更稳,所以用 0。
@@ -161,7 +188,13 @@ let workCanvas = null;
 let workCtx = null;
 // 当前选中文件的 objectURL,需要主动释放,避免大图一直占着内存
 let sourceObjectUrl = null;
+/** 本次选择的原文件。勾选「使用原图」时按原字节上传,不经过 canvas.toBlob */
+let sourceFile: File | null = null;
 let processTimer = null;
+/** 换图 / 清空时递增,丢掉还在跑的透明检测,避免旧结果把新图的勾选状态盖掉 */
+let imageToken = 0;
+/** 远程头像加载代次。本地又选了新文件时,慢返回的编辑图不能把「使用原图」清掉 */
+let editToken = 0;
 // 模型是否已加载完成:决定抠图超时用冷启动时长还是常规时长
 let modelReady = false;
 
@@ -183,6 +216,34 @@ const revokeSourceObjectUrl = () => {
     URL.revokeObjectURL(sourceObjectUrl);
     sourceObjectUrl = null;
   }
+};
+
+/** 关掉「使用原图」并放开原文件引用(保存、清空、改走远程头像时) */
+const resetUseOriginalState = () => {
+  showUseOriginal.value = false;
+  useOriginal.value = false;
+  sourceFile = null;
+};
+
+/**
+ * 直传时沿用原文件名,让扩展名和内容一致。
+ * 上传接口会拿文件名扩展名对魔数,一律改成 avatar.png 会把 webp 等透明图拒掉。
+ */
+const originalUploadName = (file: File) => {
+  const name = file.name?.trim();
+  if (name && /\.[A-Za-z0-9]{1,10}$/.test(name)) {
+    return name;
+  }
+  const byMime: Record<string, string> = {
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/jpeg': 'jpg',
+    'image/bmp': 'bmp',
+    'image/x-icon': 'ico',
+    'image/vnd.microsoft.icon': 'ico'
+  };
+  return `avatar.${byMime[file.type] || 'png'}`;
 };
 
 /** 置 0 尺寸才会真正把画布的像素缓冲还给浏览器(只清 rect 是不够的) */
@@ -253,18 +314,25 @@ const buildWorkCanvas = (img) => {
 
 // --- 加载编辑图片 ---
 const loadEditImage = async (url) => {
+  const token = ++editToken;
   return new Promise<void>((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
 
     img.onload = () => {
+      if (token !== editToken) {
+        resolve();
+        return;
+      }
+      // 远程头像不是本次选择的原文件,不能再走「使用原图」直传
+      resetUseOriginalState();
+
       // 创建离屏 canvas
       if (!processedCanvas) {
         processedCanvas = document.createElement('canvas');
         processedCtx = processedCanvas.getContext('2d');
       }
 
-      // 编辑模式下，加载的是 500x500 的输出图片
       processedCanvas.width = img.width;
       processedCanvas.height = img.height;
 
@@ -272,15 +340,18 @@ const loadEditImage = async (url) => {
       processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
       processedCtx.drawImage(img, 0, 0);
 
-      // 编辑模式：图片已经是 500x500，直接 1:1 显示，不做缩放和位置调整
-      scale.value = 1;
-      offsetX.value = 0;
-      offsetY.value = 0;
-
       hasProcessedImg.value = true;
       hasChanges.value = false; // 编辑模式初始状态无改动
 
-      render();
+      // 画布导出的头像是 500x500,1:1 铺满。原图直传可能不是方图,等比放进预览,不改动就不重新导出
+      if (img.width === CANVAS_SIZE && img.height === CANVAS_SIZE) {
+        scale.value = 1;
+        offsetX.value = 0;
+        offsetY.value = 0;
+        render();
+      } else {
+        resetPosition();
+      }
       resolve();
     };
 
@@ -324,6 +395,11 @@ const render = () => {
   // 清空画布
   ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
+  // 「使用原图」由上层 <img> 显示原文件,这里只留棋盘格,避免工作画布从透明像素里透出来
+  if (useOriginal.value) {
+    return;
+  }
+
   // processedCanvas 可能刚被回收掉(置 0 尺寸),这种情况只清屏不画
   if (!hasProcessedImg.value || !processedCanvas?.width || !processedCanvas?.height) {
     return;
@@ -353,6 +429,9 @@ watch(
     } else if (!newUrl) {
       // 清空状态
       hasProcessedImg.value = false;
+      imageToken++;
+      editToken++;
+      resetUseOriginalState();
       disposeMattingMemory();
       render();
     }
@@ -374,8 +453,11 @@ const triggerFileSelect = () => {
 const clearImage = () => {
   if (isProcessing.value || isUploading.value) return;
   clearProcessTimer();
+  imageToken++;
+  editToken++;
   hasProcessedImg.value = false;
   hasChanges.value = false;
+  resetUseOriginalState();
   disposeMattingMemory();
   render();
   emit('update:modelValue', '');
@@ -407,14 +489,19 @@ const handleFile = (file) => {
     proxy.$modal.msgError('图片太大了(超过 20MB),请压缩后再选择');
     return;
   }
-  // 上一张还在跑:换图会让 send 的运行状态错乱,直接挡住
-  if (isProcessing.value) {
-    proxy.$modal.msgWarning('正在处理上一张图片，请稍候');
+  // 上一张还在跑:换图会让 send 的运行状态错乱,直接挡住。上传中换图也会把正在提交的原文件换掉
+  if (isProcessing.value || isUploading.value) {
+    proxy.$modal.msgWarning(isUploading.value ? '正在上传，请稍候' : '正在处理上一张图片，请稍候');
     return;
   }
 
   // 用 objectURL 而不是 FileReader 转 base64:后者要整张图多存一份 1.33 倍的字符串,
   // 大图在移动端很容易顶到内存上限。每次重新生成 URL 也顺带解决「清空后再选同一张图不触发 load」
+  imageToken++;
+  editToken++;
+  useOriginal.value = false;
+  showUseOriginal.value = false;
+  sourceFile = file;
   revokeSourceObjectUrl();
   sourceObjectUrl = URL.createObjectURL(file);
   imgSrc.value = sourceObjectUrl;
@@ -500,26 +587,40 @@ const checkTransparentBackground = (source) => {
 
 // --- 图片加载完毕，开始处理 ---
 const onImageLoad = async () => {
+  const token = ++imageToken;
   const img = sourceImg.value;
   if (!img) return;
 
   // 原图先缩到工作尺寸,后面的检测/抠图/合成全部基于它
   const work = buildWorkCanvas(img);
-  if (!work) {
-    proxy.$modal.msgError('图片尺寸异常,请更换图片');
+  if (!work || token !== imageToken) {
+    if (token === imageToken) {
+      proxy.$modal.msgError('图片尺寸异常,请更换图片');
+    }
     return;
   }
 
   // 先检测是否已经是透明背景
   const isTransparent = await checkTransparentBackground(work);
+  if (token !== imageToken) return;
 
+  // 透明底:露出「使用原图」,默认不勾。不勾时保持原来的跳过抠图、仍可调整、按画布导出
   if (isTransparent) {
-    // 已经是透明背景，直接使用原图
+    showUseOriginal.value = !!sourceFile;
+    useOriginal.value = false;
     loadOriginalImage();
-  } else {
-    // 需要抠图处理
-    await processImage();
+    return;
   }
+
+  showUseOriginal.value = false;
+  useOriginal.value = false;
+  await processImage();
+};
+
+/** 勾选「使用原图」锁定调整并改显示原文件;取消则回到当前这次的画布结果 */
+const handleUseOriginalChange = () => {
+  hasChanges.value = true;
+  render();
 };
 
 // --- 直接加载原图（跳过 AI 处理） ---
@@ -640,7 +741,7 @@ const displayScale = () => {
 };
 
 const handleMouseDown = (event) => {
-  if (!hasProcessedImg.value) return;
+  if (!canAdjust.value) return;
 
   isDragging.value = true;
   dragStartX.value = event.clientX;
@@ -678,7 +779,7 @@ const touchDist = (touches) => {
 };
 
 const handleTouchStart = (event) => {
-  if (!hasProcessedImg.value) return;
+  if (!canAdjust.value) return;
   const touches = event.touches;
   if (touches.length === 1) {
     isDragging.value = true;
@@ -693,7 +794,7 @@ const handleTouchStart = (event) => {
 };
 
 const handleTouchMove = (event) => {
-  if (!hasProcessedImg.value) return;
+  if (!canAdjust.value) return;
   const touches = event.touches;
   if (touches.length === 1 && isDragging.value) {
     const s = displayScale();
@@ -718,7 +819,7 @@ const handleTouchEnd = () => {
 
 // --- 滚轮缩放事件 ---
 const handleWheel = (event) => {
-  if (!hasProcessedImg.value) return;
+  if (!canAdjust.value) return;
 
   const delta = event.deltaY > 0 ? -0.01 : 0.01;
   scale.value = Math.max(0.1, Math.min(3, scale.value + delta));
@@ -728,10 +829,10 @@ const handleWheel = (event) => {
 };
 
 // --- 上传图片到服务器(本地直传) ---
-const uploadToServer = async (blob) => {
+const uploadToServer = async (blob: Blob, filename: string) => {
   try {
     const formData = new FormData();
-    formData.append('file', blob, 'avatar.png');
+    formData.append('file', blob, filename);
     const res = await request({
       url: '/resource/oss/upload',
       method: 'post',
@@ -752,30 +853,48 @@ const uploadToServer = async (blob) => {
 
 // --- 导出图片 ---
 const exportImage = async () => {
-  if (!canvasRef.value || !hasProcessedImg.value) {
+  // 先抓住原文件:上传过程中如果又选了图,也不能把这一次要提交的字节换掉
+  const originalFile = useOriginal.value ? sourceFile : null;
+  if (!hasProcessedImg.value || (!originalFile && !canvasRef.value)) {
     proxy.$modal.msgWarning('请先上传并处理图片！');
     return null;
   }
+  if (useOriginal.value && !originalFile) {
+    proxy.$modal.msgError('找不到原图文件，请重新选择');
+    return null;
+  }
 
-  // 如果没有改动，直接返回现有 URL
-  if (!hasChanges.value && props.modelValue) {
+  // 未改动且不是「使用原图」:直接返回现有 URL。勾选原图时必须提交原文件,不能沿用旧地址
+  if (!originalFile && !hasChanges.value && props.modelValue) {
     return props.modelValue;
   }
 
   try {
     isUploading.value = true;
 
-    // 将 canvas 转为 blob
-    const blob = await new Promise((resolve) => {
-      canvasRef.value.toBlob(resolve, 'image/png');
-    });
+    // 使用原图:原文件字节原样上传。否则仍从 500 预览画布导出 PNG
+    let blob: Blob | null;
+    let filename: string;
+    if (originalFile) {
+      blob = originalFile;
+      filename = originalUploadName(originalFile);
+    } else {
+      blob = await new Promise<Blob | null>((resolve) => {
+        canvasRef.value.toBlob(resolve, 'image/png');
+      });
+      filename = 'avatar.png';
+    }
+    if (!blob) {
+      throw new Error('导出图片失败');
+    }
 
     // 上传到服务器
-    const result = await uploadToServer(blob);
+    const result = await uploadToServer(blob, filename);
 
     // 返回 url
     emit('update:modelValue', result.url);
     hasChanges.value = false; // 上传后重置改动标记
+    resetUseOriginalState();
 
     // 保存完成:这一轮的原图位图和工作画布立刻还回去(模型保持常驻,不动)
     releaseMattingMemory();
@@ -879,6 +998,54 @@ onBeforeUnmount(() => {
 
 .canvas-wrapper.has-image:active {
   cursor: grabbing;
+}
+
+/* 使用原图:不能拖、不能缩放,光标不再是抓手 */
+.canvas-wrapper.has-image.is-original,
+.canvas-wrapper.has-image.is-original:active {
+  cursor: default;
+}
+
+.source-img {
+  display: none;
+}
+
+.original-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.use-original {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  margin: 12px auto 0;
+  color: #e5e5e5;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.use-original input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #f59e0b;
+  cursor: pointer;
+}
+
+.use-original input:disabled {
+  cursor: not-allowed;
 }
 
 canvas {

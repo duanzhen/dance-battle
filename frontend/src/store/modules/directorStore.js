@@ -1087,6 +1087,7 @@ export const useDirectorStore = defineStore('director', () => {
       // avatarBgColor: 选手照片背景色,空字符串 = 透明(默认)
       // avatarSize: 头像高度占控件高度百分比(默认 75);playerGap: 左右选手水平间距百分比(默认 0)
       // roundAvatar: 圆形头像框默认开启(false = 方形)
+      // showPlayerName: 选手姓名及姓名底,默认显示;关闭后文字与底色都不渲染
       dataConfig = {
         stageId: null,
         bgImage: '',
@@ -1095,6 +1096,7 @@ export const useDirectorStore = defineStore('director', () => {
         avatarSize: 75,
         playerGap: 0,
         roundAvatar: true,
+        showPlayerName: true,
         nameBgSize: 70,
         nameBgOpacity: 50
       };

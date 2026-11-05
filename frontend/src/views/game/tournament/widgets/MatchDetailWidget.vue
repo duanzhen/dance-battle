@@ -28,6 +28,7 @@
               <img v-if="leftAvatar" :src="leftAvatar" class="w-full h-full object-contain" @error="onImgError" />
             </div>
             <span
+              v-if="showPlayerName"
               class="absolute left-1/2 -translate-x-1/2 bottom-[22%] z-20 font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate max-w-full px-3 py-1 rounded-xl"
               :class="leftLead ? 'text-amber-300' : 'text-white'"
               :style="nameBgStyle('LEFT')"
@@ -61,6 +62,7 @@
               <img v-if="rightAvatar" :src="rightAvatar" class="w-full h-full object-contain" @error="onImgError" />
             </div>
             <span
+              v-if="showPlayerName"
               class="absolute left-1/2 -translate-x-1/2 bottom-[22%] z-20 font-bold text-[clamp(36px,6vw,90px)] drop-shadow text-center truncate max-w-full px-3 py-1 rounded-xl"
               :class="rightLead ? 'text-amber-300' : 'text-white'"
               :style="nameBgStyle('RIGHT')"
@@ -226,8 +228,9 @@
         <div class="mt-3">
           <CheckboxGroup
             label="显示选项"
-            :model-value="{ showVotePanel, roundAvatar: roundAvatarEnabled }"
+            :model-value="{ showPlayerName, showVotePanel, roundAvatar: roundAvatarEnabled }"
             :options="[
+              { key: 'showPlayerName', label: '显示选手名' },
               { key: 'showVotePanel', label: '显示裁判判罚' },
               { key: 'roundAvatar', label: '圆形头像框' }
             ]"
@@ -313,6 +316,7 @@
         </div>
         <p class="text-[10px] text-neutral-600 mt-2">
           显示当前淘汰赛赛段的进行中场次：赛段名、场次、轮次、双方姓名/头像，领先方高亮。姓名背景跟随红蓝方配色，可调大小与透明度。
+          「显示选手名」默认开启；关闭后双方姓名文字与姓名底同时不渲染，不留空底条。
           选手照片背景颜色默认透明（抠图人像可直接叠在背景上）；底部裁判判罚明细默认关闭，
           需要时在「显示选项」里开启；非淘汰赛赛段或暂无进行中场次时控件保持透明。
         </p>
@@ -357,6 +361,8 @@ const props = defineProps<{
   playerGap?: number;
   /** 是否圆形头像框:默认 true;false = 方形 */
   roundAvatar?: boolean;
+  /** 是否显示选手姓名及姓名底。true 时渲染;false 时文字与底色整段不渲染 */
+  showPlayerName?: boolean;
   /** 选手姓名背景宽度:占选手列的百分比(默认 70) */
   nameBgSize?: number;
   /** 选手姓名背景透明度:0~100(默认 50) */
@@ -371,6 +377,7 @@ const emit = defineEmits<{
   'update:avatarSize': [v: number];
   'update:playerGap': [v: number];
   'update:roundAvatar': [v: boolean];
+  'update:showPlayerName': [v: boolean];
   'update:nameBgSize': [v: number];
   'update:nameBgOpacity': [v: number];
 }>();

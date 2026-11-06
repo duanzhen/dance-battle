@@ -14,6 +14,7 @@ import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
@@ -26,7 +27,6 @@ import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.MatchCurrentCompetitorStore;
-import com.dance.street.game.service.impl.stage.hook.StageHooks;
 import com.dance.street.game.engine.common.StageModeProfile;
 import com.dance.street.game.engine.common.StageModeProfile.GeneratePolicy;
 import com.dance.street.game.engine.common.StageModeProfile.Setup.Trait;
@@ -77,7 +77,8 @@ public class StageRunService {
     private final MatchCurrentCompetitorStore currentCompetitorStore;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
-    private final StageHooks stageHooks;
+    /** 海选开赛守卫:人人落圈、每圈有裁判 */
+    private final AuditionMode auditionMode;
     private final StageHandlerRegistry handlerRegistry;
 
     /** 开赛:一键完成初始化、生成对阵、开赛守卫与状态推进。 */
@@ -129,10 +130,11 @@ public class StageRunService {
                 stage = stageLookup.get(stageId);
             }
         }
-        // 海选落圈守卫:圈位由客户端在签到时指定,开赛前必须人人已落圈(见 assertAuditionAllAttached)
-        // 生成后的赛制专属守卫(海选:人人已落圈、每圈有裁判)
-        stageHooks.startGuard(stage.getStageMode())
-            .ifPresent(guard -> guard.assertPostGenerate(stageLookup.get(stageId)));
+        // 海选落圈守卫:圈位由客户端在签到时指定,开赛前必须人人已落圈且每圈有裁判。
+        // 重新读取赛段:上面的初始化/生成可能已经改过库。
+        if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            auditionMode.assertPostGenerate(stageLookup.get(stageId));
+        }
         ensureStageGaming(stageId);
 
         // 模式 afterStart(擂台开首场等):仅在 profile 要求自动开首场时调用,经 Handler 无赛制 if

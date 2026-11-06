@@ -8,8 +8,9 @@ import java.util.List;
 /**
  * 赛段对阵生成策略。每种赛制一个实现,负责「纯计算」产出 {@link BracketPlan}(不落库)。
  *
- * <p>实现必须无状态、线程安全,并由 Spring 收集;编排经对应 {@code StageHandler#generateBracket} 调用,轻量覆盖自检仍可用 {@link StageGeneratorFactory};
- * 纯粹是计算,单测仍可直接 {@code new}。落库由 Service 层完成。</p>
+ * <p>实现必须无状态、线程安全。编排经对应 {@code StageHandler#generateBracket} 调用。
+ * 纯粹是计算,单测仍可直接 {@code new}。落库由 Service 层完成。
+ * 自由对抗与擂台不生成对阵,没有对应实现。</p>
  *
  * @author duane
  */

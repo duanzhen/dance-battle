@@ -34,12 +34,6 @@ public class ScoredStageSettler implements StageSettler {
     }
 
     @Override
-    public boolean supports(String mode) {
-        return StageModeEnum.KNOCKOUT.getCode().equals(mode)
-            || StageModeEnum.FREE_MATCH.getCode().equals(mode);
-    }
-
-    @Override
     public StageSettleOutcome settle(TStage stage) {
         // 「裁判没到齐」与"场次未结算"同类:返回 pending 让导播台按提示补齐,
         // 而不是用只有一半裁判到场的分数算出名次。判定制(STANDARD)场次已在提交时定胜负,

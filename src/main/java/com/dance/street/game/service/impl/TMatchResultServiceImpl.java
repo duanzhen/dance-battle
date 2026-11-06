@@ -715,7 +715,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 淘汰特有:填下游占位 / 标决赛胜者晋级下一赛段
         boolean stageResultChanged = false;
         if (profile(stage).knockout()) {
-            stageResultChanged = resolveKnockoutDownstream(match, results);
+            stageResultChanged = downstreamRouter.routeRanked(match, results);
         }
         // 只有本次真的写入了赛段级结果(晋级/淘汰/名次)才推下游中间态:
         // 座位/名次由来源赛段给出,投影出谁就落谁;只同步"本场参赛方",不整表重建。
@@ -1041,45 +1041,6 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .set(TMatch::getResultJson, null));
         // 场次与轮次回目标状态(成套写,避免「场次已结算、轮次还在进行中」)
         matchStateWriter.setStatus(matchId, targetStatus);
-    }
-
-    /**
-     * 淘汰赛路由:败者标淘汰、胜者填下游占位/标晋级。
-     *
-     * @return 本次是否写入了赛段级结果(晋级/淘汰);只有 true 才需要推下游中间态
-     */
-    private boolean resolveKnockoutDownstream(TMatch match, List<MatchScoreResult> results) {
-        boolean wroteStageResult = false;
-        // 淘汰赛单败:非胜者(败者)赛段级结果标记为淘汰
-        for (MatchScoreResult r : results) {
-            if (r.getCompetitorId() == null) {
-                continue;
-            }
-            if (r.getRankInMatch() == null || r.getRankInMatch() > 1) {
-                downstreamRouter.markEliminated(r.getCompetitorId());
-                wroteStageResult = true;
-            }
-        }
-
-        // 胜者(本场第 1 名)去向:决赛标晋级,其余填下游占位(占位缺失时由路由补插)
-        MatchScoreResult winner = results.stream()
-            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 1)
-            .findFirst().orElse(null);
-        if (winner == null || winner.getCompetitorId() == null) {
-            return wroteStageResult;
-        }
-        downstreamRouter.routeWinner(match, winner.getCompetitorId());
-        wroteStageResult = true;
-
-        // 季军赛:本场第 2 名(败者)路由到败者组场次(半决赛败者互争季军)
-        MatchScoreResult loser = results.stream()
-            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
-            .findFirst().orElse(null);
-        if (loser != null && loser.getCompetitorId() != null) {
-            downstreamRouter.routeLoser(match, loser.getCompetitorId());
-            wroteStageResult = true;
-        }
-        return wroteStageResult;
     }
 
     /**

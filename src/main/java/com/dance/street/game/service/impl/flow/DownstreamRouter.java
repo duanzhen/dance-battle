@@ -9,12 +9,14 @@ import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.engine.scoring.MatchScoreResult;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -51,6 +53,45 @@ public class DownstreamRouter {
     /** 本场败者(第 2 名)走向:仅季军赛这类带 {@code "2"} 规则的场次有去向 */
     public void routeLoser(TMatch match, Long loserCompetitorId) {
         route(match, KEY_LOSER, loserCompetitorId);
+    }
+
+    /**
+     * 按本场名次送下游:非第 1 名标淘汰,第 1 名走胜者规则,第 2 名再走败者规则(季军赛)。
+     *
+     * <p>STANDARD 当场结算与 VOTING/RANKING 完成赛段结算共用这一份。
+     * 返回值只表示「写过赛段级结果」,供当场结算决定要不要 {@code syncPreAdvance};
+     * 完成赛段那条路径忽略返回值,名单由 {@code rebuildEntriesOfDownstream} 重建。</p>
+     *
+     * @return 是否写入了晋级/淘汰(无胜者且无人被标淘汰时为 false)
+     */
+    public boolean routeRanked(TMatch match, List<MatchScoreResult> results) {
+        boolean wroteStageResult = false;
+        for (MatchScoreResult r : results) {
+            if (r.getCompetitorId() == null) {
+                continue;
+            }
+            if (r.getRankInMatch() == null || r.getRankInMatch() > 1) {
+                markEliminated(r.getCompetitorId());
+                wroteStageResult = true;
+            }
+        }
+        MatchScoreResult winner = results.stream()
+            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 1)
+            .findFirst().orElse(null);
+        if (winner == null || winner.getCompetitorId() == null) {
+            return wroteStageResult;
+        }
+        routeWinner(match, winner.getCompetitorId());
+        wroteStageResult = true;
+
+        MatchScoreResult loser = results.stream()
+            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
+            .findFirst().orElse(null);
+        if (loser != null && loser.getCompetitorId() != null) {
+            routeLoser(match, loser.getCompetitorId());
+            wroteStageResult = true;
+        }
+        return wroteStageResult;
     }
 
     /** 淘汰赛败者统一标淘汰(胜者由 {@link #routeWinner} 处理去向) */

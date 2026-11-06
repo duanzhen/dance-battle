@@ -28,7 +28,9 @@ target/
 build/
 __pycache__/
 e2e
-docs
+# 本地草稿目录仍忽略；判罚流程简化提案是仓库内的决策文档，单独放行。
+docs/*
+!docs/judgment-flow-simplification.md
 logs
 design
 !**/src/main/**/build/

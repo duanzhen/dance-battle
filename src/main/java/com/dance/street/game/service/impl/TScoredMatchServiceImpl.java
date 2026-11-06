@@ -32,8 +32,6 @@ import com.dance.street.game.service.impl.flow.JudgeCompletenessChecker;
 import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -133,9 +131,9 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
             }
             List<MatchScoreResult> results = computeAll(match, stage);
             // 按赛制做后处理
-            StageModeProfile stageProfile = StageModeProfiles.of(stage.getStageMode());
-            if (stageProfile.knockout()) {
-                resolveKnockoutDownstream(match, results);
+            if (StageModeEnum.require(stage.getStageMode()).knockout()) {
+                // 忽略返回值:完成赛段后由 rebuildEntriesOfDownstream 重建名单,这里不 syncPreAdvance
+                downstreamRouter.routeRanked(match, results);
             }
             writeParticipantScores(match, results, null);
             // 场次与轮次成套结算(此前只置场次,轮次会残留 GAMING)
@@ -193,36 +191,6 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
                 outcomeStatus))
             .toList();
         scoreWriter.writeBatch(match.getId(), patches);
-    }
-
-    /** 淘汰赛:败者标淘汰,胜者填下游占位或标晋级下一赛段 */
-    private void resolveKnockoutDownstream(TMatch match, List<MatchScoreResult> results) {
-        for (MatchScoreResult r : results) {
-            if (r.getCompetitorId() == null) {
-                continue;
-            }
-            if (r.getRankInMatch() == null || r.getRankInMatch() > 1) {
-                downstreamRouter.markEliminated(r.getCompetitorId());
-            }
-        }
-        MatchScoreResult winner = results.stream()
-            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 1)
-            .findFirst().orElse(null);
-        if (winner == null || winner.getCompetitorId() == null) {
-            return;
-        }
-        // 胜者去向:决赛标晋级,其余填下游占位(占位缺失时由路由补插——此前这条路径只 update,会静默丢人)
-        downstreamRouter.routeWinner(match, winner.getCompetitorId());
-
-        // 季军赛:本场第 2 名(败者)路由到败者组场次(半决赛败者互争季军)。
-        // 与 TMatchResultServiceImpl 的同名方法保持同一口径——少了这一步,季军赛两个座位
-        // 永远是空的,会在导播点「开始」时被按空场静默结算,直接没有季军。
-        MatchScoreResult loser = results.stream()
-            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
-            .findFirst().orElse(null);
-        if (loser != null && loser.getCompetitorId() != null) {
-            downstreamRouter.routeLoser(match, loser.getCompetitorId());
-        }
     }
 
 }

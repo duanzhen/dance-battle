@@ -31,8 +31,6 @@ import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
 import com.dance.street.game.service.impl.settle.AuditionTiebreakResult;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import com.dance.street.game.engine.common.DimensionConfig;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
@@ -318,7 +316,7 @@ public class TMatchServiceImpl implements ITMatchService {
         }
 
         List<TMatchVo> perCompetitorMatches = matches.stream()
-            .filter(m -> stageCap(stageModeById.get(m.getStageId())).result().perCompetitor())
+            .filter(m -> stageCap(stageModeById.get(m.getStageId())).perCompetitor())
             .toList();
         if (perCompetitorMatches.isEmpty()) {
             return;
@@ -1074,7 +1072,7 @@ public class TMatchServiceImpl implements ITMatchService {
     }
 
     /** 赛制画像(读模型里替代 mode 字符串/枚举比较)。 */
-    private StageModeProfile stageCap(String stageMode) {
-        return StageModeProfiles.of(stageMode);
+    private StageModeEnum stageCap(String stageMode) {
+        return StageModeEnum.require(stageMode);
     }
 }

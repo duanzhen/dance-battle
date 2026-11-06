@@ -14,7 +14,6 @@ import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.scoring.RankCalculator;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
@@ -61,7 +60,7 @@ import java.util.Set;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class AuditionStageSettler implements StageSettler {
+public class AuditionStageSettler {
 
     /** 同一圈 + 同一边界最多加赛轮数(二海~五海),之后必须人工裁决 */
     private static final int MAX_TIEBREAKER_ROUNDS = 4;
@@ -80,12 +79,6 @@ public class AuditionStageSettler implements StageSettler {
     /** 「判完了吗」的唯一口径(与排名赛/淘汰赛上分共用,口径只保留这一份) */
     private final JudgeCompletenessChecker judgeCompletenessChecker;
 
-    @Override
-    public String stageMode() {
-        return StageModeEnum.AUDITION.getCode();
-    }
-
-    @Override
     public StageSettleOutcome settle(TStage stage) {
         // 前置守卫:还有选手一条分都没打就不许结束(正式圈与二海/加赛一视同仁)
         List<TMatch> unfinished = unfinishedMatches(stage);

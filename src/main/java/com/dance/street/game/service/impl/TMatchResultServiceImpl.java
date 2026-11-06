@@ -51,8 +51,6 @@ import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -171,12 +169,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
 
     /** 海选/排名赛为「逐选手累计打分」赛制:一次提交只写部分选手的分,不即时结算。 */
     private boolean isPerCompetitorStage(TStage stage) {
-        return profile(stage).result().perCompetitor();
+        return profile(stage).perCompetitor();
     }
 
-    /** 本赛段赛制画像(决策分派;打分本身仍由 ScoringEngine 按 matchMode 负责)。 */
-    private StageModeProfile profile(TStage stage) {
-        return StageModeProfiles.of(stage.getStageMode());
+    /** 本赛段赛制(决策分派;打分本身仍由 ScoringEngine 按 matchMode 负责)。 */
+    private StageModeEnum profile(TStage stage) {
+        return StageModeEnum.require(stage.getStageMode());
     }
 
     /**
@@ -187,7 +185,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private MatchResultVo submitPerCompetitorScores(TMatch match, TStage stage, RuleConfigHolder rc,
                                                     ScoringConfig sc, SubmitResultBo bo,
                                                     List<Long> competitorIds) {
-        boolean isAudition = profile(stage).result().writeBackSubmittedOnly();
+        boolean isAudition = profile(stage).audition();
         Map<Long, Long> touchedRounds = writePerCompetitorScores(match, rc, sc, bo, competitorIds, isAudition);
         if (isAudition) {
             // 海选:名次/晋级只认 t_round_score;participant.score_value 只是给裁判端显示的缓存总分。
@@ -715,7 +713,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 淘汰特有:填下游占位 / 标决赛胜者晋级下一赛段
         boolean stageResultChanged = false;
         if (profile(stage).knockout()) {
-            stageResultChanged = resolveKnockoutDownstream(match, results);
+            stageResultChanged = downstreamRouter.routeRanked(match, results);
         }
         // 只有本次真的写入了赛段级结果(晋级/淘汰/名次)才推下游中间态:
         // 座位/名次由来源赛段给出,投影出谁就落谁;只同步"本场参赛方",不整表重建。
@@ -1041,45 +1039,6 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .set(TMatch::getResultJson, null));
         // 场次与轮次回目标状态(成套写,避免「场次已结算、轮次还在进行中」)
         matchStateWriter.setStatus(matchId, targetStatus);
-    }
-
-    /**
-     * 淘汰赛路由:败者标淘汰、胜者填下游占位/标晋级。
-     *
-     * @return 本次是否写入了赛段级结果(晋级/淘汰);只有 true 才需要推下游中间态
-     */
-    private boolean resolveKnockoutDownstream(TMatch match, List<MatchScoreResult> results) {
-        boolean wroteStageResult = false;
-        // 淘汰赛单败:非胜者(败者)赛段级结果标记为淘汰
-        for (MatchScoreResult r : results) {
-            if (r.getCompetitorId() == null) {
-                continue;
-            }
-            if (r.getRankInMatch() == null || r.getRankInMatch() > 1) {
-                downstreamRouter.markEliminated(r.getCompetitorId());
-                wroteStageResult = true;
-            }
-        }
-
-        // 胜者(本场第 1 名)去向:决赛标晋级,其余填下游占位(占位缺失时由路由补插)
-        MatchScoreResult winner = results.stream()
-            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 1)
-            .findFirst().orElse(null);
-        if (winner == null || winner.getCompetitorId() == null) {
-            return wroteStageResult;
-        }
-        downstreamRouter.routeWinner(match, winner.getCompetitorId());
-        wroteStageResult = true;
-
-        // 季军赛:本场第 2 名(败者)路由到败者组场次(半决赛败者互争季军)
-        MatchScoreResult loser = results.stream()
-            .filter(r -> r.getRankInMatch() != null && r.getRankInMatch() == 2)
-            .findFirst().orElse(null);
-        if (loser != null && loser.getCompetitorId() != null) {
-            downstreamRouter.routeLoser(match, loser.getCompetitorId());
-            wroteStageResult = true;
-        }
-        return wroteStageResult;
     }
 
     /**

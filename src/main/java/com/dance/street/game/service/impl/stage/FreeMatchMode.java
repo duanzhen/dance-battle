@@ -1,4 +1,4 @@
-package com.dance.street.game.service.impl.stage.handler;
+package com.dance.street.game.service.impl.stage;
 
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
@@ -7,19 +7,16 @@ import com.dance.street.game.service.impl.settle.StageSettleOutcome;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-/**
- * 自由对抗:编排侧 GeneratePolicy=SKIP_SILENT,不经 {@link #generateBracket};
- * 结算与淘汰赛共用 {@link ScoredStageSettler}。
- */
+/** 自由对抗:场次由导播手动添加。结束条件与淘汰赛相同。 */
 @Component
 @RequiredArgsConstructor
-public class FreeMatchStageHandler implements StageHandler {
+public class FreeMatchMode implements StageMode {
 
     private final ScoredStageSettler settler;
 
     @Override
-    public String stageMode() {
-        return StageModeEnum.FREE_MATCH.getCode();
+    public StageModeEnum mode() {
+        return StageModeEnum.FREE_MATCH;
     }
 
     @Override

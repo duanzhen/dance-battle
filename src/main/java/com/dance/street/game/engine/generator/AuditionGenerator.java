@@ -2,7 +2,6 @@ package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.StageFlowSupport;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -25,14 +24,8 @@ import java.util.List;
  * @author duane
  */
 @Component
-public class AuditionGenerator implements StageGenerator {
+public class AuditionGenerator {
 
-    @Override
-    public StageModeEnum mode() {
-        return StageModeEnum.AUDITION;
-    }
-
-    @Override
     public BracketPlan generate(List<Long> seededCompetitorIds, RuleConfigHolder ruleConfig) {
         int circles = 1;
         if (ruleConfig != null && ruleConfig.getCircles() != null) {

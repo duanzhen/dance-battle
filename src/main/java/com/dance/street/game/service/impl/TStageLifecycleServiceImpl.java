@@ -18,7 +18,7 @@ import com.dance.street.game.service.impl.stage.RankResultService;
 import com.dance.street.game.service.impl.stage.StageCheckInService;
 import com.dance.street.game.service.impl.stage.StageRunService;
 import com.dance.street.game.service.impl.stage.StageSettlementService;
-import com.dance.street.game.service.impl.stage.handler.StageCommands;
+import com.dance.street.game.service.impl.stage.StageSetupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +37,8 @@ import java.util.List;
  *   <li>{@link ArenaRunService} 擂台轮转、{@link FreeMatchService} 自由对抗、
  *       {@link StageCheckInService} 签到落圈、{@link AuditionResultService} 海选结果导出;</li>
  *   <li>共享内核:{@link AuditionCircleSupport} 海选圈(口径 + 结构维护 + 圈级裁判绑定);</li>
- *   <li>{@link StageCommands} 主路径(init/generate/start/complete/reset)经 HandlerRegistry。</li>
+ *   <li>init/generate 走 {@link StageSetupService},开赛走 {@link StageRunService},
+ *       完成与撤销走 {@link StageSettlementService}。</li>
  * </ul>
  *
  * @author duane
@@ -56,8 +57,8 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final ArenaRunService arenaRunService;
     /** 轮空场次结算(淘汰赛) */
     private final ByeSettlementService byeSettlementService;
-    /** 统一流转编排(经 HandlerRegistry,不依赖具体赛制类) */
-    private final StageCommands stageCommands;
+    /** 初始化与生成对阵 */
+    private final StageSetupService stageSetupService;
     /** 开赛与赛中推进 */
     private final StageRunService stageRunService;
     /** 结算与晋级(完成赛段、撤销、晋级装配) */
@@ -70,13 +71,13 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void initialize(InitializeStageBo bo) {
-        stageCommands.initialize(bo);
+        stageSetupService.initialize(bo);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void generateMatches(GenerateMatchesBo bo) {
-        stageCommands.generateMatches(bo);
+        stageSetupService.generateMatches(bo);
     }
 
     @Override
@@ -127,7 +128,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void startStage(Long stageId) {
-        stageCommands.startStage(stageId);
+        stageRunService.startStage(stageId);
     }
 
     @Override
@@ -180,7 +181,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public StageCompleteVo completeStage(Long stageId) {
-        return stageCommands.completeStage(stageId);
+        return stageSettlementService.completeStage(stageId);
     }
 
     @Override
@@ -225,7 +226,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resetStageToDraft(Long stageId) {
-        stageCommands.resetToDraft(stageId);
+        stageSettlementService.resetStageToDraft(stageId);
     }
 
     @Override

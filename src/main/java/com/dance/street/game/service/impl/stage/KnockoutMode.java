@@ -1,32 +1,32 @@
-package com.dance.street.game.service.impl.stage.handler;
+package com.dance.street.game.service.impl.stage;
 
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.generator.BracketPlan;
-import com.dance.street.game.engine.generator.RankGenerator;
-import com.dance.street.game.service.impl.settle.RankStageSettler;
+import com.dance.street.game.engine.generator.KnockoutGenerator;
+import com.dance.street.game.service.impl.settle.ScoredStageSettler;
 import com.dance.street.game.service.impl.settle.StageSettleOutcome;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-/** 排名赛:生成委托 {@link RankGenerator};结算委托 {@link RankStageSettler}。 */
+/** 淘汰赛:一轮一个赛段。结算与自由对抗共用同一套「场次都结束了吗」。 */
 @Component
 @RequiredArgsConstructor
-public class RankStageHandler implements StageHandler {
+public class KnockoutMode implements StageMode {
 
-    private final RankGenerator generator;
-    private final RankStageSettler settler;
+    private final KnockoutGenerator generator;
+    private final ScoredStageSettler settler;
 
     @Override
-    public String stageMode() {
-        return StageModeEnum.RANK.getCode();
+    public StageModeEnum mode() {
+        return StageModeEnum.KNOCKOUT;
     }
 
     @Override
-    public BracketPlan generateBracket(List<Long> seededCompetitorIds, RuleConfigHolder ruleConfig) {
+    public BracketPlan plan(List<Long> seededCompetitorIds, RuleConfigHolder ruleConfig) {
         return generator.generate(seededCompetitorIds, ruleConfig);
     }
 

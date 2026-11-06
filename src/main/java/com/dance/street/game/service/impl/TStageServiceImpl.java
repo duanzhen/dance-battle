@@ -55,8 +55,6 @@ import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITRefereeStageService;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -222,7 +220,7 @@ public class TStageServiceImpl implements ITStageService {
         if (StringUtils.isBlank(add.getStageMode())) {
             throw new ServiceException("赛段模式不能为空");
         }
-        StageModeProfiles.of(add.getStageMode());
+        StageModeEnum.require(add.getStageMode());
         if (StringUtils.isBlank(add.getStatus())) {
             add.setStatus(StageConstants.STAGE_DRAFT);
         }
@@ -941,7 +939,7 @@ public class TStageServiceImpl implements ITStageService {
         // (依赖方向/开赛条件那些由开赛守卫与名单就绪度负责,这里不重复判断)。
         // 淘汰赛与擂台赛段要预排(对战树控件绑上去后,名单写入前也能看到"目前谁进来了");
         // 其余赛制不做对阵预排。
-        StageModeProfile targetCap = stageCap(stage);
+        StageModeEnum targetCap = stageCap(stage);
         boolean targetKnockout = targetCap.knockout();
         boolean targetArena = targetCap.arena();
         if (!targetKnockout && !targetArena) {
@@ -1189,8 +1187,8 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /** 本赛段赛制画像(赛制语义判断统一走这里,避免编排代码出现 mode 字符串比较)。 */
-    private StageModeProfile stageCap(TStage stage) {
-        return StageModeProfiles.of(stage.getStageMode());
+    private StageModeEnum stageCap(TStage stage) {
+        return StageModeEnum.require(stage.getStageMode());
     }
 
     private PreBracketVo.PreSeed toPreSeed(TCompetitor c, Long seedRank, String sourceMatchName) {

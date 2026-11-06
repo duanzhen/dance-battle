@@ -13,7 +13,7 @@ import java.util.Map;
  * 打分引擎入口。按 {@link MatchModeEnum} 分派到对应 {@link ScoreStrategy}。
  *
  * <p>策略由 Spring 自动收集:每个 {@link ScoreStrategy} 实现标注 {@code @Component} 即被注册,
- * 新增比赛模式只加一个实现类,无须改动本类(与 StageHandler / StageGeneratorFactory 同一套收集机制)。
+ * 新增比赛模式只加一个实现类,无须改动本类。
  * 引擎与策略均无状态,单测可直接 {@code new}(见 {@code ScoringEngineTest})。</p>
  *
  * <p>{@link #uncoveredModes()} 供测试断言:每个 {@link MatchModeEnum} 都必须有打分策略,漏实现直接暴露。</p>

@@ -30,7 +30,6 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.service.ITMatchParticipantService;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import org.dromara.common.core.exception.ServiceException;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -128,7 +127,7 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
             TMatch m = entry.getValue();
             TStage s = m.getStageId() == null ? null : stageById.get(m.getStageId());
             boolean hidden = false;
-            if (s != null && StageModeProfiles.of(s.getStageMode()).rank()
+            if (s != null && StageModeEnum.require(s.getStageMode()).rank()
                 && !StageConstants.STAGE_SETTLED.equals(s.getStatus())) {
                 RuleConfigHolder rc = RuleConfigParser.parse(s.getRuleConfig());
                 hidden = rc != null && rc.getPublishMode() != null

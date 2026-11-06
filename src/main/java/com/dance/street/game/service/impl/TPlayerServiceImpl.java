@@ -37,7 +37,6 @@ import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITCompetitorMemberService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.TournamentEventNotifier;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -359,7 +358,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
             throw new RuntimeException("赛事没有设置赛段");
         }
         // 海选/排名赛(首个赛段)已结束时禁止继续签到:迟到者无法再参与打分与后续晋级
-        if (StageModeProfiles.of(firstStage.getStageMode()).result().perCompetitor()
+        if (StageModeEnum.require(firstStage.getStageMode()).perCompetitor()
             && (StageConstants.STAGE_SETTLED.equals(firstStage.getStatus())
                 || StageConstants.STAGE_DISCARD.equals(firstStage.getStatus()))) {
             throw new RuntimeException("海选/排名赛已结束，无法继续签到");
@@ -392,7 +391,7 @@ public class TPlayerServiceImpl implements ITPlayerService {
             memberBo.setRole("MEMBER");
             competitorMemberService.insertByBo(memberBo);
 
-            if (StageModeProfiles.of(firstStage.getStageMode()).result().perCompetitor()) {
+            if (StageModeEnum.require(firstStage.getStageMode()).perCompetitor()) {
                 // 海选/排名赛:落圈由前端指定(matchId 或尚未建圈时的 zoneIndex),
                 // 后端不再按号码/名额推导;多圈未指定会被 appendStageCompetitor 拒绝
                 stageLifecycleService.appendStageCompetitor(firstStage.getId(), competitorId, bo.getMatchId(), bo.getZoneIndex());

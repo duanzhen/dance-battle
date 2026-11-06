@@ -32,8 +32,6 @@ import com.dance.street.game.service.impl.flow.JudgeCompletenessChecker;
 import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
 import com.dance.street.game.service.impl.flow.ParticipantScoreWriter;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -133,8 +131,7 @@ public class TScoredMatchServiceImpl implements ITScoredMatchService {
             }
             List<MatchScoreResult> results = computeAll(match, stage);
             // 按赛制做后处理
-            StageModeProfile stageProfile = StageModeProfiles.of(stage.getStageMode());
-            if (stageProfile.knockout()) {
+            if (StageModeEnum.require(stage.getStageMode()).knockout()) {
                 // 忽略返回值:完成赛段后由 rebuildEntriesOfDownstream 重建名单,这里不 syncPreAdvance
                 downstreamRouter.routeRanked(match, results);
             }

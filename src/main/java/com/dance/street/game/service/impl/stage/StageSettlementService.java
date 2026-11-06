@@ -37,7 +37,6 @@ import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.settle.StageSettleOutcome;
-import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -80,8 +79,8 @@ public class StageSettlementService {
     /** 赛段级结果(晋级/淘汰/名次)的唯一写入口 */
     private final CompetitorOutcomeWriter outcomeWriter;
     private final TTournamentMapper tournamentMapper;
-    /** 赛制 Handler 注册表:settle 经 StageHandler(适配器委托原 Settler) */
-    private final StageHandlerRegistry handlerRegistry;
+    /** 按赛制结算;本类只负责置状态与广播 */
+    private final StageModes stageModes;
     /** 名单服务:中间层重建、来源边关系与快照回退 */
     private final ITStageRosterService rosterService;
     private final RefereeSseNotifier refereeSseNotifier;
@@ -94,8 +93,8 @@ public class StageSettlementService {
         if (!StageConstants.STAGE_GAMING.equals(stage.getStatus())) {
             throw new ServiceException("仅 GAMING 状态的赛段可完成,当前: {}", stage.getStatus());
         }
-        // 按赛制经 StageHandler 结算(适配器委托原 Settler):编排只负责置状态与广播。
-        StageSettleOutcome outcome = handlerRegistry.of(stage.getStageMode()).settle(stage);
+        // 按赛制结算:本方法只负责置状态与广播,乐观锁留在下面的条件更新。
+        StageSettleOutcome outcome = stageModes.of(stage.getStageMode()).settle(stage);
         if (!outcome.closable()) {
             // 结算产生了后续工作(二海加赛、仍有场次未结算…):赛段保持进行中。
             // 「还不能结束」统一用返回值表达,不再与异常混用——导播台只需看 message。
@@ -360,7 +359,7 @@ public class StageSettlementService {
     @Transactional(rollbackFor = Exception.class)
     public int adjustAdvancement(Long stageId, List<Long> competitorIds) {
         TStage stage = stageLookup.get(stageId);
-        if (!handlerRegistry.of(stage.getStageMode()).capabilities().view().advancementAdjustment()) {
+        if (!StageModeEnum.require(stage.getStageMode()).rank()) {
             throw new ServiceException("仅排名赛赛段支持手动调整同分晋级");
         }
         if (!StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
@@ -445,7 +444,7 @@ public class StageSettlementService {
     /** 排名赛名次明细(按圈/维度),MANUAL/BATCH 未公布前隐藏分数。 */
     public RankDetailVo getRankDetail(Long stageId) {
         TStage stage = stageLookup.get(stageId);
-        if (!handlerRegistry.of(stage.getStageMode()).capabilities().view().rankDetail()) {
+        if (!StageModeEnum.require(stage.getStageMode()).rank()) {
             throw new ServiceException("仅排名赛赛段支持排名明细");
         }
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());

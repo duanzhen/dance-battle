@@ -25,8 +25,6 @@ import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.generator.BracketPlan;
 import com.dance.street.game.engine.generator.MatchPlan;
 import com.dance.street.game.engine.generator.SlotPlan;
-import com.dance.street.game.service.impl.stage.handler.StageHandler;
-import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
@@ -38,10 +36,6 @@ import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
 import com.dance.street.game.service.impl.flow.StageLookup;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfile.GeneratePolicy;
-import com.dance.street.game.engine.common.StageModeProfile.SeedOrder;
-import com.dance.street.game.engine.common.StageModeProfile.Setup.Trait;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -93,8 +87,8 @@ public class StageSetupService {
     private final AuditionCircleSupport auditionCircleSupport;
     /** 海选生成前校验(圈数与晋级名额) */
     private final AuditionMode auditionMode;
-    /** 赛制 Handler:capabilities + generateBracket */
-    private final StageHandlerRegistry handlerRegistry;
+    /** 按赛制取建树实现 */
+    private final StageModes stageModes;
 
     @Transactional(rollbackFor = Exception.class)
     public void initialize(InitializeStageBo bo) {
@@ -116,13 +110,13 @@ public class StageSetupService {
             throw new ServiceException("赛段无可初始化的参赛方");
         }
 
-        // 各赛制的种子排序口径由 Handler.capabilities 决定
-        StageModeProfile profile = handlerRegistry.of(stage.getStageMode()).capabilities();
-        comps.sort(seedComparator(profile.setup().seedOrder()));
+        // 各赛制的种子排序口径写在枚举上
+        StageModeEnum mode = StageModeEnum.require(stage.getStageMode());
+        comps.sort(seedComparator(mode));
         // 淘汰赛座位是"位置"而不是"出场次序":中间态允许把选手拖到轮空位互换、位置留空即轮空,
         // 因此开赛初始化不再把座位压成 1..n——否则中间态摆好的位置会被整体重排,生成的对阵与中间态对不上。
         // 其余赛制保持原语义(压成 1..n)。种子顺位批量写:此前逐个 updateById(100 人 = 100 条 SQL)
-        boolean keepSeats = profile.setup().has(Trait.KEEPS_SEATS);
+        boolean keepSeats = mode.knockout();
         Set<Long> usedSeats = new HashSet<>();
         comps.forEach(c -> {
             if (c.getSeedRank() != null) {
@@ -173,13 +167,12 @@ public class StageSetupService {
      */
     private void generateMatchesInternal(GenerateMatchesBo bo, boolean randomSplit) {
         TStage stage = stageLookup.get(bo.getStageId());
-        StageHandler handler = handlerRegistry.of(stage.getStageMode());
-        StageModeProfile profile = handler.capabilities();
+        StageModeEnum mode = StageModeEnum.require(stage.getStageMode());
         // 擂台赛不生成对阵树(由导播逐场创建);自由对抗也不生成(对手线下抽签/指认,场次由导播手动加)
-        if (profile.setup().generatePolicy() == GeneratePolicy.REJECT) {
-            throw new ServiceException(profile.setup().rejectMessage());
+        if (mode.rejectsBracketGeneration()) {
+            throw new ServiceException(StageModeEnum.ARENA_NO_BRACKET);
         }
-        if (profile.setup().generatePolicy() == GeneratePolicy.SKIP_SILENT) {
+        if (!mode.generatesBracket()) {
             log.info("赛段[{}]不生成对阵,场次由导播台手动添加", stage.getId());
             return;
         }
@@ -189,8 +182,8 @@ public class StageSetupService {
             throw new ServiceException("赛段[{}]已结束,无法生成对阵", stage.getName());
         }
         // 海选赛/排名赛:逐选手轮次,允许跳过显式初始化(兜底:自动初始化)
-        boolean perCompetitorRound = profile.result().perCompetitor();
-        if (profile.setup().has(Trait.REQUIRES_CIRCLES) && plannedCircleCount(stage) < 1) {
+        boolean perCompetitorRound = mode.perCompetitor();
+        if (mode.audition() && plannedCircleCount(stage) < 1) {
             throw new ServiceException("海选尚未配置圈,请先在赛段配置中新增至少一圈(人数/裁判/去向)");
         }
         if (!perCompetitorRound && !Long.valueOf(1L).equals(stage.getIsInitialized())) {
@@ -201,7 +194,7 @@ public class StageSetupService {
             // 海选已配置圈(单圈也算)但当前无人签到(预建空圈)时跳过自动初始化,
             // 允许抽号前先生成按配置的空圈结构,待签到后再落圈;
             // 其余场景保持原逻辑(初始化会把名单锁定,不改变业务状态)
-            boolean emptyPlannedAudition = profile.setup().has(Trait.CIRCLE_SPLIT) && plannedCircleCount(stage) >= 1
+            boolean emptyPlannedAudition = mode.audition() && plannedCircleCount(stage) >= 1
                 && competitorMapper.selectCount(Wrappers.<TCompetitor>lambdaQuery()
                     .eq(TCompetitor::getStageId, stage.getId())
                     .eq(TCompetitor::getOutcomeStatus, OutcomeStatusEnum.PENDING.getCode())) == 0;
@@ -236,22 +229,22 @@ public class StageSetupService {
             rc.setRandomSplit(randomSplit);
         }
         // 海选:晋级名额必须能按圈均分(或显式每圈名额非负)
-        if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+        if (mode.audition()) {
             auditionMode.validateBeforeGenerate(stage, rc);
         }
         // 海选分圈:持久化本次分圈方式(按号顺序均分 / 随机抽取),
         // 签到/补签需要据此判断新选手应按号码落圈还是按名额均衡落圈
-        if (profile.setup().has(Trait.CIRCLE_SPLIT)) {
+        if (mode.audition()) {
             persistCircleSplitMode(stage, randomSplit);
         }
         // 承接上一淘汰赛胜者:按胜者位置顺序配对(SEQUENTIAL),不受本赛段 SEED 配置影响;
         // 从海选赛进入的淘汰赛,未显式配置时默认标准种子对位(1-16、2-15)
-        if (profile.setup().has(Trait.RESOLVES_KNOCKOUT_PAIRING) && rc != null && rc.getKnockout() != null) {
+        if (mode.knockout() && rc != null && rc.getKnockout() != null) {
             // 首轮配对方式只看本赛段配置(头尾交叉与否是显式选择),不再按来源赛制推断
             rc.getKnockout().setPairingMode(PairingModeResolver.resolve(rc.getKnockout().getPairingMode()));
         }
         String configuredMatchMode = (rc != null && rc.getScoring() != null) ? rc.getScoring().getMatchMode() : null;
-        String matchMode = profile.setup().matchMode().resolve(configuredMatchMode, MatchModeEnum.STANDARD.getCode());
+        String matchMode = mode.resolveMatchMode(configuredMatchMode, MatchModeEnum.STANDARD.getCode());
 
         // 按种子顺位取参赛方(海选赛按签到号码顺序)
         LambdaQueryWrapper<TCompetitor> cq = Wrappers.lambdaQuery();
@@ -285,7 +278,7 @@ public class StageSetupService {
             .mapToLong(Long::longValue).max().orElse(0L);
         // 淘汰赛按赛段计划规模(teamCountStart)兜底:人数不足时仍生成完整 bracket,缺位以轮空结算,
         // 与预排(prebracket)及前端对战树预览保持一致;其余赛制不受影响
-        long plannedSlots = profile.setup().has(Trait.SLOTS_FROM_TEAM_COUNT) && stage.getTeamCountStart() != null
+        long plannedSlots = mode.knockout() && stage.getTeamCountStart() != null
             ? stage.getTeamCountStart() : 0L;
         int slotCount = (int) Math.max(Math.max(comps.size(), Math.min(maxSeed, 4096L)), Math.min(plannedSlots, 4096L));
         List<Long> seededIds = new ArrayList<>(Collections.nCopies(slotCount, null));
@@ -305,10 +298,10 @@ public class StageSetupService {
         }
 
         // 淘汰赛:配对方式未配置时补本赛段自己的默认值(顺序相邻),与中间态/大屏同一口径
-        if (profile.setup().has(Trait.RESOLVES_KNOCKOUT_PAIRING) && rc != null && rc.getKnockout() != null) {
+        if (mode.knockout() && rc != null && rc.getKnockout() != null) {
             rc.getKnockout().setPairingMode(PairingModeResolver.resolve(rc.getKnockout().getPairingMode()));
         }
-        BracketPlan plan = handler.generateBracket(seededIds, rc);
+        BracketPlan plan = stageModes.of(stage.getStageMode()).plan(seededIds, rc);
 
         List<MatchPlan> sorted = new ArrayList<>(plan.getMatches());
         sorted.sort(Comparator.comparingInt(MatchPlan::getRound).thenComparingInt(MatchPlan::getMatchIndex));
@@ -396,7 +389,7 @@ public class StageSetupService {
         }
 
         // 海选分圈:生成对阵后自动绑定圈与裁判(优先按 ruleConfig.circleRefereeIds,未配置时圈数=裁判数则 1:1,否则全部绑每圈)
-        if (profile.setup().has(Trait.CIRCLE_SPLIT)) {
+        if (mode.audition()) {
             auditionCircleSupport.assignCircleReferees(stage);
         }
 
@@ -446,15 +439,15 @@ public class StageSetupService {
         return auditionCircleSupport.plannedCircleCount(stage);
     }
 
-    /** 种子排序口径:把画像里的数据型枚举落成比较器(号码解析留在 service 层,保持 engine 纯净)。 */
-    private static Comparator<TCompetitor> seedComparator(SeedOrder order) {
-        return switch (order) {
-            case BY_NUMBER -> Comparator.comparingInt(c -> parseCompetitorNumber(c.getNumber()));
-            case BY_SEED -> Comparator.comparing(
-                (TCompetitor c) -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank());
-            case SEED_THEN_NUMBER -> Comparator
+    /** 种子排序:海选/排名按号码,擂台先种子再号码,淘汰与自由对抗按种子。 */
+    private static Comparator<TCompetitor> seedComparator(StageModeEnum mode) {
+        return switch (mode) {
+            case AUDITION, RANK -> Comparator.comparingInt(c -> parseCompetitorNumber(c.getNumber()));
+            case ARENA -> Comparator
                 .comparing((TCompetitor c) -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank())
                 .thenComparingInt(c -> parseCompetitorNumber(c.getNumber()));
+            case KNOCKOUT, FREE_MATCH -> Comparator.comparing(
+                (TCompetitor c) -> c.getSeedRank() == null ? Long.MAX_VALUE : c.getSeedRank());
         };
     }
 

@@ -137,7 +137,7 @@ public interface ITStageLifecycleService {
     /**
      * 完成赛段:GAMING→SETTLED(结算后需在中间态「确认晋级」)。
      *
-     * <p>结算由对应赛制的 {@code StageSettler} 策略执行。无论哪种赛制,
+     * <p>结算由对应赛制的 Mode 执行。无论哪种赛制,
      * 「还不能结束」都通过返回值的 {@code completed=false} + {@code message} 表达,
      * 不再混用异常(见 {@link StageCompleteVo})。</p>
      *

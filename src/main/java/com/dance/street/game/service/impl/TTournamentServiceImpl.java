@@ -46,8 +46,6 @@ import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITStageRosterService;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import com.dance.street.game.service.ITVisSceneService;
 import com.dance.street.game.service.ITVisWidgetService;
 import com.dance.street.game.service.ITRefereeService;
@@ -867,7 +865,7 @@ public class TTournamentServiceImpl implements ITTournamentService {
     }
 
     /** 赛段赛制画像(模板/装配里替代 mode 字符串比较)。 */
-    private StageModeProfile stageCap(TStageVo stage) {
-        return StageModeProfiles.of(stage.getStageMode());
+    private StageModeEnum stageCap(TStageVo stage) {
+        return StageModeEnum.require(stage.getStageMode());
     }
 }

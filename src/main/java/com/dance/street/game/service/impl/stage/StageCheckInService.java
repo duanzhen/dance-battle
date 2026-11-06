@@ -20,9 +20,6 @@ import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
 import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.settle.SettlementSupport;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfile.Setup.Trait;
-import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -52,7 +49,6 @@ import static com.dance.street.game.service.impl.settle.SettlementSupport.parseC
 @Service
 public class StageCheckInService {
 
-    private final StageHandlerRegistry handlerRegistry;
     private final StageLookup stageLookup;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
@@ -85,8 +81,8 @@ public class StageCheckInService {
         // 海选/排名赛均为逐选手轮次:签到/补签到选手直接挂入未结算圈场次,可被裁判打分。
         // 已生成对阵但尚未开赛(PENDING)时同样挂入,否则补签到选手会从打分中"消失"
         // (不参与任何场次,结算后无晋级/淘汰结果,且无任何提示)。
-        StageModeProfile profile = handlerRegistry.of(stage.getStageMode()).capabilities();
-        boolean perCompetitor = profile.result().perCompetitor();
+        StageModeEnum mode = StageModeEnum.require(stage.getStageMode());
+        boolean perCompetitor = mode.perCompetitor();
         if (!perCompetitor) {
             return;
         }
@@ -97,7 +93,7 @@ public class StageCheckInService {
 
         // 海选圈必须先建好(ensure-circle-slots / generate-matches),签到只负责把人落进已有的圈。
         // 这里不再按配置补建圈场次——「没有圈也能签到」会让选手静默不参与打分与结算。
-        boolean auditionSplit = profile.setup().has(Trait.CIRCLE_SPLIT);
+        boolean auditionSplit = mode.audition();
         if (auditionSplit && auditionCircleSupport.circles(stage).isEmpty()) {
             throw new ServiceException("海选赛段尚未建立圈场次,请先创建圈后再签到");
         }
@@ -180,7 +176,7 @@ public class StageCheckInService {
             return;
         }
         TStage stage = stageLookup.get(stageId);
-        if (!handlerRegistry.of(stage.getStageMode()).capabilities().result().perCompetitor()) {
+        if (!StageModeEnum.require(stage.getStageMode()).perCompetitor()) {
             return;
         }
         if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())
@@ -248,7 +244,7 @@ public class StageCheckInService {
             return;
         }
         TStage stage = stageLookup.get(stageId);
-        if (!handlerRegistry.of(stage.getStageMode()).capabilities().result().perCompetitor()) {
+        if (!StageModeEnum.require(stage.getStageMode()).perCompetitor()) {
             return;
         }
         if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())

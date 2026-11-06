@@ -20,13 +20,13 @@ import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
-import com.dance.street.game.service.impl.stage.handler.ArenaStageHandler;
-import com.dance.street.game.service.impl.stage.handler.AuditionStageHandler;
-import com.dance.street.game.service.impl.stage.handler.FreeMatchStageHandler;
-import com.dance.street.game.service.impl.stage.handler.KnockoutStageHandler;
-import com.dance.street.game.service.impl.stage.handler.RankStageHandler;
-import com.dance.street.game.service.impl.stage.handler.StageHandler;
-import com.dance.street.game.service.impl.stage.handler.StageHandlerRegistry;
+import com.dance.street.game.service.impl.stage.ArenaMode;
+import com.dance.street.game.service.impl.stage.AuditionMode;
+import com.dance.street.game.service.impl.stage.FreeMatchMode;
+import com.dance.street.game.service.impl.stage.KnockoutMode;
+import com.dance.street.game.service.impl.stage.RankMode;
+import com.dance.street.game.service.impl.stage.StageMode;
+import com.dance.street.game.service.impl.stage.StageModes;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,7 +81,7 @@ class StageSettlementStrategyTest {
     }
 
     @Autowired
-    private StageHandlerRegistry handlerRegistry;
+    private StageModes stageModes;
     @Autowired
     private TTournamentMapper tournamentMapper;
     @Autowired
@@ -100,33 +100,28 @@ class StageSettlementStrategyTest {
     private ITMatchResultService matchResultService;
 
     /**
-     * Handler 覆盖性:每个 {@link StageModeEnum} 都能经 Registry 解析出 Handler(含 settle)。
-     * 新增赛制却忘了加 Handler 时,这条会先红,而不是线上点「完成赛段」才报错。
+     * 每个 {@link StageModeEnum} 都能解析出 Mode。
+     * 新增赛制却忘了加实现时,这条会先红,而不是线上点「完成赛段」才报错。
      */
     @Test
     void everyStageModeHasHandlerWithSettle() {
-        List<String> uncovered = handlerRegistry.uncoveredModes();
-        assertTrue(uncovered.isEmpty(), "以下赛制没有 StageHandler: " + uncovered);
+        List<String> uncovered = stageModes.uncoveredModes();
+        assertTrue(uncovered.isEmpty(), "以下赛制没有 StageMode: " + uncovered);
         for (StageModeEnum mode : StageModeEnum.values()) {
-            StageHandler handler = handlerRegistry.of(mode.getCode());
-            assertNotNull(handler, "赛制 " + mode.getCode() + " 无 Handler");
-            assertNotNull(handler.capabilities());
+            StageMode impl = stageModes.of(mode.getCode());
+            assertNotNull(impl, "赛制 " + mode.getCode() + " 无实现");
+            assertEquals(mode, impl.mode());
         }
     }
 
-    /** 分派正确性:每种赛制落到预期 Handler。 */
+    /** 分派正确性:每种赛制落到预期实现。 */
     @Test
     void registryDispatchesToExpectedHandler() {
-        assertInstanceOf(AuditionStageHandler.class,
-            handlerRegistry.of(StageModeEnum.AUDITION.getCode()));
-        assertInstanceOf(RankStageHandler.class,
-            handlerRegistry.of(StageModeEnum.RANK.getCode()));
-        assertInstanceOf(ArenaStageHandler.class,
-            handlerRegistry.of(StageModeEnum.ARENA.getCode()));
-        assertInstanceOf(KnockoutStageHandler.class,
-            handlerRegistry.of(StageModeEnum.KNOCKOUT.getCode()));
-        assertInstanceOf(FreeMatchStageHandler.class,
-            handlerRegistry.of(StageModeEnum.FREE_MATCH.getCode()));
+        assertInstanceOf(AuditionMode.class, stageModes.of(StageModeEnum.AUDITION.getCode()));
+        assertInstanceOf(RankMode.class, stageModes.of(StageModeEnum.RANK.getCode()));
+        assertInstanceOf(ArenaMode.class, stageModes.of(StageModeEnum.ARENA.getCode()));
+        assertInstanceOf(KnockoutMode.class, stageModes.of(StageModeEnum.KNOCKOUT.getCode()));
+        assertInstanceOf(FreeMatchMode.class, stageModes.of(StageModeEnum.FREE_MATCH.getCode()));
     }
 
     /**

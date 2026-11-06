@@ -1,7 +1,6 @@
 package com.dance.street.game.engine.generator;
 
 import com.dance.street.game.engine.common.RuleConfigHolder;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -17,14 +16,8 @@ import java.util.List;
  * @author duane
  */
 @Component
-public class RankGenerator implements StageGenerator {
+public class RankGenerator {
 
-    @Override
-    public StageModeEnum mode() {
-        return StageModeEnum.RANK;
-    }
-
-    @Override
     public BracketPlan generate(List<Long> seededCompetitorIds, RuleConfigHolder ruleConfig) {
         List<Long> seeded = seededCompetitorIds == null ? List.of() : seededCompetitorIds;
         List<MatchPlan> matches = new ArrayList<>();

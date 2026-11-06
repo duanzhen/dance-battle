@@ -5,7 +5,6 @@ import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import lombok.RequiredArgsConstructor;
@@ -25,18 +24,12 @@ import java.util.Map;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class ArenaStageSettler implements StageSettler {
+public class ArenaStageSettler {
 
     private final TMatchMapper matchMapper;
     private final CompetitorOutcomeWriter outcomeWriter;
     private final ArenaQueueSupport arenaQueueSupport;
 
-    @Override
-    public String stageMode() {
-        return StageModeEnum.ARENA.getCode();
-    }
-
-    @Override
     public StageSettleOutcome settle(TStage stage) {
         long gaming = matchMapper.selectCount(Wrappers.<TMatch>lambdaQuery()
             .eq(TMatch::getStageId, stage.getId())

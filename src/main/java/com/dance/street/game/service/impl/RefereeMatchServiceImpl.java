@@ -34,8 +34,6 @@ import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -116,10 +114,10 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         // 淘汰赛读 knockout.publishMode,擂台赛等读顶层 publishMode(统一在 RuleConfigHolder)
         String publishMode = stageRc == null ? "AUTO" : stageRc.resolvePublishMode();
         String publishScope = stageRc != null ? stageRc.getPublishScope() : null;
-        StageModeProfile profile = StageModeProfiles.of(stage.getStageMode());
+        StageModeEnum profile = StageModeEnum.require(stage.getStageMode());
         boolean isAuditionStage = profile.audition();
         boolean isRankStage = profile.rank();
-        boolean perCompetitorStage = profile.result().perCompetitor();
+        boolean perCompetitorStage = profile.perCompetitor();
         MatchFormat matchFormat = MatchFormat.of(stage.getRuleConfig());
         // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分
         boolean rankResultHidden = isRankStage && !"AUTO".equalsIgnoreCase(publishMode);
@@ -572,7 +570,7 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         // 排名赛未公布时隐藏汇总分/排名(与 my-match 同一口径),避免轻量接口提前泄露
         TStage stage = stageMapper.selectById(match.getStageId());
         boolean rankResultHidden = false;
-        if (stage != null && StageModeProfiles.of(stage.getStageMode()).rank()
+        if (stage != null && StageModeEnum.require(stage.getStageMode()).rank()
             && !StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
             RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
             rankResultHidden = rc != null && StringUtils.isNotBlank(rc.getPublishMode())
@@ -582,7 +580,7 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             .eq(TMatchParticipant::getMatchId, matchId)
             .orderByAsc(TMatchParticipant::getDisplaySlotIndex));
         // 海选:当前累计总分按打分明细现算(缓存 score_value 可能只含部分裁判)
-        boolean isAudition = stage != null && StageModeProfiles.of(stage.getStageMode()).audition();
+        boolean isAudition = stage != null && StageModeEnum.require(stage.getStageMode()).audition();
         Map<Long, java.math.BigDecimal> globalScoreByComp = new HashMap<>();
         if (isAudition) {
             List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()

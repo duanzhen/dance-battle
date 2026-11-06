@@ -3,7 +3,6 @@ package com.dance.street.game.engine;
 import com.dance.street.game.engine.generator.AuditionGenerator;
 import com.dance.street.game.engine.generator.KnockoutGenerator;
 import com.dance.street.game.engine.generator.RankGenerator;
-import com.dance.street.game.engine.generator.StageGenerator;
 import com.dance.street.game.engine.scoring.ScoringEngine;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -26,8 +25,9 @@ class EngineCoverageTest {
             assertNotNull(ctx.getBean(AuditionGenerator.class));
             assertNotNull(ctx.getBean(RankGenerator.class));
             assertNotNull(ctx.getBean(KnockoutGenerator.class));
-            assertEquals(3, ctx.getBeansOfType(StageGenerator.class).size(),
-                "建树生成器应为海选/排名/淘汰三个;自由对抗与擂台不生成对阵");
+            assertEquals(3, ctx.getBeansOfType(AuditionGenerator.class).size()
+                + ctx.getBeansOfType(RankGenerator.class).size()
+                + ctx.getBeansOfType(KnockoutGenerator.class).size());
         }
     }
 

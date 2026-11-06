@@ -51,8 +51,6 @@ import com.dance.street.game.service.ITScoredMatchService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
-import com.dance.street.game.engine.common.StageModeProfile;
-import com.dance.street.game.engine.common.StageModeProfiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -171,12 +169,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
 
     /** 海选/排名赛为「逐选手累计打分」赛制:一次提交只写部分选手的分,不即时结算。 */
     private boolean isPerCompetitorStage(TStage stage) {
-        return profile(stage).result().perCompetitor();
+        return profile(stage).perCompetitor();
     }
 
-    /** 本赛段赛制画像(决策分派;打分本身仍由 ScoringEngine 按 matchMode 负责)。 */
-    private StageModeProfile profile(TStage stage) {
-        return StageModeProfiles.of(stage.getStageMode());
+    /** 本赛段赛制(决策分派;打分本身仍由 ScoringEngine 按 matchMode 负责)。 */
+    private StageModeEnum profile(TStage stage) {
+        return StageModeEnum.require(stage.getStageMode());
     }
 
     /**
@@ -187,7 +185,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private MatchResultVo submitPerCompetitorScores(TMatch match, TStage stage, RuleConfigHolder rc,
                                                     ScoringConfig sc, SubmitResultBo bo,
                                                     List<Long> competitorIds) {
-        boolean isAudition = profile(stage).result().writeBackSubmittedOnly();
+        boolean isAudition = profile(stage).audition();
         Map<Long, Long> touchedRounds = writePerCompetitorScores(match, rc, sc, bo, competitorIds, isAudition);
         if (isAudition) {
             // 海选:名次/晋级只认 t_round_score;participant.score_value 只是给裁判端显示的缓存总分。

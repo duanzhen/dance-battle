@@ -13,7 +13,6 @@ import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.scoring.MatchScoreInput;
 import com.dance.street.game.engine.scoring.MatchScoreResult;
 import com.dance.street.game.engine.scoring.RankCalculator;
@@ -50,7 +49,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class RankStageSettler implements StageSettler {
+public class RankStageSettler {
 
     private final ScoringEngine scoringEngine;
     private final TMatchMapper matchMapper;
@@ -61,12 +60,6 @@ public class RankStageSettler implements StageSettler {
     private final SettlementSupport settlementSupport;
     private final ITScoredMatchService scoredMatchService;
 
-    @Override
-    public String stageMode() {
-        return StageModeEnum.RANK.getCode();
-    }
-
-    @Override
     public StageSettleOutcome settle(TStage stage) {
         // 「还没判完」属于"还没准备好",与"场次未结算"同类:返回 pending 让导播台按提示补齐,
         // 而不是抛异常当失败处理。必须在结算前统一扫一遍,避免像异常那样中途中断、只结算了一半场次。

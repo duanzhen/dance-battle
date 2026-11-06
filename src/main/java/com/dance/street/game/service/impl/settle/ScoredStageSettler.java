@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.StageConstants;
-import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.service.ITScoredMatchService;
 import lombok.RequiredArgsConstructor;
@@ -23,17 +22,11 @@ import java.util.List;
  */
 @Component
 @RequiredArgsConstructor
-public class ScoredStageSettler implements StageSettler {
+public class ScoredStageSettler {
 
     private final ITScoredMatchService scoredMatchService;
     private final TMatchMapper matchMapper;
 
-    @Override
-    public String stageMode() {
-        return StageModeEnum.KNOCKOUT.getCode();
-    }
-
-    @Override
     public StageSettleOutcome settle(TStage stage) {
         // 「裁判没到齐」与"场次未结算"同类:返回 pending 让导播台按提示补齐,
         // 而不是用只有一半裁判到场的分数算出名次。判定制(STANDARD)场次已在提交时定胜负,

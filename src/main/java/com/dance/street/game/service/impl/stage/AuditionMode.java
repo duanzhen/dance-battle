@@ -9,14 +9,21 @@ import com.dance.street.game.domain.TStage;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
+import com.dance.street.game.engine.generator.AuditionGenerator;
+import com.dance.street.game.engine.generator.BracketPlan;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
 import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
+import com.dance.street.game.service.impl.settle.AuditionStageSettler;
+import com.dance.street.game.service.impl.settle.StageSettleOutcome;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.exception.ServiceException;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,18 +34,34 @@ import java.util.stream.Collectors;
 /**
  * 海选专属校验。生成前核对晋级名额,开赛前核对人人落圈且每圈有裁判。
  *
- * <p>原先挂在 {@code StageSetupHook}/{@code StageStartGuard} 上,全仓库只有海选实现,
- * 编排层按赛制直接调用本类。</p>
+ * <p>原先挂在钩子上的校验、建圈和加赛结算都从这里进入。</p>
  */
 @Component
 @RequiredArgsConstructor
-public class AuditionMode {
+public class AuditionMode implements StageMode {
 
+    private final AuditionGenerator generator;
+    private final AuditionStageSettler settler;
     private final TCompetitorMapper competitorMapper;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
     private final TMatchRefereeMapper matchRefereeMapper;
     private final AuditionCircleSupport auditionCircleSupport;
+
+    @Override
+    public StageModeEnum mode() {
+        return StageModeEnum.AUDITION;
+    }
+
+    @Override
+    public BracketPlan plan(List<Long> seededCompetitorIds, RuleConfigHolder ruleConfig) {
+        return generator.generate(seededCompetitorIds, ruleConfig);
+    }
+
+    @Override
+    public StageSettleOutcome settle(TStage stage) {
+        return settler.settle(stage);
+    }
 
     /**
      * 生成对阵前:晋级名额必须能被配置圈数整除(显式每圈名额时只校验非负)。

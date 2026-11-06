@@ -37,7 +37,7 @@ import java.util.List;
  *   <li>{@link ArenaRunService} 擂台轮转、{@link FreeMatchService} 自由对抗、
  *       {@link StageCheckInService} 签到落圈、{@link AuditionResultService} 海选结果导出;</li>
  *   <li>共享内核:{@link AuditionCircleSupport} 海选圈(口径 + 结构维护 + 圈级裁判绑定);</li>
- *   <li>{@link StageCommands} 主路径(init/generate/start/complete/reset)经 HandlerRegistry。</li>
+ *   <li>{@link StageCommands} 转发 init/generate/start/complete/reset;赛制分派仍在 Setup/Run/Settlement。</li>
  * </ul>
  *
  * @author duane
@@ -56,7 +56,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     private final ArenaRunService arenaRunService;
     /** 轮空场次结算(淘汰赛) */
     private final ByeSettlementService byeSettlementService;
-    /** 统一流转编排(经 HandlerRegistry,不依赖具体赛制类) */
+    /** 主路径转发(不再调用空的赛制钩子) */
     private final StageCommands stageCommands;
     /** 开赛与赛中推进 */
     private final StageRunService stageRunService;

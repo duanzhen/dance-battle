@@ -21,6 +21,7 @@ import com.dance.street.game.engine.common.StageFlowSupport;
 import com.dance.street.game.engine.common.enums.MatchModeEnum;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.generator.BracketPlan;
 import com.dance.street.game.engine.generator.MatchPlan;
 import com.dance.street.game.engine.generator.SlotPlan;
@@ -37,7 +38,6 @@ import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
 import com.dance.street.game.service.impl.flow.StageLookup;
-import com.dance.street.game.service.impl.stage.hook.StageHooks;
 import com.dance.street.game.engine.common.StageModeProfile;
 import com.dance.street.game.engine.common.StageModeProfile.GeneratePolicy;
 import com.dance.street.game.engine.common.StageModeProfile.SeedOrder;
@@ -91,7 +91,8 @@ public class StageSetupService {
     private final ITStageRosterService rosterService;
     /** 海选圈口径与圈级裁判绑定 */
     private final AuditionCircleSupport auditionCircleSupport;
-    private final StageHooks stageHooks;
+    /** 海选生成前校验(圈数与晋级名额) */
+    private final AuditionMode auditionMode;
     /** 赛制 Handler:capabilities + generateBracket */
     private final StageHandlerRegistry handlerRegistry;
 
@@ -234,8 +235,10 @@ public class StageSetupService {
         if (rc != null) {
             rc.setRandomSplit(randomSplit);
         }
-        // 赛制专属的生成前校验(海选圈配置与晋级名额等)
-        stageHooks.setupHook(stage.getStageMode()).ifPresent(h -> h.validateBeforeGenerate(stage, rc));
+        // 海选:晋级名额必须能按圈均分(或显式每圈名额非负)
+        if (StageModeEnum.AUDITION.getCode().equals(stage.getStageMode())) {
+            auditionMode.validateBeforeGenerate(stage, rc);
+        }
         // 海选分圈:持久化本次分圈方式(按号顺序均分 / 随机抽取),
         // 签到/补签需要据此判断新选手应按号码落圈还是按名额均衡落圈
         if (profile.setup().has(Trait.CIRCLE_SPLIT)) {

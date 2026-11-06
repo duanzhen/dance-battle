@@ -10,8 +10,8 @@ import java.util.Set;
  * 赛段模式的"数据型"画像:一种赛制一条记录,集中声明模式之间的<b>取值差异</b>。
  *
  * <p>只有"取值不同"的差异放这里(是否逐选手、是否生成对阵、默认 matchMode、排序口径…);
- * "算法不同/要查库"的差异仍走接口:已有的 {@code StageGenerator}/{@code StageSettler},
- * 以及 service 侧的 {@code StageSetupHook}/{@code StageStartGuard}。</p>
+ * "算法不同/要查库"的差异仍走 {@code StageGenerator}/{@code StageSettler},
+ * 海选生成前与开赛前校验在 {@code AuditionMode}。</p>
  *
  * @param mode   赛制
  * @param setup  初始化/生成对阵相关

@@ -25,16 +25,8 @@ import com.dance.street.game.domain.TStage;
  */
 public interface StageSettler {
 
-    /** 负责的赛制({@code StageModeEnum.code}) */
+    /** 负责的赛制({@code StageModeEnum.code})。多种赛制共用同一实现时,由 Handler 直接注入,不再用 supports 分派。 */
     String stageMode();
-
-    /**
-     * 本策略是否处理该赛制。默认只处理 {@link #stageMode()};
-     * 多个赛制共用同一结算方式时(如淘汰赛与自由对抗都是"多裁判累计打分"),覆盖本方法即可。
-     */
-    default boolean supports(String mode) {
-        return stageMode().equals(mode);
-    }
 
     /**
      * 结算赛段。

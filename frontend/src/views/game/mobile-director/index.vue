@@ -446,7 +446,7 @@
                 >
                   开始
                 </button>
-                <!-- 默认收缩:点开下拉显示重启(仅赛段进行中) -->
+                <!-- 默认收缩:点开下拉显示重置场次(仅赛段进行中) -->
                 <div v-if="match.status === 'SETTLED' && currentStage?.status === 'GAMING'" class="relative">
                   <button
                     @click="toggleMore(match.id)"
@@ -465,7 +465,7 @@
                       "
                       class="block w-full px-3 py-2 text-[10px] text-neutral-300 hover:bg-neutral-800 whitespace-nowrap bg-transparent border-0"
                     >
-                      重启
+                      重置场次
                     </button>
                   </div>
                 </div>
@@ -642,9 +642,9 @@
                   @click="handleCancelStartMatch(match)"
                   class="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-red-600/15 text-red-400 border border-red-600/30 active:scale-95 transition-transform"
                 >
-                  重置
+                  取消开始
                 </button>
-                <!-- 自由对抗:误加的场次可直接删除(已结算需先重启) -->
+                <!-- 自由对抗:误加的场次可直接删除(已结算需先重置场次) -->
                 <button
                   v-if="isFreeMatchStage && match.status !== 'SETTLED'"
                   @click="handleDeleteFreeMatch(match)"
@@ -668,7 +668,7 @@
                 </button>
               </div>
 
-              <!-- 展开卡片:每轮参赛者 + 每个裁判判罚结果 + 重启(仅已结束) -->
+              <!-- 展开卡片:每轮参赛者 + 每个裁判判罚结果 + 重置场次(仅已结束) -->
               <div v-if="expandedMatchId === match.id" class="mt-3 rounded-xl border border-amber-500/25 bg-neutral-950/70 p-2.5 space-y-2">
                 <div class="flex items-center justify-between px-0.5">
                   <span class="text-[9px] font-bold text-neutral-500 uppercase tracking-wider">轮次判罚明细</span>
@@ -692,15 +692,23 @@
                               : 'bg-neutral-800 text-neutral-500'
                         "
                       >
-                        {{ r.status === 'GAMING' ? '进行中' : '已结束' }}
+                        {{ r.status === 'GAMING' ? '进行中' : r.status === 'PENDING' ? '未开始' : '已结束' }}
                       </span>
                       <button
-                        v-if="currentStage?.stageMode === 'KNOCKOUT'"
+                        v-if="currentStage?.stageMode === 'KNOCKOUT' && r.status !== 'PENDING'"
                         @click.stop="handleResetRound(match, r.roundSequence)"
                         class="text-[8px] px-1.5 py-0.5 rounded bg-red-600/15 text-red-400 border border-red-600/30 active:scale-95 transition-transform"
                         title="重置本局及之后各局,重新判罚"
                       >
-                        重置
+                        重置本局
+                      </button>
+                      <button
+                        v-if="currentStage?.stageMode === 'KNOCKOUT' && r.status === 'PENDING'"
+                        @click.stop="handleSwitchRound(match, r.roundSequence)"
+                        class="text-[8px] px-1.5 py-0.5 rounded bg-amber-600/15 text-amber-400 border border-amber-600/30 active:scale-95 transition-transform"
+                        title="不重置判罚,手动把该局设为当前局"
+                      >
+                        切换到此局
                       </button>
                     </span>
                   </div>
@@ -725,7 +733,7 @@
                   该场暂无轮次数据
                 </p>
 
-                <!-- 重启:仅已结束场次且赛段仍进行中,展开时可见 -->
+                <!-- 重置场次:仅已结束场次且赛段仍进行中,展开时可见 -->
                 <div
                   v-if="match.status === 'SETTLED' && currentStage?.status === 'GAMING'"
                   class="flex justify-end pt-1.5 border-t border-neutral-800"
@@ -737,7 +745,7 @@
                     "
                     class="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-neutral-950 border border-neutral-600 text-neutral-300 hover:bg-neutral-800 active:scale-95 transition-all"
                   >
-                    重启
+                    重置场次
                   </button>
                 </div>
               </div>
@@ -943,6 +951,7 @@ import {
   directorCancelStartMatch,
   directorResetMatch,
   directorResetRound,
+  directorSwitchRound,
   directorSubmitResult,
   directorPublishResult,
   directorSetCurrentCompetitor,
@@ -1855,27 +1864,39 @@ const confirmTempWithdraw = async () => {
   }
 };
 
-/** 重启场次:清空该场已提交的分数/结果,回到进行中 */
+/** 重置场次:清空整场所有 Round 的分数/结果,整场回到进行中 */
 const handleRestartMatch = async (match: MatchInfo) => {
-  if (!(await askConfirm(`确认重启场次 #${match.id}？将清空该场已提交的分数与结果。`))) return;
+  if (!(await askConfirm(`确认重置场次 #${match.id}？将清空整场所有 Round 的分数与结果。`))) return;
   try {
     await directorResetMatch(match.id);
     await refreshMatches();
   } catch (e: any) {
-    console.error('重启场次失败:', e);
-    notifyError(e, '重启场次失败');
+    console.error('重置场次失败:', e);
+    notifyError(e, '重置场次失败');
   }
 };
 
-/** 重置某一局:删掉该局之后的局、清空该局判罚,回到该局重新判 */
+/** 重置某一局:清空该局及之后的判罚,回到该局重新判 */
 const handleResetRound = async (match: MatchInfo, roundSequence: number) => {
-  if (!(await askConfirm(`确认重置第${roundSequence}ROUND？该局及之后各局的判罚都会清空。`))) return;
+  if (!(await askConfirm(`确认重置第${roundSequence}ROUND？该局及之后已提交的判罚都会清空。`))) return;
   try {
     await directorResetRound(match.id, roundSequence);
     await refreshMatches();
   } catch (e: any) {
     console.error('重置局失败:', e);
     notifyError(e, '重置局失败');
+  }
+};
+
+/** 手动切换当前局:只改当前生效轮,不清空任何判罚。 */
+const handleSwitchRound = async (match: MatchInfo, roundSequence: number) => {
+  if (!(await askConfirm(`确认切换到第${roundSequence}ROUND？后续仍会自动进入下一局。`))) return;
+  try {
+    await directorSwitchRound(match.id, roundSequence);
+    await refreshMatches();
+  } catch (e: any) {
+    console.error('切换当前局失败:', e);
+    notifyError(e, '切换当前局失败');
   }
 };
 
@@ -1896,8 +1917,8 @@ const handleTournamentEvent = (data: any) => {
     }
     return;
   }
-  // 赛段级事件(开始/完成/晋级):刷新赛段列表与当前赛段场次
-  if (data.type === 'stage') {
+  // 赛段级事件(开始/完成/晋级/配置变更):刷新赛段列表与当前赛段场次
+  if (data.type === 'stage' || data.type === 'config') {
     loadStages();
     if (selectedStageId.value) {
       loadMatchesForStage(selectedStageId.value);
@@ -1915,7 +1936,7 @@ const moreMatchId = ref<string | null>(null);
 const toggleMore = (id: string) => {
   moreMatchId.value = moreMatchId.value === id ? null : id;
 };
-/** 淘汰赛场次卡片展开态:展开后显示各轮判罚明细与重启 */
+/** 淘汰赛场次卡片展开态:展开后显示各轮判罚明细与重置入口 */
 const expandedMatchId = ref<string | null>(null);
 const toggleExpand = (id: string) => {
   expandedMatchId.value = expandedMatchId.value === id ? null : id;

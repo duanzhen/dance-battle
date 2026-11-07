@@ -29,6 +29,7 @@ import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITRefereeStageService;
+import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
 import com.dance.street.game.service.impl.settle.AuditionTiebreakResult;
 import com.dance.street.game.engine.common.DimensionConfig;
@@ -243,7 +244,6 @@ public class TMatchServiceImpl implements ITMatchService {
             vo.setBestOf(fmt.maxGames());
             vo.setRequiredWins(fmt.requiredWins());
             List<TMatchRound> roundList = roundsByMatch.getOrDefault(vo.getId(), List.of());
-            vo.setCurrentGame(Math.max(1, roundList.size()));
             int leftWins = 0;
             int rightWins = 0;
             for (TMatchRound r : roundList) {
@@ -274,7 +274,9 @@ public class TMatchServiceImpl implements ITMatchService {
             // 整场胜负是否已定 + 当前局是否还在进行(提前确认可与"继续判下一局"并存)
             vo.setSeriesWinnerSide(leftWins >= fmt.requiredWins() ? "LEFT"
                 : rightWins >= fmt.requiredWins() ? "RIGHT" : null);
-            TMatchRound currentRound = roundList.isEmpty() ? null : roundList.get(roundList.size() - 1);
+            TMatchRound currentRound = MatchRoundLocator.pickCurrent(roundList, vo.getStatus());
+            vo.setCurrentGame(currentRound == null || currentRound.getRoundSequence() == null
+                ? 1 : currentRound.getRoundSequence().intValue());
             vo.setCurrentRoundGaming(currentRound != null
                 && StageConstants.MATCH_GAMING.equals(currentRound.getStatus()));
         }

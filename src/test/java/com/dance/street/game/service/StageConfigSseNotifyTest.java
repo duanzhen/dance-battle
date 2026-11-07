@@ -1,5 +1,6 @@
 package com.dance.street.game.service;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchReferee;
 import com.dance.street.game.domain.TStage;
@@ -7,6 +8,7 @@ import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageConfigBo;
 import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchRefereeMapper;
@@ -32,11 +34,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 赛段「判罚方式」切换要通知裁判端。
+ * 赛段「判罚/公布方式」切换要通知裁判端与赛事页面。
  *
  * <p>事故现象:把淘汰赛/擂台赛从「裁判判罚」改成「导播台判定」后,已经打开的裁判页还停在
  * 原来的判罚界面上(反之从导播台改回裁判判罚也一样),现场得手动刷新。原因是赛段配置保存
- * 只写库、不推裁判通道,而裁判页只在收到推送时才重新拉数据。</p>
+ * 只写库、不推 SSE,而裁判页、导播端和大屏只在收到推送时才重新拉数据。</p>
  */
 @SpringBootTest(properties = {
     "app.redis.enabled=false",
@@ -86,6 +88,22 @@ class StageConfigSseNotifyTest {
         }
     }
 
+    /** 记录赛事广播:导播端、大屏和配置页面都靠这条通道感知公布方式变化。 */
+    static class RecordingTournamentNotifier extends TournamentEventNotifier {
+
+        final List<String> events = new CopyOnWriteArrayList<>();
+
+        RecordingTournamentNotifier(TournamentEventSseEmitterManager manager) {
+            super(manager);
+        }
+
+        @Override
+        public void notify(Long tournamentId, Long stageId, Long matchId, String type) {
+            events.add(tournamentId + "/" + stageId + "/" + type);
+            super.notify(tournamentId, stageId, matchId, type);
+        }
+    }
+
     @TestConfiguration
     static class RefereeNotifierRecorderConfig {
 
@@ -98,10 +116,18 @@ class StageConfigSseNotifyTest {
                                                           TMatchRefereeMapper matchRefereeMapper) {
             return new RecordingRefereeNotifier(refereeStageService, manager, stageMapper, matchMapper, matchRefereeMapper);
         }
+
+        @Bean
+        @Primary
+        RecordingTournamentNotifier recordingTournamentNotifier(TournamentEventSseEmitterManager manager) {
+            return new RecordingTournamentNotifier(manager);
+        }
     }
 
     @Autowired
     private RecordingRefereeNotifier refereeNotifier;
+    @Autowired
+    private RecordingTournamentNotifier tournamentNotifier;
     @Autowired
     private TTournamentMapper tournamentMapper;
     @Autowired
@@ -138,6 +164,29 @@ class StageConfigSseNotifyTest {
             "擂台赛改成导播台判定应推裁判端,实际: " + refereeNotifier.events);
     }
 
+    /** 比赛进行中仍可切换公布模式,并同时通知裁判端与赛事页面。 */
+    @Test
+    void publishModeCanChangeWhileStageIsRunning() {
+        Long tid = newTournament("赛中切换公布模式");
+        TStageVo stage = newStage(tid, "8强", "KNOCKOUT");
+        stageMapper.update(null, Wrappers.<TStage>lambdaUpdate()
+            .eq(TStage::getId, stage.getId())
+            .set(TStage::getStatus, StageConstants.STAGE_GAMING));
+
+        refereeNotifier.events.clear();
+        tournamentNotifier.events.clear();
+        savePublishMode(stage, "DIRECTOR");
+
+        TStage updated = stageMapper.selectById(stage.getId());
+        assertTrue("DIRECTOR".equals(RuleConfigParser.parse(updated.getRuleConfig())
+                .getKnockout().getPublishMode()),
+            "比赛开始后仍应写入手动选择的公布模式");
+        assertTrue(refereeNotifier.events.contains(stage.getId() + "/-/ config"),
+            "赛中切换后应通知裁判端,实际: " + refereeNotifier.events);
+        assertTrue(tournamentNotifier.events.contains(tid + "/" + stage.getId() + "/config"),
+            "赛中切换后应通知导播端与大屏,实际: " + tournamentNotifier.events);
+    }
+
     /** 判罚方式没变(纯保存一次)不该推,避免每次保存配置都刷一遍裁判端。 */
     @Test
     void unchangedConfigDoesNotNotify() {
@@ -145,9 +194,12 @@ class StageConfigSseNotifyTest {
         TStageVo stage = newStage(tid, "8强", "KNOCKOUT");
 
         refereeNotifier.events.clear();
+        tournamentNotifier.events.clear();
         savePublishMode(stage, "AUTO");
         assertFalse(refereeNotifier.events.contains(stage.getId() + "/-/ config"),
             "判罚方式没变不该推,实际: " + refereeNotifier.events);
+        assertFalse(tournamentNotifier.events.contains(tid + "/" + stage.getId() + "/config"),
+            "判罚方式没变不该广播,实际: " + tournamentNotifier.events);
     }
 
     // ===== 造数据 =====

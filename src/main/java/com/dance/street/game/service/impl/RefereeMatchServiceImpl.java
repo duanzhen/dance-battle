@@ -34,6 +34,7 @@ import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
+import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -234,10 +235,12 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             vo.setSeriesRightWins(rightWins);
             vo.setSeriesWinnerSide(leftWins >= matchFormat.requiredWins() ? "LEFT"
                 : rightWins >= matchFormat.requiredWins() ? "RIGHT" : null);
-            TMatchRound lastRound = rounds.isEmpty() ? null : rounds.get(rounds.size() - 1);
-            vo.setCurrentRoundGaming(lastRound != null
-                && StageConstants.MATCH_GAMING.equals(lastRound.getStatus()));
-            vo.setCurrentGame(Math.max(1, rounds.size()));
+            TMatchRound currentRound = MatchRoundLocator.pickCurrent(
+                rounds, match == null ? null : match.getStatus());
+            vo.setCurrentRoundGaming(currentRound != null
+                && StageConstants.MATCH_GAMING.equals(currentRound.getStatus()));
+            vo.setCurrentGame(currentRound == null || currentRound.getRoundSequence() == null
+                ? 1 : currentRound.getRoundSequence().intValue());
         }
         // 海选:裁判端要显示「本场晋级几人 / 本赛段共晋级几人」(加赛显示本次加赛争几个名额)
         if (isAuditionStage) {
@@ -408,10 +411,11 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         vo.setStageMatches(stageMatchInfos);
         vo.setStageOverview(stageOverview);
 
-        // 当前生效轮:淘汰赛/擂台赛取最新一轮(平局加赛/多轮制时即当前判罚轮);
+        // 当前生效轮:BO 多局制取第一局未结算轮,避免预建的后续轮抢走当前判罚位;
         // 海选/排名赛逐选手轮次无平局语义,取第一轮作为展示轮
         TMatchRound currentRound = rounds.isEmpty() ? null
-            : perCompetitorStage ? rounds.get(0) : rounds.get(rounds.size() - 1);
+            : perCompetitorStage ? rounds.get(0)
+            : MatchRoundLocator.pickCurrent(rounds, match == null ? null : match.getStatus());
         if (currentRound != null) {
             RefereeRoundInfo roundInfo = new RefereeRoundInfo();
             roundInfo.setId(currentRound.getId());

@@ -96,6 +96,12 @@
         <div class="p-4">
           <!-- 淘汰赛/擂台赛:中部判罚区,按选中场次状态展示(参考海选布局) -->
           <div v-if="isKnockoutMode || isArenaMode" class="space-y-4">
+            <div
+              v-if="roundSwitchFrozen && bestOf > 1"
+              class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center text-xs font-bold text-amber-300"
+            >
+              已自动进入下一局，{{ roundSwitchFreezeRemaining }} 秒后可判罚
+            </div>
             <!-- 导播台判定:本赛段由 MC 直接判,裁判端不显示判罚界面(改判罚方式后会实时切换) -->
             <div v-if="isDirectorMode" class="text-center py-16">
               <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
@@ -120,7 +126,7 @@
                           : 'border-neutral-800 bg-neutral-900 text-neutral-500'
                     "
                   >
-                    第{{ r.roundSequence }}轮 · {{ r.id === currentRoundId ? '当前' : r.outcome === 'DRAW' ? '平局' : '已结算' }}
+                    第{{ r.roundSequence }}轮 · {{ roundChipText(r) }}
                   </div>
                 </div>
 
@@ -144,7 +150,7 @@
                   <div v-if="!pendingPublish || currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
                     <button
                       @click="submitKnockout('LEFT')"
-                      :disabled="submitting"
+                      :disabled="submitting || roundSwitchFrozen"
                       :class="sideButtonClass('LEFT')"
                     >
                       <span class="block text-[9px] mb-1" :class="sideLabelClass('LEFT')">左方胜</span>
@@ -152,14 +158,14 @@
                     </button>
                     <button
                       @click="submitKnockout('DRAW')"
-                      :disabled="submitting"
+                      :disabled="submitting || roundSwitchFrozen"
                       class="px-8 py-5 rounded-xl text-lg font-black bg-neutral-800 text-neutral-200 border-2 border-neutral-600 active:bg-neutral-700 transition-colors disabled:opacity-40"
                     >
                       平
                     </button>
                     <button
                       @click="submitKnockout('RIGHT')"
-                      :disabled="submitting"
+                      :disabled="submitting || roundSwitchFrozen"
                       :class="sideButtonClass('RIGHT')"
                     >
                       <span class="block text-[9px] mb-1" :class="sideLabelClass('RIGHT')">右方胜</span>
@@ -249,7 +255,7 @@
                         : 'bg-neutral-800 text-neutral-500'
                   "
                 >
-                  第{{ r.roundSequence }}轮{{ r.outcome === 'DRAW' ? '·平局' : r.status === 'GAMING' ? '·进行中' : '·已结算' }}
+                  第{{ r.roundSequence }}轮{{ r.outcome === 'DRAW' ? '·平局' : r.status === 'GAMING' ? '·进行中' : r.status === 'PENDING' ? '·未开始' : '·已结算' }}
                 </span>
                 <span v-if="m.winnerName && !isAudition" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400">
                   胜者 {{ m.winnerName }}
@@ -470,7 +476,7 @@
                         : 'border-neutral-800 bg-neutral-900 text-neutral-500'
                   "
                 >
-                  第{{ r.roundSequence }}轮 · {{ r.id === currentRoundId ? '当前' : r.outcome === 'DRAW' ? '平局' : '已结算' }}
+                  第{{ r.roundSequence }}轮 · {{ roundChipText(r) }}
                 </div>
               </div>
 
@@ -484,7 +490,7 @@
                 <div v-if="!pendingPublish || currentRoundGaming" class="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
                   <button
                     @click="submitKnockout('LEFT')"
-                    :disabled="submitting"
+                    :disabled="submitting || roundSwitchFrozen"
                     :class="sideButtonClass('LEFT')"
                   >
                     <span class="block text-[9px] mb-1" :class="sideLabelClass('LEFT')">左方胜</span>
@@ -492,14 +498,14 @@
                   </button>
                   <button
                     @click="submitKnockout('DRAW')"
-                    :disabled="submitting"
+                    :disabled="submitting || roundSwitchFrozen"
                     class="px-8 py-5 rounded-xl text-lg font-black bg-neutral-800 text-neutral-200 border-2 border-neutral-600 active:bg-neutral-700 transition-colors disabled:opacity-40"
                   >
                     平
                   </button>
                   <button
                     @click="submitKnockout('RIGHT')"
-                    :disabled="submitting"
+                    :disabled="submitting || roundSwitchFrozen"
                     :class="sideButtonClass('RIGHT')"
                   >
                     <span class="block text-[9px] mb-1" :class="sideLabelClass('RIGHT')">右方胜</span>
@@ -794,6 +800,22 @@ const tiebreakerRound = ref('');
 const pendingPublish = ref(false);
 const rounds = ref<RoundInfo[]>([]);
 const currentRoundId = ref<number | null>(null);
+/** 自动进入下一局后短暂冻结判罚按钮,手动切局不会触发。 */
+const roundSwitchFreezeUntil = ref(0);
+const roundSwitchClock = ref(Date.now());
+let roundSwitchFreezeTimer: ReturnType<typeof setInterval> | null = null;
+let pendingAutoRoundFreeze = false;
+const roundSwitchFreezeRemaining = computed(() =>
+  Math.max(0, Math.ceil((roundSwitchFreezeUntil.value - roundSwitchClock.value) / 1000))
+);
+const roundSwitchFrozen = computed(() => roundSwitchFreezeRemaining.value > 0);
+const roundChipText = (r: RoundInfo) => {
+  if (r.id === currentRoundId.value) return '当前';
+  if (r.outcome === 'DRAW') return '平局';
+  if (r.status === 'PENDING') return '未开始';
+  if (r.status === 'GAMING') return '进行中';
+  return '已结算';
+};
 const participants = ref<Participant[]>([]);
 
 // 本裁判已提交的明细(仅用于回显自己的分,绝不用其他裁判的累计分当自己的)
@@ -1135,7 +1157,7 @@ const confirmRankTarget = async () => {
 
 /** 淘汰赛三按钮判罚:左胜 / 平 / 右胜,点击立即提交 */
 const submitKnockout = async (side: 'LEFT' | 'DRAW' | 'RIGHT') => {
-  if (submitting.value) return;
+  if (submitting.value || roundSwitchFrozen.value) return;
   const left = leftParticipant.value;
   const right = rightParticipant.value;
   if (!left || !right || left.competitorId == null || right.competitorId == null) return;
@@ -1398,6 +1420,43 @@ const numValue = (n?: string | number | null) => {
   return Number.isNaN(v) ? Number.MAX_SAFE_INTEGER : v;
 };
 
+const clearRoundSwitchFreeze = () => {
+  pendingAutoRoundFreeze = false;
+  if (roundSwitchFreezeTimer) {
+    clearInterval(roundSwitchFreezeTimer);
+    roundSwitchFreezeTimer = null;
+  }
+  roundSwitchFreezeUntil.value = 0;
+  roundSwitchClock.value = Date.now();
+};
+
+const startRoundSwitchFreeze = () => {
+  clearRoundSwitchFreeze();
+  roundSwitchFreezeUntil.value = Date.now() + 5000;
+  roundSwitchClock.value = Date.now();
+  roundSwitchFreezeTimer = setInterval(() => {
+    roundSwitchClock.value = Date.now();
+    if (roundSwitchClock.value >= roundSwitchFreezeUntil.value) {
+      if (roundSwitchFreezeTimer) {
+        clearInterval(roundSwitchFreezeTimer);
+        roundSwitchFreezeTimer = null;
+      }
+      roundSwitchFreezeUntil.value = 0;
+    }
+  }, 200);
+};
+
+/** SSE 可能先于 my-match 数据到达:等 bestOf 明确后再决定是否冻结。 */
+const applyPendingAutoRoundFreeze = () => {
+  if (!pendingAutoRoundFreeze) return;
+  if (bestOf.value > 1) {
+    pendingAutoRoundFreeze = false;
+    startRoundSwitchFreeze();
+  } else if (bestOf.value > 0) {
+    pendingAutoRoundFreeze = false;
+  }
+};
+
 /** 完整应用一份 my-match 数据(切换赛段/场次/模式时调用,会重置编辑态) */
 const applyData = (data: any) => {
   error.value = '';
@@ -1417,6 +1476,7 @@ const applyData = (data: any) => {
   bestOf.value = Number(data?.bestOf) || 1;
   requiredWins.value = Number(data?.requiredWins) || 1;
   currentGame.value = Number(data?.currentGame) || 1;
+  applyPendingAutoRoundFreeze();
   seriesLeftWins.value = Number(data?.seriesLeftWins) || 0;
   seriesRightWins.value = Number(data?.seriesRightWins) || 0;
   seriesWinnerSide.value = data?.seriesWinnerSide ?? null;
@@ -1752,6 +1812,15 @@ const connectRefereeSse = (authKey: string) => {
       // 打分事件且就是当前场次:只拉轻量累计分合并,避免每次打分都全量 my-match;
       // 其余事件(开赛/换场/换赛段)仍走全量 refresh,保证上下文能被裁判端感知
       const evtMatchId = data?.matchId;
+      if (data?.type === 'round-auto' && evtMatchId != null
+        && String(evtMatchId) === String(matchId.value)) {
+        pendingAutoRoundFreeze = true;
+        applyPendingAutoRoundFreeze();
+      }
+      if (data?.type === 'round-manual' && evtMatchId != null
+        && String(evtMatchId) === String(matchId.value)) {
+        clearRoundSwitchFreeze();
+      }
       if (data?.type === 'scores' && evtMatchId != null && String(evtMatchId) === String(matchId.value)) {
         scheduleScoresMerge();
       } else {
@@ -1787,6 +1856,10 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown);
   unsubSse?.();
   unsubSse = null;
+  if (roundSwitchFreezeTimer) {
+    clearInterval(roundSwitchFreezeTimer);
+    roundSwitchFreezeTimer = null;
+  }
 });
 </script>
 

@@ -338,7 +338,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
      * 淘汰赛按 BO 局分推进(纯展示/流程,不改对阵生成):
      * <ul>
      *   <li>平局局不计胜场,自动继续加局(fix:1:1 又打平 → 继续加局);</li>
-     *   <li>没人赢满需赢局数 → 自动开下一局;</li>
+     *   <li>没人赢满需赢局数 → 启用开赛时预建的下局;预建局打完后仍未分胜负才补加赛轮;</li>
      *   <li>有人赢满但还没打满最多局数(如 2:0 / 3:0):暂存整场结果(Map置待确认),
      *       同时仍开下一局让现场可以继续判——点了「提前确认」就提前结束,不点就继续打完;</li>
      *   <li>打满最多局数:整场结果只写一次。MANUAL 待导播台「公布结果」,AUTO/DIRECTOR 直接结算。</li>
@@ -385,7 +385,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         if (right != null) {
             decided.put(right, "RIGHT".equals(decidedSide) ? MatchOutcomeEnum.WIN.getCode() : MatchOutcomeEnum.LOSS.getCode());
         }
-        int games = countRounds(match.getId());
+        int games = countPlayedRounds(match.getId());
         if (games < format.maxGames()) {
             // 提前打出胜负(如 2:0 / 3:0):暂存整场结果(提供「提前确认」),同时开下一局可继续判
             return advanceToNextRound(match, results, round, decided);
@@ -480,10 +480,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .eq(TRoundScore::getScore, java.math.BigDecimal.ONE)).intValue();
     }
 
-    /** 本场已进行的局数 */
-    private int countRounds(Long matchId) {
+    /** 本场已打完的局数(不把预建但未开始的轮次算进去) */
+    private int countPlayedRounds(Long matchId) {
         return matchRoundMapper.selectCount(Wrappers.<TMatchRound>lambdaQuery()
-            .eq(TMatchRound::getMatchId, matchId)).intValue();
+            .eq(TMatchRound::getMatchId, matchId)
+            .eq(TMatchRound::getStatus, StageConstants.MATCH_SETTLED)).intValue();
     }
 
     /**
@@ -522,7 +523,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     }
 
     /**
-     * 本局结束但整场未结束:参与方回退待判定,自动开下一局(场次保持 GAMING);
+     * 本局结束但整场未结束:参与方回退待判定,启用下一局(场次保持 GAMING);
      * 本局胜负留在本局明细里,整场结果等分出胜负时再写一次。
      *
      * @param pendingOutcomes 已提前分出胜负时的整场结果(写 result_json,提供「提前确认」);
@@ -541,13 +542,26 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .eq(TMatch::getId, match.getId())
             .set(TMatch::getResultJson, null));
 
-        TMatchRound next = new TMatchRound();
-        next.setTournamentId(match.getTournamentId());
-        next.setMatchId(match.getId());
-        next.setTenantId(match.getTenantId());
-        next.setRoundSequence(current.getRoundSequence() + 1);
-        next.setStatus(StageConstants.MATCH_GAMING);
-        matchRoundMapper.insert(next);
+        long nextSequence = current.getRoundSequence() + 1;
+        TMatchRound next = matchRoundMapper.selectOne(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, match.getId())
+            .eq(TMatchRound::getRoundSequence, nextSequence));
+        if (next == null) {
+            // BO 预建轮次已全部打平:仍无胜者时才补一局，避免死局无法结束。
+            next = new TMatchRound();
+            next.setTournamentId(match.getTournamentId());
+            next.setMatchId(match.getId());
+            next.setTenantId(match.getTenantId());
+            next.setRoundSequence(nextSequence);
+            next.setStatus(StageConstants.MATCH_GAMING);
+            matchRoundMapper.insert(next);
+        } else {
+            TMatchRound upd = new TMatchRound();
+            upd.setId(next.getId());
+            upd.setStatus(StageConstants.MATCH_GAMING);
+            matchRoundMapper.updateById(upd);
+            next.setStatus(StageConstants.MATCH_GAMING);
+        }
 
         // 提前分出胜负:暂存整场结果,等导播台「提前确认」;同时下一局仍可继续判(不点确认就打完)
         if (pendingOutcomes != null && !pendingOutcomes.isEmpty()) {
@@ -556,9 +570,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
                 .set(TMatch::getResultJson, toResultJson(pendingOutcomes)));
         }
 
-        log.info("场次[{}]第{}局结束,自动进入第{}局", match.getId(),
+        log.info("场次[{}]第{}局结束,进入第{}局", match.getId(),
             current.getRoundSequence(), next.getRoundSequence());
-        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "match");
+        // 自动进入下一局:裁判端据此冻结判罚按钮 5 秒,避免上一局连点误判到新局。
+        refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "round-auto");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "match");
         return buildVo(match.getId(), StageConstants.MATCH_GAMING, results);
     }
@@ -722,8 +737,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             rosterService.syncPreAdvance(stage.getId(), competitorIds);
         }
 
-        // 场次与全部轮次(含平局加赛轮)一并结算
+        // 先按通用状态机结算;BO 预建但未打的后续轮次随后恢复为 PENDING。
         matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_SETTLED);
+        if (profile(stage).knockout()) {
+            restoreUnplayedSeriesRounds(match.getId());
+        }
         // 结算即清空待确认/待公布状态,避免残留
         matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
             .eq(TMatch::getId, match.getId())
@@ -822,6 +840,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 赛段若尚未开始,随本场一起进入 GAMING
         stageLifecycleService.ensureStageGaming(stage.getId());
         matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_GAMING);
+        prepareSeriesRounds(match, stage);
         refereeSseNotifier.notifyMatch(stage.getId(), match.getId(), "match");
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), match.getId(), "match");
         log.info("场次[{}]已单独开始", matchId);
@@ -878,6 +897,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
         rollbackDownstreamIfSettled(match);
         clearMatchState(match, StageConstants.MATCH_GAMING);
+        prepareSeriesRounds(match, stage);
         // 本场参赛方的赛段结果已回退待定:之前按旧结果落进下一赛段中间态的座位还原成空位。
         // 同样只同步"本场参赛方"——重判只改对应那一行。
         List<Long> affected = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
@@ -918,20 +938,36 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
         // 整场已结算:先回退下游占位/晋级,避免重置后旧胜者残留(下游已开赛则拒绝)
         rollbackDownstreamIfSettled(match);
-        // 删掉目标局之后的所有局及其判罚明细
+        // BO 的后续轮次已在开赛时预建:重置只清空判罚并回到目标局,
+        // 仅删除平局加赛产生、且超出标准 BO 数量的额外轮次。
+        int standardGames = MatchFormat.of(stage == null ? null : stage.getRuleConfig()).maxGames();
+        long keepThrough = Math.max(standardGames, roundSequence);
         List<Long> dropRoundIds = rounds.stream()
-            .filter(r -> r.getRoundSequence() != null && r.getRoundSequence() > roundSequence)
+            .filter(r -> r.getRoundSequence() != null && r.getRoundSequence() > keepThrough)
             .map(TMatchRound::getId).filter(Objects::nonNull).toList();
         if (!dropRoundIds.isEmpty()) {
             roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery().in(TRoundScore::getRoundId, dropRoundIds));
             matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery().in(TMatchRound::getId, dropRoundIds));
         }
-        // 清掉目标局本身的判罚明细(重新判罚)
-        roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery().eq(TRoundScore::getRoundId, target.getId()));
-        TMatchRound upd = new TMatchRound();
-        upd.setId(target.getId());
-        upd.setStatus(StageConstants.MATCH_GAMING);
-        matchRoundMapper.updateById(upd);
+        // 清掉目标局及之后各局的判罚;目标局回到进行中,后续预建局回到待开始。
+        List<Long> resetRoundIds = rounds.stream()
+            .filter(r -> r.getRoundSequence() != null && r.getRoundSequence() >= roundSequence)
+            .map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        if (!resetRoundIds.isEmpty()) {
+            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                .in(TRoundScore::getRoundId, resetRoundIds));
+        }
+        for (TMatchRound r : rounds) {
+            if (r.getRoundSequence() == null || r.getRoundSequence() < roundSequence
+                || r.getRoundSequence() > keepThrough) {
+                continue;
+            }
+            TMatchRound upd = new TMatchRound();
+            upd.setId(r.getId());
+            upd.setStatus(r.getRoundSequence().equals(roundSequence)
+                ? StageConstants.MATCH_GAMING : StageConstants.MATCH_PENDING);
+            matchRoundMapper.updateById(upd);
+        }
         // 参赛方回到待判定(局结果不是整场结果);赛段级结果一并回退待定
         participantMapper.update(null, Wrappers.<TMatchParticipant>lambdaUpdate()
             .set(TMatchParticipant::getScoreValue, null)
@@ -960,6 +996,78 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         refereeSseNotifier.notifyMatch(match.getStageId(), matchId, "reset");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), matchId, "reset");
         log.info("场次[{}]已重置到第{}局,等待重新判罚", matchId, roundSequence);
+    }
+
+    /**
+     * 手动切换当前局:只把目标轮置为 GAMING、原当前轮退回 PENDING,不改判罚数据。
+     * 自动推进仍由 {@link #advanceToNextRound} 负责。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void switchCurrentRound(Long matchId, Long roundSequence) {
+        if (roundSequence == null || roundSequence < 1) {
+            throw new ServiceException("局序号非法");
+        }
+        TMatch match = matchMapper.selectById(matchId);
+        if (match == null) {
+            throw new ServiceException("场次不存在");
+        }
+        if (!StageConstants.MATCH_GAMING.equals(match.getStatus())) {
+            throw new ServiceException("仅进行中的场次可切换当前局,当前: {}", match.getStatus());
+        }
+        TStage stage = stageMapper.selectById(match.getStageId());
+        if (stage == null) {
+            throw new ServiceException("赛段不存在");
+        }
+        if (StageConstants.STAGE_SETTLED.equals(stage.getStatus())
+            || StageConstants.STAGE_DISCARD.equals(stage.getStatus())) {
+            throw new ServiceException("赛段[{}]已结束,无法切换当前局", stage.getName());
+        }
+        List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, matchId)
+            .orderByAsc(TMatchRound::getRoundSequence));
+        TMatchRound target = rounds.stream()
+            .filter(r -> roundSequence.equals(r.getRoundSequence()))
+            .findFirst().orElse(null);
+        if (target == null) {
+            throw new ServiceException("第{}局不存在", roundSequence);
+        }
+        if (StageConstants.MATCH_SETTLED.equals(target.getStatus())) {
+            throw new ServiceException("第{}局已结算,请先重置该局再切换", roundSequence);
+        }
+        TMatchRound current = MatchRoundLocator.pickCurrent(rounds, match.getStatus());
+        if (current != null && Objects.equals(current.getId(), target.getId())) {
+            return;
+        }
+        if (current != null && current.getId() != null) {
+            long currentScores = roundScoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
+                .eq(TRoundScore::getRoundId, current.getId()));
+            if (currentScores > 0) {
+                throw new ServiceException("第{}局已有判罚,请先重置或完成后再切换当前局",
+                    current.getRoundSequence());
+            }
+        }
+        for (TMatchRound round : rounds) {
+            if (round.getId() == null || !StageConstants.MATCH_GAMING.equals(round.getStatus())) {
+                continue;
+            }
+            TMatchRound upd = new TMatchRound();
+            upd.setId(round.getId());
+            upd.setStatus(StageConstants.MATCH_PENDING);
+            matchRoundMapper.updateById(upd);
+        }
+        TMatchRound targetUpdate = new TMatchRound();
+        targetUpdate.setId(target.getId());
+        targetUpdate.setStatus(StageConstants.MATCH_GAMING);
+        matchRoundMapper.updateById(targetUpdate);
+        matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
+            .eq(TMatch::getId, matchId)
+            .set(TMatch::getResultJson, null));
+        // 手动切局不触发防误触冻结;若自动冻结尚未结束,裁判端收到后立即解除。
+        refereeSseNotifier.notifyMatch(match.getStageId(), matchId, "round-manual");
+        tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), matchId, "match");
+        log.info("场次[{}]手动切换当前局:{} -> {}", matchId,
+            current == null ? null : current.getRoundSequence(), roundSequence);
     }
 
     /** 场次已结算时回退它写到下游的胜者/败者占位(下游已开赛则拒绝,避免误伤) */
@@ -1039,6 +1147,74 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             .set(TMatch::getResultJson, null));
         // 场次与轮次回目标状态(成套写,避免「场次已结算、轮次还在进行中」)
         matchStateWriter.setStatus(matchId, targetStatus);
+    }
+
+    /**
+     * 淘汰赛开赛时按 BO 格式预建全部轮次:第 1 局立即进行,其余轮次待开始。
+     * 已有轮次保持幂等,平局产生的超额加赛轮在重新开赛时清理。
+     */
+    private void prepareSeriesRounds(TMatch match, TStage stage) {
+        if (match == null || stage == null || !profile(stage).knockout()
+            || !MatchModeEnum.STANDARD.getCode().equals(match.getMatchMode())) {
+            return;
+        }
+        int maxGames = MatchFormat.of(stage.getRuleConfig()).maxGames();
+        List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, match.getId())
+            .orderByAsc(TMatchRound::getRoundSequence));
+        Map<Long, TMatchRound> bySequence = rounds.stream()
+            .filter(r -> r.getRoundSequence() != null)
+            .collect(Collectors.toMap(TMatchRound::getRoundSequence, r -> r, (a, b) -> a));
+
+        List<Long> extraRoundIds = rounds.stream()
+            .filter(r -> r.getRoundSequence() != null && r.getRoundSequence() > maxGames)
+            .map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        if (!extraRoundIds.isEmpty()) {
+            roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
+                .in(TRoundScore::getRoundId, extraRoundIds));
+            matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
+                .in(TMatchRound::getId, extraRoundIds));
+        }
+
+        for (long sequence = 1; sequence <= maxGames; sequence++) {
+            String status = sequence == 1
+                ? StageConstants.MATCH_GAMING : StageConstants.MATCH_PENDING;
+            TMatchRound round = bySequence.get(sequence);
+            if (round == null) {
+                round = new TMatchRound();
+                round.setTournamentId(match.getTournamentId());
+                round.setMatchId(match.getId());
+                round.setTenantId(match.getTenantId());
+                round.setRoundSequence(sequence);
+                round.setStatus(status);
+                matchRoundMapper.insert(round);
+            } else if (!status.equals(round.getStatus())) {
+                TMatchRound upd = new TMatchRound();
+                upd.setId(round.getId());
+                upd.setStatus(status);
+                matchRoundMapper.updateById(upd);
+            }
+        }
+    }
+
+    /** 场次提前结束时,预建但从未判罚的后续轮次恢复为待开始,不能显示成已结算。 */
+    private void restoreUnplayedSeriesRounds(Long matchId) {
+        List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, matchId)
+            .orderByAsc(TMatchRound::getRoundSequence));
+        for (TMatchRound round : rounds) {
+            if (!StageConstants.MATCH_SETTLED.equals(round.getStatus()) || round.getId() == null) {
+                continue;
+            }
+            long scores = roundScoreMapper.selectCount(Wrappers.<TRoundScore>lambdaQuery()
+                .eq(TRoundScore::getRoundId, round.getId()));
+            if (scores == 0) {
+                TMatchRound upd = new TMatchRound();
+                upd.setId(round.getId());
+                upd.setStatus(StageConstants.MATCH_PENDING);
+                matchRoundMapper.updateById(upd);
+            }
+        }
     }
 
     /**

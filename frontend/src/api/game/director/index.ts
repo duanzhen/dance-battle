@@ -149,10 +149,18 @@ export function directorResetMatch(id: string | number) {
   });
 }
 
-/** 重置指定局(BO 多局制):删掉该局之后的局、清空该局判罚,回到该局进行中 */
+/** 重置指定局(BO 多局制):清空该局及之后判罚,回到该局进行中 */
 export function directorResetRound(id: string | number, roundSequence: string | number) {
   return directorRequest({
     url: `/game/director/match/${id}/round/${roundSequence}/reset`,
+    method: 'post'
+  });
+}
+
+/** 手动切换当前局(BO 多局制):不清空判罚,只切换当前生效轮 */
+export function directorSwitchRound(id: string | number, roundSequence: string | number) {
+  return directorRequest({
+    url: `/game/director/match/${id}/round/${roundSequence}/current`,
     method: 'post'
   });
 }

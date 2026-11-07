@@ -202,6 +202,13 @@ class MatchResultStateFlowTest {
             .eq(TMatchRound::getMatchId, matchId)).size();
     }
 
+    private String roundStatus(Long matchId, long roundSequence) {
+        TMatchRound round = matchRoundMapper.selectOne(Wrappers.<TMatchRound>lambdaQuery()
+            .eq(TMatchRound::getMatchId, matchId)
+            .eq(TMatchRound::getRoundSequence, roundSequence));
+        return round == null ? null : round.getStatus();
+    }
+
     /** 本场已落库的打分明细条数(含投票行) */
     private long scoreRows(Long matchId) {
         List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
@@ -602,11 +609,12 @@ class MatchResultStateFlowTest {
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
         matchResultService.startMatch(match.getId());
+        assertEquals(3, roundCount(match.getId()), "BO3 应在开始场次时一次生成3局");
 
         vote(match.getId(), judge, true);
         assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus(),
             "BO3 第1局打完不到2胜,应自动进第2局而不是结算");
-        assertEquals(2, roundCount(match.getId()), "第1局后应自动开第2局");
+        assertEquals(3, roundCount(match.getId()), "第1局后应直接启用预建的第2局,不再新建轮次");
 
         vote(match.getId(), judge, true);
         TMatch afterSecond = matchMapper.selectById(match.getId());
@@ -618,8 +626,54 @@ class MatchResultStateFlowTest {
         matchResultService.publishResult(match.getId());
         assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
             "提前确认后应按正常结果结算");
+        assertEquals(StageConstants.MATCH_PENDING, roundStatus(match.getId(), 3),
+            "提前结束时未打的第3局应保持待开始,不能显示成已结算");
         assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ADVANCE.getCode()));
         assertEquals(1, countOutcome(stage.getId(), OutcomeStatusEnum.ELIMINATED.getCode()));
+    }
+
+    /** BO5 同样在开赛时一次生成5局,而不是每打一局再插入下一局。 */
+    @Test
+    void bo5CreatesAllRoundsWhenMatchStarts() {
+        Long tid = newTournament("BO5开赛建轮");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null, "BO5");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        assertEquals(5, roundCount(match.getId()), "BO5 开始场次时应有5个预建轮次");
+        assertEquals(StageConstants.MATCH_GAMING, roundStatus(match.getId(), 1));
+        assertEquals(StageConstants.MATCH_PENDING, roundStatus(match.getId(), 2));
+        assertEquals(StageConstants.MATCH_PENDING, roundStatus(match.getId(), 5));
+    }
+
+    /** MC 可手动切换当前局;切过去后，自动推进仍从新当前局继续。 */
+    @Test
+    void manualRoundSwitchKeepsAutomaticAdvance() {
+        Long tid = newTournament("BO3手动切局");
+        TStageVo stage = newKnockoutStage(tid, "决赛", 2, 1, false, null, "BO3");
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+
+        matchResultService.switchCurrentRound(match.getId(), 2L);
+        assertEquals(StageConstants.MATCH_PENDING, roundStatus(match.getId(), 1));
+        assertEquals(StageConstants.MATCH_GAMING, roundStatus(match.getId(), 2),
+            "手动切换后第2局应成为当前局");
+        assertEquals(StageConstants.MATCH_PENDING, roundStatus(match.getId(), 3));
+
+        vote(match.getId(), judge, true);
+        assertEquals(StageConstants.MATCH_SETTLED, roundStatus(match.getId(), 2));
+        assertEquals(StageConstants.MATCH_GAMING, roundStatus(match.getId(), 3),
+            "手动切换后仍应保留自动进入下一局的机制");
+        assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus());
     }
 
     /** BO3 2:0 后不点提前确认:继续开第3局,判完打满再结算。 */
@@ -634,6 +688,7 @@ class MatchResultStateFlowTest {
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
         matchResultService.startMatch(match.getId());
+        assertEquals(3, roundCount(match.getId()), "BO3 开赛即应生成3局");
 
         vote(match.getId(), judge, true);
         vote(match.getId(), judge, true);
@@ -641,7 +696,7 @@ class MatchResultStateFlowTest {
         assertEquals(StageConstants.MATCH_GAMING, afterSweep.getStatus(),
             "2:0 不自动结束,应可继续判下一局");
         assertNotNull(afterSweep.getResultJson(), "2:0 应暂存整场结果,供提前确认");
-        assertEquals(3, roundCount(match.getId()), "2:0 后应已开出第3局");
+        assertEquals(3, roundCount(match.getId()), "2:0 后应启用预建的第3局");
 
         // 不点提前确认,继续判第3局 → 打满结算(即便第3局右方赢,整场仍是左方 2:1 胜)
         vote(match.getId(), judge, false);
@@ -662,6 +717,7 @@ class MatchResultStateFlowTest {
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
         matchResultService.startMatch(match.getId());
+        assertEquals(3, roundCount(match.getId()), "BO3 开赛即应生成3局");
 
         vote(match.getId(), judge, true);
         vote(match.getId(), judge, true);
@@ -684,11 +740,12 @@ class MatchResultStateFlowTest {
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
         matchResultService.startMatch(match.getId());
+        assertEquals(3, roundCount(match.getId()), "BO3 开赛即应生成3局");
 
         vote(match.getId(), judge, true);
         vote(match.getId(), judge, false);
         assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus());
-        assertEquals(3, roundCount(match.getId()), "1:1 后应开第3局");
+        assertEquals(3, roundCount(match.getId()), "1:1 后应启用预建的第3局");
 
         vote(match.getId(), judge, true);
         assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
@@ -708,6 +765,7 @@ class MatchResultStateFlowTest {
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
         matchResultService.startMatch(match.getId());
+        assertEquals(3, roundCount(match.getId()), "BO3 开赛即应生成3局");
 
         vote(match.getId(), judge, true);
         vote(match.getId(), judge, false);
@@ -734,6 +792,7 @@ class MatchResultStateFlowTest {
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
         matchResultService.startMatch(match.getId());
+        assertEquals(3, roundCount(match.getId()), "BO3 开赛即应生成3局");
 
         directorJudgeGame(match.getId(), true);
         directorJudgeGame(match.getId(), true);
@@ -741,7 +800,7 @@ class MatchResultStateFlowTest {
         assertEquals(StageConstants.MATCH_GAMING, afterSweep.getStatus(),
             "导播判定 2:0 不自动结束,应可继续判第3局");
         assertNotNull(afterSweep.getResultJson(), "导播判定 2:0 也应暂存结果供提前结束");
-        assertEquals(3, roundCount(match.getId()), "2:0 后应已开出第3局");
+        assertEquals(3, roundCount(match.getId()), "2:0 后应启用预建的第3局");
 
         matchResultService.publishResult(match.getId());
         assertEquals(StageConstants.MATCH_SETTLED, matchMapper.selectById(match.getId()).getStatus(),
@@ -761,6 +820,7 @@ class MatchResultStateFlowTest {
         lifecycleService.startStage(stage.getId());
         TMatch match = matchesOf(stage.getId()).get(0);
         matchResultService.startMatch(match.getId());
+        assertEquals(3, roundCount(match.getId()), "BO3 开赛即应生成3局");
 
         vote(match.getId(), judge, true);   // 第1局 A 胜
         vote(match.getId(), judge, true);   // 第2局 A 胜 → 2:0,已开第3局并暂存结果
@@ -771,11 +831,13 @@ class MatchResultStateFlowTest {
         TMatch after = matchMapper.selectById(match.getId());
         assertEquals(StageConstants.MATCH_GAMING, after.getStatus(), "重置后场次回到进行中");
         assertNull(after.getResultJson(), "重置后不应残留待确认结果");
-        assertEquals(2, roundCount(match.getId()), "第2局之后的第3局应被删除");
+        assertEquals(3, roundCount(match.getId()), "重置应保留开赛时预建的第3局");
+        assertEquals(StageConstants.MATCH_GAMING, roundStatus(match.getId(), 2));
+        assertEquals(StageConstants.MATCH_PENDING, roundStatus(match.getId(), 3));
 
         // 重新判第2局为 B 胜 → 1:1,应自动再开第3局
         vote(match.getId(), judge, false);
         assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus());
-        assertEquals(3, roundCount(match.getId()), "1:1 后应重新开第3局");
+        assertEquals(3, roundCount(match.getId()), "1:1 后应直接启用预建的第3局");
     }
 }

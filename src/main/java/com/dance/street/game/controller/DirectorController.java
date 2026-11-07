@@ -263,7 +263,7 @@ public class DirectorController {
     }
 
     /**
-     * 重置指定局(BO 多局制):删掉该局之后的局、清空该局判罚,场次回到该局进行中。
+     * 重置指定局(BO 多局制):保留预建后续局、清空该局及之后判罚,场次回到该局进行中。
      */
     @Log(title = "导播台重置局", businessType = BusinessType.UPDATE)
     @PostMapping("/match/{id}/round/{roundSequence}/reset")
@@ -272,6 +272,19 @@ public class DirectorController {
                               HttpServletRequest request) {
         assertMatchInTournament(currentTournament(request), id);
         matchResultService.resetRound(id, roundSequence);
+        return R.ok();
+    }
+
+    /**
+     * 手动切换当前局(BO 多局制):不清空判罚,只切换当前生效的 GAMING 轮。
+     */
+    @Log(title = "导播台切换当前局", businessType = BusinessType.UPDATE)
+    @PostMapping("/match/{id}/round/{roundSequence}/current")
+    public R<Void> switchCurrentRound(@PathVariable("id") Long id,
+                                      @PathVariable("roundSequence") Long roundSequence,
+                                      HttpServletRequest request) {
+        assertMatchInTournament(currentTournament(request), id);
+        matchResultService.switchCurrentRound(id, roundSequence);
         return R.ok();
     }
 

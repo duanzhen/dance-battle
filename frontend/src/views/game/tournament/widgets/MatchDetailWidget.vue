@@ -592,7 +592,9 @@ const loadData = async () => {
       const md: any = await getMatch(current.id);
       matchDetail.value = mirrorMatchDetail(md.data || null);
       const rounds: any[] = matchDetail.value?.roundVotes || [];
-      roundSeq.value = rounds.length > 0 ? rounds[rounds.length - 1].roundSequence : 1;
+      const currentRound = rounds.find((r: any) => r.status === 'GAMING')
+        || [...rounds].reverse().find((r: any) => r.status === 'SETTLED');
+      roundSeq.value = currentRound?.roundSequence || 1;
     } catch (e) {
       console.warn('MatchDetailWidget 加载场次详情失败', e);
       matchDetail.value = null;
@@ -781,7 +783,9 @@ const voteBlockStyle = { width: 'clamp(12px, 1.5vw, 28px)', height: 'clamp(10px,
 
 const roundStatusText = (r: any) => {
   if (r.outcome === 'DRAW') return '平局加赛';
-  return r.status === 'SETTLED' ? '已结算' : '判罚中';
+  if (r.status === 'SETTLED') return '已结算';
+  if (r.status === 'PENDING') return '未开始';
+  return '判罚中';
 };
 
 /** 单轮各裁判票数统计 */

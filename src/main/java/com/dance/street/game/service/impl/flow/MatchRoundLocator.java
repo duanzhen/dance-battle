@@ -11,12 +11,11 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * 「当前生效轮」的唯一口径:一个场次里轮次序号最大的那一轮。
+ * 「当前生效轮」的唯一口径。
  *
- * <p>多轮场次(淘汰赛平局新增的加赛轮、后续 BO 多局制)中,裁判此刻判的就是最新一轮。
- * 这个选择此前在两个服务里各写了一份:提交结果侧取最新一轮,多裁判累计侧取首轮,
- * 同一场次的"写入轮"与"回显轮"因此会分叉(裁判提交的分进了第 1 轮,回显按最后一轮查,
- * 表现为「提交了却看不到分」)。收敛到本类后只有一个答案。</p>
+ * <p>BO3/BO5 开赛时会预建全部轮次:第 1 局 GAMING,其余 PENDING。当前轮取序号最小的
+ * 未结算轮;场次已结束则取最后一局已结算轮。这样预建轮次不会被误当成当前判罚轮,
+ * 同时保留 BO1 平局加赛等超出预建数量的极端场景。</p>
  *
  * @author duane
  */
@@ -26,15 +25,14 @@ public class MatchRoundLocator {
 
     private final TMatchRoundMapper matchRoundMapper;
 
-    /**
-     * 取场次的当前生效轮(序号最大者);一个轮次都没有时补建第 1 轮并返回。
-     */
+    /** 取场次的当前生效轮;一个轮次都没有时补建第 1 轮并返回。 */
     public TMatchRound current(TMatch match) {
         List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
             .eq(TMatchRound::getMatchId, match.getId())
             .orderByAsc(TMatchRound::getRoundSequence));
-        if (!rounds.isEmpty()) {
-            return rounds.get(rounds.size() - 1);
+        TMatchRound current = pickCurrent(rounds, match.getStatus());
+        if (current != null) {
+            return current;
         }
         TMatchRound round = new TMatchRound();
         round.setTournamentId(match.getTournamentId());
@@ -44,5 +42,38 @@ public class MatchRoundLocator {
         round.setStatus(StageConstants.MATCH_GAMING);
         matchRoundMapper.insert(round);
         return round;
+    }
+
+    /**
+     * 从按序号升序排列的轮次中选当前轮。
+     *
+     * <p>进行中:优先取唯一 GAMING 轮;没有 GAMING 时取第一局未结算轮;
+     * 已结束:最后一局已结算轮。手动切换后目标轮会置 GAMING,因此会稳定成为当前轮。
+     * 这样预建的后续轮次只作为赛程占位,不会抢走当前判罚轮。</p>
+     */
+    public static TMatchRound pickCurrent(List<TMatchRound> rounds, String matchStatus) {
+        if (rounds == null || rounds.isEmpty()) {
+            return null;
+        }
+        if (StageConstants.MATCH_SETTLED.equals(matchStatus)) {
+            TMatchRound lastSettled = null;
+            for (TMatchRound round : rounds) {
+                if (StageConstants.MATCH_SETTLED.equals(round.getStatus())) {
+                    lastSettled = round;
+                }
+            }
+            return lastSettled != null ? lastSettled : rounds.get(rounds.size() - 1);
+        }
+        for (TMatchRound round : rounds) {
+            if (StageConstants.MATCH_GAMING.equals(round.getStatus())) {
+                return round;
+            }
+        }
+        for (TMatchRound round : rounds) {
+            if (!StageConstants.MATCH_SETTLED.equals(round.getStatus())) {
+                return round;
+            }
+        }
+        return rounds.get(rounds.size() - 1);
     }
 }

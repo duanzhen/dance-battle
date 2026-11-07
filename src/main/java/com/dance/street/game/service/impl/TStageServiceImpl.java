@@ -8,7 +8,9 @@ import org.dromara.common.mybatis.core.page.PageQuery;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.domain.TPlayer;
+import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.bo.StageRefereeBo;
 import com.dance.street.game.domain.TRoundScore;
@@ -49,6 +52,7 @@ import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
+import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
@@ -80,6 +84,7 @@ public class TStageServiceImpl implements ITStageService {
     private final TCompetitorMapper competitorMapper;
     private final TCompetitorMemberMapper competitorMemberMapper;
     private final TRoundScoreMapper roundScoreMapper;
+    private final TRefereeMapper refereeMapper;
     private final TRefereeStageMapper refereeStageMapper;
     private final ITRefereeStageService refereeStageService;
     private final TPlayerMapper playerMapper;
@@ -246,6 +251,7 @@ public class TStageServiceImpl implements ITStageService {
         if (add.getNextStageId() != null) {
             rosterService.reconcileAfterLinkChange(add.getNextStageId());
         }
+        assignTournamentRefereesByDefault(add);
 
         TStageVo vo = MapstructUtils.convert(add, TStageVo.class);
         fillChainPrev(vo);
@@ -338,13 +344,16 @@ public class TStageServiceImpl implements ITStageService {
                 "赛段状态只能通过开始、完成或重置流程变更，不能直接标记为 {}（当前 {}）",
                 patch.getStatus(), oldStage.getStatus());
         }
+        boolean ruleConfigChanged = changed(oldStage.getRuleConfig(), patch.getRuleConfig())
+            && !onlyResultPublishConfigChanged(oldStage.getRuleConfig(), patch.getRuleConfig());
         if (!StageConstants.STAGE_DRAFT.equals(oldStage.getStatus())
             && (changed(oldStage.getStageMode(), patch.getStageMode())
             || changed(oldStage.getMembers(), patch.getMembers())
             || changed(oldStage.getTeamCountStart(), patch.getTeamCountStart())
             || changed(oldStage.getTeamCountEnd(), patch.getTeamCountEnd())
-            || changed(oldStage.getRuleConfig(), patch.getRuleConfig()))) {
-            throw new ServiceException("赛段[{}]已开始，赛制、人数和规则配置已锁定；如需调整请先重置为草稿",
+            || ruleConfigChanged)) {
+            throw new ServiceException(
+                "赛段[{}]已开始，赛制、人数及结果公布设置以外的规则已锁定；如需调整请先重置为草稿",
                 oldStage.getName());
         }
         // 指针列不参与配置更新:客户端值已被调用方清空,这里再兜一层,
@@ -365,11 +374,12 @@ public class TStageServiceImpl implements ITStageService {
         // 海选:裁判到底是谁由「圈配置」决定 —— 赛段级绑定跟着圈裁判同步一份
         syncAuditionCircleReferees(baseMapper.selectById(patch.getId()));
 
-        // 判罚方式/打分口径等"裁判端界面相关"配置变了:推一次裁判通道,让已打开的裁判页
-        // 重新拉取 —— 否则「裁判判罚 ↔ 导播台判定」切换后,裁判页还停在原来的判罚界面上。
+        // 判罚/公布方式等配置变了:裁判页需要重新决定是否展示判罚界面,
+        // 导播端与大屏也需要重新判断哪些结果可见,因此两条 SSE 通道都推一次。
         TStage updated = baseMapper.selectById(patch.getId());
-        if (refereeFacingConfigChanged(oldStage, updated)) {
+        if (liveConfigChanged(oldStage, updated)) {
             refereeSseNotifier.notifyStage(patch.getId(), "config");
+            tournamentEventNotifier.notify(updated.getTournamentId(), updated.getId(), null, "config");
         }
 
         // 返回库中整行:prev/next 是展示列,链由 StageChain 维护,回读才是最新口径
@@ -423,12 +433,39 @@ public class TStageServiceImpl implements ITStageService {
     }
 
     /**
-     * 影响裁判端界面的配置是否变化:判罚方式(裁判/导播台)、满分、打分口径。
+     * 新建非海选赛段时默认关联当前赛事的全部裁判。
+     *
+     * <p>海选裁判由 ruleConfig.circleRefereeIds 逐圈决定,不能在这里提前写赛段级绑定;
+     * 其他赛制没有圈级拆分,赛事裁判就是该赛段的默认裁判组。后续仍可在草稿期显式调整。</p>
+     */
+    private void assignTournamentRefereesByDefault(TStage stage) {
+        if (stage == null || stage.getId() == null || stage.getTournamentId() == null
+            || stageCap(stage).audition()) {
+            return;
+        }
+        List<Long> refereeIds = refereeMapper.selectList(Wrappers.<TReferee>lambdaQuery()
+                .eq(TReferee::getTournamentId, stage.getTournamentId())
+                .select(TReferee::getId))
+            .stream().map(TReferee::getId).filter(Objects::nonNull).distinct().toList();
+        if (refereeIds.isEmpty()) {
+            return;
+        }
+        StageRefereeBo bo = new StageRefereeBo();
+        bo.setStageId(stage.getId());
+        bo.setTournamentId(stage.getTournamentId());
+        bo.setRefereeIds(refereeIds);
+        refereeStageService.assignReferees(bo);
+        log.info("非海选赛段[{}]默认关联赛事[{}]全部裁判:{} 人",
+            stage.getId(), stage.getTournamentId(), refereeIds.size());
+    }
+
+    /**
+     * 影响裁判端、导播端或大屏展示的配置是否变化:公布方式/范围、分数可见性、满分与打分口径。
      *
      * <p>只看这几项而不是整段 JSON:配置保存会做归一化(补字段、调顺序),
      * 按字符串比较会对每次保存都推一次无意义的刷新。</p>
      */
-    private boolean refereeFacingConfigChanged(TStage oldStage, TStage updated) {
+    private boolean liveConfigChanged(TStage oldStage, TStage updated) {
         if (oldStage == null || updated == null) {
             return false;
         }
@@ -438,8 +475,52 @@ public class TStageServiceImpl implements ITStageService {
             return oldRc != newRc && !Objects.equals(oldStage.getRuleConfig(), updated.getRuleConfig());
         }
         return !Objects.equals(oldRc.resolvePublishMode(), newRc.resolvePublishMode())
+            || !Objects.equals(oldRc.getPublishScope(), newRc.getPublishScope())
+            || !Objects.equals(oldRc.getShowScore(), newRc.getShowScore())
+            || !Objects.equals(oldRc.getScoreDisplay(), newRc.getScoreDisplay())
             || !Objects.equals(oldRc.getMaxScore(), newRc.getMaxScore())
             || !Objects.equals(oldRc.getScoring(), newRc.getScoring());
+    }
+
+    /**
+     * 已开始赛段只允许改结果公布区:其余 ruleConfig 字段仍必须与库中一致。
+     *
+     * <p>比较 JSON 树而不是解析后的 Bean,避免未建模字段(如擂台赛 scale、顶层
+     * advanceCount)被静默忽略后成为绕过锁定的入口。公布模式的位置兼容淘汰赛
+     * {@code knockout.publishMode} 与其他赛制顶层 {@code publishMode}。</p>
+     */
+    private boolean onlyResultPublishConfigChanged(String beforeJson, String afterJson) {
+        if (Objects.equals(beforeJson, afterJson)) {
+            return true;
+        }
+        if (StringUtils.isBlank(beforeJson) || StringUtils.isBlank(afterJson)) {
+            return false;
+        }
+        try {
+            ObjectMapper mapper = SnowflakeJson.mapper();
+            JsonNode before = mapper.readTree(beforeJson);
+            JsonNode after = mapper.readTree(afterJson);
+            stripResultPublishSettings(before);
+            stripResultPublishSettings(after);
+            return Objects.equals(before, after);
+        } catch (Exception e) {
+            log.warn("赛段结果公布配置比较失败,按锁定处理: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private void stripResultPublishSettings(JsonNode root) {
+        if (!(root instanceof ObjectNode config)) {
+            return;
+        }
+        config.remove("publishMode");
+        config.remove("publishScope");
+        config.remove("showScore");
+        config.remove("scoreDisplay");
+        JsonNode knockout = config.get("knockout");
+        if (knockout instanceof ObjectNode knockoutConfig) {
+            knockoutConfig.remove("publishMode");
+        }
     }
 
     /**

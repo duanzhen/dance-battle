@@ -5,6 +5,7 @@ import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TTournament;
+import com.dance.street.game.domain.bo.StageRefereeBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.bo.TStageConfigBo;
 import com.dance.street.game.domain.vo.TStageVo;
@@ -12,6 +13,7 @@ import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
+import com.dance.street.game.service.ITRefereeStageService;
 import com.dance.street.game.service.ITStageService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -54,6 +56,7 @@ class AuditionCircleRefereeSyncTest {
     @Autowired private TTournamentMapper tournamentMapper;
     @Autowired private TRefereeMapper refereeMapper;
     @Autowired private TRefereeStageMapper refereeStageMapper;
+    @Autowired private ITRefereeStageService refereeStageService;
     @Autowired private ITStageService stageService;
 
     @Test
@@ -77,18 +80,23 @@ class AuditionCircleRefereeSyncTest {
         assertEquals(List.of(r1, r2, r3), stageRefereeIds(audition.getId()));
     }
 
-    /** 非海选赛段不参与同步:它的裁判仍由「裁判组」显式分配。 */
+    /** 非海选赛段默认关联赛事全部裁判,且后续显式调整不会被海选圈同步覆盖。 */
     @Test
-    void nonAuditionStageKeepsItsOwnRefereeGroup() {
+    void nonAuditionStageDefaultsToTournamentRefereesAndKeepsExplicitGroup() {
         Long tid = newTournament("knockout-referee");
         Long r1 = newReferee(tid, "裁判甲");
+        Long r2 = newReferee(tid, "裁判乙");
+        Long otherTid = newTournament("other-knockout-referee");
+        newReferee(otherTid, "其他赛事裁判");
         TStageVo knockout = newStage(tid, "16强", "KNOCKOUT");
+        assertEquals(List.of(r1, r2), stageRefereeIds(knockout.getId()),
+            "非海选赛段应默认关联本赛事全部裁判,不包含其他赛事裁判");
 
-        TRefereeStage link = new TRefereeStage();
-        link.setRefereeId(r1);
-        link.setStageId(knockout.getId());
-        link.setTournamentId(tid);
-        refereeStageMapper.insert(link);
+        StageRefereeBo assign = new StageRefereeBo();
+        assign.setStageId(knockout.getId());
+        assign.setTournamentId(tid);
+        assign.setRefereeIds(List.of(r1));
+        refereeStageService.assignReferees(assign);
 
         saveCircleReferees(knockout.getId(), List.of());
         assertEquals(List.of(r1), stageRefereeIds(knockout.getId()),

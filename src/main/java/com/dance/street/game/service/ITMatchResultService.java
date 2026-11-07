@@ -32,12 +32,20 @@ public interface ITMatchResultService {
     void resetMatch(Long matchId);
 
     /**
-     * 重置指定局(BO 多局制):删掉该局之后的所有局、清空该局判罚明细,
+     * 重置指定局(BO 多局制):保留开赛时预建的后续局,清空该局及之后的判罚明细,
      * 场次回到该局进行中,等待重新判罚。用于导播台发现某一局判错时回退。
      *
      * @param roundSequence 目标局序号(1 起)
      */
     void resetRound(Long matchId, Long roundSequence);
+
+    /**
+     * 手动切换当前局(导播台):目标局必须是未结算轮,切走后原当前局回到待开始;
+     * 不修改判罚明细。目标局已有判罚、或原当前局已有判罚时拒绝，需先重置。
+     *
+     * @param roundSequence 目标局序号(1 起)
+     */
+    void switchCurrentRound(Long matchId, Long roundSequence);
 
     /** 导播台确认公布结果(MANUAL 模式):用裁判判完暂存的结果结算场次 */
     com.dance.street.game.domain.vo.MatchResultVo publishResult(Long matchId);

@@ -139,6 +139,7 @@
                   @update:src="handleUpdateProp('src', $event)"
                   @update:text="handleUpdateProp('text', $event)"
                   @update:fontSize="handleUpdateProp('fontSize', $event)"
+                  @update:cardWidth="handleUpdateProp('cardWidth', $event)"
                   @update:color="handleUpdateProp('color', $event)"
                   @update:fontWeight="handleUpdateProp('fontWeight', $event)"
                   @update:textAlign="handleUpdateProp('textAlign', $event)"

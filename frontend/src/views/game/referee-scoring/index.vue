@@ -347,7 +347,7 @@
                   <div v-for="dim in dimensions" :key="dim.key" class="flex items-center justify-between gap-3 mb-2">
                     <div class="min-w-[72px]">
                       <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
-                      <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
+                      <div class="text-[9px] text-neutral-600">满分 {{ dimMaxScore(dim.key) }}</div>
                       <div v-if="scoringAggregateRule === 'WEIGHTED'" class="text-[9px] text-amber-500/80">
                         权重 {{ Number(dim.weight) || 0 }}%
                       </div>
@@ -361,14 +361,18 @@
                         <Minus class="w-4 h-4 mx-auto" />
                       </button>
                       <input
-                        type="number"
-                        min="0"
-                        :max="dim.maxScore || undefined"
-                        :readonly="blockSoftKeyboard"
-                        :inputmode="blockSoftKeyboard ? 'none' : 'decimal'"
+                        type="text"
+                        inputmode="decimal"
+                        enterkeyhint="done"
+                        autocomplete="off"
+                        pattern="[0-9]*[.]?[0-9]{0,2}"
+                        aria-label="维度分数"
                         :value="keypadTarget?.competitorId != null ? getDimScore(keypadTarget.competitorId, dim.key) : 0"
+                        @focus="selectScoreValue"
                         @input="keypadTarget?.competitorId != null && onDimInput(keypadTarget.competitorId, dim.key, $event)"
-                        class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
+                        @blur="keypadTarget?.competitorId != null && onDimBlur(keypadTarget.competitorId, dim.key, $event)"
+                        @keydown.enter.prevent="finishScoreInput"
+                        class="score-number-input w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
                       />
                       <button
                         @click="adjustDim(keypadTarget?.competitorId!, dim.key, 1)"
@@ -541,7 +545,7 @@
                   <div v-for="dim in dimensions" :key="dim.key" class="flex items-center justify-between gap-3">
                     <div class="min-w-[72px]">
                       <div class="text-xs font-bold text-neutral-300">{{ dim.name || dim.key }}</div>
-                      <div v-if="dim.maxScore" class="text-[9px] text-neutral-600">满分 {{ dim.maxScore }}</div>
+                      <div class="text-[9px] text-neutral-600">满分 {{ dimMaxScore(dim.key) }}</div>
                       <div v-if="scoringAggregateRule === 'WEIGHTED'" class="text-[9px] text-amber-500/80">
                         权重 {{ Number(dim.weight) || 0 }}%
                       </div>
@@ -554,14 +558,18 @@
                         <Minus class="w-4 h-4 mx-auto" />
                       </button>
                       <input
-                        type="number"
-                        min="0"
-                        :max="dim.maxScore || undefined"
-                        :readonly="blockSoftKeyboard"
-                        :inputmode="blockSoftKeyboard ? 'none' : 'decimal'"
+                        type="text"
+                        inputmode="decimal"
+                        enterkeyhint="done"
+                        autocomplete="off"
+                        pattern="[0-9]*[.]?[0-9]{0,2}"
+                        aria-label="维度分数"
                         :value="getDimScore(p.competitorId!, dim.key)"
+                        @focus="selectScoreValue"
                         @input="onDimInput(p.competitorId!, dim.key, $event)"
-                        class="w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
+                        @blur="onDimBlur(p.competitorId!, dim.key, $event)"
+                        @keydown.enter.prevent="finishScoreInput"
+                        class="score-number-input w-20 h-10 bg-black text-center text-xl font-black font-mono text-amber-400 rounded-lg border border-neutral-700 focus:border-amber-500 outline-none tabular-nums"
                       />
                       <button
                         @click="adjustDim(p.competitorId!, dim.key, 1)"
@@ -646,6 +654,7 @@ import { subscribeChannel } from '@/utils/sseChannel';
 import type { SseStatus } from '@/utils/sseChannel';
 import SseLiveBadge from '@/components/SseLiveBadge/index.vue';
 import { payloadOf } from '@/utils/apiEnvelope';
+import { sanitizeScoreInput } from '@/utils/scoreInput';
 import {
   parseTournamentColorConfig,
   isMatchMirrored,
@@ -845,7 +854,7 @@ const keypadSubmitting = ref(false);
 const scoreInputRef = ref<HTMLInputElement | null>(null);
 /**
  * 触屏设备标记:裁判端主要在手机上使用,页面自带软键盘/加减按钮打分。
- * 若让原生输入框获得焦点,系统会弹出手机键盘遮挡打分界面,因此触屏设备给分数输入框
+ * 若让原生输入框获得焦点,系统会弹出手机键盘遮挡打分界面,因此触屏设备给海选分数输入框
  * 加 readonly + inputmode="none",只接受页面内键盘/按钮的输入;
  * 桌面端不限制,仍可用物理键盘直接输入(见 keyboard 事件处理)。
  */
@@ -857,6 +866,18 @@ const auditionMaxScore = ref(10);
 const keypadMax = computed(() => Math.max(1, Number(auditionMaxScore.value) || 10));
 /** 小数位数:10 分制与 100 分制都支持两位小数 */
 const keypadDecimals = computed(() => 2);
+
+/** 点击排名赛分数后全选当前值,方便直接输入覆盖 */
+const selectScoreValue = (event: FocusEvent) => {
+  const el = event.target as HTMLInputElement | null;
+  if (!el) return;
+  nextTick(() => el.select());
+};
+
+/** 手机数字键盘点“完成”时收起键盘 */
+const finishScoreInput = (event: KeyboardEvent) => {
+  (event.target as HTMLInputElement | null)?.blur();
+};
 
 /** 选手卡片 DOM 引用(用于选中时自动居中滚动) */
 const chipEls = new Map<number, HTMLElement>();
@@ -1153,10 +1174,10 @@ const getDimScore = (competitorId: number, dim: string): number => {
   return edits.value[competitorId]?.[dim] ?? 0;
 };
 
-/** 维度满分:未配置或非正数表示不限 */
+/** 维度满分:与后端一致,未配置或非法时按 10 分处理 */
 const dimMaxScore = (dim: string): number | null => {
   const max = Number(dimensions.value.find((d) => d.key === dim)?.maxScore);
-  return Number.isFinite(max) && max > 0 ? max : null;
+  return Number.isFinite(max) && max > 0 ? max : 10;
 };
 
 /** 维度展示名(提示语里用) */
@@ -1183,21 +1204,33 @@ const setDimScore = (competitorId: number, dim: string, raw: string) => {
 };
 
 /**
- * 排名赛维度分键盘输入:超满分的输入整条不接受,回退到上一次有效值。
- * 按钮(adjustDim)与键盘走同一上限,避免只限了按钮、"手输能超"的情况。
+ * 排名赛维度分键盘输入:只接受数字和一个小数点,小数最多两位;
+ * 超满分的输入整条不接受,回退到上一次有效值。按钮与键盘走同一上限。
  */
 const onDimInput = (competitorId: number, dim: string, event: Event) => {
   const el = event.target as HTMLInputElement;
-  const parsed = Number(el.value);
   const max = dimMaxScore(dim);
-  if (max != null && Number.isFinite(parsed) && parsed > max) {
-    const fallback = getDimScore(competitorId, dim);
-    // 回退值就是当前已存的分(含 0),照实显示,别把 0 分显示成空
-    el.value = String(fallback);
+  const fallback = String(getDimScore(competitorId, dim));
+  const sanitized = sanitizeScoreInput(el.value, { max, fallback });
+  el.value = sanitized.value;
+  if (sanitized.overMax) {
     tipOverLimit(`「${dimLabel(dim)}」满分 ${max} 分`);
     return;
   }
-  setDimScore(competitorId, dim, el.value);
+  if (sanitized.invalid) {
+    tipOverLimit('分数只能输入数字和小数点');
+    return;
+  }
+  setDimScore(competitorId, dim, sanitized.value);
+};
+
+/** 失焦时把空输入和单独的小数点规范成 0,避免输入框看起来仍是空值 */
+const onDimBlur = (competitorId: number, dim: string, event: FocusEvent) => {
+  const el = event.target as HTMLInputElement;
+  if (el.value === '' || el.value === '.') {
+    el.value = '0';
+    setDimScore(competitorId, dim, '0');
+  }
 };
 
 const adjustDim = (competitorId: number, dim: string, delta: number) => {
@@ -1769,5 +1802,16 @@ onUnmounted(() => {
 /* 打分输入框不显示闪烁光标:裁判打分/投屏录制时更干净 */
 .no-caret {
   caret-color: transparent;
+}
+/* 排名赛分数框点击后直接输入:覆盖根节点的 select-none,并隐藏数字框步进箭头 */
+.score-number-input {
+  user-select: text;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.score-number-input::-webkit-inner-spin-button,
+.score-number-input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
 }
 </style>

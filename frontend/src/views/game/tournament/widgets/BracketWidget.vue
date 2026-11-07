@@ -19,7 +19,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="listName(row.left)">{{ listName(row.left) || BLANK_NAME }}</span>
+              <span class="name" :style="fz(1)" :title="listName(row.left)">{{ nameOrBlank(listName(row.left)) }}</span>
             </span>
             <span class="bracket-list-vs" :style="fz(0.8)">VS</span>
             <span class="bracket-list-side" :class="{ 'winner-gold': showWinner && isWinner(row.right) }">
@@ -31,7 +31,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="listName(row.right)">{{ listName(row.right) || BLANK_NAME }}</span>
+              <span class="name" :style="fz(1)" :title="listName(row.right)">{{ nameOrBlank(listName(row.right)) }}</span>
             </span>
           </div>
         </div>
@@ -48,7 +48,7 @@
             alt=""
             @error="onAvatarError"
           />
-          <span class="name" :class="{ 'winner-gold': showWinner && !!champion }" :style="fz(1)">{{ champion?.name || '' }}</span>
+          <span class="name" :class="{ 'winner-gold': showWinner && !!champion }" :style="fz(1)">{{ nameOrBlank(champion?.name) }}</span>
         </div>
         <!-- 左右半区:下方 -->
         <div class="flex items-center justify-between min-h-0 w-full">
@@ -66,7 +66,7 @@
               :class="{ 'winner-gold': showWinner && champion && champion.competitorId === finalists.left?.competitorId }"
               :style="fz(1)"
               :title="finalists.left?.name || ''"
-              >{{ finalists.left?.name || '' }}</span
+              >{{ nameOrBlank(finalists.left?.name) }}</span
             >
           </div>
           <div class="final-card" :class="{ 'final-win': champion && champion.competitorId === finalists.right?.competitorId }">
@@ -83,7 +83,7 @@
               :class="{ 'winner-gold': showWinner && champion && champion.competitorId === finalists.right?.competitorId }"
               :style="fz(1)"
               :title="finalists.right?.name || ''"
-              >{{ finalists.right?.name || '' }}</span
+              >{{ nameOrBlank(finalists.right?.name) }}</span
             >
           </div>
         </div>
@@ -102,7 +102,7 @@
                 @error="onAvatarError"
               />
               <span class="name" :class="{ 'winner-gold': showWinner && semi.left?.top?.win }" :style="fz(1)" :title="semi.left?.top?.name || ''">{{
-                semi.left?.top?.name || ''
+                nameOrBlank(semi.left?.top?.name)
               }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.left?.bottom?.win }">
@@ -119,7 +119,7 @@
                 :class="{ 'winner-gold': showWinner && semi.left?.bottom?.win }"
                 :style="fz(1)"
                 :title="semi.left?.bottom?.name || ''"
-                >{{ semi.left?.bottom?.name || '' }}</span
+                >{{ nameOrBlank(semi.left?.bottom?.name) }}</span
               >
             </div>
           </div>
@@ -135,7 +135,7 @@
                 @error="onAvatarError"
               />
               <span class="name" :class="{ 'winner-gold': showWinner && semi.right?.top?.win }" :style="fz(1)" :title="semi.right?.top?.name || ''">{{
-                semi.right?.top?.name || ''
+                nameOrBlank(semi.right?.top?.name)
               }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': semi.right?.bottom?.win }">
@@ -152,7 +152,7 @@
                 :class="{ 'winner-gold': showWinner && semi.right?.bottom?.win }"
                 :style="fz(1)"
                 :title="semi.right?.bottom?.name || ''"
-                >{{ semi.right?.bottom?.name || '' }}</span
+                >{{ nameOrBlank(semi.right?.bottom?.name) }}</span
               >
             </div>
           </div>
@@ -161,7 +161,7 @@
         <div v-if="thirdPlaceEnabled" class="flex-none flex justify-center min-h-0">
           <div class="final-card third-place-card" :class="{ 'final-win': !!semi.third?.winner }">
             <span class="third-place-label" :style="fz(0.65)">季军</span>
-            <span class="name" :style="fz(1)" :title="thirdPlaceText">{{ thirdPlaceText }}</span>
+            <span class="name" :style="fz(1)" :title="thirdPlaceText">{{ nameOrBlank(thirdPlaceText) }}</span>
           </div>
         </div>
       </div>
@@ -189,7 +189,7 @@
                 :class="{ 'winner-gold': showWinner && s.leftWin }"
                 :style="fz(1)"
                 :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName"
-                >{{ s.leftName || '' }}</span
+                >{{ nameOrBlank(s.leftName) }}</span
               >
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
@@ -206,7 +206,7 @@
                 :class="{ 'winner-gold': showWinner && s.rightWin }"
                 :style="fz(1)"
                 :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName"
-                >{{ s.rightName || '' }}</span
+                >{{ nameOrBlank(s.rightName) }}</span
               >
             </div>
           </template>
@@ -222,7 +222,7 @@
           <template v-for="(s, i) in rightSlots" :key="'r' + i">
             <div class="final-card" :class="{ 'final-win': s.leftWin, 'final-bye': s.leftBye }">
               <img v-if="showAvatar && s.leftAvatar" :src="s.leftAvatar" class="bracket-avatar" :style="avatarStyle" alt="" @error="onAvatarError" />
-              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ s.leftName || '' }}</span>
+              <span class="name" :style="fz(1)" :title="s.leftSrc ? s.leftName + ' · ' + s.leftSrc : s.leftName">{{ nameOrBlank(s.leftName) }}</span>
             </div>
             <div class="final-card" :class="{ 'final-win': s.rightWin, 'final-bye': s.rightBye }">
               <img
@@ -233,7 +233,7 @@
                 alt=""
                 @error="onAvatarError"
               />
-              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ s.rightName || '' }}</span>
+              <span class="name" :style="fz(1)" :title="s.rightSrc ? s.rightName + ' · ' + s.rightSrc : s.rightName">{{ nameOrBlank(s.rightName) }}</span>
             </div>
           </template>
         </div>
@@ -287,6 +287,15 @@
         <div class="space-y-3 mt-2">
           <ColorInput label="文字颜色" :model-value="textColor || '#000000'" @update:model-value="$emit('update:textColor', $event)" />
           <TextInput label="字号(px)" :model-value="String(fontSize ?? 24)" placeholder="24" @update:model-value="handleFontSizeUpdate" />
+          <div>
+            <TextInput
+              label="选手卡片宽度(px)"
+              :model-value="cardWidth != null ? String(cardWidth) : ''"
+              placeholder="自动"
+              @update:model-value="handleCardWidthUpdate"
+            />
+            <p class="text-[9px] text-neutral-600 mt-1">留空时自动适配，范围 40–1200px</p>
+          </div>
           <div>
             <span class="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">边框颜色</span>
             <div class="flex items-center gap-1.5">
@@ -352,6 +361,12 @@ import { subscribeTournamentEvents, unsubscribeTournamentEvents } from '@/utils/
  */
 const BLANK_NAME = '\u00A0';
 
+/** 空名字也保留一个不可见字符,避免输入出现/消失时行盒和卡片高度跳变 */
+const nameOrBlank = (name?: string | null) => {
+  const text = String(name ?? '').trim();
+  return text ? String(name) : BLANK_NAME;
+};
+
 const props = defineProps<{
   stageId?: string | number;
   mode?: 'view' | 'edit';
@@ -360,6 +375,8 @@ const props = defineProps<{
   borderColor?: string;
   bgColor?: string;
   fontSize?: number;
+  /** 选手卡片宽度(px);留空时沿用原有自适应宽度 */
+  cardWidth?: number | null;
   /** 是否在名字前显示选手头像(默认不显示) */
   showAvatar?: boolean;
   /** 展示胜利者:胜者名字显示为金色 */
@@ -373,10 +390,17 @@ const emit = defineEmits<{
   'update:borderColor': [value: string];
   'update:bgColor': [value: string];
   'update:fontSize': [value: number];
+  'update:cardWidth': [value: number | null];
   'update:showAvatar': [value: boolean];
   'update:showWinner': [value: boolean];
   'update:listMode': [value: boolean];
 }>();
+
+/** 自定义卡片宽度:未配置时返回 null,由 CSS 按各卡片原比例自适应 */
+const cardWidthPx = computed(() => {
+  const width = Number(props.cardWidth);
+  return Number.isFinite(width) && width > 0 ? Math.min(1200, Math.max(40, Math.round(width))) : null;
+});
 
 // 样式配置:通过 CSS 变量作用于全部对战卡;未配置时回退默认样式(白字/灰边/透明底)
 const bracketStyle = computed(() => ({
@@ -384,7 +408,8 @@ const bracketStyle = computed(() => ({
   // 空字符串 = 用户点击「设为透明」,显式映射为 transparent,
   // 否则空值会被 || 回退成默认色(灰边/黑底),达不到透明效果
   '--bracket-border': props.borderColor === '' ? 'transparent' : props.borderColor || undefined,
-  '--bracket-bg': props.bgColor === '' ? 'transparent' : props.bgColor || undefined
+  '--bracket-bg': props.bgColor === '' ? 'transparent' : props.bgColor || undefined,
+  '--bracket-card-width': cardWidthPx.value == null ? undefined : `${cardWidthPx.value}px`
 }));
 
 /** 名字字号基准(px):fz 与对战列的溢出预留宽度共用同一口径 */
@@ -405,6 +430,20 @@ const fz = (ratio: number) => {
 const handleFontSizeUpdate = (v: string) => {
   const n = Number(v);
   emit('update:fontSize', Number.isFinite(n) && n > 0 ? n : 24);
+};
+
+const handleCardWidthUpdate = (v: string) => {
+  const text = String(v ?? '').trim();
+  if (!text) {
+    emit('update:cardWidth', null);
+    return;
+  }
+  const n = Number(text);
+  if (Number.isFinite(n) && n > 0) {
+    emit('update:cardWidth', Math.min(1200, Math.max(40, Math.round(n))));
+  } else {
+    emit('update:cardWidth', cardWidthPx.value);
+  }
 };
 
 const loading = ref(false);
@@ -1069,8 +1108,8 @@ const handleTournamentEvent = (data: any) => {
 }
 .slot .name {
   /* 名字绝不省略号、绝不换行:放不下就直接溢出 */
-  white-space: nowrap;
-  min-width: 0;
+  white-space: pre;
+  min-width: 1ch;
   max-width: 100%;
 }
 .final-card {
@@ -1085,22 +1124,16 @@ const handleTournamentEvent = (data: any) => {
   gap: 8px;
   font-size: clamp(10px, 1.2vw, 18px);
   min-height: 2.6em;
-  width: 9em;
-  max-width: 9em;
+  width: var(--bracket-card-width, 9em);
+  max-width: var(--bracket-card-width, 9em);
 }
 .final-card .name {
-  /* 名字绝不省略号、绝不换行:放不下就直接溢出卡片,靠所在列预留的宽度画出去 */
-  white-space: nowrap;
+  /* white-space: pre 不会折叠 NBSP,空名字也能稳定撑出宽高 */
+  white-space: pre;
   text-align: center;
-  min-width: 0;
+  min-width: 1ch;
+  min-height: 1.3em;
   max-width: 100%;
-}
-/* 标准对战树两列:溢出方向朝中间(左列向右、右列向左),把预留宽度用在靠中间的一侧 */
-.bracket-col.left .final-card .name {
-  text-align: left;
-}
-.bracket-col.right .final-card .name {
-  text-align: right;
 }
 /* 给溢出卡片的长名字留出可绘制宽度:内边距提供余量、负外边距抵消,卡片坐标与原来完全一致 */
 .bracket-col.left {
@@ -1132,14 +1165,14 @@ const handleTournamentEvent = (data: any) => {
   color: var(--bracket-text, #000000);
   padding: 12px 14px;
   font-size: clamp(12px, 1.5vw, 24px);
-  width: 9.5em;
-  max-width: 9.5em;
+  width: var(--bracket-card-width, 9.5em);
+  max-width: var(--bracket-card-width, 9.5em);
 }
 .third-place-card {
   flex-direction: column;
   gap: 2px;
-  width: 12em;
-  max-width: 12em;
+  width: var(--bracket-card-width, 12em);
+  max-width: var(--bracket-card-width, 12em);
   min-height: 2.8em;
   padding: 4px 10px 6px;
 }
@@ -1178,15 +1211,19 @@ const handleTournamentEvent = (data: any) => {
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  text-align: center;
 }
 .bracket-list-side:last-child {
-  justify-content: flex-end;
-  text-align: right;
+  justify-content: center;
+  text-align: center;
 }
 .bracket-list-side .name {
-  /* 列表模式同样不省略、不换行 */
-  white-space: nowrap;
+  /* 列表模式同样保留 NBSP,避免空名字导致行高跳变 */
+  white-space: pre;
+  min-width: 1ch;
+  min-height: 1.3em;
 }
 .bracket-list-vs {
   flex: none;

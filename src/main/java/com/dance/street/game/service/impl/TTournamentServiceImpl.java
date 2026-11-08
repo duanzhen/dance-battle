@@ -795,7 +795,12 @@ public class TTournamentServiceImpl implements ITTournamentService {
      * 保存前的数据校验
      */
     private void validEntityBeforeSave(TTournament entity){
-        //TODO 做一些数据校验,如唯一约束
+        if (entity.getLogicalWidth() != null && entity.getLogicalWidth() <= 0) {
+            throw new ServiceException("默认屏幕分辨率宽度必须为正整数");
+        }
+        if (entity.getLogicalHeight() != null && entity.getLogicalHeight() <= 0) {
+            throw new ServiceException("默认屏幕分辨率高度必须为正整数");
+        }
     }
 
     /**

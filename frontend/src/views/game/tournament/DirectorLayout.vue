@@ -339,10 +339,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useDirectorStore } from '@/store/modules/directorStore'; // 确保路径正确
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { X, Package, Settings2, Undo2, Redo2 } from 'lucide-vue-next';
+import { getTournament } from '@/api/game/tournament';
 
 const router = useRouter();
+const route = useRoute();
 
 // 引入拆分好的子组件
 import WidgetToolbox from './WidgetToolbox.vue';
@@ -638,10 +640,27 @@ const handleSceneDragLeave = () => {
 // --- 业务逻辑 ---
 
 const createNewScene = async () => {
+  let width = Number(store.currentScene?.width) || 1920;
+  let height = Number(store.currentScene?.height) || 1080;
+  const tournamentId = route.query.id ?? route.query.tournamentId;
+  if (tournamentId) {
+    try {
+        const resp = await getTournament(tournamentId);
+      const configuredWidth = Number(resp?.data?.logicalWidth);
+      const configuredHeight = Number(resp?.data?.logicalHeight);
+      if (Number.isFinite(configuredWidth) && configuredWidth > 0
+        && Number.isFinite(configuredHeight) && configuredHeight > 0) {
+        width = configuredWidth;
+        height = configuredHeight;
+      }
+    } catch (e) {
+      console.warn('读取赛事默认分辨率失败，使用当前场景尺寸', e);
+    }
+  }
   const newScene = {
     name: `新场景 ${store.scenes.length + 1}`,
-    width: 1920,
-    height: 1080,
+    width,
+    height,
     bgColor: '#000000',
     widgets: []
   };

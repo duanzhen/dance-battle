@@ -26,7 +26,7 @@
     <!-- 参赛选手:下方全宽 -->
     <PlayerEditor :tournament-id="tournamentId" />
 
-    <!-- 编辑赛事弹窗:仅封面/名称/状态 -->
+    <!-- 编辑赛事弹窗:封面/名称/状态、默认屏幕分辨率 -->
     <TournamentForm
       v-model="showEdit"
       :tournament="tournament"

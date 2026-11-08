@@ -119,13 +119,15 @@
         <p class="text-[11px] text-neutral-600 mt-1">输入姓名按快捷添加裁判,没有裁判时点击右侧 X 标记「暂无裁判」。</p>
       </div>
 
-      <div v-if="!simple" class="col-span-2">
-        <label class="block text-sm font-medium text-neutral-400 mb-1.5">屏幕尺寸</label>
+      <div class="col-span-2">
+        <label class="block text-sm font-medium text-neutral-400 mb-1.5">默认屏幕分辨率</label>
         <div class="flex items-center gap-2">
           <div class="relative flex-1 min-w-0">
             <input
               v-model.number="form.logicalWidth"
               type="number"
+              min="1"
+              step="1"
               placeholder="1920"
               class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
             />
@@ -136,12 +138,15 @@
             <input
               v-model.number="form.logicalHeight"
               type="number"
+              min="1"
+              step="1"
               placeholder="1080"
               class="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
             />
             <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-neutral-600 pointer-events-none">高</span>
           </div>
         </div>
+        <p class="mt-1 text-[10px] text-neutral-600">新建场景和大屏默认画布使用该分辨率。</p>
       </div>
 
       <div v-if="!simple" class="col-span-2">
@@ -521,6 +526,15 @@ const submitForm = async () => {
     ElMessage.warning('请输入赛事名称');
     return;
   }
+  const logicalWidth = Math.round(Number(form.logicalWidth));
+  const logicalHeight = Math.round(Number(form.logicalHeight));
+  if (!Number.isFinite(logicalWidth) || logicalWidth <= 0
+    || !Number.isFinite(logicalHeight) || logicalHeight <= 0) {
+    ElMessage.warning('默认屏幕分辨率的宽高必须为正整数');
+    return;
+  }
+  form.logicalWidth = logicalWidth;
+  form.logicalHeight = logicalHeight;
   if (!props.tournament && !selectedTemplate.value) {
     ElMessage.warning('请选择赛事模版；如需空白手工建赛，请明确选择“不使用模版”');
     return;
@@ -563,8 +577,8 @@ const submitForm = async () => {
         coverImage: form.coverImage,
         templateCode: selectedTemplate.value,
         // 建赛时选的分辨率要带过去:后端按它建场景/控件,否则进大屏还是 1920×1080
-        logicalWidth: Number(form.logicalWidth) || 1920,
-        logicalHeight: Number(form.logicalHeight) || 1080,
+        logicalWidth,
+        logicalHeight,
         remark: form.remark,
         refereeNames
       });

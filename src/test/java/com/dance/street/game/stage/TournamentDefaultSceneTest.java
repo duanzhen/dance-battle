@@ -9,6 +9,7 @@ import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.mapper.TVisSceneMapper;
 import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.service.ITTournamentService;
+import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * 建赛默认场景约定:
@@ -155,5 +157,29 @@ class TournamentDefaultSceneTest {
             .orElseThrow();
         assertEquals(1080L, bg.getW(), "背景占位控件应铺满场景宽度");
         assertEquals(1920L, bg.getH(), "背景占位控件应铺满场景高度");
+    }
+
+    /** 赛事编辑可修改默认屏幕分辨率,供后续场景/大屏画布使用。 */
+    @Test
+    void editTournamentUpdatesDefaultResolution() {
+        TTournamentBo create = new TTournamentBo();
+        create.setName("编辑默认分辨率");
+        create.setStatus(0L);
+        TTournamentVo tournament = tournamentService.insertByBo(create);
+
+        TTournamentBo update = new TTournamentBo();
+        update.setId(tournament.getId());
+        update.setLogicalWidth(1080L);
+        update.setLogicalHeight(1920L);
+        tournamentService.updateByBo(update);
+
+        TTournamentVo updated = tournamentService.queryById(tournament.getId());
+        assertEquals(1080L, updated.getLogicalWidth());
+        assertEquals(1920L, updated.getLogicalHeight());
+
+        TTournamentBo invalid = new TTournamentBo();
+        invalid.setId(tournament.getId());
+        invalid.setLogicalWidth(0L);
+        assertThrows(ServiceException.class, () -> tournamentService.updateByBo(invalid));
     }
 }

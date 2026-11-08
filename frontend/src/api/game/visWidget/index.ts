@@ -104,11 +104,16 @@ export const updateWidgetTimerState = (
 
 /**
  * 视频播放/暂停/结束(管理端):只写 dataConfig 的
- * videoPlaying / videoStartedAt / videoPositionMs,落库后广播让大屏跟着同步。
+ * videoPlaying / videoStartedAt / videoPositionMs / videoCarouselIndex,落库后广播让大屏跟着同步。
  */
 export const updateWidgetVideoState = (
   id: string | number,
-  data: { videoPlaying?: boolean; videoStartedAt?: number | null; videoPositionMs?: number | null }
+  data: {
+    videoPlaying?: boolean;
+    videoStartedAt?: number | null;
+    videoPositionMs?: number | null;
+    videoCarouselIndex?: number | null;
+  }
 ): AxiosPromise<void> => {
   return request({
     url: `/game/visWidget/${id}/video-state`,

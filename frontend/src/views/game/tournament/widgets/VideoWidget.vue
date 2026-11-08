@@ -5,9 +5,9 @@
       <div class="w-full h-full bg-neutral-700/30">
         <video
           ref="videoRef"
-          :src="src"
+          :src="currentVideo"
           class="w-full h-full object-fill block pointer-events-none"
-          :loop="loop"
+          :loop="!videoCarouselEnabled && loop"
           :muted="effectiveMuted"
           :autoplay="autoplay"
           playsinline
@@ -17,6 +17,7 @@
             @timeupdate="handleTimeUpdate"
           @play="handlePlay"
           @pause="handlePause"
+          @ended="handleEnded"
         ></video>
       </div>
 
@@ -79,7 +80,25 @@
     <div v-else class="video-editor space-y-4 px-2 py-4">
       <section>
         <span class="section-title">视频属性</span>
+        <label class="mb-3 flex cursor-pointer items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2.5">
+          <span class="text-xs font-medium text-neutral-300">视频轮播</span>
+          <input
+            type="checkbox"
+            :checked="videoCarouselEnabled === true"
+            class="h-4 w-4 accent-amber-500"
+            @change="handleVideoCarouselToggle(($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+        <p class="mb-3 text-[10px] text-neutral-600">开启后播放完当前视频会自动播放下一条；单视频模式继续使用原素材视频。</p>
+
+        <MultiVideoUpload
+          v-if="videoCarouselEnabled === true"
+          :model-value="videoCarouselItemsValue"
+          label="轮播视频"
+          @update:model-value="$emit('update:videoCarouselItems', $event)"
+        />
         <AssetUpload
+          v-else
           label="素材视频"
           :model-value="src"
           :is-image="false"
@@ -88,6 +107,9 @@
           :show-url-input="true"
           @update:model-value="$emit('update:src', $event)"
         />
+        <p v-if="videoCarouselEnabled === true" class="mt-2 text-[10px] text-neutral-600">
+          轮播模式下始终播放完当前视频再切换，下一条从头播放；“循环播放”仅单视频模式生效。
+        </p>
 
         <CheckboxGroup
           label="播放选项"
@@ -110,9 +132,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import AssetUpload from './common/AssetUpload.vue';
 import CheckboxGroup from './common/CheckboxGroup.vue';
+import MultiVideoUpload from './common/MultiVideoUpload.vue';
 
 // --- Props 定义 ---
 const props = withDefaults(
@@ -133,6 +156,10 @@ const props = withDefaults(
     videoPlaying?: boolean;
     videoPositionMs?: number | string | null;
     videoStartedAt?: number | string | null;
+    /** 视频轮播开关与列表；单视频仍使用 src */
+    videoCarouselEnabled?: boolean;
+    videoCarouselItems?: string[];
+    videoCarouselIndex?: number | string | null;
   }>(),
   {
     loop: true,
@@ -150,8 +177,15 @@ const emit = defineEmits<{
   'update:muted': [value: boolean];
   'update:autoplay': [value: boolean];
   'update:volume': [value: number];
+  'update:videoCarouselEnabled': [value: boolean];
+  'update:videoCarouselItems': [value: string[]];
   /** 一次提交整份播放状态:是否在播 / 暂停位置(ms) / 本次播放起点时间戳(ms) */
-  'update:playback': [value: { videoPlaying: boolean; videoStartedAt: number | null; videoPositionMs: number }];
+  'update:playback': [value: {
+    videoPlaying: boolean;
+    videoStartedAt: number | null;
+    videoPositionMs: number;
+    videoCarouselIndex: number | null;
+  }];
 }>();
 
 // --- 内部逻辑 ---
@@ -162,6 +196,8 @@ const isPlaying = ref(false);
 const currentTime = ref(0);
 const duration = ref(0);
 const isDragging = ref(false);
+const activeVideoIndex = ref(0);
+const pendingCarouselAdvance = ref(false);
 /** 播放态下周期性对齐进度的定时器(仅大屏/跟随端用) */
 let syncTimer: number | null = null;
 
@@ -170,6 +206,33 @@ let syncTimer: number | null = null;
  * 声音只由投射端(非控制端)按配置输出。
  */
 const effectiveMuted = computed(() => (props.canControl ? true : !!props.muted));
+
+const videoCarouselItemsValue = computed(() =>
+  Array.isArray(props.videoCarouselItems) ? props.videoCarouselItems.filter(Boolean) : []
+);
+const displayVideos = computed(() => {
+  if (!props.videoCarouselEnabled) return props.src ? [props.src] : [];
+  return videoCarouselItemsValue.value.length
+    ? videoCarouselItemsValue.value
+    : props.src ? [props.src] : [];
+});
+const currentVideo = computed(() =>
+  displayVideos.value[activeVideoIndex.value] || displayVideos.value[0] || ''
+);
+
+const clampVideoIndex = () => {
+  const length = displayVideos.value.length;
+  activeVideoIndex.value = length
+    ? Math.min(length - 1, Math.max(0, Math.round(Number(activeVideoIndex.value) || 0)))
+    : 0;
+};
+
+const handleVideoCarouselToggle = (enabled: boolean) => {
+  emit('update:videoCarouselEnabled', enabled);
+  if (enabled && !videoCarouselItemsValue.value.length && props.src) {
+    emit('update:videoCarouselItems', [props.src]);
+  }
+};
 
 // 处理复选框更新
 const handleCheckboxUpdate = (key: string, value: boolean) => {
@@ -211,14 +274,15 @@ const desiredPositionSec = () => {
   const v = videoRef.value;
   const dur = v?.duration ?? 0;
   if (Number.isFinite(dur) && dur > 0) {
-    return props.loop ? target % dur : Math.min(target, dur);
+    const loopSingleVideo = props.loop && !props.videoCarouselEnabled;
+    return loopSingleVideo ? target % dur : Math.min(target, dur);
   }
   return target;
 };
 
 const applyRemoteState = () => {
   const v = videoRef.value;
-  if (!v || !hasRemoteState.value) {
+  if (!v || pendingCarouselAdvance.value || !hasRemoteState.value) {
     return;
   }
   const t = desiredPositionSec();
@@ -247,7 +311,8 @@ const emitPlaybackState = (playing: boolean, positionMsOverride?: number) => {
   emit('update:playback', {
     videoPlaying: playing,
     videoStartedAt: playing ? Date.now() : null,
-    videoPositionMs: posMs
+    videoPositionMs: posMs,
+    videoCarouselIndex: props.videoCarouselEnabled ? activeVideoIndex.value : null
   });
 };
 
@@ -265,6 +330,13 @@ const handlePlay = () => {
 
 const handlePause = () => {
   isPlaying.value = false;
+};
+
+const handleEnded = () => {
+  if (!props.videoCarouselEnabled || displayVideos.value.length < 2) return;
+  pendingCarouselAdvance.value = true;
+  activeVideoIndex.value = (activeVideoIndex.value + 1) % displayVideos.value.length;
+  emitPlaybackState(true, 0);
 };
 
 // 切换播放/暂停
@@ -400,12 +472,67 @@ defineExpose({
   videoElement: videoRef
 });
 
+/** 管理端轮播到下一条后,投射端按持久化索引跟随。 */
+watch(
+  () => props.videoCarouselIndex,
+  (value) => {
+    if (!props.videoCarouselEnabled || value == null) return;
+    const index = Math.round(Number(value));
+    if (Number.isFinite(index) && index >= 0) {
+      activeVideoIndex.value = index;
+      clampVideoIndex();
+    }
+  }
+);
+
+watch(
+  () => [props.videoCarouselEnabled, props.videoCarouselItems],
+  () => {
+    clampVideoIndex();
+    const remoteIndex = Number(props.videoCarouselIndex);
+    if (props.videoCarouselEnabled && props.videoCarouselIndex != null
+      && Number.isFinite(remoteIndex) && remoteIndex >= 0) {
+      activeVideoIndex.value = remoteIndex;
+      clampVideoIndex();
+    }
+  },
+  { deep: true }
+);
+
+/** 切换轮播条目后从头加载;自动播放或远端处于播放态时继续播放。 */
+watch(currentVideo, async (nextSrc, previousSrc) => {
+  if (!nextSrc || nextSrc === previousSrc) return;
+  await nextTick();
+  const v = videoRef.value;
+  if (!v) return;
+  currentTime.value = 0;
+  duration.value = 0;
+  v.load();
+  if (pendingCarouselAdvance.value || props.videoPlaying === true || props.autoplay) {
+    try {
+      await v.play();
+    } catch (e) {
+      console.error('Carousel video play failed:', e);
+    } finally {
+      pendingCarouselAdvance.value = false;
+    }
+  } else {
+    pendingCarouselAdvance.value = false;
+  }
+});
+
 onMounted(() => {
   // 初始化音量
   if (videoRef.value) {
     videoRef.value.volume = props.volume;
     videoRef.value.muted = effectiveMuted.value;
   }
+  const remoteIndex = Number(props.videoCarouselIndex);
+  if (props.videoCarouselEnabled && props.videoCarouselIndex != null
+    && Number.isFinite(remoteIndex) && remoteIndex >= 0) {
+    activeVideoIndex.value = remoteIndex;
+  }
+  clampVideoIndex();
   applyRemoteState();
   // 兜底:播放态下周期性对齐进度(阈值 1.5s,避免频繁跳帧),
   // 防止某一次 sceneUpdate 丢失后大屏长期停在错误进度

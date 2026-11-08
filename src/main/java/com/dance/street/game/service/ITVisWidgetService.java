@@ -40,7 +40,8 @@ public interface ITVisWidgetService {
     /**
      * 按 JSON 补丁回写视频组件的播放状态:补丁里的键合并进组件的 dataConfig。
      *
-     * <p>白名单只有 {@code videoPlaying}/{@code videoStartedAt}/{@code videoPositionMs} 三个键。
+     * <p>白名单只有 {@code videoPlaying}/{@code videoStartedAt}/{@code videoPositionMs}/
+     * {@code videoCarouselIndex} 四个键。
      * 播放/暂停/结束都在管理端画布操作,落库后广播 sceneUpdate,让大屏投射端跟随同一份状态。</p>
      *
      * @param widgetId 组件ID(必须是 VIDEO 组件)

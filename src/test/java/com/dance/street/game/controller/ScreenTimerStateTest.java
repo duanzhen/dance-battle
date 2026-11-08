@@ -169,11 +169,13 @@ class ScreenTimerStateTest {
         play.put("videoPlaying", true);
         play.put("videoStartedAt", 4102444800000L);
         play.put("videoPositionMs", 0L);
+        play.put("videoCarouselIndex", 2L);
         visWidgetService.updateVideoState(id, play);
 
         String playing = widgetMapper.selectById(id).getDataConfig();
         assertTrue(playing.contains("\"videoPlaying\":true"), "应写入播放状态,实际: " + playing);
         assertTrue(playing.contains("\"videoStartedAt\":4102444800000"), "应写入播放起点,实际: " + playing);
+        assertTrue(playing.contains("\"videoCarouselIndex\":2"), "应写入当前轮播视频索引,实际: " + playing);
         assertTrue(playing.contains("/uploads/a.mp4"), "视频素材不能被改动,实际: " + playing);
 
         Map<String, Object> stop = new HashMap<>();

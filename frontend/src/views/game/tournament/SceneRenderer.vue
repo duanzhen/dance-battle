@@ -202,7 +202,12 @@ const persistWidgetConfig = async (widget: SceneElement, patch: Record<string, u
   try {
     if (widget.type === 'VIDEO') {
       // 视频:一次提交整份播放状态
-      const body: { videoPlaying?: boolean; videoStartedAt?: number | null; videoPositionMs?: number | null } = {};
+      const body: {
+        videoPlaying?: boolean;
+        videoStartedAt?: number | null;
+        videoPositionMs?: number | null;
+        videoCarouselIndex?: number | null;
+      } = {};
       if ('videoPlaying' in patch) {
         body.videoPlaying = patch.videoPlaying as boolean;
       }
@@ -211,6 +216,9 @@ const persistWidgetConfig = async (widget: SceneElement, patch: Record<string, u
       }
       if ('videoPositionMs' in patch) {
         body.videoPositionMs = (patch.videoPositionMs as number | null) ?? null;
+      }
+      if ('videoCarouselIndex' in patch) {
+        body.videoCarouselIndex = (patch.videoCarouselIndex as number | null) ?? null;
       }
       if (Object.keys(body).length > 0) {
         await updateWidgetVideoState(widget.id, body);

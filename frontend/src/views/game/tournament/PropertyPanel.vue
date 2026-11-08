@@ -157,6 +157,11 @@
                   @update:endAt="handleUpdateProp('endAt', $event)"
                   @update:remainMs="handleUpdateProp('remainMs', $event)"
                   @update:stageId="handleUpdateProp('stageId', $event)"
+                  @update:carouselEnabled="handleUpdateProp('carouselEnabled', $event)"
+                  @update:carouselImages="handleUpdateProp('carouselImages', $event)"
+                  @update:carouselInterval="handleUpdateProp('carouselInterval', $event)"
+                  @update:videoCarouselEnabled="handleUpdateProp('videoCarouselEnabled', $event)"
+                  @update:videoCarouselItems="handleUpdateProp('videoCarouselItems', $event)"
                   @update:matchId="handleUpdateProp('matchId', $event)"
                   @update:showCurrent="handleUpdateProp('showCurrent', $event)"
                   @update:bgImage="handleUpdateProp('bgImage', $event)"
@@ -179,6 +184,7 @@
                   @update:showSeat="handleUpdateProp('showSeat', $event)"
                   @update:showNumber="handleUpdateProp('showNumber', $event)"
                   @update:columns="handleUpdateProp('columns', $event)"
+                  @update:sortMode="handleUpdateProp('sortMode', $event)"
                 />
               </div>
             </section>

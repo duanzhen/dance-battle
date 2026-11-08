@@ -116,12 +116,13 @@ public class TVisWidgetServiceImpl implements ITVisWidgetService {
         notifySceneUpdate(widget.getSceneId());
     }
 
-    /** 视频播放状态允许回写的键(videoPlaying/videoStartedAt/videoPositionMs) */
+    /** 视频播放状态允许回写的键(videoPlaying/videoStartedAt/videoPositionMs/videoCarouselIndex) */
     private static final List<String> VIDEO_STATE_KEYS =
-        List.of("videoPlaying", "videoStartedAt", "videoPositionMs");
+        List.of("videoPlaying", "videoStartedAt", "videoPositionMs", "videoCarouselIndex");
 
     /**
-     * 按 JSON 补丁合并进视频组件的 dataConfig(白名单键:videoPlaying / videoStartedAt / videoPositionMs)。
+     * 按 JSON 补丁合并进视频组件的 dataConfig(白名单键:videoPlaying / videoStartedAt /
+     * videoPositionMs / videoCarouselIndex)。
      *
      * <p>与管理端倒计时同一套思路:大屏只读,播放/暂停/结束都在管理端画布操作,落库后广播
      * sceneUpdate 让所有正在投射该场景的大屏重载配置,从而播放进度保持同步。</p>

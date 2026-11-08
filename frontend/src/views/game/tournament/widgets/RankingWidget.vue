@@ -86,9 +86,20 @@
             </button>
           </div>
         </div>
+        <div class="mt-3">
+          <ButtonGroup
+            label="展示顺序"
+            :model-value="sortModeValue"
+            :options="[
+              { value: 'NUMBER', label: '号码排序' },
+              { value: 'RANK', label: '名次排序' }
+            ]"
+            @update:model-value="$emit('update:sortMode', $event)"
+          />
+        </div>
         <p class="text-[10px] text-neutral-600 mt-2">
           展示排名赛(多维度打分)的选手排名,以表格展示,分圈时每圈一张表;是否显示分数由赛段配置决定,手动/批量公布模式下公布前自动隐藏。
-          背景颜色可设为透明,不影响文字与表格内容。
+          背景颜色可设为透明;展示顺序默认按号码排序,也可切换为按名次排序。
         </p>
       </section>
     </div>
@@ -101,6 +112,7 @@ import { useRoute } from 'vue-router';
 import { Ban } from 'lucide-vue-next';
 import StageSelector from '../stages/StageSelector.vue';
 import ColorInput from './common/ColorInput.vue';
+import ButtonGroup from './common/ButtonGroup.vue';
 import {
   getStage,
   getStageRankDetail,
@@ -118,10 +130,13 @@ const props = defineProps<{
   tournamentId?: string | number | null;
   /** 背景颜色;空字符串 = 透明(默认深色底) */
   bgColor?: string;
+  /** 展示顺序:NUMBER=号码升序(默认) / RANK=名次升序 */
+  sortMode?: string;
 }>();
 defineEmits<{
   'update:stageId': [v: string | number | null];
   'update:bgColor': [v: string];
+  'update:sortMode': [v: string];
 }>();
 
 const route = useRoute();
@@ -157,6 +172,7 @@ const error = ref('');
 
 /** 背景颜色:空字符串 = 透明;未配置时使用深色底(与原遮罩观感一致) */
 const bgColorValue = computed(() => (props.bgColor === '' ? 'transparent' : props.bgColor || '#0a0a0a'));
+const sortModeValue = computed(() => (props.sortMode === 'RANK' ? 'RANK' : 'NUMBER'));
 
 const stageName = ref('');
 const advanceCount = ref(0);
@@ -249,7 +265,7 @@ const loadData = async () => {
       participants: (partsByMatch[String(m.id)] || []).filter((p: any) => p.competitorId != null)
     }));
 
-    // 按圈(displayZone)分组,每圈一列,组内按排名排序(无排名按分数降序、再按号码)
+    // 按圈(displayZone)分组,每圈一列;先按名次确定晋级范围,再按配置顺序展示
     const order: string[] = [];
     const grouped = new Map<string, any[]>();
     withParts.forEach((m: any) => {
@@ -279,6 +295,9 @@ const loadData = async () => {
       // 公布范围 TOP_N:只展示每圈晋级线内的前 N 名
       if (publishScope.value === 'TOP_N') {
         ranked = ranked.filter((p: any) => p.rankInMatch != null && p.rankInMatch <= perCircle);
+      }
+      if (sortModeValue.value === 'NUMBER') {
+        ranked = ranked.slice().sort((a: any, b: any) => numOf(a) - numOf(b));
       }
       return {
         zone,
@@ -366,6 +385,10 @@ watch(
 );
 watch(
   () => props.stageId,
+  () => loadData()
+);
+watch(
+  () => props.sortMode,
   () => loadData()
 );
 

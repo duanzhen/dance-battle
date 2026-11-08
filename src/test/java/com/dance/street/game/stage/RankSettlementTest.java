@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
+import com.dance.street.game.domain.TPlayer;
 import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TTournament;
+import com.dance.street.game.domain.bo.CheckInBo;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TMatchBo;
@@ -19,11 +21,13 @@ import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
+import com.dance.street.game.service.ITPlayerService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.impl.stage.RankResultService;
@@ -82,12 +86,45 @@ class RankSettlementTest {
     @Autowired private TMatchMapper matchMapper;
     @Autowired private TMatchParticipantMapper participantMapper;
     @Autowired private TCompetitorMapper competitorMapper;
+    @Autowired private TPlayerMapper playerMapper;
     @Autowired private TRefereeMapper refereeMapper;
     @Autowired private ITStageService stageService;
     @Autowired private ITStageLifecycleService lifecycleService;
     @Autowired private ITMatchResultService matchResultService;
     @Autowired private ITMatchService matchService;
+    @Autowired private ITPlayerService playerService;
     @Autowired private RankResultService rankResultService;
+
+    /** 排名赛开始后仍可签到加人:新选手加入唯一场次,立即进入裁判打分名单。 */
+    @Test
+    void rankStageAllowsLateCheckInWhileGaming() {
+        Long tid = newTournament("排名赛开赛后补签到");
+        insertReferee(tid, "裁判A");
+        TStageVo stage = newStage(tid, "排名赛", 2, 1, rankRule(1));
+        insertPending(tid, stage.getId(), "选手1", "1", 1);
+        insertPending(tid, stage.getId(), "选手2", "2", 2);
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        assertEquals(2, realParticipants(match.getId()).size());
+
+        TPlayer late = new TPlayer();
+        late.setTournamentId(tid);
+        late.setName("迟到选手");
+        playerMapper.insert(late);
+        CheckInBo bo = new CheckInBo();
+        bo.setPlayerId(late.getId());
+        bo.setCheckInType("CREATE");
+        bo.setCompetitorNumber("3");
+        Long lateCompetitorId = playerService.checkIn(bo).getCompetitorId();
+
+        assertNotNull(lateCompetitorId);
+        assertEquals(3, realParticipants(match.getId()).size(),
+            "排名赛开始后签到的选手应自动加入唯一场次");
+        assertTrue(realParticipants(match.getId()).stream()
+                .anyMatch(p -> lateCompetitorId.equals(p.getCompetitorId())),
+            "新签到选手应出现在裁判打分名单中");
+    }
 
     /**
      * 排名赛:单圈 4 人,1 名裁判按单维度打分;完成赛段后按总分取前 2 名晋级,

@@ -653,6 +653,7 @@ import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Plus, Minus } from 'lucide-vue-next';
 import { ElMessage } from 'element-plus';
+import NoSleep from 'nosleep.js';
 import logo from '@/assets/logo/logo.png';
 import { setRefereeAuthKey, getRefereeMyMatch, submitRefereeScore, getRefereeMatchScores } from '@/api/game/referee/scoring';
 import { getTournament } from '@/api/game/screen';
@@ -668,7 +669,58 @@ import {
   TournamentColorConfig
 } from '@/utils/tournamentColorConfig';
 
+const noSleep = new NoSleep();
 const route = useRoute();
+
+/** 裁判页保持屏幕常亮:NoSleep 必须在用户手势后启用。 */
+let noSleepEnabling = false;
+let noSleepWarned = false;
+const noSleepGestureEvents: Array<'pointerdown' | 'keydown'> = ['pointerdown', 'keydown'];
+
+const removeNoSleepGestureListeners = () => {
+  noSleepGestureEvents.forEach((eventName) =>
+    document.removeEventListener(eventName, handleNoSleepGesture, true)
+  );
+};
+
+const tryEnableNoSleep = async () => {
+  if (noSleep.isEnabled || noSleepEnabling) return;
+  noSleepEnabling = true;
+  try {
+    await noSleep.enable();
+    removeNoSleepGestureListeners();
+  } catch (e) {
+    if (!noSleepWarned) {
+      noSleepWarned = true;
+      console.warn('屏幕常亮启用失败，将在下次页面交互时重试', e);
+    }
+  } finally {
+    noSleepEnabling = false;
+  }
+};
+
+function handleNoSleepGesture() {
+  void tryEnableNoSleep();
+}
+
+const handleNoSleepVisibility = () => {
+  if (document.visibilityState === 'visible') {
+    void tryEnableNoSleep();
+  }
+};
+
+const setupNoSleep = () => {
+  noSleepGestureEvents.forEach((eventName) =>
+    document.addEventListener(eventName, handleNoSleepGesture, true)
+  );
+  document.addEventListener('visibilitychange', handleNoSleepVisibility);
+};
+
+const stopNoSleep = () => {
+  removeNoSleepGestureListeners();
+  document.removeEventListener('visibilitychange', handleNoSleepVisibility);
+  noSleep.disable();
+};
 
 /** 兼容旧场次名 R{轮次}-M{场次},统一展示为 第{场次}场 */
 const fmtMatchName = (name?: string) => {
@@ -1810,7 +1862,8 @@ const connectRefereeSse = (authKey: string) => {
     buildUrl: () => `${baseUrl}/tournament/event/sse?authKey=${encodeURIComponent(authKey)}&clientid=${clientId}`,
     onMessage: (data: any) => {
       // 打分事件且就是当前场次:只拉轻量累计分合并,避免每次打分都全量 my-match;
-      // 其余事件(开赛/换场/换赛段)仍走全量 refresh,保证上下文能被裁判端感知
+      // 其余事件(开赛/换场/换赛段/海选或排名赛补签到)仍走全量 refresh,
+      // 保证新签到的选手能实时进入裁判页名单。
       const evtMatchId = data?.matchId;
       if (data?.type === 'round-auto' && evtMatchId != null
         && String(evtMatchId) === String(matchId.value)) {
@@ -1844,6 +1897,7 @@ onMounted(async () => {
     loading.value = false;
     return;
   }
+  setupNoSleep();
   window.addEventListener('keydown', onKeydown);
   setRefereeAuthKey(authKey as string);
   // 先连 SSE:此时可能还没有进行中的赛段,但连接本身必须建立,否则开赛事件收不到
@@ -1853,6 +1907,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  stopNoSleep();
   window.removeEventListener('keydown', onKeydown);
   unsubSse?.();
   unsubSse = null;

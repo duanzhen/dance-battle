@@ -585,7 +585,7 @@ const isFiltering = computed(() => currentTab.value !== 'ALL' || searchQuery.val
 // 首次使用引导步骤
 const onboardingSteps = [
   { title: '创建赛事', desc: '填名称、封面，选裁判（必填）与模版；选模版会自动生成赛段链、场景与对战树' },
-  { title: '导入选手并签到', desc: '导入 Excel 或逐个添加；现场按号码签到落圈，海选进行中自动加入场次' },
+  { title: '导入选手并签到', desc: '导入 Excel 或逐个添加；现场按号码签到，海选或排名赛进行中自动加入场次' },
   { title: '手机导播台开赛', desc: 'MC 扫码进入：开始赛段、逐场推进、完成赛段结算' },
   { title: '大屏投射', desc: '打开赛事大屏，对战树、记分板与倒计时实时同步给观众' }
 ];

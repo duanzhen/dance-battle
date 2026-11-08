@@ -60,7 +60,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 海选开赛后继续加人(现场补签到)。
+ * 海选/排名赛开赛后继续加人(现场补签到)。
  *
  * <p>现场最常见的场景:海选已经开判,迟到选手/临时报名者到场,需要在不动已判结果的前提下
  * 把他们加进某个还没判完的圈。这个场景此前没有测试覆盖——既有用例只覆盖「开赛前签到」
@@ -225,6 +225,27 @@ class AuditionLateCheckInTest {
             "不该把其他圈也一起推,实际: " + refereeNotifier.events);
     }
 
+    /** 排名赛开赛后补签到也要推裁判端,否则排名赛裁判页无法实时出现新选手。 */
+    @Test
+    void rankLateCheckInNotifiesRefereeForRealtimeRefresh() {
+        Long tid = newTournament("排名赛补签到推送裁判端");
+        newReferee(tid, "裁判A");
+        TStageVo stage = startRank(tid);
+        putRankCompetitor(tid, stage, "选手1", "1");
+        putRankCompetitor(tid, stage, "选手2", "2");
+        lifecycleService.startStage(stage.getId());
+        TMatch match = circlesOf(stage.getId()).get(0);
+
+        refereeNotifier.events.clear();
+        Long latePlayer = newPlayer(tid, "迟到者");
+        Long late = playerService.checkIn(checkInBo(latePlayer, "3", null)).getCompetitorId();
+
+        assertNotNull(late);
+        assertEquals(1, participantCount(match.getId(), late), "迟到者应加入排名赛唯一场次");
+        assertTrue(refereeNotifier.events.contains(stage.getId() + "/" + match.getId() + "/ competitors"),
+            "排名赛补签到应推裁判端实时刷新,实际: " + refereeNotifier.events);
+    }
+
     /** 迟到者与老选手同池竞争:分数高就能拿到晋级名额。 */
     @Test
     void lateCheckInCompetesForAdvancement() {
@@ -363,6 +384,23 @@ class AuditionLateCheckInTest {
         return stage;
     }
 
+    /** 建一个排名赛首赛段。 */
+    private TStageVo startRank(Long tid) {
+        TStageBo bo = new TStageBo();
+        bo.setTournamentId(tid);
+        bo.setName("排名赛");
+        bo.setStageMode("RANK");
+        bo.setStatus(StageConstants.STAGE_DRAFT);
+        bo.setTeamCountStart(2L);
+        bo.setTeamCountEnd(1L);
+        bo.setIsInitialized(0L);
+        bo.setRuleConfig("{\"mode\":\"RANK\",\"advanceCount\":1,"
+            + "\"scoring\":{\"type\":\"MULTI_DIM\",\"matchMode\":\"RANKING\","
+            + "\"aggregateRule\":\"WEIGHTED\",\"dimensions\":["
+            + "{\"key\":\"TECH\",\"name\":\"技术\",\"weight\":100,\"maxScore\":100}]}}");
+        return stageService.insertByBo(bo);
+    }
+
     private Long newPlayer(Long tid, String name) {
         TPlayer p = new TPlayer();
         p.setTournamentId(tid);
@@ -383,6 +421,27 @@ class AuditionLateCheckInTest {
         competitorMapper.insert(c);
         lifecycleService.appendStageCompetitor(stage.getId(), c.getId(), circleId);
         return c.getId();
+    }
+
+    /** 排名赛开赛前直接建参赛方,开赛生成唯一场次时统一落位。 */
+    private Long putRankCompetitor(Long tid, TStageVo stage, String name, String number) {
+        TCompetitor c = new TCompetitor();
+        c.setTournamentId(tid);
+        c.setStageId(stage.getId());
+        c.setType(0L);
+        c.setName(name);
+        c.setNumber(number);
+        c.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
+        competitorMapper.insert(c);
+        return c.getId();
+    }
+
+    private Long newReferee(Long tournamentId, String name) {
+        TReferee r = new TReferee();
+        r.setTournamentId(tournamentId);
+        r.setName(name);
+        refereeMapper.insert(r);
+        return r.getId();
     }
 
     private void bindRefereeToAllCircles(Long tournamentId, Long stageId) {

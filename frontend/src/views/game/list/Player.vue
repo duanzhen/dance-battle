@@ -12,11 +12,11 @@
           选手 {{ playerStats.total }} · 已签到 {{ playerStats.checkedIn }}
         </span>
         <span
-          v-if="auditionGaming"
+          v-if="perCompetitorGaming"
           class="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded text-[10px] text-amber-500 flex items-center gap-1 flex-shrink-0"
         >
           <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-          海选进行中，签到后自动加入场次
+          {{ perCompetitorGamingLabel }}进行中，签到后自动加入场次
         </span>
       </div>
 
@@ -380,11 +380,16 @@ const firstStageInfo = ref<{ stageMode?: string; status?: string } | null>(null)
 const circleLabels = ref<Record<string, string>>({});
 const circleLabelOf = (competitorId?: string | number | null) => (competitorId == null ? '' : circleLabels.value[String(competitorId)] || '');
 
-// 海选赛段已开始:提示签到后会自动加入当前场次继续参赛
-const auditionGaming = computed(() => {
+// 海选/排名赛段已开始:提示签到后会自动加入当前场次继续参赛
+const perCompetitorGaming = computed(() => {
   const info = firstStageInfo.value;
-  return !!info && info.stageMode === 'AUDITION' && info.status === 'GAMING';
+  return !!info
+    && (info.stageMode === 'AUDITION' || info.stageMode === 'RANK')
+    && info.status === 'GAMING';
 });
+const perCompetitorGamingLabel = computed(() =>
+  firstStageInfo.value?.stageMode === 'RANK' ? '排名赛' : '海选'
+);
 
 // 赛段已开始/结束后,签到结果锁定:只能新增签到,不能编辑/解除
 const checkInLocked = computed(() => {

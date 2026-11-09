@@ -43,6 +43,8 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import static com.dance.street.game.service.impl.settle.SettlementSupport.parseCompetitorNumber;
+import static com.dance.street.game.service.impl.settle.SettlementSupport.tiebreakerDepth;
+import static com.dance.street.game.service.impl.settle.SettlementSupport.tiebreakerRoundName;
 
 /**
  * 海选结果的口径与导出。
@@ -136,13 +138,9 @@ public class AuditionResultService {
         // 加赛深度 -> 圈(displayZone,按首次出现序) -> 加赛场次
         Map<Integer, LinkedHashMap<String, List<TMatch>>> byDepthZone = new TreeMap<>();
         for (TMatch m : tbMatches) {
-            String nm = m.getName() == null ? "" : m.getName();
-            int depth = 0;
-            for (int i = nm.indexOf("加赛"); i >= 0; i = nm.indexOf("加赛", i + 2)) {
-                depth++;
-            }
+            int depth = tiebreakerDepth(m);
             String zone = m.getDisplayZone();
-            byDepthZone.computeIfAbsent(Math.max(1, depth), k -> new LinkedHashMap<>())
+            byDepthZone.computeIfAbsent(depth, k -> new LinkedHashMap<>())
                 .computeIfAbsent(zone, k -> new ArrayList<>())
                 .add(m);
         }
@@ -334,7 +332,7 @@ public class AuditionResultService {
             for (AuditionResultVo.CompetitorItem c : tbItems) {
                 tbRows.add(auditionExportRow(c, referees, false, zoneLabels, multiCircle, null));
             }
-            String sheetName = tiebreakerSheetName(tb.getRound());
+            String sheetName = tiebreakerRoundName(tb.getRound());
             String zoneLabel = zoneLabelOf(zoneLabels, tb.getZone());
             if (multiCircle && StringUtils.isNotBlank(zoneLabel)) {
                 sheetName += "·" + zoneLabel;
@@ -537,17 +535,6 @@ public class AuditionResultService {
             return "";
         }
         return zoneLabels.getOrDefault(zone, "");
-    }
-
-    /** 加赛深度 -> sheet 名:1=二海,2=三海,3=四海,4=五海(加赛上限内最多四级) */
-    private String tiebreakerSheetName(int depth) {
-        return switch (depth) {
-            case 1 -> "二海";
-            case 2 -> "三海";
-            case 3 -> "四海";
-            case 4 -> "五海";
-            default -> "加赛" + depth;
-        };
     }
 
     /** 海选加赛参赛方结果文本 */

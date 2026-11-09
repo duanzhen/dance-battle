@@ -90,22 +90,11 @@ public class AuditionAdvanceInfoSupport {
         if (!SettlementSupport.isTiebreaker(match)) {
             return null;
         }
-        String name = match.getName() == null ? "" : match.getName();
-        int depth = 0;
-        for (int i = name.indexOf("加赛"); i >= 0; i = name.indexOf("加赛", i + 2)) {
-            depth++;
-        }
-        return switch (Math.max(1, depth)) {
-            case 1 -> "二海";
-            case 2 -> "三海";
-            case 3 -> "四海";
-            case 4 -> "五海";
-            default -> "加赛" + Math.max(1, depth);
-        };
+        return SettlementSupport.tiebreakerRoundName(SettlementSupport.tiebreakerDepth(match));
     }
 
-    /** 各圈已晋级人数(按人去重):与 AuditionStageSettler#countAuditionAdvancedByZone 同一口径 */
-    private Map<String, Integer> advancedByZone(List<TMatch> matches) {
+    /** 各圈已晋级人数(按人去重),结算与展示共用。 */
+    public Map<String, Integer> advancedByZone(List<TMatch> matches) {
         Map<Long, String> matchZone = new HashMap<>();
         for (TMatch m : matches) {
             matchZone.put(m.getId(), m.getDisplayZone());

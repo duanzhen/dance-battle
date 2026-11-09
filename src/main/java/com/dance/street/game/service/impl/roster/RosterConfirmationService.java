@@ -54,6 +54,8 @@ public class RosterConfirmationService {
     private final RosterGroupStore rosterGroupStore;
     /** 中间层名单的行级读写 */
     private final RosterEntryStore rosterEntryStore;
+    /** 名单投影的空闲座位口径 */
+    private final RosterProjectionService rosterProjectionService;
     /** 出口规则与名单状态/守卫 */
     private final RosterGroupService rosterGroupService;
 
@@ -230,7 +232,7 @@ public class RosterConfirmationService {
             }
             seed = seedOverride;
         } else {
-            seed = nextFreeSeed(occupiedSeeds, plan);
+            seed = rosterProjectionService.nextFreeSeed(occupiedSeeds, plan);
         }
         TCompetitor created = new TCompetitor();
         created.setTenantId(target.getTenantId());
@@ -360,18 +362,6 @@ public class RosterConfirmationService {
             .stream()
             .collect(Collectors.groupingBy(TCompetitorMember::getCompetitorId,
                 Collectors.mapping(TCompetitorMember::getPlayerId, Collectors.toList())));
-    }
-
-    private long nextFreeSeed(Set<Long> occupiedSeeds, int plan) {
-        if (plan > 0) {
-            for (long seat = 1; seat <= plan; seat++) {
-                if (!occupiedSeeds.contains(seat)) {
-                    return seat;
-                }
-            }
-            return plan + 1L;
-        }
-        return occupiedSeeds.stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
     }
 
     /** 外卡号码自动分配:已有号码里取最大数值 +1,前缀 G */

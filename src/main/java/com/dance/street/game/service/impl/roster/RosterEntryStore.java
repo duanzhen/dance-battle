@@ -327,10 +327,7 @@ public class RosterEntryStore {
         if (referencing.isEmpty()) {
             return 0;
         }
-        List<TStage> all = stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
-            .eq(TStage::getTournamentId, source.getTournamentId())
-            .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
-            .in(TStage::getId, referencing));
+        List<TStage> all = downstreamStages(source, referencing);
         int rebuilt = 0;
         for (TStage s : all) {
             // 上游结算/重置 = 对账:多入口汇合要保留导播已经排好的位置
@@ -642,12 +639,7 @@ public class RosterEntryStore {
         if (referencing.isEmpty()) {
             return 0;
         }
-        List<TStage> targets = stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
-                .eq(TStage::getTournamentId, source.getTournamentId())
-                .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
-                .in(TStage::getId, referencing)).stream()
-            .filter(t -> !Objects.equals(t.getId(), sourceStageId))
-            .toList();
+        List<TStage> targets = downstreamStages(source, referencing);
         if (targets.isEmpty()) {
             return 0;
         }
@@ -707,13 +699,7 @@ public class RosterEntryStore {
             return 0;
         }
         int changed = 0;
-        for (TStage target : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
-            .eq(TStage::getTournamentId, source.getTournamentId())
-            .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
-            .in(TStage::getId, referencing))) {
-            if (Objects.equals(target.getId(), sourceStageId)) {
-                continue;
-            }
+        for (TStage target : downstreamStages(source, referencing)) {
             changed += syncTargetPreAdvance(target, sourceStageId, only);
         }
         return changed;
@@ -739,13 +725,7 @@ public class RosterEntryStore {
             return 0;
         }
         int changed = 0;
-        for (TStage target : stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
-            .eq(TStage::getTournamentId, source.getTournamentId())
-            .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
-            .in(TStage::getId, referencing))) {
-            if (Objects.equals(target.getId(), sourceStageId)) {
-                continue;
-            }
+        for (TStage target : downstreamStages(source, referencing)) {
             if (!StageConstants.STAGE_DRAFT.equals(target.getStatus())) {
                 continue;   // 目标已开赛/已作废:名单锁定
             }
@@ -1031,6 +1011,20 @@ public class RosterEntryStore {
         } else {
             clearRuleEntry(row, emptySlotKind, rowStatus);
         }
+    }
+
+    /** 赛事内引用了来源赛段的下游赛段(排除来源自身与已作废赛段)。 */
+    private List<TStage> downstreamStages(TStage source, Collection<Long> referencing) {
+        if (source == null || referencing == null || referencing.isEmpty()) {
+            return List.of();
+        }
+        return stageMapper.selectList(Wrappers.<TStage>lambdaQuery()
+                .eq(TStage::getTournamentId, source.getTournamentId())
+                .ne(TStage::getStatus, StageConstants.STAGE_DISCARD)
+                .in(TStage::getId, referencing))
+            .stream()
+            .filter(target -> !Objects.equals(target.getId(), source.getId()))
+            .toList();
     }
 
     /**

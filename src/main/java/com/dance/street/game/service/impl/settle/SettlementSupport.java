@@ -50,6 +50,27 @@ public class SettlementSupport {
         return match != null && StageConstants.MATCH_TYPE_TIEBREAKER.equals(match.getMatchType());
     }
 
+    /** 加赛深度:场次名中「加赛」的出现次数,最小为 1(二海)。 */
+    public static int tiebreakerDepth(TMatch match) {
+        String name = match == null || match.getName() == null ? "" : match.getName();
+        int depth = 0;
+        for (int i = name.indexOf("加赛"); i >= 0; i = name.indexOf("加赛", i + 2)) {
+            depth++;
+        }
+        return Math.max(1, depth);
+    }
+
+    /** 加赛轮次名:1=二海,2=三海,3=四海,4=五海,更深层使用「加赛N」。 */
+    public static String tiebreakerRoundName(int depth) {
+        return switch (Math.max(1, depth)) {
+            case 1 -> "二海";
+            case 2 -> "三海";
+            case 3 -> "四海";
+            case 4 -> "五海";
+            default -> "加赛" + Math.max(1, depth);
+        };
+    }
+
     /** 参赛号码转数值用于排序:非数字号码排最后 */
     public static int parseCompetitorNumber(String number) {
         if (number == null || number.isBlank()) {

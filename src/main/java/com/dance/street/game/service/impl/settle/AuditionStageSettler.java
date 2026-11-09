@@ -76,6 +76,7 @@ public class AuditionStageSettler {
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
     private final SettlementSupport settlementSupport;
+    private final AuditionAdvanceInfoSupport auditionAdvanceInfoSupport;
     /** 「判完了吗」的唯一口径(与排名赛/淘汰赛上分共用,口径只保留这一份) */
     private final JudgeCompletenessChecker judgeCompletenessChecker;
 
@@ -143,7 +144,8 @@ public class AuditionStageSettler {
         long people = participantMapper.selectCount(Wrappers.<TMatchParticipant>lambdaQuery()
             .eq(TMatchParticipant::getMatchId, tb.getId())
             .isNotNull(TMatchParticipant::getCompetitorId));
-        return zoneLabel(tb.getDisplayZone()) + tiebreakerRoundName(tiebreakerDepth(tb))
+        return zoneLabel(tb.getDisplayZone())
+            + SettlementSupport.tiebreakerRoundName(SettlementSupport.tiebreakerDepth(tb))
             + "(" + tiebreakerTag(tb.getRemark()) + " " + people + " 人同分)";
     }
 
@@ -155,26 +157,6 @@ public class AuditionStageSettler {
         int idx = zone.lastIndexOf('-');
         String no = idx >= 0 ? zone.substring(idx + 1) : zone;
         return "第" + no + "圈 ";
-    }
-
-    /** 加赛深度:场次名里「加赛」出现的次数(1=二海,2=三海…),与导出 sheet 同名 */
-    private int tiebreakerDepth(TMatch tb) {
-        String name = tb.getName() == null ? "" : tb.getName();
-        int depth = 0;
-        for (int i = name.indexOf("加赛"); i >= 0; i = name.indexOf("加赛", i + 2)) {
-            depth++;
-        }
-        return Math.max(1, depth);
-    }
-
-    private String tiebreakerRoundName(int depth) {
-        return switch (depth) {
-            case 1 -> "二海";
-            case 2 -> "三海";
-            case 3 -> "四海";
-            case 4 -> "五海";
-            default -> "加赛" + depth;
-        };
     }
 
     /** 加赛争的边界标签:remark 形如「同分加赛,晋级名额,3人」,取第二段 */
@@ -239,7 +221,7 @@ public class AuditionStageSettler {
         Map<String, StageFlowSupport.CircleQuota> zoneCtx =
             StageFlowSupport.circleQuotaContext(stage, matches, "海选");
         // 圈内已晋级数(含已结算正式圈与加赛,支持重复结算幂等)
-        Map<String, Integer> zoneAdvanced = countAuditionAdvancedByZone(matches);
+        Map<String, Integer> zoneAdvanced = auditionAdvanceInfoSupport.advancedByZone(matches);
 
         for (TMatch match : matches) {
             if (StageConstants.MATCH_SETTLED.equals(match.getStatus())) {
@@ -309,39 +291,6 @@ public class AuditionStageSettler {
         if (changed > 0) {
             log.info("海选结算:按明细重算 {} 行显示用总分(participant.score_value)", changed);
         }
-    }
-
-    /**
-     * 统计海选各圈(displayZone)已晋级人数,每圈独立结算时用它计算剩余名额。
-     *
-     * <p><b>必须按人去重</b>:加赛结算会把晋级结果同步回该选手在本赛段的全部参赛行
-     * (原始圈 + 各级加赛),同一名晋级者因此会留下多行 ADVANCE。按行计数会把二海晋级者
-     * 重复算进名额(二海 1 人晋级、剩 2 人进三海时,三海查到"名额已满"而把两人全淘汰,
-     * 本圈少一个晋级者——正是"选手没进下一赛段"那类现场事故)。</p>
-     */
-    private Map<String, Integer> countAuditionAdvancedByZone(List<TMatch> matches) {
-        Map<Long, String> matchZone = new HashMap<>();
-        for (TMatch m : matches) {
-            matchZone.put(m.getId(), m.getDisplayZone());
-        }
-        List<TMatchParticipant> parts = participantMapper.selectList(
-            Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchZone.keySet())
-                .eq(TMatchParticipant::getOutcomeStatus, OutcomeStatusEnum.ADVANCE.getCode()));
-        // competitorId -> 所在圈:同一选手多行只留第一行(其所在圈唯一)
-        Map<Long, String> advancerZone = new HashMap<>();
-        for (TMatchParticipant p : parts) {
-            if (p.getCompetitorId() == null) {
-                continue;
-            }
-            advancerZone.putIfAbsent(p.getCompetitorId(),
-                matchZone.getOrDefault(p.getMatchId(), ""));
-        }
-        Map<String, Integer> result = new HashMap<>();
-        for (String zone : advancerZone.values()) {
-            result.merge(zone, 1, Integer::sum);
-        }
-        return result;
     }
 
     /**

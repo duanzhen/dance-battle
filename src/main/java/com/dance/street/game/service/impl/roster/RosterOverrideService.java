@@ -616,23 +616,8 @@ public class RosterOverrideService {
             .filter(r -> r.getSlot() != null && !isPlainBye(r))
             .map(TStageRosterEntry::getSlot)
             .collect(Collectors.toSet());
-        entryMapper.delete(Wrappers.<TStageRosterEntry>lambdaQuery()
-            .eq(TStageRosterEntry::getTargetStageId, stageId)
-            .eq(TStageRosterEntry::getSlotKind, StageConstants.SLOT_BYE)
-            .isNull(TStageRosterEntry::getSourceCompetitorId));
-        for (long slot = 1; slot <= total; slot++) {
-            if (used.contains(slot)) {
-                continue;
-            }
-            TStageRosterEntry bye = new TStageRosterEntry();
-            bye.setTournamentId(target.getTournamentId());
-            bye.setTargetStageId(stageId);
-            bye.setSlot(slot);
-            bye.setSlotKind(StageConstants.SLOT_BYE);
-            bye.setOrigin(RosterConstants.ENTRY_ORIGIN_RULE);
-            bye.setStatus(RosterConstants.ENTRY_STATUS_READY);
-            entryMapper.insert(bye);
-        }
+        clearPlainByeSeats(stageId);
+        fillMissingByeSeats(target, stageId, used, total);
     }
 
     /** 撤销单条人工覆盖的行级动作(还原"移出"/清回空位) */
@@ -755,10 +740,7 @@ public class RosterOverrideService {
         long total = Math.max(plan, Math.max(maxSlot,
             used.stream().mapToLong(Long::longValue).max().orElse(0L)));
         // 纯填充空位行整批删掉后按缺失座位重建,保证 1..total 每个座位恰好一行
-        entryMapper.delete(Wrappers.<TStageRosterEntry>lambdaQuery()
-            .eq(TStageRosterEntry::getTargetStageId, stageId)
-            .eq(TStageRosterEntry::getSlotKind, StageConstants.SLOT_BYE)
-            .isNull(TStageRosterEntry::getSourceCompetitorId));
+        clearPlainByeSeats(stageId);
         for (TStageRosterEntry r : moving) {
             if (r.getSlot() == null) {
                 // 摘掉座位号必须显式 SET slot = NULL:updateById 默认跳过 null 字段,
@@ -771,6 +753,21 @@ public class RosterOverrideService {
             }
             entryMapper.updateById(r);
         }
+        fillMissingByeSeats(target, stageId, used, total);
+        log.info("赛段[{}]中间层名单顺序已保存({} 项)", stageId, moving.size());
+        rosterGroupStore.notifyTarget(stageId);
+    }
+
+    /** 删除无来源引用的纯填充空位行,后续按当前占座集合统一重建。 */
+    private void clearPlainByeSeats(Long stageId) {
+        entryMapper.delete(Wrappers.<TStageRosterEntry>lambdaQuery()
+            .eq(TStageRosterEntry::getTargetStageId, stageId)
+            .eq(TStageRosterEntry::getSlotKind, StageConstants.SLOT_BYE)
+            .isNull(TStageRosterEntry::getSourceCompetitorId));
+    }
+
+    /** 为 1..total 中未被占用的座位补纯空位行。 */
+    private void fillMissingByeSeats(TStage target, Long stageId, Set<Long> used, long total) {
         for (long slot = 1; slot <= total; slot++) {
             if (used.contains(slot)) {
                 continue;
@@ -784,8 +781,6 @@ public class RosterOverrideService {
             bye.setStatus(RosterConstants.ENTRY_STATUS_READY);
             entryMapper.insert(bye);
         }
-        log.info("赛段[{}]中间层名单顺序已保存({} 项)", stageId, moving.size());
-        rosterGroupStore.notifyTarget(stageId);
     }
 
     private void validateOverrideSource(Long stageId, String op, TStageRosterOverrideBo bo,

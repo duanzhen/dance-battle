@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,6 +100,29 @@ class StageEdgeRulesTest {
         assertThrows(ServiceException.class,
             () -> stageService.deleteWithValidByIds(List.of(b.getId()), true),
             "含自定义边的赛段不能直接删除");
+    }
+
+    /** 链首没有合法的跨赛段入边,空链首的自定义出口应随节点一起删除。 */
+    @Test
+    void entryStageCanBeDeletedWithCustomOutgoingEdge() {
+        Long tid = newTournament("链首自定义出口可删");
+        TStageVo a = newStage(tid, "A", null);
+        TStageVo b = newStage(tid, "B", a.getId());
+        TStageRosterBo bo = new TStageRosterBo();
+        TStageRosterGroupBo custom = new TStageRosterGroupBo();
+        custom.setSourceStageId(a.getId());
+        custom.setResultFilter(OutcomeStatusEnum.ELIMINATED.getCode());
+        custom.setFillMode("AUTO");
+        custom.setQuota(0);
+        bo.setGroups(List.of(custom));
+        rosterService.addGroups(b.getId(), bo);
+
+        assertTrue(stageService.deleteWithValidByIds(List.of(a.getId()), true));
+        assertNull(stageMapper.selectById(a.getId()));
+        assertTrue(rosterService.listBySource(a.getId()).isEmpty(), "链首出口应随赛段删除");
+        List<TStageRosterGroupBo> successorGroups = rosterService.groupsOfStage(b.getId());
+        assertEquals(1, successorGroups.size());
+        assertNull(successorGroups.getFirst().getSourceStageId(), "新链首应恢复为签到来源");
     }
 
     /** 上游已结算 → 不允许再增删改它的出口(来源段必须是 DRAFT)。 */

@@ -14,11 +14,12 @@ import com.dance.street.game.domain.vo.StageParticipantsVo;
 import com.dance.street.game.domain.vo.TStageRosterOverrideVo;
 import com.dance.street.game.domain.vo.TStageRosterVo;
 import com.dance.street.game.service.ITStageRosterService;
-import com.dance.street.game.service.impl.roster.RosterApplyService;
+import com.dance.street.game.service.impl.roster.RosterConfirmationService;
 import com.dance.street.game.service.impl.roster.RosterEntryStore;
 import com.dance.street.game.service.impl.roster.RosterGroupService;
 import com.dance.street.game.service.impl.roster.RosterGroupStore;
 import com.dance.street.game.service.impl.roster.RosterOverrideService;
+import com.dance.street.game.service.impl.roster.RosterProjectionService;
 import com.dance.street.game.service.impl.roster.RosterViewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -45,10 +46,9 @@ import java.util.Map;
  *   <li>{@link RosterGroupService} 出口(来源组)配置与规则、名单状态与开赛守卫;</li>
  *   <li>{@link RosterEntryStore} 中间层行的读写 + 整表重建 + 上游变更后的实时对账;</li>
  *   <li>{@link RosterOverrideService} 人工调整(加人/移出/钉座位/拖动);</li>
- *   <li>{@link RosterApplyService} 整单装配(确认名单,把中间层物化到目标层);</li>
+ *   <li>{@link RosterConfirmationService} 确认名单,把中间层物化到目标层;</li>
  *   <li>{@link RosterViewService} 大屏参赛选手与中间态名单预览;</li>
- *   <li>更底层:{@link RosterGroupStore}(边表存储)、{@link RosterAssembler}(取人规则求值)、
- *       {@link RosterMaterializer}(逐行物化)。</li>
+ *   <li>更底层:{@link RosterGroupStore}(边表存储)、{@link RosterProjectionService}(取人和座位投影)。</li>
  * </ul>
  *
  * @author duane
@@ -68,7 +68,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     /** 对外视图:参赛选手(大屏)与中间态名单预览 */
     private final RosterViewService rosterViewService;
     /** 整单装配(确认名单):中间层整表物化到目标层 */
-    private final RosterApplyService rosterApplyService;
+    private final RosterConfirmationService rosterConfirmationService;
 
     // ------------------------------------------------------------------
     // 名单来源组(赛段间依赖的边+取人规则)的读写
@@ -263,7 +263,7 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int applyRoster(Long targetStageId, Map<Long, List<Long>> manualSelections) {
-        return rosterApplyService.applyRoster(targetStageId, manualSelections);
+        return rosterConfirmationService.applyRoster(targetStageId, manualSelections);
     }
 
     /**

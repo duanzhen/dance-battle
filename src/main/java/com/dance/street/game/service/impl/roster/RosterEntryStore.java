@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
  * 中间层名单(t_stage_roster_entry)的行级读写:构建一行、清空一行、清空整表。
  *
  * <p>中间层是"两个赛段之间唯一的一份数据":整表重建与实时对账都收敛到这里,
- * 两者共用 {@link RosterAssembler#project} 这一份投影,不再各算一套座位。</p>
+ * 两者共用 {@link RosterProjectionService#project} 这一份投影,不再各算一套座位。</p>
  *
  * <p>口径与注释原样保留:空座位是"轮空"还是"待定"取决于名单来源是否已结算(中间态与大屏必须同一口径)。</p>
  *
@@ -58,7 +58,7 @@ public class RosterEntryStore {
     /** 来源组(出口)的读口径与广播 */
     private final RosterGroupStore rosterGroupStore;
     /** 装配的规则求值 */
-    private final RosterAssembler rosterAssembler;
+    private final RosterProjectionService rosterProjectionService;
     private final TMatchParticipantMapper participantMapper;
 
     /**
@@ -151,7 +151,7 @@ public class RosterEntryStore {
         boolean sourceReady = readyByGroups(groups);
         // 投影 = 唯一算法:单来源自动落座(座号=来源名次)、多来源进待落位区、
         // 座位 1..N 每个都铺实体行。
-        RosterAssembler.Projection projection = rosterAssembler.project(target, groups);
+        RosterProjectionService.Projection projection = rosterProjectionService.project(target, groups);
         if (projection.holding() && keepManualAdjustments) {
             int changed = rebuildHoldingEntries(target, projection, sourceReady);
             rosterGroupStore.notifyTarget(targetStageId);
@@ -172,13 +172,13 @@ public class RosterEntryStore {
         // 同一选手只留手动那条。没有手动边的赛段保持原口径(投影说了算)。
         boolean manualWins = keepManualAdjustments && RosterEdgeRules.hasManualEdge(groups);
         if (manualWins) {
-            projection = rosterAssembler.manualWins(projection, manualRows);
+            projection = rosterProjectionService.manualWins(projection, manualRows);
             // 待落位粘性:已被挤进待落位区的自动人,手动人移走后也不自动回座,座位留空
             Set<Long> holdingIds = selectEntries(targetStageId).stream()
                 .filter(r -> r.getSlot() == null && r.getSourceCompetitorId() != null)
                 .map(TStageRosterEntry::getSourceCompetitorId)
                 .collect(Collectors.toSet());
-            projection = rosterAssembler.stickyHolding(projection, holdingIds);
+            projection = rosterProjectionService.stickyHolding(projection, holdingIds);
         }
         Set<Long> manualSeats = new HashSet<>();
         if (manualWins) {
@@ -191,14 +191,14 @@ public class RosterEntryStore {
             if (manualSeats.contains(slot)) {
                 continue;   // 座位归手动的人:下面按原行写回,这里不再铺空位
             }
-            RosterAssembler.AssembledRow r = projection.bySlot().get(slot);
+            RosterProjectionService.AssembledRow r = projection.bySlot().get(slot);
             entryMapper.insert(toEntry(target, slot, r, sourceReady));
             projectedSlots.add(slot);
             if (r != null && r.source != null) {
                 projectedSourceIds.add(r.source.getId());
             }
         }
-        for (RosterAssembler.AssembledRow r : projection.holdingRows()) {
+        for (RosterProjectionService.AssembledRow r : projection.holdingRows()) {
             entryMapper.insert(toHoldingEntry(target, r, sourceReady));
             if (r.source != null) {
                 projectedSourceIds.add(r.source.getId());
@@ -237,7 +237,7 @@ public class RosterEntryStore {
      *
      * @return 变更行数(仅用于日志)
      */
-    private int rebuildHoldingEntries(TStage target, RosterAssembler.Projection projection,
+    private int rebuildHoldingEntries(TStage target, RosterProjectionService.Projection projection,
                                       boolean sourceReady) {
         Long targetStageId = target.getId();
         String rowStatus = sourceReady
@@ -284,7 +284,7 @@ public class RosterEntryStore {
             changed++;
         }
         // 新进来的候选 → 待落位区;已经有行的人不动(可能导播已经拖到座位上了)
-        for (RosterAssembler.AssembledRow candidate : projection.holdingRows()) {
+        for (RosterProjectionService.AssembledRow candidate : projection.holdingRows()) {
             Long cid = candidate.source == null ? null : candidate.source.getId();
             if (cid == null || !presentSourceIds.add(cid)) {
                 continue;
@@ -479,7 +479,7 @@ public class RosterEntryStore {
     }
 
     /** 组装一行中间层数据:座位有人=PLAYER,空座=BYE(空位也是实体行) */
-    public TStageRosterEntry toEntry(TStage target, long slot, RosterAssembler.AssembledRow row,
+    public TStageRosterEntry toEntry(TStage target, long slot, RosterProjectionService.AssembledRow row,
                                      boolean sourceReady) {
         TStageRosterEntry e = baseEntry(target, slot, sourceReady);
         if (row == null) {
@@ -500,7 +500,7 @@ public class RosterEntryStore {
      * 组装一行"待落位"数据:人在名单里,但还没有座位号(多入口汇合时由导播在中间态拖到座位上)。
      * 座位行与它是两回事——座位号 1..N 各有一行空位实体,不看 slot 就区分不出"人在哪"。
      */
-    public TStageRosterEntry toHoldingEntry(TStage target, RosterAssembler.AssembledRow row,
+    public TStageRosterEntry toHoldingEntry(TStage target, RosterProjectionService.AssembledRow row,
                                             boolean sourceReady) {
         TStageRosterEntry e = baseEntry(target, null, sourceReady);
         e.setSlotKind(StageConstants.SLOT_PLAYER);
@@ -598,7 +598,7 @@ public class RosterEntryStore {
     }
 
     /** 把组装行的人(来源参赛方 / 外卡)填进中间层行 */
-    private void fillPerson(TStageRosterEntry e, RosterAssembler.AssembledRow row) {
+    private void fillPerson(TStageRosterEntry e, RosterProjectionService.AssembledRow row) {
         if (row.guest) {
             e.setRefType("GUEST");
             e.setPlayerId(row.guestPlayerId);
@@ -779,7 +779,7 @@ public class RosterEntryStore {
      * 把一个目标赛段的中间层与来源赛段当前的结果对齐:整表重建与实时同步共用同一份投影,
      * 不再有"快路径 / 通用路径 / 待落位路径"三套算法。
      *
-     * <p>座位号由来源赛段经 {@link RosterExitApply} 给出,这里只做对账:
+     * <p>座位号由来源赛段经 {@link RosterProjectionService} 给出,这里只做对账:
      * 该坐哪就坐哪;不再晋级的(判错重判/重置)座位还原成空位;人工调整的行原样保留。</p>
      */
     private int syncTargetPreAdvance(TStage target, Long sourceStageId, Set<Long> only) {
@@ -799,7 +799,7 @@ public class RosterEntryStore {
         if (groups.isEmpty()) {
             return 0;
         }
-        RosterAssembler.Projection projection = rosterAssembler.project(target, groups);
+        RosterProjectionService.Projection projection = rosterProjectionService.project(target, groups);
         // 一条自动边 + 手动边:手动的人优先(座位归他,被占座的自动人进待落位区,同一选手只留手动)
         Set<Long> displaced = Set.of();
         int displacedMoved = 0;
@@ -807,14 +807,14 @@ public class RosterEntryStore {
             Set<Long> holdingBefore = projection.holdingRows().stream()
                 .map(r -> r.source == null ? null : r.source.getId())
                 .filter(Objects::nonNull).collect(Collectors.toSet());
-            projection = rosterAssembler.manualWins(projection, rows.stream()
+            projection = rosterProjectionService.manualWins(projection, rows.stream()
                 .filter(r -> RosterConstants.ENTRY_ORIGIN_MANUAL.equals(r.getOrigin())).toList());
             // 已在待落位区的人(含此前被挤下来的):手动人移走后也不自动回座
             Set<Long> currentlyHolding = rows.stream()
                 .filter(r -> r.getSlot() == null && r.getSourceCompetitorId() != null)
                 .map(TStageRosterEntry::getSourceCompetitorId)
                 .collect(Collectors.toSet());
-            projection = rosterAssembler.stickyHolding(projection, currentlyHolding);
+            projection = rosterProjectionService.stickyHolding(projection, currentlyHolding);
             displaced = projection.holdingRows().stream()
                 .map(r -> r.source == null ? null : r.source.getId())
                 .filter(id -> id != null && (currentlyHolding.contains(id) || !holdingBefore.contains(id)))
@@ -853,7 +853,7 @@ public class RosterEntryStore {
     }
 
     /** 把还没有行的人补进待落座区(已有行的人不动:可能导播已经拖到座位上了) */
-    private int insertHoldingRows(TStage target, List<RosterAssembler.AssembledRow> candidates, String rowStatus) {
+    private int insertHoldingRows(TStage target, List<RosterProjectionService.AssembledRow> candidates, String rowStatus) {
         if (candidates.isEmpty()) {
             return 0;
         }
@@ -862,7 +862,7 @@ public class RosterEntryStore {
             .filter(Objects::nonNull)
             .collect(Collectors.toSet());
         int changed = 0;
-        for (RosterAssembler.AssembledRow c : candidates) {
+        for (RosterProjectionService.AssembledRow c : candidates) {
             if (c.source == null || c.source.getId() == null || existing.contains(c.source.getId())) {
                 continue;
             }
@@ -883,7 +883,7 @@ public class RosterEntryStore {
      * 找到原来代表这个位置的那一行,把新的人/新的座号写进去;这个位置上没人了才还原成空位。
      * 人工行不动;显示与物化一律只看 {@code slot}(新座号)。</p>
      */
-    private int reconcileSeats(TStage target, Long sourceStageId, RosterAssembler.Projection projection,
+    private int reconcileSeats(TStage target, Long sourceStageId, RosterProjectionService.Projection projection,
                                List<TStageRosterEntry> rows, String rowStatus, String emptySlotKind,
                                Set<Long> only, Set<Long> displaced) {
         // 来源位置(finalRank) → 投影给出的新座号;人 → 它现在占的来源位置
@@ -958,7 +958,7 @@ public class RosterEntryStore {
         for (Map.Entry<Long, Long> e : seatBySourceSlot.entrySet()) {
             long src = e.getKey();
             long seat = e.getValue();
-            RosterAssembler.AssembledRow expected = projection.bySlot().get(seat);
+            RosterProjectionService.AssembledRow expected = projection.bySlot().get(seat);
             TCompetitor advancer = expected.source;
             TStageRosterEntry row = rowBySourceSlot.get(src);
             if (row == null) {
@@ -986,7 +986,7 @@ public class RosterEntryStore {
      * 已经落位的人不会被挪走:导播拖好的座位要保住,不能因为另一个入口判完一场就被打回待落位区。
      */
     private int reconcileHolding(TStage target, Long sourceStageId,
-                                 List<RosterAssembler.AssembledRow> holdingRows,
+                                 List<RosterProjectionService.AssembledRow> holdingRows,
                                  List<TStageRosterEntry> rows, String rowStatus, Set<Long> only) {
         Set<Long> candidateIds = holdingRows.stream().map(r -> r.source.getId())
             .filter(Objects::nonNull).collect(Collectors.toSet());
@@ -1010,7 +1010,7 @@ public class RosterEntryStore {
             changed++;
         }
         // 2) 新进来的候选 → 待落位区(没有座位号)。已经有行的人不动:可能导播已经拖到座位上了。
-        for (RosterAssembler.AssembledRow candidate : holdingRows) {
+        for (RosterProjectionService.AssembledRow candidate : holdingRows) {
             if (bySource.containsKey(candidate.source.getId())) {
                 continue;
             }
@@ -1040,7 +1040,7 @@ public class RosterEntryStore {
      * 它是对账的定位键:上游改了某个位置的结果时,按这个位置找到原来那一行做变更。</p>
      */
     private void placeAdvancer(TStage target, TStageRosterEntry row,
-                               RosterAssembler.AssembledRow expected, String rowStatus, long seat) {
+                               RosterProjectionService.AssembledRow expected, String rowStatus, long seat) {
         TCompetitor advancer = expected.source;
         long sourceSlot = advancer.getFinalRank() != null ? advancer.getFinalRank() : seat;
         if (RosterConstants.ENTRY_ORIGIN_MANUAL.equals(row.getOrigin())) {

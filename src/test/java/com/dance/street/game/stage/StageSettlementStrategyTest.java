@@ -20,9 +20,9 @@ import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
-import com.dance.street.game.service.impl.stage.ArenaMode;
+import com.dance.street.game.service.impl.stage.ArenaStageService;
 import com.dance.street.game.service.impl.stage.AuditionMode;
-import com.dance.street.game.service.impl.stage.FreeMatchMode;
+import com.dance.street.game.service.impl.stage.FreeMatchStageService;
 import com.dance.street.game.service.impl.stage.KnockoutMode;
 import com.dance.street.game.service.impl.stage.RankMode;
 import com.dance.street.game.service.impl.stage.StageMode;
@@ -119,9 +119,9 @@ class StageSettlementStrategyTest {
     void registryDispatchesToExpectedHandler() {
         assertInstanceOf(AuditionMode.class, stageModes.of(StageModeEnum.AUDITION.getCode()));
         assertInstanceOf(RankMode.class, stageModes.of(StageModeEnum.RANK.getCode()));
-        assertInstanceOf(ArenaMode.class, stageModes.of(StageModeEnum.ARENA.getCode()));
+        assertInstanceOf(ArenaStageService.class, stageModes.of(StageModeEnum.ARENA.getCode()));
         assertInstanceOf(KnockoutMode.class, stageModes.of(StageModeEnum.KNOCKOUT.getCode()));
-        assertInstanceOf(FreeMatchMode.class, stageModes.of(StageModeEnum.FREE_MATCH.getCode()));
+        assertInstanceOf(FreeMatchStageService.class, stageModes.of(StageModeEnum.FREE_MATCH.getCode()));
     }
 
     /**

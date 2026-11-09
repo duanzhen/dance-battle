@@ -27,6 +27,8 @@ import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import com.dance.street.game.service.impl.flow.StageLookup;
 import com.dance.street.game.service.impl.settle.ArenaQueueSupport;
+import com.dance.street.game.service.impl.settle.ArenaStageSettler;
+import com.dance.street.game.service.impl.settle.StageSettleOutcome;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -44,16 +46,16 @@ import java.util.stream.Collectors;
 /**
  * 擂台赛的运行与总览:逐场开赛、弃权补位、队列/积分总览。
  *
- * <p>从 {@code TStageLifecycleServiceImpl} 按业务轴搬出来的内部协作者。擂台赛没有固定签表,
- * 对手由"轮转队列"逐场产生,所以这块自成一条业务线;队列与积分的算法在
- * {@link ArenaQueueSupport},这里只负责把它变成场次、参赛方行与总览视图。</p>
+ * <p>擂台赛没有固定签表,对手由"轮转队列"逐场产生。本类同时是该赛制的
+ * {@link StageMode} 实现，运行操作、总览和结算留在同一条赛制业务线中；
+ * 队列与积分的算法在 {@link ArenaQueueSupport}。</p>
  *
  * @author duane
  */
 @Slf4j
 @RequiredArgsConstructor
 @Service
-public class ArenaRunService {
+public class ArenaStageService implements StageMode {
 
     private final StageLookup stageLookup;
     private final TMatchMapper matchMapper;
@@ -67,8 +69,20 @@ public class ArenaRunService {
     private final CompetitorOutcomeWriter outcomeWriter;
     /** 擂台轮转队列/积分口径(查询与结算共用) */
     private final ArenaQueueSupport arenaQueueSupport;
+    /** 擂台赛完成时的名次结算 */
+    private final ArenaStageSettler arenaStageSettler;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
+
+    @Override
+    public StageModeEnum mode() {
+        return StageModeEnum.ARENA;
+    }
+
+    @Override
+    public StageSettleOutcome settle(TStage stage) {
+        return arenaStageSettler.settle(stage);
+    }
 
     /** 开始下一场对决:从轮转队列取队首两人开一场(有进行中的对决时拒绝)。 */
     @Transactional(rollbackFor = Exception.class)

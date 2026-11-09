@@ -52,7 +52,7 @@ public class RosterViewService {
     /** 中间层名单的行级读写 */
     private final RosterEntryStore rosterEntryStore;
     /** 投影规则求值:判断目标赛段是不是"多入口汇合"(那些行来自未结算来源也能调) */
-    private final RosterAssembler rosterAssembler;
+    private final RosterProjectionService rosterProjectionService;
     /** 名单状态位与锁口径 */
     private final RosterGroupService rosterGroupService;
 
@@ -262,7 +262,7 @@ public class RosterViewService {
             .filter(Objects::nonNull).distinct().toList();
         // 行级可调整判定:多入口汇合的座位靠导播拖(对账不重排已落好的行),全放开;
         // 单入口自动排座则按来源是否结算:未结算来源的人会被投影重新落座,先锁着
-        boolean multiEntry = rosterAssembler.multiEntry(groups);
+        boolean multiEntry = rosterProjectionService.multiEntry(groups);
         Set<Long> unsettledSources = rosterEntryStore.unsettledSourceStageIds(
             entries.stream().map(TStageRosterEntry::getSourceStageId)
                 .filter(Objects::nonNull).distinct().toList());

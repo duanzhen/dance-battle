@@ -15,7 +15,7 @@ import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageService;
-import com.dance.street.game.service.impl.roster.RosterMaterializer;
+import com.dance.street.game.service.impl.roster.RosterConfirmationService;
 import org.dromara.common.core.exception.ServiceException;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -66,7 +66,7 @@ class CompetitorSourceUniqueTest {
     @Autowired private TCompetitorMemberMapper memberMapper;
     @Autowired private TStageMapper stageMapper;
     @Autowired private ITStageService stageService;
-    @Autowired private RosterMaterializer materializer;
+    @Autowired private RosterConfirmationService rosterConfirmationService;
 
     @Test
     void databaseRejectsSecondCompetitorForSameSourceButAllowsNullSource() {
@@ -102,10 +102,10 @@ class CompetitorSourceUniqueTest {
 
         TStage target = stageMapper.selectById(to.getId());
         Set<Long> occupied = new HashSet<>();
-        assertEquals(1, materializer.copyIntoStage(target, source, occupied, List.of(), null));
+        assertEquals(1, rosterConfirmationService.copyIntoStage(target, source, occupied, List.of(), null));
         // 模拟另一个并发的"确认名单"带着同一个来源再来一遍:命中唯一索引,按已物化处理
         Set<Long> occupied2 = new HashSet<>();
-        assertEquals(0, materializer.copyIntoStage(target, source, occupied2, List.of(), null),
+        assertEquals(0, rosterConfirmationService.copyIntoStage(target, source, occupied2, List.of(), null),
             "重复物化应返回 0 而不是抛错");
         assertTrue(occupied2.isEmpty(), "重复物化不应占座");
 
@@ -118,12 +118,12 @@ class CompetitorSourceUniqueTest {
 
     @Test
     void duplicateDetectionRecognisesSpringAndSqliteStyleErrors() {
-        assertTrue(RosterMaterializer.isDuplicateKey(new DuplicateKeyException("x")));
-        assertTrue(RosterMaterializer.isDuplicateKey(new RuntimeException("wrap",
+        assertTrue(RosterConfirmationService.isDuplicateKey(new DuplicateKeyException("x")));
+        assertTrue(RosterConfirmationService.isDuplicateKey(new RuntimeException("wrap",
             new java.sql.SQLException("[SQLITE_CONSTRAINT_UNIQUE] UNIQUE constraint failed: t_competitor.stage_id"))));
-        assertTrue(RosterMaterializer.isDuplicateKey(new RuntimeException("wrap",
+        assertTrue(RosterConfirmationService.isDuplicateKey(new RuntimeException("wrap",
             new java.sql.SQLException("Duplicate entry '1-2' for key 'uk'", "23000", 1062))));
-        org.junit.jupiter.api.Assertions.assertFalse(RosterMaterializer.isDuplicateKey(new RuntimeException("other")));
+        org.junit.jupiter.api.Assertions.assertFalse(RosterConfirmationService.isDuplicateKey(new RuntimeException("other")));
     }
 
     @Test

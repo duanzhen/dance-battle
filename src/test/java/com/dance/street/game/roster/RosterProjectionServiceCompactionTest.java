@@ -1,8 +1,8 @@
 package com.dance.street.game.roster;
 
 import com.dance.street.game.domain.TCompetitor;
-import com.dance.street.game.service.impl.roster.RosterAssembler.AssembledRow;
-import com.dance.street.game.service.impl.roster.RosterExitApply;
+import com.dance.street.game.service.impl.roster.RosterProjectionService;
+import com.dance.street.game.service.impl.roster.RosterProjectionService.AssembledRow;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,20 +15,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * 出口压紧表征:算法在 {@link RosterExitApply},不依赖 Assembler 类名。
+ * 出口压紧表征:算法与名单装配投影同属 {@link RosterProjectionService}。
  * 9..24 → 目标座 1..16;中间空洞保留;不改写来源 final_rank。
  * 端到端(含 shouldCompact 与重建)见 {@link MergePreAdvanceSeatTest}。
  */
 @SpringBootTest
-class RosterExitApplyCompactionTest {
+class RosterProjectionServiceCompactionTest {
 
     @Autowired
-    private RosterExitApply exitApply;
+    private RosterProjectionService projectionService;
 
     @Test
     void compactShiftsNineToTwentyFourOntoOneThroughSixteen() {
         List<AssembledRow> rows = ranks(9, 24);
-        exitApply.assignEdgeSeats(rows, 16, new HashSet<>(), true);
+        projectionService.assignEdgeSeats(rows, 16, new HashSet<>(), true);
         List<Long> seats = rows.stream().map(r -> r.seedRank).sorted().toList();
         assertEquals(16, seats.size());
         assertEquals(1L, seats.getFirst());
@@ -40,7 +40,7 @@ class RosterExitApplyCompactionTest {
     @Test
     void compactKeepsMiddleHoles() {
         List<AssembledRow> rows = List.of(rankRow(3L), rankRow(4L), rankRow(7L));
-        exitApply.assignEdgeSeats(rows, 16, new HashSet<>(), true);
+        projectionService.assignEdgeSeats(rows, 16, new HashSet<>(), true);
         assertEquals(List.of(1L, 2L, 5L), rows.stream().map(r -> r.seedRank).toList());
         assertEquals(List.of(3L, 4L, 7L), rows.stream().map(r -> r.source.getFinalRank()).toList());
     }
@@ -48,7 +48,7 @@ class RosterExitApplyCompactionTest {
     @Test
     void copyAssignPreservesHollowSlots() {
         List<AssembledRow> rows = List.of(rankRow(1L), rankRow(4L));
-        exitApply.assignEdgeSeats(rows, 4, new HashSet<>(), false);
+        projectionService.assignEdgeSeats(rows, 4, new HashSet<>(), false);
         assertEquals(1L, rows.get(0).seedRank);
         assertEquals(4L, rows.get(1).seedRank);
     }
@@ -56,7 +56,7 @@ class RosterExitApplyCompactionTest {
     @Test
     void compactOverflowGoesPending() {
         List<AssembledRow> rows = ranks(9, 24);
-        exitApply.assignEdgeSeats(rows, 8, new HashSet<>(), true);
+        projectionService.assignEdgeSeats(rows, 8, new HashSet<>(), true);
         long seated = rows.stream().filter(r -> r.seedRank != null).count();
         long pending = rows.stream().filter(r -> r.seedRank == null).count();
         assertEquals(8, seated);

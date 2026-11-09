@@ -59,7 +59,7 @@ public class RosterOverrideService {
     /** 中间层名单的行级读写 */
     private final RosterEntryStore rosterEntryStore;
     /** 投影规则求值:判断目标赛段是不是"多入口汇合"(座位全靠导播拖,不做来源锁定) */
-    private final RosterAssembler rosterAssembler;
+    private final RosterProjectionService rosterProjectionService;
     /** 名单状态位与锁口径(人工调整的前提是名单未装配/已重置) */
     private final RosterGroupService rosterGroupService;
 
@@ -99,7 +99,7 @@ public class RosterOverrideService {
      * 实时对账会按 {@code source_slot} 重新落座、来源结算时还会整表重写,现在调也会被冲掉。</p>
      */
     private void assertRowsAdjustable(TStage target, Collection<TStageRosterEntry> rows) {
-        if (target != null && rosterAssembler.multiEntry(rosterGroupStore.groupsOf(target))) {
+        if (target != null && rosterProjectionService.multiEntry(rosterGroupStore.groupsOf(target))) {
             return;
         }
         if (rows == null || rows.isEmpty()) {
@@ -686,7 +686,7 @@ public class RosterOverrideService {
         // 它们照旧占着座位(下面进 used),别的行也就顶不掉它们;等来源结算后再拖即可。
         // 多入口汇合不加锁:那类赛段的座位本来就是导播自己排的(与 moveRow 同一口径)。
         Set<Long> lockedRowIds = new HashSet<>();
-        if (!rosterAssembler.multiEntry(rosterGroupStore.groupsOf(target))) {
+        if (!rosterProjectionService.multiEntry(rosterGroupStore.groupsOf(target))) {
             Set<Long> unsettledSources = rosterEntryStore.unsettledSourceStageIds(
                 rows.stream().map(TStageRosterEntry::getSourceStageId).filter(Objects::nonNull).toList());
             rows.stream()

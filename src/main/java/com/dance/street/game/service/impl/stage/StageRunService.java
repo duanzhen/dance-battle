@@ -76,7 +76,7 @@ public class StageRunService {
     /** 海选开赛守卫:人人落圈、每圈有裁判 */
     private final AuditionMode auditionMode;
     /** 擂台开赛后创建第一场 */
-    private final ArenaRunService arenaRunService;
+    private final ArenaStageService arenaStageService;
 
     /** 开赛:一键完成初始化、生成对阵、开赛守卫与状态推进。 */
     @Transactional(rollbackFor = Exception.class)
@@ -136,7 +136,7 @@ public class StageRunService {
 
         // 擂台开赛后自动创建第一场
         if (mode.autoStartFirstMatch()) {
-            arenaRunService.startNextArenaMatch(stageId);
+            arenaStageService.startNextArenaMatch(stageId);
             return;
         }
 

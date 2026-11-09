@@ -2,21 +2,27 @@ package com.dance.street.game.service.impl.roster;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dance.street.game.domain.TCompetitor;
+import com.dance.street.game.domain.TCompetitorMember;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
+import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.StageConstants;
+import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
+import com.dance.street.game.mapper.TCompetitorMemberMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TStageRosterEntryMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -30,17 +36,18 @@ import java.util.stream.Collectors;
  *
  * <p>从 {@code TStageRosterServiceImpl} 搬出来的编排层。中间层是"唯一事实"——
  * 规则生成与人工调整都已经落在行上,这里只做:兜底默认衔接 → 校验(来源结算/对阵/落位/计划/重复)
- * → 逐行调用 {@link RosterMaterializer} 物化 → 回写状态位与行↔参赛方的挂钩。</p>
+ * → 逐行物化 → 回写状态位与行↔参赛方的挂钩。</p>
  *
  * @author duane
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class RosterApplyService {
+public class RosterConfirmationService {
 
     private final TStageMapper stageMapper;
     private final TCompetitorMapper competitorMapper;
+    private final TCompetitorMemberMapper competitorMemberMapper;
     private final TMatchMapper matchMapper;
     private final TStageRosterEntryMapper entryMapper;
     /** 来源组(出口)的存储:读、按 id 差异保存、变更广播 */
@@ -49,8 +56,6 @@ public class RosterApplyService {
     private final RosterEntryStore rosterEntryStore;
     /** 出口规则与名单状态/守卫 */
     private final RosterGroupService rosterGroupService;
-    /** 逐行物化:中间层的一行 → 目标赛段的正式参赛方 */
-    private final RosterMaterializer rosterMaterializer;
 
     @Transactional(rollbackFor = Exception.class)
     public int applyRoster(Long targetStageId, Map<Long, List<Long>> manualSelections) {
@@ -91,7 +96,7 @@ public class RosterApplyService {
         }
         int plan = target.getTeamCountStart() != null && target.getTeamCountStart() > 0
             ? target.getTeamCountStart().intValue() : 0;
-        Set<String> existingPlayerKeys = rosterMaterializer.memberPlayerKeys(existing);
+        Set<String> existingPlayerKeys = memberPlayerKeys(existing);
         Map<Long, TCompetitor> existingBySource = new HashMap<>();
         for (TCompetitor c : existing) {
             if (c.getSourceCompetitorId() != null) {
@@ -132,7 +137,7 @@ public class RosterApplyService {
                 .collect(Collectors.toMap(TCompetitor::getId, c -> c, (a, b) -> a));
         int created = 0;
         for (TStageRosterEntry e : players) {
-            RosterAssembler.AssembledRow row = new RosterAssembler.AssembledRow();
+            RosterProjectionService.AssembledRow row = new RosterProjectionService.AssembledRow();
             row.seedRank = e.getSlot();
             row.entryTag = e.getEntryTag();
             List<Long> playersOfRow;
@@ -150,7 +155,7 @@ public class RosterApplyService {
                     continue;
                 }
                 row.source = src;
-                playersOfRow = rosterMaterializer.memberPlayersOf(List.of(src)).getOrDefault(src.getId(), List.of());
+                playersOfRow = memberPlayersOf(List.of(src)).getOrDefault(src.getId(), List.of());
             }
             boolean overlap = false;
             for (Long pid : playersOfRow) {
@@ -168,9 +173,9 @@ public class RosterApplyService {
                 throw new ServiceException("名单装配超出赛段计划 {} 人,请先调整来源组或人工调整后再确认", plan);
             }
             if (row.guest) {
-                created += rosterMaterializer.copyGuestIntoStage(target, row, occupiedSeeds);
+                created += copyGuestIntoStage(target, row, occupiedSeeds);
             } else {
-                created += rosterMaterializer.copyIntoStage(target, row.source, occupiedSeeds, playersOfRow, row.seedRank);
+                created += copyIntoStage(target, row.source, occupiedSeeds, playersOfRow, row.seedRank);
             }
         }
         if (created > 0 || !players.isEmpty()) {
@@ -205,5 +210,184 @@ public class RosterApplyService {
         log.info("赛段[{}]整单装配完成:新增 {} 人(中间层 {} 人)", targetStageId, created, players.size());
         rosterGroupStore.notifyTarget(targetStageId);
         return created;
+    }
+
+    /**
+     * 把上一赛段的参赛方复制成本赛段的参赛方(带成员行)。
+     *
+     * @param seedOverride 中间态指定的座位号;为空则取下一个空位
+     * @return 新增人数(1;并发下已被别处物化而命中唯一索引时为 0)
+     */
+    public int copyIntoStage(TStage target, TCompetitor source, Set<Long> occupiedSeeds,
+                             List<Long> players, Long seedOverride) {
+        int plan = target.getTeamCountStart() != null && target.getTeamCountStart() > 0
+            ? target.getTeamCountStart().intValue() : 0;
+        long seed;
+        if (seedOverride != null) {
+            if (occupiedSeeds.contains(seedOverride)) {
+                throw new ServiceException(
+                    "种子覆盖位[{}]已被占用(已有参赛方或其他晋级者),请先在中间态调整预排位置", seedOverride);
+            }
+            seed = seedOverride;
+        } else {
+            seed = nextFreeSeed(occupiedSeeds, plan);
+        }
+        TCompetitor created = new TCompetitor();
+        created.setTenantId(target.getTenantId());
+        created.setTournamentId(target.getTournamentId());
+        created.setStageId(target.getId());
+        created.setSourceCompetitorId(source.getId());
+        created.setSourceStageId(source.getStageId());
+        created.setFromRoster(1L);
+        created.setEntryTag(OutcomeStatusEnum.ADVANCE.getCode().equals(source.getOutcomeStatus())
+            ? RosterConstants.ENTRY_ADVANCE : RosterConstants.ENTRY_REVIVE);
+        created.setType(source.getType());
+        created.setName(source.getName());
+        created.setNumber(source.getNumber());
+        created.setSeedRank(seed);
+        created.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
+        created.setRemark(source.getRemark());
+        try {
+            competitorMapper.insert(created);
+        } catch (RuntimeException e) {
+            if (!isDuplicateKey(e)) {
+                throw e;
+            }
+            // 并发的另一次"确认名单"已经把同一个来源人物化进本赛段:
+            // 它的结果就是我们要的结果,不重复建成员行、不占座。
+            log.warn("赛段[{}]物化来源参赛方[{}]时命中唯一索引,视为已由并发请求物化,跳过",
+                target.getId(), source.getId());
+            return 0;
+        }
+        for (TCompetitorMember sourceMember : competitorMemberMapper.selectList(
+            Wrappers.<TCompetitorMember>lambdaQuery()
+                .eq(TCompetitorMember::getCompetitorId, source.getId()))) {
+            TCompetitorMember member = new TCompetitorMember();
+            member.setTenantId(created.getTenantId());
+            member.setTournamentId(created.getTournamentId());
+            member.setCompetitorId(created.getId());
+            member.setPlayerId(sourceMember.getPlayerId());
+            member.setRole(sourceMember.getRole());
+            member.setRemark(sourceMember.getRemark());
+            competitorMemberMapper.insert(member);
+        }
+        occupiedSeeds.add(seed);
+        return 1;
+    }
+
+    /**
+     * 是否唯一键冲突:MySQL 经 Spring 翻译成 {@link DuplicateKeyException};
+     * SQLite 没有对应的错误码表,翻译后不一定是该类型,所以再按 SQLState 23xxx / 报错文案兜一层。
+     */
+    public static boolean isDuplicateKey(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof DuplicateKeyException) {
+                return true;
+            }
+            if (t instanceof SQLException sql) {
+                String state = sql.getSQLState();
+                String msg = sql.getMessage() == null ? "" : sql.getMessage();
+                if ((state != null && state.startsWith("23"))
+                    || msg.contains("UNIQUE constraint failed")
+                    || msg.contains("Duplicate entry")) {
+                    return true;
+                }
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /** 把一张外卡写成目标赛段的参赛方(可选关联选手);号码缺省自动分配 G 开头 */
+    public int copyGuestIntoStage(TStage target, RosterProjectionService.AssembledRow row,
+                                  Set<Long> occupiedSeeds) {
+        String number = row.guestNumber != null && !row.guestNumber.isBlank()
+            ? row.guestNumber : nextGuestNumber(target);
+        TCompetitor created = new TCompetitor();
+        created.setTenantId(target.getTenantId());
+        created.setTournamentId(target.getTournamentId());
+        created.setStageId(target.getId());
+        created.setFromRoster(1L);
+        created.setEntryTag(RosterConstants.ENTRY_GUEST);
+        created.setType(row.guestType == null ? 0L : row.guestType);
+        created.setName(row.guestName);
+        created.setNumber(number);
+        created.setSeedRank(row.seedRank);
+        created.setOutcomeStatus(OutcomeStatusEnum.PENDING.getCode());
+        competitorMapper.insert(created);
+        if (row.guestPlayerId != null) {
+            TCompetitorMember member = new TCompetitorMember();
+            member.setTenantId(target.getTenantId());
+            member.setTournamentId(target.getTournamentId());
+            member.setCompetitorId(created.getId());
+            member.setPlayerId(row.guestPlayerId);
+            member.setRole("MEMBER");
+            competitorMemberMapper.insert(member);
+        }
+        occupiedSeeds.add(row.seedRank);
+        log.info("赛段[{}]物化外卡[{}](id={}, 号={}, 种子={})",
+            target.getId(), row.guestName, created.getId(), number, row.seedRank);
+        return 1;
+    }
+
+    /** 目标赛段内已有键的选手:已有参赛方关联的选手(用于装配去重) */
+    public Set<String> memberPlayerKeys(List<TCompetitor> competitors) {
+        if (competitors.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> competitorIds = competitors.stream().map(TCompetitor::getId).toList();
+        return competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()
+                .in(TCompetitorMember::getCompetitorId, competitorIds)
+                .select(TCompetitorMember::getPlayerId))
+            .stream()
+            .map(TCompetitorMember::getPlayerId)
+            .filter(Objects::nonNull)
+            .map(String::valueOf)
+            .collect(Collectors.toSet());
+    }
+
+    /** 参赛方 → 关联选手列表(装配时把成员行一起带过去) */
+    public Map<Long, List<Long>> memberPlayersOf(List<TCompetitor> competitors) {
+        if (competitors.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> competitorIds = competitors.stream().map(TCompetitor::getId).toList();
+        return competitorMemberMapper.selectList(Wrappers.<TCompetitorMember>lambdaQuery()
+                .in(TCompetitorMember::getCompetitorId, competitorIds)
+                .select(TCompetitorMember::getCompetitorId, TCompetitorMember::getPlayerId))
+            .stream()
+            .collect(Collectors.groupingBy(TCompetitorMember::getCompetitorId,
+                Collectors.mapping(TCompetitorMember::getPlayerId, Collectors.toList())));
+    }
+
+    private long nextFreeSeed(Set<Long> occupiedSeeds, int plan) {
+        if (plan > 0) {
+            for (long seat = 1; seat <= plan; seat++) {
+                if (!occupiedSeeds.contains(seat)) {
+                    return seat;
+                }
+            }
+            return plan + 1L;
+        }
+        return occupiedSeeds.stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
+    }
+
+    /** 外卡号码自动分配:已有号码里取最大数值 +1,前缀 G */
+    private String nextGuestNumber(TStage stage) {
+        List<String> numbers = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
+                .eq(TCompetitor::getStageId, stage.getId())
+                .select(TCompetitor::getNumber))
+            .stream().map(TCompetitor::getNumber).filter(Objects::nonNull).toList();
+        long maxNum = 0L;
+        for (String number : numbers) {
+            if (number.matches("\\d+")) {
+                maxNum = Math.max(maxNum, Long.parseLong(number));
+            } else if (number.matches("G\\d+")) {
+                maxNum = Math.max(maxNum, Long.parseLong(number.substring(1)));
+            }
+        }
+        return "G" + (maxNum + 1);
     }
 }

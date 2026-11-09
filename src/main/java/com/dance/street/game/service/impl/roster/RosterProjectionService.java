@@ -9,9 +9,11 @@ import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.bo.TStageRosterGroupBo;
 import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
+import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
+import com.dance.street.game.mapper.TStageMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -27,15 +29,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
- * 名单装配的规则求值:按来源组(出口)规则取人、排序、落位。
+ * 名单装配的规则求值与座位投影:按来源组(出口)规则取人、排序、切片和落位。
  *
- * <p>从 {@code TStageRosterServiceImpl} 拆出来的第一块:按边取人/过滤/排序。
- * 本类只负责按边取人({@link #groupRows}),名额切片与目标边落座(含出口压紧)统一由
- * {@link RosterCommands}(切片见 {@link RosterQuotaSlice},落座见 {@link RosterExitApply})完成;
- * 本类不再按来源 mode 分支。
+ * <p>取人、名额切片、出口压紧和目标边落座属于同一条投影算法的连续步骤，放在同一个
+ * 类中，避免每个私有步骤都变成独立 Bean。本类不按来源 mode 分支。
  * 中间层存储(EntryStore)依赖本类做投影,本类不反向依赖存储。</p>
  *
  * <p>口径:淘汰签表空洞不许压紧;海选/排名非从第1名切片的压紧在出口边界一次完成;
@@ -46,13 +47,12 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class RosterAssembler {
+public class RosterProjectionService {
 
     private final TCompetitorMapper competitorMapper;
     private final TMatchMapper matchMapper;
     private final TMatchParticipantMapper participantMapper;
-    /** 出口「切片 + 落座/压紧」的唯一入口;本类只负责取人(groupRows)并把候选交给它 */
-    private final RosterCommands rosterCommands;
+    private final TStageMapper stageMapper;
 
     /** 装配中间结果:或来自某条来源边的人,或一张外卡 */
     public static final class AssembledRow {
@@ -98,7 +98,7 @@ public class RosterAssembler {
      * <p>统一规则(与赛制无关,任何赛段、任何衔接都是这一套):</p>
      * <ol>
      *   <li>按出边规则取人({@link #assembleRows});</li>
-     *   <li><b>入边只有一条</b> → 自动落座:由 {@link RosterExitApply} 按出边决定
+     *   <li><b>入边只有一条</b> → 自动落座:按出边决定
      *       原样复制或压紧目标座号,1..N 每个座位都有一行实体,轮空不压塌陷;</li>
      *   <li><b>入边 ≥2 条</b>(汇合/多圈)→ 不做座位计算,所有人进待落位区,
      *       座位 1..N 照铺空位实体,由导播在中间态拖入。</li>
@@ -112,14 +112,14 @@ public class RosterAssembler {
             int slots = Math.max(plan, holdingRows.size());
             return new Projection(true, slots, Map.of(), holdingRows);
         }
-        // 单入边:走 RosterCommands.exitApply(切片 → 落座/压紧);取人在这里,按需惰性读取
+        // 单入边:切片 → 落座/压紧;取人按需惰性读取
         List<AssembledRow> rows = List.of();
         if (!groups.isEmpty()) {
             // 唯一的入口边(MANUAL 边不取人、不算入口);没有入口边则没有规则人
             List<TStageRosterGroupBo> entry = RosterEdgeRules.entryEdges(groups);
             if (!entry.isEmpty()) {
                 TStageRosterGroupBo edge = entry.get(0);
-                rows = rosterCommands.exitApply(edge, () -> groupRows(edge), plan);
+                rows = exitApply(edge, () -> groupRows(edge), plan);
             }
         }
         int maxAssigned = rows.stream().map(r -> r.seedRank).filter(Objects::nonNull)
@@ -250,12 +250,153 @@ public class RosterAssembler {
         return occupiedSeeds.stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
     }
 
+    /**
+     * 对一条出边执行出口投影:取人 → quota 切片 → 目标边落座(必要时压紧)。
+     * 非自动出边返回空列表且不调用候选供应器。
+     */
+    public List<AssembledRow> exitApply(TStageRosterGroupBo edge,
+                                        Supplier<List<TCompetitor>> candidates, int plan) {
+        if (!RosterEdgeRules.isAutoEdge(edge)) {
+            return new ArrayList<>();
+        }
+        List<AssembledRow> rows = slice(edge, candidates.get());
+        assignEdgeSeats(rows, plan, new HashSet<>(), shouldCompact(edge));
+        return rows;
+    }
+
+    /** 只按出边名额切片并包装成装配行，不分配目标座位。 */
+    public List<AssembledRow> sliceEdge(TStageRosterGroupBo edge,
+                                        Supplier<List<TCompetitor>> candidates) {
+        if (!RosterEdgeRules.isAutoEdge(edge)) {
+            return new ArrayList<>();
+        }
+        return slice(edge, candidates.get());
+    }
+
+    /**
+     * 该出边是否在切片后压紧目标座位。
+     *
+     * <p>海选/排名来源的名次是累加序号，允许压紧；淘汰等签表来源必须保留空洞座位。</p>
+     */
+    public boolean shouldCompact(TStageRosterGroupBo edge) {
+        if (edge == null || edge.getSourceStageId() == null) {
+            return false;
+        }
+        TStage source = stageMapper.selectById(edge.getSourceStageId());
+        if (source == null) {
+            return false;
+        }
+        return StageModeEnum.AUDITION.getCode().equals(source.getStageMode())
+            || StageModeEnum.RANK.getCode().equals(source.getStageMode());
+    }
+
+    /**
+     * 按出边座位规则写入 {@link AssembledRow#seedRank}。
+     *
+     * @param compact true = 整体下移 minRank-1 压掉前部空档；false = 原样复制来源座号
+     */
+    public void assignEdgeSeats(List<AssembledRow> rows, int plan,
+                                Set<Long> occupiedSeeds, boolean compact) {
+        Set<Long> occupied = occupiedSeeds == null ? new HashSet<>() : occupiedSeeds;
+        if (compact) {
+            compactAssign(rows, plan, occupied);
+        } else {
+            copyAssign(rows, plan, occupied);
+        }
+    }
+
+    /** 按出边来源赛制的压紧口径落座。 */
+    public void assignEdgeSeats(List<AssembledRow> rows, int plan, TStageRosterGroupBo edge) {
+        assignEdgeSeats(rows, plan, new HashSet<>(), shouldCompact(edge));
+    }
+
+    /** 按出边 quota 截取候选并包装成装配行（纯计算，不查来源数据）。 */
+    private List<AssembledRow> slice(TStageRosterGroupBo edge, List<TCompetitor> candidates) {
+        List<AssembledRow> rows = new ArrayList<>();
+        int quota = edge.getQuota() != null && edge.getQuota() > 0
+            ? edge.getQuota() : Integer.MAX_VALUE;
+        int n = 0;
+        for (TCompetitor c : candidates) {
+            if (n++ >= quota) {
+                log.warn("来源组(源赛段 {})配额 {} 已满,剩余候选截断",
+                    edge.getSourceStageId(), edge.getQuota());
+                break;
+            }
+            AssembledRow row = new AssembledRow();
+            row.source = c;
+            row.sourceGroupId = edge.getId();
+            row.entryTag = OutcomeStatusEnum.ADVANCE.getCode().equals(c.getOutcomeStatus())
+                ? RosterConstants.ENTRY_ADVANCE : RosterConstants.ENTRY_REVIVE;
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    /** 海选/排名出口压紧:名次整体下移 min-1，中间空洞保留。 */
+    private void compactAssign(List<AssembledRow> rows, int plan, Set<Long> occupied) {
+        int minRank = rows.stream()
+            .map(r -> r.source == null ? null : r.source.getFinalRank())
+            .filter(Objects::nonNull)
+            .mapToInt(Long::intValue)
+            .min().orElse(1);
+        long shift = Math.max(0L, (long) minRank - 1L);
+        for (AssembledRow r : rows) {
+            Long rank = r.source == null ? null : r.source.getFinalRank();
+            Long seat = rank == null ? null : rank - shift;
+            if (seat != null && seat >= 1L && (plan <= 0 || seat <= plan) && occupied.add(seat)) {
+                r.seedRank = seat;
+                continue;
+            }
+            if (rank != null) {
+                r.seedRank = null;
+                continue;
+            }
+            Long free = nextFreeSeedOrNull(occupied, plan);
+            r.seedRank = free;
+            if (free != null) {
+                occupied.add(free);
+            }
+        }
+    }
+
+    /** 签表/默认:原样复制来源座号（空洞即位置）。 */
+    private void copyAssign(List<AssembledRow> rows, int plan, Set<Long> occupied) {
+        for (AssembledRow r : rows) {
+            Long seat = r.source == null ? null : r.source.getFinalRank();
+            if (seat != null && seat >= 1L && (plan <= 0 || seat <= plan) && occupied.add(seat)) {
+                r.seedRank = seat;
+                continue;
+            }
+            if (seat != null && seat >= 1L && plan > 0 && seat > plan) {
+                r.seedRank = null;
+                continue;
+            }
+            Long free = nextFreeSeedOrNull(occupied, plan);
+            r.seedRank = free;
+            if (free != null) {
+                occupied.add(free);
+            }
+        }
+    }
+
+    private Long nextFreeSeedOrNull(Set<Long> occupiedSeeds, int plan) {
+        if (plan > 0) {
+            for (long seat = 1; seat <= plan; seat++) {
+                if (!occupiedSeeds.contains(seat)) {
+                    return seat;
+                }
+            }
+            return null;
+        }
+        return occupiedSeeds.stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
+    }
+
     /** 按边取人:每个人记住自己来自哪条边(汇合/平行边时中间态要能追溯到入边) */
     private List<AssembledRow> autoCandidateRows(List<TStageRosterGroupBo> groups) {
         Map<Long, AssembledRow> merged = new LinkedHashMap<>();
         for (TStageRosterGroupBo g : groups) {
-            // 切片由 RosterCommands 统一(非自动边返回空,不取人、不落座);多条边取到同一人时先到先得(putIfAbsent)
-            for (AssembledRow row : rosterCommands.sliceEdge(g, () -> groupRows(g))) {
+            // 非自动边返回空,不取人、不落座;多条边取到同一人时先到先得
+            for (AssembledRow row : sliceEdge(g, () -> groupRows(g))) {
                 merged.putIfAbsent(row.source.getId(), row);
             }
         }

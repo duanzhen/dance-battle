@@ -22,6 +22,8 @@ import com.dance.street.game.service.RefereeSseNotifier;
 import com.dance.street.game.service.TournamentEventNotifier;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
 import com.dance.street.game.service.impl.flow.StageLookup;
+import com.dance.street.game.service.impl.settle.ScoredStageSettler;
+import com.dance.street.game.service.impl.settle.StageSettleOutcome;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.exception.ServiceException;
@@ -37,16 +39,15 @@ import java.util.stream.Collectors;
 /**
  * 自由对抗赛段的写操作:手动加场、删场、手动选晋级。
  *
- * <p>从 {@code TStageLifecycleServiceImpl} 按业务轴搬出来的内部协作者(不对外暴露接口,
- * 仍由 {@code ITStageLifecycleService} 转发)。自由对抗没有自动对阵,所有对阵与晋级
- * 都由导播在手机端手点,所以这块逻辑自成一条业务线。</p>
+ * <p>自由对抗没有自动对阵,所有对阵与晋级都由导播在手机端手点。
+ * 本类同时是该赛制的 {@link StageMode} 实现，运行操作和完成结算留在一起。</p>
  *
  * @author duane
  */
 @Slf4j
 @RequiredArgsConstructor
 @Service
-public class FreeMatchService {
+public class FreeMatchStageService implements StageMode {
 
     private final StageLookup stageLookup;
     private final TMatchMapper matchMapper;
@@ -57,8 +58,20 @@ public class FreeMatchService {
     /** 赛段级结果(晋级/淘汰/名次)的唯一写入口 */
     private final CompetitorOutcomeWriter outcomeWriter;
     private final ITStageRosterService rosterService;
+    /** 自由对抗的场次完成口径与淘汰赛一致 */
+    private final ScoredStageSettler scoredStageSettler;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
+
+    @Override
+    public StageModeEnum mode() {
+        return StageModeEnum.FREE_MATCH;
+    }
+
+    @Override
+    public StageSettleOutcome settle(TStage stage) {
+        return scoredStageSettler.settle(stage);
+    }
 
     /** 手动加一场对战(自由对抗):只有进行中的赛段能加,选手须属于本赛段且未退赛。 */
     @Transactional(rollbackFor = Exception.class)

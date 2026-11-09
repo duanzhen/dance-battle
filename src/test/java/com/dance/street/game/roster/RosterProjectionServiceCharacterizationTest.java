@@ -10,10 +10,9 @@ import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
 import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TStageMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
-import com.dance.street.game.service.impl.roster.RosterAssembler;
-import com.dance.street.game.service.impl.roster.RosterCommands;
-import com.dance.street.game.service.impl.roster.RosterAssembler.AssembledRow;
-import com.dance.street.game.service.impl.roster.RosterAssembler.Projection;
+import com.dance.street.game.service.impl.roster.RosterProjectionService;
+import com.dance.street.game.service.impl.roster.RosterProjectionService.AssembledRow;
+import com.dance.street.game.service.impl.roster.RosterProjectionService.Projection;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 表征测试:钉住 {@link RosterAssembler#project} 与 {@link RosterAssembler#assembleRows}(autoCandidateRows)
+ * 表征测试:钉住 {@link RosterProjectionService#project} 与 {@link RosterProjectionService#assembleRows}
  * 的现有输出,重构「切片/出口落座」的调用关系时必须保持原样通过(测试本身不随重构改动)。
  *
  * <p>钉住的口径:单入边按来源 mode 压紧(海选/排名)或原样复制(淘汰,含空洞与超容量→待落座);
@@ -43,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 非自动边(STREAM/MANUAL/无来源)被跳过;默认排序 final_rank 升序再 id;入场标签 ADVANCE/REVIVE。</p>
  */
 @SpringBootTest(properties = {"app.redis.enabled=false", "app.schema-init.enabled=true"})
-class RosterAssemblerCharacterizationTest {
+class RosterProjectionServiceCharacterizationTest {
 
     private static final String DB_PATH = "target/roster-assembler-characterization.db";
 
@@ -60,8 +59,7 @@ class RosterAssemblerCharacterizationTest {
         }
     }
 
-    @Autowired private RosterAssembler assembler;
-    @Autowired private RosterCommands commands;
+    @Autowired private RosterProjectionService projectionService;
     @Autowired private TTournamentMapper tournamentMapper;
     @Autowired private TStageMapper stageMapper;
     @Autowired private TCompetitorMapper competitorMapper;
@@ -82,7 +80,7 @@ class RosterAssemblerCharacterizationTest {
         TStageRosterGroupBo g = edge(1001L, source.getId(), 9, 14, 0);
         TStage target = newStage(tid, "目标", "KNOCKOUT", 8L);
 
-        Projection p = assembler.project(target, List.of(g));
+        Projection p = projectionService.project(target, List.of(g));
 
         assertFalse(p.holding());
         assertEquals(8, p.slotCount(), "容量 8 > 最大座 6");
@@ -107,7 +105,7 @@ class RosterAssemblerCharacterizationTest {
         TStageRosterGroupBo g = edge(2001L, source.getId(), 5, 12, 3);   // quota 3
         TStage target = newStage(tid, "目标", "KNOCKOUT", 4L);
 
-        Projection p = assembler.project(target, List.of(g));
+        Projection p = projectionService.project(target, List.of(g));
 
         assertFalse(p.holding());
         assertEquals(4, p.slotCount());
@@ -127,7 +125,7 @@ class RosterAssemblerCharacterizationTest {
         TStageRosterGroupBo g = edge(3001L, source.getId(), null, null, 0);
         TStage target = newStage(tid, "目标", "KNOCKOUT", 4L);
 
-        Projection p = assembler.project(target, List.of(g));
+        Projection p = projectionService.project(target, List.of(g));
 
         assertFalse(p.holding());
         assertEquals(4, p.slotCount());
@@ -146,7 +144,7 @@ class RosterAssemblerCharacterizationTest {
         g.setFillMode(RosterConstants.FILL_STREAM);
         TStage target = newStage(tid, "目标", "KNOCKOUT", 4L);
 
-        Projection p = assembler.project(target, List.of(g));
+        Projection p = projectionService.project(target, List.of(g));
 
         assertFalse(p.holding());
         assertTrue(p.bySlot().isEmpty());
@@ -166,7 +164,7 @@ class RosterAssemblerCharacterizationTest {
         comp(tid, b.getId(), 2L, OutcomeStatusEnum.ADVANCE);
         TStage target = newStage(tid, "决赛", "KNOCKOUT", 2L);
 
-        Projection p = assembler.project(target, List.of(
+        Projection p = projectionService.project(target, List.of(
             edge(5001L, a.getId(), null, null, 0), edge(5002L, b.getId(), null, null, 0)));
 
         assertTrue(p.holding());
@@ -192,7 +190,7 @@ class RosterAssemblerCharacterizationTest {
         TStageRosterGroupBo g1 = edge(6001L, source.getId(), 1, 4, 0);
         TStageRosterGroupBo g2 = edge(6002L, source.getId(), 3, 6, 0);
 
-        List<AssembledRow> rows = assembler.assembleRows(List.of(g1, g2));
+        List<AssembledRow> rows = projectionService.assembleRows(List.of(g1, g2));
 
         assertEquals(List.of(1L, 2L, 3L, 4L, 5L, 6L),
             rows.stream().map(r -> r.source.getFinalRank()).toList(), "先 g1 的 1..4,再 g2 新增的 5、6");
@@ -221,17 +219,17 @@ class RosterAssemblerCharacterizationTest {
         TStageRosterGroupBo noSource = edge(7004L, null, null, null, 0);
         TStageRosterGroupBo second = edge(7005L, source.getId(), 5, 6, 1);   // quota 1:只取 5
 
-        List<AssembledRow> rows = assembler.assembleRows(List.of(quota2, stream, manual, noSource, second));
+        List<AssembledRow> rows = projectionService.assembleRows(List.of(quota2, stream, manual, noSource, second));
 
         assertEquals(List.of(1L, 2L, 5L), rows.stream().map(r -> r.source.getFinalRank()).toList());
         assertEquals(List.of(7001L, 7001L, 7005L), rows.stream().map(r -> r.sourceGroupId).toList());
     }
 
-    // ---------------- RosterCommands 是真实入口 ----------------
+    // ---------------- 出口切片/落座是投影的真实入口 ----------------
 
     @Test
-    void commandsExitApplyIsTheSamePathAsProjectSingleEdge() {
-        Long tid = newTournament("char-commands");
+    void assemblerExitApplyIsTheSamePathAsProjectSingleEdge() {
+        Long tid = newTournament("char-exit-apply");
         TStage source = newStage(tid, "海选", "AUDITION", 0L);
         for (long r = 9; r <= 12; r++) {
             comp(tid, source.getId(), r, OutcomeStatusEnum.ADVANCE);
@@ -239,18 +237,18 @@ class RosterAssemblerCharacterizationTest {
         TStageRosterGroupBo g = edge(8001L, source.getId(), 9, 12, 0);
         TStage target = newStage(tid, "目标", "KNOCKOUT", 4L);
 
-        List<AssembledRow> viaCommands = commands.exitApply(g, () -> assembler.groupRows(g), 4);
-        Projection p = assembler.project(target, List.of(g));
+        List<AssembledRow> viaExitApply = projectionService.exitApply(g, () -> projectionService.groupRows(g), 4);
+        Projection p = projectionService.project(target, List.of(g));
 
-        assertTrue(commands.shouldCompact(g));
-        assertEquals(List.of(1L, 2L, 3L, 4L), viaCommands.stream().map(r -> r.seedRank).toList());
-        assertEquals(viaCommands.stream().map(r -> r.source.getId()).toList(),
+        assertTrue(projectionService.shouldCompact(g));
+        assertEquals(List.of(1L, 2L, 3L, 4L), viaExitApply.stream().map(r -> r.seedRank).toList());
+        assertEquals(viaExitApply.stream().map(r -> r.source.getId()).toList(),
             p.bySlot().values().stream().map(r -> r.source.getId()).toList());
         // 非自动边:空列表且不取人
         TStageRosterGroupBo stream = edge(8002L, source.getId(), null, null, 0);
         stream.setFillMode(RosterConstants.FILL_STREAM);
-        assertTrue(commands.exitApply(stream, () -> { throw new AssertionError("不应取人"); }, 4).isEmpty());
-        assertTrue(commands.sliceEdge(stream, () -> { throw new AssertionError("不应取人"); }).isEmpty());
+        assertTrue(projectionService.exitApply(stream, () -> { throw new AssertionError("不应取人"); }, 4).isEmpty());
+        assertTrue(projectionService.sliceEdge(stream, () -> { throw new AssertionError("不应取人"); }).isEmpty());
     }
 
     // ---------------- helpers ----------------

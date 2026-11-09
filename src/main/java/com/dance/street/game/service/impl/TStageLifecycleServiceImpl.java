@@ -10,10 +10,10 @@ import com.dance.street.game.domain.vo.RankResultVo;
 import com.dance.street.game.domain.vo.StageCompleteVo;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.impl.flow.AuditionCircleSupport;
-import com.dance.street.game.service.impl.stage.ArenaRunService;
+import com.dance.street.game.service.impl.stage.ArenaStageService;
 import com.dance.street.game.service.impl.stage.AuditionResultService;
 import com.dance.street.game.service.impl.stage.ByeSettlementService;
-import com.dance.street.game.service.impl.stage.FreeMatchService;
+import com.dance.street.game.service.impl.stage.FreeMatchStageService;
 import com.dance.street.game.service.impl.stage.RankResultService;
 import com.dance.street.game.service.impl.stage.StageCheckInService;
 import com.dance.street.game.service.impl.stage.StageRunService;
@@ -34,7 +34,7 @@ import java.util.List;
  *   <li>{@link StageSetupService} 初始化与生成对阵、{@link StageRunService} 开赛与赛中推进
  *       —— Run 依赖 Setup(startStage 会先初始化再生成对阵),所以 Setup 必须先拆;</li>
  *   <li>{@link StageSettlementService} 结算/撤销/晋级、{@link ByeSettlementService} 轮空结算;</li>
- *   <li>{@link ArenaRunService} 擂台轮转、{@link FreeMatchService} 自由对抗、
+ *   <li>{@link ArenaStageService} 擂台轮转、{@link FreeMatchStageService} 自由对抗、
  *       {@link StageCheckInService} 签到落圈、{@link AuditionResultService} 海选结果导出;</li>
  *   <li>共享内核:{@link AuditionCircleSupport} 海选圈(口径 + 结构维护 + 圈级裁判绑定);</li>
  *   <li>init/generate 走 {@link StageSetupService},开赛走 {@link StageRunService},
@@ -54,7 +54,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     /** 排名赛结果口径与原始数据导出 */
     private final RankResultService rankResultService;
     /** 擂台赛运行与总览 */
-    private final ArenaRunService arenaRunService;
+    private final ArenaStageService arenaStageService;
     /** 轮空场次结算(淘汰赛) */
     private final ByeSettlementService byeSettlementService;
     /** 初始化与生成对阵 */
@@ -66,7 +66,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     /** 海选/排名赛签到落圈 */
     private final StageCheckInService stageCheckInService;
     /** 自由对抗(手动加场/删场/选晋级)的写操作 */
-    private final FreeMatchService freeMatchService;
+    private final FreeMatchStageService freeMatchStageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -89,19 +89,19 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void startNextArenaMatch(Long stageId) {
-        arenaRunService.startNextArenaMatch(stageId);
+        arenaStageService.startNextArenaMatch(stageId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void withdrawArenaCompetitor(Long stageId, Long competitorId) {
-        arenaRunService.withdrawArenaCompetitor(stageId, competitorId);
+        arenaStageService.withdrawArenaCompetitor(stageId, competitorId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void tempWithdrawArenaCompetitor(Long stageId, Long competitorId) {
-        arenaRunService.tempWithdrawArenaCompetitor(stageId, competitorId);
+        arenaStageService.tempWithdrawArenaCompetitor(stageId, competitorId);
     }
 
     /**
@@ -122,7 +122,7 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
 
     @Override
     public ArenaOverviewVo getArenaOverview(Long stageId) {
-        return arenaRunService.getArenaOverview(stageId);
+        return arenaStageService.getArenaOverview(stageId);
     }
 
     @Override
@@ -250,19 +250,19 @@ public class TStageLifecycleServiceImpl implements ITStageLifecycleService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createFreeMatch(Long stageId, Long competitorAId, Long competitorBId) {
-        return freeMatchService.createFreeMatch(stageId, competitorAId, competitorBId);
+        return freeMatchStageService.createFreeMatch(stageId, competitorAId, competitorBId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteFreeMatch(Long matchId) {
-        freeMatchService.deleteFreeMatch(matchId);
+        freeMatchStageService.deleteFreeMatch(matchId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int selectFreeMatchAdvancers(Long stageId, List<Long> competitorIds) {
-        return freeMatchService.selectFreeMatchAdvancers(stageId, competitorIds);
+        return freeMatchStageService.selectFreeMatchAdvancers(stageId, competitorIds);
     }
 
     @Override

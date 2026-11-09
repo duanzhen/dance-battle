@@ -65,7 +65,7 @@ public class RosterGroupService {
     /** 中间层名单的行级读写 */
     private final RosterEntryStore rosterEntryStore;
     /** 出口取人规则的求值 */
-    private final RosterAssembler rosterAssembler;
+    private final RosterProjectionService rosterProjectionService;
     /** 赛段链遍历的唯一入口(以 next 链为事实源) */
     private final StageChain stageChain;
 
@@ -769,7 +769,7 @@ public class RosterGroupService {
             gv.setScoreMax(g.getScoreMax());
             gv.setLabel(groupLabel(g));
             gv.setSourceStageId(g.getSourceStageId());
-            gv.setCompetitors(rosterAssembler.groupRows(g).stream()
+            gv.setCompetitors(rosterProjectionService.groupRows(g).stream()
                 .map(c -> MapstructUtils.convert(c, TCompetitorVo.class))
                 .toList());
             groupsVo.add(gv);
@@ -784,7 +784,7 @@ public class RosterGroupService {
             return false;
         }
         for (TStageRosterGroupBo g : rosterGroupStore.groupsOf(stage)) {
-            if (!rosterAssembler.groupRows(g).isEmpty()) {
+            if (!rosterProjectionService.groupRows(g).isEmpty()) {
                 return true;
             }
         }
@@ -861,7 +861,7 @@ public class RosterGroupService {
             Map<String, Integer> order = g.getSourceStageId() == null ? Map.of()
                 : zoneOrderOf(g.getSourceStageId());
             // 圈名按圈序号解析:第 k 个圈的分区名就是 ZONE-k
-            return "第" + (order.getOrDefault(rosterAssembler.normalizeZone(g.getZone()), -1) + 1) + "圈·" + result + rank;
+            return "第" + (order.getOrDefault(rosterProjectionService.normalizeZone(g.getZone()), -1) + 1) + "圈·" + result + rank;
         }
         return (Boolean.TRUE.equals(g.getRankByZone()) ? "每圈" : "全场") + result + rank;
     }
@@ -871,7 +871,7 @@ public class RosterGroupService {
             .eq(TMatch::getStageId, sourceStageId)
             .orderByAsc(TMatch::getDisplayRow)
             .orderByAsc(TMatch::getId));
-        return rosterAssembler.zoneByIdOrder(matches);
+        return rosterProjectionService.zoneByIdOrder(matches);
     }
 
     /** 该赛段是否已物化出参赛行(名单真正被锁定过);空赛段不算 */

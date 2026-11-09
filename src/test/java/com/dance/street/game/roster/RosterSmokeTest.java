@@ -818,9 +818,9 @@ class RosterSmokeTest {
         assertEquals(s0.getId(), after.get(0).getSourceStageId(), "剩下的应是人工配置的跨级来源");
     }
 
-    /** 中间插段:海选按圈固定边不随链迁移 —— 16强 仍接着海选(自动边才会跟随,见 RosterGroupTableTest) */
+    /** 中间插段:旧直连边必须由新赛段接管,不能让海选继续直接连到原后继。 */
     @Test
-    void chainInsertKeepsAuditionCircleExitPinned() {
+    void chainInsertReplacesAuditionDirectExitWithInsertedStage() {
         TTournament tournament = new TTournament();
         tournament.setName("插段名单对账赛事");
         tournamentMapper.insert(tournament);
@@ -831,18 +831,24 @@ class RosterSmokeTest {
             baseStage(tournament.getId(), "16强", "KNOCKOUT", 8L, 1L, audition.getId()));
         assertEquals(audition.getId(), rosterService.listByTarget(round16.getId()).get(0).getGroups().get(0).getSourceStageId());
 
-        // 在海选与 16 强之间插入"复活赛"(插到海选之后)
-        TStageBo inserted = baseStage(tournament.getId(), "复活赛", "KNOCKOUT", 8L, 4L, audition.getId());
-        stageService.insertByBo(inserted);
+        // 在海选与 16 强之间插入"排名赛"(插到海选之后)
+        TStageBo inserted = baseStage(tournament.getId(), "排名赛", "RANK", 8L, 4L, audition.getId());
+        TStageVo insertedStage = stageService.insertByBo(inserted);
 
         // 前驱按 next 链推导(库里不再有 prev 列)
         Long prevId = stageService.queryById(round16.getId()).getPrevStageId();
         assertNotNull(prevId);
-        assertEquals("复活赛", stageMapper.selectById(prevId).getName());
+        assertEquals("排名赛", stageMapper.selectById(prevId).getName());
         List<TStageRosterGroupBo> groups = rosterService.listByTarget(round16.getId()).get(0).getGroups();
-        assertTrue(groups.stream().anyMatch(g -> audition.getId().equals(g.getSourceStageId())
-                && Integer.valueOf(0).equals(g.getGenerated())),
-            "海选按圈固定边不随链迁移,16强 仍接海选,实际=" + groups);
+        assertEquals(1, groups.size(), "16强 应只保留新插入赛段这条链式来源");
+        assertEquals(insertedStage.getId(), groups.getFirst().getSourceStageId(),
+            "旧的 海选→16强 直连边应替换为 排名赛→16强");
+        assertTrue(groups.stream().noneMatch(g -> audition.getId().equals(g.getSourceStageId())),
+            "16强 不应继续直接依赖海选");
+        assertTrue(rosterService.groupsOfStage(insertedStage.getId()).stream()
+                .anyMatch(g -> audition.getId().equals(g.getSourceStageId())
+                    && Integer.valueOf(0).equals(g.getGenerated())),
+            "海选的按圈固定出口应接到新插入赛段");
     }
 
     /** 手工名单:C 拖到首位 → 移出 A → 补落选者 F → 加外卡 G,顺序即出场次序 */

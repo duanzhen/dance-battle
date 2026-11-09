@@ -97,6 +97,12 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void reconcileAfterStageInsert(Long previousStageId, Long insertedStageId, Long nextStageId) {
+        rosterGroupService.reconcileAfterStageInsert(previousStageId, insertedStageId, nextStageId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void ensureRosterForSurvivors(Collection<Long> tournamentIds) {
         rosterGroupService.ensureRosterForSurvivors(tournamentIds);
     }

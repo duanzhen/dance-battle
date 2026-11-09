@@ -245,9 +245,10 @@ public class TStageServiceImpl implements ITStageService {
         // 名单:新赛段有直接前驱时同步写入默认来源组(source=prev, ADVANCE, AUTO)。
         // 晋级名额与人选一律以名单来源组 + 赛段配置为准,建链时不做任何名额联动。
         rosterService.ensureRosterForStage(add);
-        // 中间插入(A→Z→B):B 的 prev 已改为 Z,名单默认来源同步从 A 迁到 Z
+        // 中间插入(A→Z→B):移除旧的 A→B 直连边,按 Z 的类型建立 Z→B,保留 B 的其他汇合来源。
         if (add.getNextStageId() != null) {
-            rosterService.reconcileAfterLinkChange(add.getNextStageId());
+            rosterService.reconcileAfterStageInsert(
+                afterStageId, add.getId(), add.getNextStageId());
         }
         assignTournamentRefereesByDefault(add);
 

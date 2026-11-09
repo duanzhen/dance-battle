@@ -202,6 +202,46 @@ public class RosterGroupService {
         rosterEntryStore.rebuildEntries(stage.getId());
     }
 
+    /**
+     * 链中间插入后替换原直连边。
+     *
+     * <p>固定边虽然平时不随链移动，但它作为“旧前驱 → 原后继”的直连边时，插入新节点后
+     * 已经不再代表当前链路，必须由新节点接管。原后继的其他入边保持不变。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void reconcileAfterStageInsert(Long previousStageId, Long insertedStageId, Long nextStageId) {
+        if (insertedStageId == null || nextStageId == null) {
+            return;
+        }
+        TStage inserted = stageMapper.selectById(insertedStageId);
+        TStage next = stageMapper.selectById(nextStageId);
+        if (inserted == null || next == null
+            || !Objects.equals(inserted.getTournamentId(), next.getTournamentId())) {
+            throw new ServiceException("插入赛段与原后继不存在或不属于同一赛事");
+        }
+        if (StageConstants.STAGE_DISCARD.equals(next.getStatus())) {
+            return;
+        }
+        if (isLocked(next)) {
+            throw new ServiceException("赛段[{}]名单已装配,请先重置该赛段后再调整赛段链路",
+                next.getName());
+        }
+
+        List<TStageRosterGroupBo> groups = new ArrayList<>(rosterGroupStore.groupsOf(next));
+        boolean changed = groups.removeIf(g -> Objects.equals(g.getSourceStageId(), previousStageId));
+        if (groups.stream().noneMatch(g -> Objects.equals(g.getSourceStageId(), insertedStageId))) {
+            groups.addAll(chainDefaultGroups(inserted));
+            changed = true;
+        }
+        if (!changed) {
+            return;
+        }
+        rosterGroupStore.saveGroups(next, groups);
+        rosterEntryStore.rebuildEntries(nextStageId);
+        log.info("赛段插入对账:旧边[{}→{}]替换为新边[{}→{}]",
+            previousStageId, nextStageId, insertedStageId, nextStageId);
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void ensureRosterForSurvivors(Collection<Long> tournamentIds) {
         if (tournamentIds == null || tournamentIds.isEmpty()) {
@@ -421,18 +461,20 @@ public class RosterGroupService {
             log.info("入口赛段[{}]未配置来源,已补签到来源组", stage.getId());
             return;
         }
-        // 海选来源:出口按圈绑定 —— 按当前圈数逐圈生成固定边(generated=0,不随链自动改挂/删除)
-        if (StageModeEnum.AUDITION.getCode().equals(prevStage.getStageMode())) {
-            List<TStageRosterGroupBo> circleExits = buildAuditionCircleExits(prevStage);
-            groups.addAll(circleExits);
-            log.info("赛段[{}]的上游是海选,已按 {} 个圈生成固定出口", stage.getId(), circleExits.size());
-            return;
-        }
-        TStageRosterGroupBo chain = defaultGroup(prevStage.getId());
-        chain.setGenerated(1);
-        groups.add(chain);
+        groups.addAll(chainDefaultGroups(prevStage));
         log.info("赛段[{}]未配置出口,已补链式默认衔接:上一赛段[{}]晋级者进入本赛段",
             stage.getId(), prevStage.getId());
+    }
+
+    /** 按来源赛段类型生成“来源 → 目标”的默认链式出口。 */
+    private List<TStageRosterGroupBo> chainDefaultGroups(TStage source) {
+        // 海选来源:出口按圈绑定,逐圈生成固定边(generated=0)。
+        if (StageModeEnum.AUDITION.getCode().equals(source.getStageMode())) {
+            return buildAuditionCircleExits(source);
+        }
+        TStageRosterGroupBo chain = defaultGroup(source.getId());
+        chain.setGenerated(1);
+        return List.of(chain);
     }
 
     /**

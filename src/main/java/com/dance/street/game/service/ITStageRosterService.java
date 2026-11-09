@@ -123,10 +123,16 @@ public interface ITStageRosterService {
     void assertStageStartable(Long targetStageId);
 
     /**
-     * 改链/插段后对账名单:清理引用了旧前驱的自动默认组/入口 STREAM,按当前 prev 补齐。
+     * 改链后对账名单:清理引用了旧前驱的自动默认组/入口 STREAM,按当前 prev 补齐。
      * <p>链路没有实际变化时(例如只是保存赛段)为空操作,不会因为名单已装配而报错。</p>
      */
     void reconcileAfterLinkChange(Long stageId);
+
+    /**
+     * 中间插入后替换原直连边：移除“旧前驱 → 原后继”，并按新插入赛段的类型建立
+     * “新赛段 → 原后继”，同时保留原后继的其他汇合来源。
+     */
+    void reconcileAfterStageInsert(Long previousStageId, Long insertedStageId, Long nextStageId);
 
     /** 删段后为存活但丢失名单的赛段补建默认名单 */
     void ensureRosterForSurvivors(Collection<Long> tournamentIds);

@@ -27,7 +27,6 @@ import com.dance.street.game.domain.TReferee;
 import com.dance.street.game.domain.TRefereeStage;
 import com.dance.street.game.domain.bo.StageRefereeBo;
 import com.dance.street.game.domain.TRoundScore;
-import com.dance.street.game.domain.TVisWidget;
 import com.dance.street.game.domain.TStageRosterEntry;
 import com.dance.street.game.domain.vo.PreBracketVo;
 import com.dance.street.game.domain.vo.StageFlowVo;
@@ -51,14 +50,13 @@ import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TPlayerMapper;
 import com.dance.street.game.mapper.TRefereeStageMapper;
-import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
 import com.dance.street.game.mapper.TStageMapper;
-import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITStageRosterService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITRefereeStageService;
+import com.dance.street.game.service.impl.stage.StageDeletionService;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -83,15 +81,15 @@ public class TStageServiceImpl implements ITStageService {
     private final TMatchRoundMapper matchRoundMapper;
     private final TCompetitorMapper competitorMapper;
     private final TCompetitorMemberMapper competitorMemberMapper;
-    private final TRoundScoreMapper roundScoreMapper;
     private final TRefereeMapper refereeMapper;
     private final TRefereeStageMapper refereeStageMapper;
     private final ITRefereeStageService refereeStageService;
     private final TPlayerMapper playerMapper;
-    private final TVisWidgetMapper visWidgetMapper;
     private final ITStageRosterService rosterService;
     /** 赛段链遍历的唯一入口(以 next 链为事实源) */
     private final StageChain stageChain;
+    /** 赛段图节点删除的统一用例 */
+    private final StageDeletionService stageDeletionService;
     /** 赛段配置变化要推裁判端:判罚方式在「裁判判罚 ↔ 导播台判定」之间切换会改变裁判端界面 */
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
@@ -667,163 +665,7 @@ public class TStageServiceImpl implements ITStageService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid) {
-        if (ids == null || ids.isEmpty()) {
-            return false;
-        }
-        // 一次只允许删除一个赛段:批量删除入口已移除,这里再兜一道,防止绕过前端直接传多个 id
-        if (ids.size() > 1) {
-            throw new ServiceException("一次只能删除一个赛段,请逐个删除");
-        }
-        List<TStage> deletingStages = baseMapper.selectList(
-            Wrappers.lambdaQuery(TStage.class).in(TStage::getId, ids));
-        if(isValid){
-            // 状态守卫:进行中/已结束的赛段不允许删除,与前端「删除此赛段」的禁用口径一致。
-            // 这两类赛段已承载现场数据(场次/判罚/打分),删除会级联抹掉,且不可恢复。
-            for (TStage st : deletingStages) {
-                if (StageConstants.STAGE_GAMING.equals(st.getStatus())) {
-                    throw new ServiceException("赛段[{}]进行中,不可删除(已承载现场场次与判分数据)",
-                        st.getName());
-                }
-                if (StageConstants.STAGE_SETTLED.equals(st.getStatus())) {
-                    throw new ServiceException("赛段[{}]已结束,不可删除(已承载赛果数据)", st.getName());
-                }
-            }
-            // 链表不在这里拼:删除落库后由 StageChain.realignPointers 按 next 链统一收口
-            // (旧实现在删除前后各写一遍邻居指针,是同一件事做两遍)
-        }
-        // 级联删除关联数据:场次→轮次→打分/参赛明细,参赛方→成员,裁判关联
-        List<Long> stageIds = ids.stream().map(Long::valueOf).toList();
-        // 名单清理与边收口
-        if (!stageIds.isEmpty()) {
-            // 删除守卫:赛段含任何自定义(固定)边(作为来源或目标)时不允许直接删除
-            rosterService.assertStagesDeletable(stageIds);
-            // 删除前捕获链上后继(删完就读不到了),供入边改挂使用
-            Map<Long, Long> successorByStage = new HashMap<>();
-            for (TStage st : deletingStages) {
-                if (st.getNextStageId() != null) {
-                    successorByStage.put(st.getId(), st.getNextStageId());
-                }
-            }
-            // 清掉以这些赛段为目标的中间层名单行
-            rosterService.removeEntriesOfTargets(stageIds);
-            // 边收口:被删段的出边删除、入边原地改挂到链上后继(只可能是自动边,固定边已被守卫拦下)
-            rosterService.reattachEdgesOnStageDelete(stageIds, successorByStage);
-        }
-        List<Long> matchIds = matchMapper.selectList(Wrappers.<TMatch>lambdaQuery()
-                .in(TMatch::getStageId, stageIds)
-                .select(TMatch::getId))
-            .stream().map(TMatch::getId).toList();
-        if (!matchIds.isEmpty()) {
-            List<Long> roundIds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
-                    .in(TMatchRound::getMatchId, matchIds)
-                    .select(TMatchRound::getId))
-                .stream().map(TMatchRound::getId).toList();
-            if (!roundIds.isEmpty()) {
-                roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                    .in(TRoundScore::getRoundId, roundIds));
-            }
-            participantMapper.delete(Wrappers.<TMatchParticipant>lambdaQuery()
-                .in(TMatchParticipant::getMatchId, matchIds));
-            matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
-                .in(TMatchRound::getMatchId, matchIds));
-            matchMapper.delete(Wrappers.<TMatch>lambdaQuery()
-                .in(TMatch::getStageId, stageIds));
-        }
-        List<Long> compIds = competitorMapper.selectList(Wrappers.<TCompetitor>lambdaQuery()
-                .in(TCompetitor::getStageId, stageIds)
-                .select(TCompetitor::getId))
-            .stream().map(TCompetitor::getId).toList();
-        if (!compIds.isEmpty()) {
-            competitorMemberMapper.delete(Wrappers.<TCompetitorMember>lambdaQuery()
-                .in(TCompetitorMember::getCompetitorId, compIds));
-            competitorMapper.delete(Wrappers.<TCompetitor>lambdaQuery()
-                .in(TCompetitor::getStageId, stageIds));
-        }
-        refereeStageMapper.delete(Wrappers.<TRefereeStage>lambdaQuery()
-            .in(TRefereeStage::getStageId, stageIds));
-        boolean deleted = baseMapper.deleteByIds(ids) > 0;
-        Set<Long> affectedTournamentIds = deletingStages.stream()
-            .map(TStage::getTournamentId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
-        // 删除后收口:按当前 next 链重算顺序并修正指针(被删节点自动被前后邻居跨过)。
-        // 指针只在 StageChain 里写,删除流程不再自己拼「前驱.next = 被删的.next」。
-        for (Long tid : affectedTournamentIds) {
-            stageChain.realignPointers(tid);
-        }
-        // 注:删段后不再自动补默认边——依赖以边表为准,"删掉就是删掉"(入边已在上面改挂到后继)
-        // 自动解绑引用被删赛段/其场次的场景组件,避免大屏刷新后报"赛段不存在"
-        clearWidgetStageBindings(deletingStages, matchIds);
-        // 广播赛段变化:删除前导播台/其他管理标签页手里是旧赛段链,不通知就会停留在已删赛段上
-        for (Long tid : affectedTournamentIds) {
-            tournamentEventNotifier.notify(tid, null, null, "stage");
-        }
-        return deleted;
-    }
-
-    /**
-     * 删除赛段后清理 vis_widget 绑定:dataConfig 中的 stageId / matchId
-     * 若指向被删赛段或其场次,统一置空(组件保留,显示为待绑定状态)。
-     */
-    private void clearWidgetStageBindings(List<TStage> stages, List<Long> matchIds) {
-        if (stages == null || stages.isEmpty()) {
-            return;
-        }
-        Set<Long> tournamentIds = stages.stream()
-            .map(TStage::getTournamentId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
-        if (tournamentIds.isEmpty()) {
-            return;
-        }
-        Set<String> removedRefs = new HashSet<>();
-        stages.forEach(s -> {
-            if (s.getId() != null) {
-                removedRefs.add(String.valueOf(s.getId()));
-            }
-        });
-        if (matchIds != null) {
-            matchIds.forEach(id -> {
-                if (id != null) {
-                    removedRefs.add(String.valueOf(id));
-                }
-            });
-        }
-        List<TVisWidget> widgets = visWidgetMapper.selectList(Wrappers.<TVisWidget>lambdaQuery()
-            .in(TVisWidget::getTournamentId, tournamentIds));
-        if (widgets.isEmpty()) {
-            return;
-        }
-        ObjectMapper mapper = SnowflakeJson.mapper();
-        for (TVisWidget w : widgets) {
-            if (StringUtils.isBlank(w.getDataConfig())) {
-                continue;
-            }
-            try {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> dc = mapper.readValue(w.getDataConfig(), Map.class);
-                if (dc == null) {
-                    continue;
-                }
-                boolean changed = false;
-                for (String key : List.of("stageId", "targetStageId", "matchId")) {
-                    Object val = dc.get(key);
-                    if (val != null && removedRefs.contains(String.valueOf(val))) {
-                        dc.put(key, null);
-                        changed = true;
-                    }
-                }
-                if (changed) {
-                    TVisWidget upd = new TVisWidget();
-                    upd.setId(w.getId());
-                    upd.setDataConfig(mapper.writeValueAsString(dc));
-                    visWidgetMapper.updateById(upd);
-                    log.info("赛段删除联动:组件[{}](type={}) 已清空失效绑定 {}", w.getId(), w.getType(), dc);
-                }
-            } catch (Exception e) {
-                log.warn("赛段删除联动:组件[{}] dataConfig 解析失败,跳过: {}", w.getId(), e.getMessage());
-            }
-        }
+        return stageDeletionService.delete(ids);
     }
 
     /**

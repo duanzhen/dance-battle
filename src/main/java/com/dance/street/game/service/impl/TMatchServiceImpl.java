@@ -33,6 +33,7 @@ import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.settle.AuditionAdvanceInfoSupport;
 import com.dance.street.game.service.impl.settle.AuditionTiebreakResult;
 import com.dance.street.game.engine.common.DimensionConfig;
+import com.dance.street.game.engine.common.PromotionTarget;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
 import com.dance.street.game.engine.common.ScoringConfig;
@@ -984,7 +985,7 @@ public class TMatchServiceImpl implements ITMatchService {
         if (StringUtils.isBlank(add.getMatchMode())) {
             add.setMatchMode("STANDARD");
         }
-        validEntityBeforeSave(add);
+        validatePromotionRule(add.getStageId(), add.getPromotionRule());
         baseMapper.insert(add);
         bo.setId(add.getId());
         return MapstructUtils.convert(add, TMatchVo.class);
@@ -1016,16 +1017,37 @@ public class TMatchServiceImpl implements ITMatchService {
                 before.getStatus(), update.getStatus());
         }
         guardMatchMutable(before.getStageId(), before.getId());
-        validEntityBeforeSave(update);
+        validatePromotionRule(before.getStageId(), update.getPromotionRule());
         baseMapper.updateById(update);
         return MapstructUtils.convert(update, TMatchVo.class);
     }
 
     /**
-     * 保存前的数据校验
+     * 场次内部晋级路由必须指向本赛段现存场次。
+     * 跨赛段流转只属于名单来源边，不能写进 promotion_rule。
      */
-    private void validEntityBeforeSave(TMatch entity){
-        //TODO 做一些数据校验,如唯一约束
+    private void validatePromotionRule(Long stageId, String promotionRule) {
+        if (StringUtils.isBlank(promotionRule)) {
+            return;
+        }
+        Map<String, PromotionTarget> rules = RuleConfigParser.parsePromotionRule(promotionRule);
+        for (PromotionTarget target : rules.values()) {
+            if (target == null || StringUtils.isBlank(target.getAction())) {
+                continue;
+            }
+            if (StageConstants.ACTION_FINAL_ADVANCE.equals(target.getAction())) {
+                continue;
+            }
+            if (!StageConstants.ACTION_ADVANCE.equals(target.getAction())
+                || target.getTargetMatchId() == null || target.getTargetSlot() == null) {
+                throw new ServiceException("场次晋级去向配置非法");
+            }
+            TMatch destination = baseMapper.selectById(target.getTargetMatchId());
+            if (destination == null || !Objects.equals(destination.getStageId(), stageId)) {
+                throw new ServiceException(
+                    "场次晋级去向[{}]必须是本赛段内的现存场次", target.getTargetMatchId());
+            }
+        }
     }
 
     /**

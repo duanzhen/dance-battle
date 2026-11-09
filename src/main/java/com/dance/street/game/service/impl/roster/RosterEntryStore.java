@@ -542,16 +542,6 @@ public class RosterEntryStore {
             .eq(TStageRosterEntry::getTargetStageId, targetStageId));
     }
 
-    /** 批量删除多个目标赛段的中间层(目标赛段被删除时用) */
-    @Transactional(rollbackFor = Exception.class)
-    public void removeEntriesOfTargets(Collection<Long> targetStageIds) {
-        if (targetStageIds == null || targetStageIds.isEmpty()) {
-            return;
-        }
-        entryMapper.delete(Wrappers.<TStageRosterEntry>lambdaQuery()
-            .in(TStageRosterEntry::getTargetStageId, targetStageIds));
-    }
-
     /** 中间层行 → 人工调整视图:手工加进来的(origin=MANUAL)与被移出的空位(BYE 且带来源引用) */
     public List<TStageRosterOverrideVo> manualViewsOf(List<TStageRosterEntry> entries) {
         return entries.stream()

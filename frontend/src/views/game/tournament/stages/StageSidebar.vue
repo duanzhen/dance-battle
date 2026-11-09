@@ -243,16 +243,16 @@ const statusTextClass = computed(() => {
   return map[localStage.value.status] || 'text-neutral-400';
 });
 
-// 是否可删除 (GAMING 和 SETTLED 禁用)
+// 仅未开始的草稿赛段可删除;是否为空由后端按参赛方和中间态名单统一校验
 const canDelete = computed(() => {
-  return localStage.value.status !== 'GAMING' && localStage.value.status !== 'SETTLED';
+  return localStage.value.status === 'DRAFT';
 });
 
 // 获取删除禁用原因
 const getDeleteDisabledReason = () => {
   if (localStage.value.status === 'GAMING') return '赛段进行中,无法删除';
   if (localStage.value.status === 'SETTLED') return '赛段已结束,无法删除';
-  return '';
+  return '只有未开始的草稿赛段可以删除';
 };
 
 // 获取赛段类型标签

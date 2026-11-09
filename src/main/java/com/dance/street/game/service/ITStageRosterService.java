@@ -18,6 +18,7 @@ import com.dance.street.game.domain.vo.TStageRosterVo;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 名单服务:数据所有权 = 来源层(t_competitor) → 中间层(t_stage_roster_entry,一行一个座位)
@@ -130,14 +131,18 @@ public interface ITStageRosterService {
     /** 删段后为存活但丢失名单的赛段补建默认名单 */
     void ensureRosterForSurvivors(Collection<Long> tournamentIds);
 
-    /** 删除守卫:赛段含任何自定义(固定)边(作为来源或目标)时不允许直接删除 */
-    void assertStagesDeletable(Collection<Long> stageIds);
+    /**
+     * 从名单依赖图中移除一个赛段节点。
+     *
+     * <p>保留原有固定边删除守卫；校验所有受影响目标仍可重建后，清理指向被删赛段/边/参赛方的
+     * 中间态行和物化快照，并把自动入边改挂到链后继。</p>
+     *
+     * @return 删除后需要重新投影名单的目标赛段
+     */
+    Set<Long> detachStageFromRosterGraph(Long deletedStageId, Long successorStageId);
 
-    /** 删除赛段后的边收口:被删段的出边删除、入边原地改挂到链上后继 */
-    void reattachEdgesOnStageDelete(Collection<Long> deletedStageIds, Map<Long, Long> successorByStage);
-
-    /** 删除赛段后:清掉以这些赛段为目标的中间层名单行 */
-    void removeEntriesOfTargets(Collection<Long> targetStageIds);
+    /** 赛段行和链完成删除后，对受影响的存活赛段统一重新投影中间态名单。 */
+    int reconcileAfterStageDelete(Collection<Long> targetStageIds);
 
     /** 显式跳过整份名单(本赛段不带人) */
     void markSkipped(Long stageId);

@@ -941,19 +941,15 @@ const deleteStage = async () => {
   const idx = stages.value.findIndex((s) => String(s.id) === stageId);
   if (idx === -1) return;
 
-  // 破坏性操作二次确认:删除会级联清掉本赛段的场次/轮次/打分,不可恢复
+  // 破坏性操作二次确认:只允许删除未开始的空赛段,由后端再次校验参赛方和中间态名单
   const stageName = stages.value[idx]?.name || '该赛段';
   try {
-    await ElMessageBox.confirm(
-      `确定删除赛段「${stageName}」吗？该赛段下属的相关数据会一并清除，且不可恢复。`,
-      '删除赛段',
-      {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger'
-      }
-    );
+    await ElMessageBox.confirm(`确定删除赛段「${stageName}」吗？仅未开始且没有参赛人员的赛段可以删除，操作不可恢复。`, '删除赛段', {
+      confirmButtonText: '确定删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger'
+    });
   } catch {
     // 取消删除
     return;

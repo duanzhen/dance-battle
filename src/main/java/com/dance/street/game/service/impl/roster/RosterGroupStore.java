@@ -83,6 +83,16 @@ public class RosterGroupStore {
             .in(TStageRosterGroup::getSourceStageId, ids));
     }
 
+    /** 以这些赛段为来源的边(被删赛段的"出边") */
+    public List<TStageRosterGroup> edgesBySource(Collection<Long> sourceStageIds) {
+        List<Long> ids = distinctIds(sourceStageIds);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return groupMapper.selectList(Wrappers.<TStageRosterGroup>lambdaQuery()
+            .in(TStageRosterGroup::getSourceStageId, ids));
+    }
+
     /** 以这些赛段为目标的边(被删赛段的"入边"),用于原地改挂到后继 */
     public List<TStageRosterGroup> edgesByTarget(Collection<Long> targetStageIds) {
         List<Long> ids = distinctIds(targetStageIds);

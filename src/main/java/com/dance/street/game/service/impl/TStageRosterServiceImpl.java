@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 名单服务实现(门面):一份数据三个层次——
@@ -102,20 +103,14 @@ public class TStageRosterServiceImpl implements ITStageRosterService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void assertStagesDeletable(Collection<Long> stageIds) {
-        rosterGroupService.assertStagesDeletable(stageIds);
+    public Set<Long> detachStageFromRosterGraph(Long deletedStageId, Long successorStageId) {
+        return rosterGroupService.detachStageFromRosterGraph(deletedStageId, successorStageId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void reattachEdgesOnStageDelete(Collection<Long> deletedStageIds, Map<Long, Long> successorByStage) {
-        rosterGroupService.reattachEdgesOnStageDelete(deletedStageIds, successorByStage);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void removeEntriesOfTargets(Collection<Long> targetStageIds) {
-        rosterEntryStore.removeEntriesOfTargets(targetStageIds);
+    public int reconcileAfterStageDelete(Collection<Long> targetStageIds) {
+        return rosterGroupService.reconcileAfterStageDelete(targetStageIds);
     }
 
     @Override

@@ -35,7 +35,7 @@
           :is="componentMap[widgets.type]"
           :ref="(el: any) => setWidgetRef(el, widgets.id)"
           v-bind="widgetProps(widgets)"
-          :widget-id="widgets.type === 'TIMER' ? String(widgets.id) : undefined"
+          :widget-id="String(widgets.id)"
           @update:endAt="(v: number | null) => persistWidgetConfig(widgets, { endAt: v })"
           @update:remainMs="(v: number | null) => persistWidgetConfig(widgets, { remainMs: v })"
           @update:playback="(p: Record<string, unknown>) => persistWidgetConfig(widgets, p)"
@@ -97,6 +97,7 @@ import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
 import AuditionWidget from './widgets/AuditionWidget.vue';
 import ParticipantWidget from './widgets/ParticipantWidget.vue';
+import ScoreDetailWidget from './widgets/ScoreDetailWidget.vue';
 import { updateWidgetTimerState, updateWidgetVideoState } from '@/api/game/visWidget';
 import html2canvas from 'html2canvas';
 
@@ -111,7 +112,8 @@ const componentMap: Record<string, any> = {
   'ARENA_SCORE': ArenaWidget,
   'AUDITION': AuditionWidget,
   'RANKING': RankingWidget,
-  'PARTICIPANTS': ParticipantWidget
+  'PARTICIPANTS': ParticipantWidget,
+  'SCORE_DETAIL': ScoreDetailWidget
 };
 
 export interface SceneElement {

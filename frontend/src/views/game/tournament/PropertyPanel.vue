@@ -135,6 +135,7 @@
                 <component
                   :is="widgetComponentMap[widget.type]"
                   v-bind="widgetProps"
+                  :widget-id="widget.id != null ? String(widget.id) : undefined"
                   :mode="'edit'"
                   @update:src="handleUpdateProp('src', $event)"
                   @update:text="handleUpdateProp('text', $event)"
@@ -478,6 +479,7 @@ import ArenaWidget from './widgets/ArenaWidget.vue';
 import RankingWidget from './widgets/RankingWidget.vue';
 import AuditionWidget from './widgets/AuditionWidget.vue';
 import ParticipantWidget from './widgets/ParticipantWidget.vue';
+import ScoreDetailWidget from './widgets/ScoreDetailWidget.vue';
 
 const emit = defineEmits(['widgetUpdated']);
 
@@ -496,7 +498,8 @@ const widgetComponentMap = {
   'ARENA_SCORE': ArenaWidget,
   'AUDITION': AuditionWidget,
   'RANKING': RankingWidget,
-  'PARTICIPANTS': ParticipantWidget
+  'PARTICIPANTS': ParticipantWidget,
+  'SCORE_DETAIL': ScoreDetailWidget
 };
 
 const widget = computed(() => store.selectedWidget);

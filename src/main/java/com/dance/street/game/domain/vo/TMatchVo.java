@@ -244,6 +244,12 @@ public class TMatchVo implements Serializable {
         private String refereeName;
         /** LEFT/RIGHT/DRAW;未判为 null */
         private String vote;
+
+        /**
+         * 该裁判本轮是否已判。
+         * 公共端在 MANUAL 未公布时会清空 {@code vote},用此字段表示「已判但不露胜负」。
+         */
+        private Boolean voted;
     }
 
     @Data

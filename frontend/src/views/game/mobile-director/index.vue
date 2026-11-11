@@ -438,7 +438,17 @@
                 <p v-if="!match.roundScores || match.roundScores.length === 0" class="text-[10px] text-neutral-600 py-1">该圈暂无轮次/评分</p>
               </div>
 
+              <div v-if="isRankStage && match.status === 'GAMING' && match.pendingPublish" class="mt-2 text-center">
+                <span class="text-[9px] font-bold text-amber-400">裁判已打完，等待公布结果</span>
+              </div>
               <div class="flex justify-end gap-2 mt-2">
+                <button
+                  v-if="isRankStage && match.status === 'GAMING' && match.pendingPublish"
+                  @click="handlePublish(match)"
+                  class="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600/20 text-amber-400 border border-amber-600/30 active:scale-95 transition-transform"
+                >
+                  公布结果
+                </button>
                 <button
                   v-if="match.status === 'PENDING'"
                   @click="handleStartMatch(match)"
@@ -927,6 +937,61 @@
       </div>
     </div>
   </div>
+
+  <!-- 评分详情推送:赛事有 2 个及以上评分详情组件时,点选手后选择推到哪一个 -->
+  <div v-if="scoreDetailPickerVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" @click.self="closeScoreDetailPicker">
+    <div class="w-full max-w-sm bg-neutral-900 border border-neutral-700 rounded-xl p-4">
+      <h4 class="text-sm font-bold text-neutral-200 mb-1">推送到评分详情</h4>
+      <p class="text-[10px] text-neutral-500 mb-3 truncate">
+        <span v-if="scoreDetailPickerRound?.competitorNumber" class="font-mono text-amber-400 mr-1">#{{ scoreDetailPickerRound.competitorNumber }}</span>
+        {{ scoreDetailPickerRound?.competitorName || '选手' }}
+      </p>
+      <div class="space-y-1.5 max-h-[50vh] overflow-y-auto">
+        <div
+          v-for="w in scoreDetailWidgets"
+          :key="String(w.id)"
+          class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left border border-neutral-700 bg-neutral-800/60"
+        >
+          <button
+            class="flex-1 min-w-0 text-left disabled:opacity-40"
+            :disabled="scoreDetailPushingId != null"
+            @click="pushScoreDetail(w)"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-neutral-200 truncate">{{ w.name || '评分详情' }}</span>
+              <span
+                v-if="isPushedTo(w)"
+                class="text-[8px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 flex-none"
+              >
+                已推送
+              </span>
+              <span
+                v-else-if="w.competitorId != null"
+                class="text-[8px] px-1 py-0.5 rounded bg-neutral-700 text-neutral-400 flex-none"
+              >
+                已有推送
+              </span>
+            </div>
+            <div class="text-[10px] text-neutral-500 truncate mt-0.5">
+              <template v-if="w.screenName || w.sceneName">{{ [w.screenName, w.sceneName].filter(Boolean).join(' · ') }} · </template>
+              ID {{ w.id }}
+            </div>
+          </button>
+          <button
+            v-if="w.matchId != null || w.competitorId != null"
+            class="flex-none px-2 py-1 rounded text-[10px] text-neutral-400 border border-neutral-700 hover:border-red-500/40 hover:text-red-400 disabled:opacity-40"
+            :disabled="scoreDetailPushingId != null"
+            @click="clearScoreDetail(w)"
+          >
+            清除
+          </button>
+        </div>
+      </div>
+      <div class="flex justify-end mt-4">
+        <button class="px-4 py-2 rounded-lg text-xs text-neutral-400 hover:bg-neutral-800" @click="closeScoreDetailPicker">取消</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -956,6 +1021,8 @@ import {
   directorPublishResult,
   directorSetCurrentCompetitor,
   directorGetCurrentCompetitor,
+  directorListScoreDetailWidgets,
+  directorSetWidgetScoreDetail,
   listDirectorStageCompetitors,
   directorCreateFreeMatch,
   directorDeleteFreeMatch,
@@ -1654,6 +1721,116 @@ const handleComplete = async () => {
   }
 };
 
+type ScoreDetailWidgetItem = {
+  id: string | number;
+  name?: string;
+  sceneId?: string | number;
+  sceneName?: string;
+  screenName?: string;
+  matchId?: string | number | null;
+  competitorId?: string | number | null;
+};
+
+const scoreDetailWidgets = ref<ScoreDetailWidgetItem[]>([]);
+const scoreDetailPickerVisible = ref(false);
+const scoreDetailPickerMatch = ref<MatchInfo | null>(null);
+const scoreDetailPickerRound = ref<any>(null);
+const scoreDetailPushingId = ref<string | null>(null);
+
+const scoreDetailWidgetLabel = (w: ScoreDetailWidgetItem) => w.name || '评分详情';
+
+const isPushedTo = (w: ScoreDetailWidgetItem, match?: MatchInfo | null, competitorId?: any) => {
+  const m = match ?? scoreDetailPickerMatch.value;
+  const cid = competitorId ?? scoreDetailPickerRound.value?.competitorId;
+  return (
+    w.matchId != null &&
+    w.competitorId != null &&
+    m != null &&
+    cid != null &&
+    String(w.matchId) === String(m.id) &&
+    String(w.competitorId) === String(cid)
+  );
+};
+
+const loadScoreDetailWidgets = async () => {
+  try {
+    const resp = await directorListScoreDetailWidgets();
+    scoreDetailWidgets.value = listOf<ScoreDetailWidgetItem>(resp);
+  } catch (e) {
+    // 拉列表失败不能打断「标记当前上场」,按没有评分详情组件处理
+    console.error('加载评分详情组件失败:', e);
+    scoreDetailWidgets.value = [];
+  }
+};
+
+const closeScoreDetailPicker = () => {
+  scoreDetailPickerVisible.value = false;
+  scoreDetailPickerMatch.value = null;
+  scoreDetailPickerRound.value = null;
+};
+
+const pushScoreDetail = async (widget: ScoreDetailWidgetItem, match?: MatchInfo | null, competitorId?: any) => {
+  const m = match ?? scoreDetailPickerMatch.value;
+  const cid = competitorId ?? scoreDetailPickerRound.value?.competitorId;
+  if (!m || cid == null) return;
+  scoreDetailPushingId.value = String(widget.id);
+  try {
+    await directorSetWidgetScoreDetail(widget.id, m.id, cid);
+    scoreDetailWidgets.value = scoreDetailWidgets.value.map((w) =>
+      String(w.id) === String(widget.id) ? { ...w, matchId: m.id, competitorId: cid } : w
+    );
+    ElMessage.success(`已推送到「${scoreDetailWidgetLabel(widget)}」`);
+    closeScoreDetailPicker();
+  } catch (e: any) {
+    console.error('推送评分详情失败:', e);
+    notifyError(e, '推送失败');
+  } finally {
+    scoreDetailPushingId.value = null;
+  }
+};
+
+const clearScoreDetail = async (widget: ScoreDetailWidgetItem) => {
+  scoreDetailPushingId.value = String(widget.id);
+  try {
+    await directorSetWidgetScoreDetail(widget.id, null, null);
+    scoreDetailWidgets.value = scoreDetailWidgets.value.map((w) =>
+      String(w.id) === String(widget.id) ? { ...w, matchId: null, competitorId: null } : w
+    );
+    ElMessage.success(`已清除「${scoreDetailWidgetLabel(widget)}」的推送`);
+  } catch (e: any) {
+    console.error('清除评分详情失败:', e);
+    notifyError(e, '清除失败');
+  } finally {
+    scoreDetailPushingId.value = null;
+  }
+};
+
+/**
+ * 标记成功后再处理评分详情推送:
+ * 0 个组件 → 不弹窗,不打断原有「标记当前上场」;
+ * 1 个组件 → 直接推到该 widgetId(若已是同一选手则清除);
+ * 2 个及以上 → 弹出选择器。
+ */
+const afterMarkCurrent = async (match: MatchInfo, round: any) => {
+  const cid = round?.competitorId ?? null;
+  if (cid == null) return;
+  await loadScoreDetailWidgets();
+  const widgets = scoreDetailWidgets.value;
+  if (widgets.length === 0) return;
+  if (widgets.length === 1) {
+    const w = widgets[0];
+    if (isPushedTo(w, match, cid)) {
+      await clearScoreDetail(w);
+    } else {
+      await pushScoreDetail(w, match, cid);
+    }
+    return;
+  }
+  scoreDetailPickerMatch.value = match;
+  scoreDetailPickerRound.value = round;
+  scoreDetailPickerVisible.value = true;
+};
+
 /** 标记当前上场选手(海选大屏):MC 点击选手名字,仅标记并广播,大屏 widget 同步高亮/居中 */
 const handleMarkCurrent = async (match: MatchInfo, round: any) => {
   const cid = round?.competitorId ?? null;
@@ -1666,6 +1843,11 @@ const handleMarkCurrent = async (match: MatchInfo, round: any) => {
   } catch (e: any) {
     console.error('标记当前上场失败:', e);
     notifyError(e, '标记失败');
+    return;
+  }
+  // 当前上场标记与评分详情推送相互独立:标记成功后,有评分详情组件再决定直推或弹出选择
+  if (cid != null) {
+    await afterMarkCurrent(match, round);
   }
 };
 
@@ -1915,6 +2097,14 @@ const handleTournamentEvent = (data: any) => {
     if (selectedStageId.value) {
       loadMatchesForStage(selectedStageId.value);
     }
+    loadScoreDetailWidgets();
+    return;
+  }
+  if (data.type === 'score-detail') {
+    loadScoreDetailWidgets();
+    if (selectedStageId.value) {
+      loadMatchesForStage(selectedStageId.value);
+    }
     return;
   }
   // 赛段级事件(开始/完成/晋级/配置变更):刷新赛段列表与当前赛段场次
@@ -2066,6 +2256,7 @@ onMounted(async () => {
   if (selectedStageId.value) {
     await loadMatchesForStage(selectedStageId.value);
   }
+  await loadScoreDetailWidgets();
   if (!tournamentId.value) {
     // 没拿到赛事ID就没有可订阅的通道,标识按连接失败处理,避免一直停在"连接中"
     sseStatus.value = 'error';

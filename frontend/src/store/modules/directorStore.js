@@ -1128,6 +1128,14 @@ export const useDirectorStore = defineStore('director', () => {
       defaultHeight = 600;
     }
 
+    if (type === 'SCORE_DETAIL') {
+      defaultName = `评分详情 ${currentScene.value.widgets.length + 1}`;
+      // 不绑定场次/选手:导播台点击选手后再选择推送到哪个组件,目标只存在 Redis
+      dataConfig = { showAvatar: true, showPlayerName: true, roundAvatar: true };
+      defaultWidth = 800;
+      defaultHeight = 560;
+    }
+
     const newWidget = {
       tournamentId: currentTournamentId,
       sceneId: currentScene.value?.id, // 直接使用 id，应该已经是字符串或数字

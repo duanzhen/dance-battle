@@ -150,7 +150,7 @@
                       <!-- 手动公布:只显示裁判是否已判,不提前露出红蓝结果 -->
                       <template v-if="manualPending">
                         <span
-                          v-if="refereeVote(r, ref)"
+                          v-if="hasJudged(r, ref)"
                           class="inline-flex items-center justify-center rounded-[2px] text-green-400 font-black leading-none text-[clamp(10px,1.3vw,20px)]"
                           :style="voteBlockStyle"
                           title="裁判已判"
@@ -762,11 +762,22 @@ const voteReferees = computed(() => {
 
 /** 某轮某裁判的判罚:LEFT / RIGHT / DRAW / null(未判) */
 const refereeVote = (r: any, ref: { refereeId?: string | number; refereeName?: string }): string | null => {
+  return findVote(r, ref)?.vote ?? null;
+};
+
+/** 该裁判本轮是否已判:优先看 voted(公布前公共接口会清空 vote) */
+const hasJudged = (r: any, ref: { refereeId?: string | number; refereeName?: string }): boolean => {
+  const hit = findVote(r, ref);
+  if (!hit) return false;
+  if (hit.voted === true || hit.scored === true) return true;
+  return hit.vote != null && hit.vote !== '';
+};
+
+const findVote = (r: any, ref: { refereeId?: string | number; refereeName?: string }): any | undefined => {
   const votes: any[] = r?.refereeVotes || [];
-  const hit = votes.find((v) =>
+  return votes.find((v) =>
     ref.refereeId != null ? String(v.refereeId) === String(ref.refereeId) : String(v.refereeName || '') === String(ref.refereeName || '')
   );
-  return hit?.vote ?? null;
 };
 
 /** 判罚色块:红/蓝实心、平局灰色、未判深色空块 */
@@ -796,6 +807,7 @@ const roundVoteCounts = (r: any) => {
   let draw = 0;
   let voted = 0;
   for (const v of votes) {
+    const judged = v.voted === true || v.scored === true || v.vote === 'LEFT' || v.vote === 'RIGHT' || v.vote === 'DRAW';
     if (v.vote === 'LEFT') {
       left++;
       voted++;
@@ -804,6 +816,8 @@ const roundVoteCounts = (r: any) => {
       voted++;
     } else if (v.vote === 'DRAW') {
       draw++;
+      voted++;
+    } else if (judged) {
       voted++;
     }
   }

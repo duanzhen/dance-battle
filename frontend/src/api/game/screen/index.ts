@@ -146,6 +146,14 @@ export const getMatchCurrentCompetitor = (id: string | number) => {
   });
 };
 
+/** 评分详情组件当前推送目标(按 widgetId);未推送返回 null */
+export const getWidgetScoreDetail = (widgetId: string | number) => {
+  return screenRequest({
+    url: '/tournament/screen/widget/' + widgetId + '/score-detail',
+    method: 'get'
+  });
+};
+
 /** 场次参赛明细列表 */
 export const listMatchParticipant = (query?: MatchParticipantQuery): AxiosPromise<MatchParticipantVO[]> => {
   return screenRequest({

@@ -20,6 +20,7 @@ import com.dance.street.game.domain.TMatchRound;
 import com.dance.street.game.domain.TRoundScore;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
+import com.dance.street.game.engine.common.ScorePublishState;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
 import com.dance.street.game.engine.common.enums.MatchOutcomeEnum;
@@ -101,8 +102,8 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
     }
 
     /**
-     * 排名赛公布控制:MANUAL/BATCH 模式且赛段未结算(SETTLED)前,
-     * 隐藏参赛方总分/排名,保证大屏与外部接口在公布前看不到结果。
+     * 排名赛公布控制:MANUAL/BATCH 且尚未公布(赛段未 SETTLED、场次也未 scoresPublished)时,
+     * 隐藏参赛方总分/排名。MANUAL 经导播台公布后即使赛段未结算也露分。
      */
     private void maskRankScores(List<TMatchParticipantVo> list) {
         if (list == null || list.isEmpty()) {
@@ -126,14 +127,7 @@ public class TMatchParticipantServiceImpl implements ITMatchParticipantService {
         for (Map.Entry<Long, TMatch> entry : matchById.entrySet()) {
             TMatch m = entry.getValue();
             TStage s = m.getStageId() == null ? null : stageById.get(m.getStageId());
-            boolean hidden = false;
-            if (s != null && StageModeEnum.require(s.getStageMode()).rank()
-                && !StageConstants.STAGE_SETTLED.equals(s.getStatus())) {
-                RuleConfigHolder rc = RuleConfigParser.parse(s.getRuleConfig());
-                hidden = rc != null && rc.getPublishMode() != null
-                    && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
-            }
-            hiddenByMatch.put(entry.getKey(), hidden);
+            hiddenByMatch.put(entry.getKey(), ScorePublishState.hideRankPublic(s, m));
         }
         for (TMatchParticipantVo vo : list) {
             if (vo.getMatchId() != null && Boolean.TRUE.equals(hiddenByMatch.get(vo.getMatchId()))) {

@@ -48,7 +48,8 @@ import {
   Timer,
   CreditCard,
   Swords,
-  ListOrdered
+  ListOrdered,
+  Table2
 } from 'lucide-vue-next'; // 假设使用 lucide 图标库，或者你自己写 SVG
 import { ElMessage } from 'element-plus';
 
@@ -72,6 +73,7 @@ const categories = [
       { label: '擂台积分', type: 'ARENA_SCORE', icon: Coins },
       { label: '对战树', type: 'BRACKET', icon: Network },
       { label: '当前场次', type: 'MATCH_DETAIL', icon: Swords },
+      { label: '评分详情', type: 'SCORE_DETAIL', icon: Table2 },
       { label: '排名展示', type: 'RANKING', icon: ListOrdered },
       { label: '参赛选手', type: 'PARTICIPANTS', icon: Users }
     ]

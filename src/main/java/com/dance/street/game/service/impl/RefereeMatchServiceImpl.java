@@ -18,6 +18,7 @@ import com.dance.street.game.domain.vo.RefereeMatchVo.RefereeRoundInfo;
 import com.dance.street.game.domain.vo.RefereeMatchVo.RefereeStageInfo;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
+import com.dance.street.game.engine.common.ScorePublishState;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.MatchFormat;
 import com.dance.street.game.engine.common.enums.StageModeEnum;
@@ -120,8 +121,6 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         boolean isRankStage = profile.rank();
         boolean perCompetitorStage = profile.perCompetitor();
         MatchFormat matchFormat = MatchFormat.of(stage.getRuleConfig());
-        // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分
-        boolean rankResultHidden = isRankStage && !"AUTO".equalsIgnoreCase(publishMode);
         // 分圈海选:裁判只应看到/判罚自己绑定的圈(t_match_referee 圈级绑定)。
         // 只有该赛段确实做了圈级绑定时才启用过滤,单圈/未配置圈裁判的旧数据保持原行为。
         Set<Long> allowedMatchIds = allowedMatchIds(stage.getId(), refereeId);
@@ -171,6 +170,9 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
                 }
             }
         }
+        // 排名赛 MANUAL/BATCH:公布前隐藏汇总分/排名,裁判仍可见自己的打分;
+        // MANUAL 经导播台公布后即使赛段未结算也露总分。当前场次解析完成后再判定。
+        boolean rankResultHidden = isRankStage && ScorePublishState.hideRankPublic(stage, match);
         // 海选/排名赛:号码即上场顺序,直接按号码数值排序,
         // 避免补签选手按插入顺序排在队尾(不依赖可能错位的 displaySlotIndex)
         if (perCompetitorStage && !participants.isEmpty()) {
@@ -302,7 +304,8 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             matchInfo.setStatus(match.getStatus());
             matchInfo.setMatchMode(match.getMatchMode());
             vo.setMatch(matchInfo);
-            vo.setPendingPublish(StringUtils.isNotBlank(match.getResultJson()));
+            vo.setPendingPublish(ScorePublishState.pendingPublish(
+                stage.getStageMode(), match.getStatus(), match.getResultJson()));
         }
 
         // 赛段内所有进行中场次(多场并行时供裁判切换)
@@ -573,13 +576,7 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         assertScoringPermission(match.getStageId(), matchId, refereeId);
         // 排名赛未公布时隐藏汇总分/排名(与 my-match 同一口径),避免轻量接口提前泄露
         TStage stage = stageMapper.selectById(match.getStageId());
-        boolean rankResultHidden = false;
-        if (stage != null && StageModeEnum.require(stage.getStageMode()).rank()
-            && !StageConstants.STAGE_SETTLED.equals(stage.getStatus())) {
-            RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-            rankResultHidden = rc != null && StringUtils.isNotBlank(rc.getPublishMode())
-                && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
-        }
+        boolean rankResultHidden = ScorePublishState.hideRankPublic(stage, match);
         List<TMatchParticipant> participants = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
             .eq(TMatchParticipant::getMatchId, matchId)
             .orderByAsc(TMatchParticipant::getDisplaySlotIndex));

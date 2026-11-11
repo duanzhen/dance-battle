@@ -36,6 +36,7 @@ import com.dance.street.game.engine.common.DimensionConfig;
 import com.dance.street.game.engine.common.PromotionTarget;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
+import com.dance.street.game.engine.common.ScorePublishState;
 import com.dance.street.game.engine.common.ScoringConfig;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.MatchFormat;
@@ -428,6 +429,7 @@ public class TMatchServiceImpl implements ITMatchService {
                     ref.setRefereeId(refId);
                     ref.setRefereeName(refereeNameById.get(refId));
                     ref.setScore(refScore);
+                    ref.setScored(true);
                     refScores.add(ref);
                 });
             } else {
@@ -440,6 +442,7 @@ public class TMatchServiceImpl implements ITMatchService {
                     ref.setRefereeId(s.getRefereeId());
                     ref.setRefereeName(s.getRefereeId() == null ? null : refereeNameById.get(s.getRefereeId()));
                     ref.setScore(s.getScore());
+                    ref.setScored(true);
                     refScores.add(ref);
                 }
             }
@@ -527,6 +530,7 @@ public class TMatchServiceImpl implements ITMatchService {
             ref.setRefereeId(refId);
             ref.setRefereeName(refereeNameById.get(refId));
             ref.setScore(score);
+            ref.setScored(true);
             refScores.add(ref);
         });
         d.setRefereeScores(refScores);
@@ -542,9 +546,11 @@ public class TMatchServiceImpl implements ITMatchService {
         }
         List<Long> stageIds = matches.stream().map(TMatchVo::getStageId).filter(Objects::nonNull).distinct().toList();
         Map<Long, String> publishModeByStage = new HashMap<>();
+        Map<Long, String> stageModeById = new HashMap<>();
         if (!stageIds.isEmpty()) {
             for (TStage s : stageMapper.selectByIds(stageIds)) {
                 publishModeByStage.put(s.getId(), readPublishMode(s));
+                stageModeById.put(s.getId(), s.getStageMode());
             }
         }
         // 裁判分配一次批量取回:此前每个需要显示投票进度的场次都回查一次赛段裁判
@@ -588,8 +594,8 @@ public class TMatchServiceImpl implements ITMatchService {
 
         for (TMatchVo vo : matches) {
             vo.setPublishMode(publishModeByStage.get(vo.getStageId()));
-            vo.setPendingPublish(StageConstants.MATCH_GAMING.equals(vo.getStatus())
-                && StringUtils.isNotBlank(vo.getResultJson()));
+            vo.setPendingPublish(ScorePublishState.pendingPublish(
+                stageModeById.get(vo.getStageId()), vo.getStatus(), vo.getResultJson()));
             if (!votingMatchIds.contains(vo.getId())) {
                 continue;
             }
@@ -654,6 +660,7 @@ public class TMatchServiceImpl implements ITMatchService {
                     }
                 }
                 rv.setVote(vote);
+                rv.setVoted(vote != null);
                 rvs.add(rv);
             }
             vo.setRefereeVotes(rvs);
@@ -872,7 +879,9 @@ public class TMatchServiceImpl implements ITMatchService {
                     ref.setRefereeId(rid);
                     ref.setRefereeName(refNameById.get(rid));
                     String v = interpretVote(votes, rid, rLeft, rRight);
-                    ref.setVote(v != null ? v : fallbackVote);
+                    String resolved = v != null ? v : fallbackVote;
+                    ref.setVote(resolved);
+                    ref.setVoted(resolved != null);
                     refVotes.add(ref);
                 }
                 rv.setRefereeVotes(refVotes);

@@ -23,6 +23,7 @@ import com.dance.street.game.domain.vo.TStageVo;
 import com.dance.street.game.domain.vo.TTournamentVo;
 import com.dance.street.game.domain.vo.TVisSceneVo;
 import com.dance.street.game.domain.vo.TVisWidgetVo;
+import com.dance.street.game.domain.vo.WidgetScoreDetailTargetVo;
 import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITMatchParticipantService;
 import com.dance.street.game.service.ITMatchRefereeService;
@@ -36,6 +37,8 @@ import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITTournamentService;
 import com.dance.street.game.service.ITVisSceneService;
 import com.dance.street.game.service.ITVisWidgetService;
+import com.dance.street.game.service.impl.ScreenResultMasker;
+import com.dance.street.game.service.impl.WidgetScoreDetailService;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.mybatis.core.page.PageQuery;
@@ -76,6 +79,8 @@ public class ScreenController {
 
     private final ITVisSceneService visSceneService;
     private final ITVisWidgetService visWidgetService;
+    private final WidgetScoreDetailService widgetScoreDetailService;
+    private final ScreenResultMasker screenResultMasker;
     private final ITTournamentService tournamentService;
     private final ITStageService stageService;
     private final ITStageLifecycleService stageLifecycleService;
@@ -178,13 +183,17 @@ public class ScreenController {
     /** 场次列表(按赛段) */
     @GetMapping("/match/list")
     public TableDataInfo<TMatchVo> matches(TMatchBo bo, PageQuery pageQuery) {
-        return matchService.queryPageList(bo, pageQuery);
+        TableDataInfo<TMatchVo> page = matchService.queryPageList(bo, pageQuery);
+        screenResultMasker.maskMatches(page.getData());
+        return page;
     }
 
     /** 场次详情 */
     @GetMapping("/match/{id}")
     public R<TMatchVo> match(@PathVariable("id") Long id) {
-        return R.ok(matchService.queryById(id));
+        TMatchVo vo = matchService.queryById(id);
+        screenResultMasker.maskMatch(vo);
+        return R.ok(vo);
     }
 
     /** 场次当前上场选手(海选大屏标记) */
@@ -193,10 +202,19 @@ public class ScreenController {
         return R.ok(stageLifecycleService.getMatchCurrentCompetitor(id));
     }
 
+    /** 评分详情组件当前推送目标(按 widgetId);未推送或组件不存在返回 null */
+    @GetMapping("/widget/{id}/score-detail")
+    public R<WidgetScoreDetailTargetVo> scoreDetailTarget(@PathVariable("id") Long id) {
+        return R.ok(widgetScoreDetailService.getTargetPublic(id));
+    }
+
     /** 场次参赛明细列表(按场次/赛段) */
     @GetMapping("/matchParticipant/list")
     public TableDataInfo<TMatchParticipantVo> matchParticipants(TMatchParticipantBo bo, PageQuery pageQuery) {
-        return matchParticipantService.queryPageList(bo, pageQuery);
+        TableDataInfo<TMatchParticipantVo> page = matchParticipantService.queryPageList(bo, pageQuery);
+        // queryPageList 已按公布状态遮总分;这里再走一遍公开遮罩,保持与场次详情同一口径
+        screenResultMasker.maskParticipants(page.getData());
+        return page;
     }
 
     /** 参赛单位列表(按赛段/赛事) */

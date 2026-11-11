@@ -12,7 +12,9 @@ import com.dance.street.game.domain.vo.ArenaOverviewVo;
 import com.dance.street.game.domain.vo.TCompetitorVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.domain.vo.TStageVo;
+import com.dance.street.game.domain.vo.ScoreDetailWidgetVo;
 import com.dance.street.game.domain.vo.TTournamentVo;
+import com.dance.street.game.domain.vo.WidgetScoreDetailTargetVo;
 import com.dance.street.game.interceptor.DirectorAuthInterceptor;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
@@ -20,6 +22,7 @@ import com.dance.street.game.service.ITCompetitorService;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.ITTournamentService;
+import com.dance.street.game.service.impl.WidgetScoreDetailService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.domain.R;
@@ -49,6 +52,7 @@ public class DirectorController {
     private final ITCompetitorService competitorService;
     private final ITStageLifecycleService stageLifecycleService;
     private final ITMatchResultService matchResultService;
+    private final WidgetScoreDetailService widgetScoreDetailService;
 
     /**
      * 获取当前认证赛事信息(名称等)
@@ -346,6 +350,54 @@ public class DirectorController {
     public R<Long> getCurrentCompetitor(@PathVariable("id") Long id, HttpServletRequest request) {
         assertMatchInTournament(currentTournament(request), id);
         return R.ok(stageLifecycleService.getMatchCurrentCompetitor(id));
+    }
+
+    /**
+     * 当前赛事下全部「评分详情」组件(供 MC 选择推送到哪个 widgetId)。
+     * 无此类组件时返回空列表,前端不应弹错误。
+     */
+    @GetMapping("/score-detail-widgets")
+    public R<List<ScoreDetailWidgetVo>> listScoreDetailWidgets(HttpServletRequest request) {
+        return R.ok(widgetScoreDetailService.listForTournament(currentTournament(request).getId()));
+    }
+
+    /**
+     * 查询某个评分详情组件当前推送的场次/选手;未推送返回 null。
+     */
+    @GetMapping("/widget/{id}/score-detail")
+    public R<WidgetScoreDetailTargetVo> getScoreDetailTarget(@PathVariable("id") Long id,
+                                                             HttpServletRequest request) {
+        return R.ok(widgetScoreDetailService.getTarget(currentTournament(request).getId(), id));
+    }
+
+    /**
+     * 将指定场次选手的评分详情推到某个评分详情组件,或清除该组件当前推送。
+     * body 中 matchId、competitorId 都为空(或省略)时清除;必须成对出现。
+     */
+    @Log(title = "推送评分详情", businessType = BusinessType.UPDATE)
+    @PutMapping("/widget/{id}/score-detail")
+    public R<Void> setScoreDetailTarget(@PathVariable("id") Long id,
+                                        @RequestBody(required = false) java.util.Map<String, Object> body,
+                                        HttpServletRequest request) {
+        Long matchId = readLong(body, "matchId");
+        Long competitorId = readLong(body, "competitorId");
+        widgetScoreDetailService.setTarget(currentTournament(request).getId(), id, matchId, competitorId);
+        return R.ok();
+    }
+
+    private Long readLong(java.util.Map<String, Object> body, String key) {
+        if (body == null) {
+            return null;
+        }
+        Object v = body.get(key);
+        if (v == null || "".equals(v.toString().trim()) || "null".equalsIgnoreCase(v.toString().trim())) {
+            return null;
+        }
+        try {
+            return Long.valueOf(v.toString().trim());
+        } catch (NumberFormatException e) {
+            throw new ServiceException(key + " 格式不正确");
+        }
     }
 
     private TTournamentVo currentTournament(HttpServletRequest request) {

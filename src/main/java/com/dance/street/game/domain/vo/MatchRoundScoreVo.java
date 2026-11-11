@@ -81,5 +81,11 @@ public class MatchRoundScoreVo implements Serializable {
 
         /** 该裁判本轮打分 */
         private BigDecimal score;
+
+        /**
+         * 该裁判是否已提交该指标/该轮分数。
+         * 公共端在 MANUAL/BATCH 未公布时会清空 {@code score},用此字段表示「已打但不露分」。
+         */
+        private Boolean scored;
     }
 }

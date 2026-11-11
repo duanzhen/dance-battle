@@ -38,7 +38,9 @@ import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TMatchRoundMapper;
 import com.dance.street.game.mapper.TRoundScoreMapper;
 import com.dance.street.game.mapper.TStageMapper;
+import com.dance.street.game.engine.common.ScorePublishState;
 import com.dance.street.game.service.impl.flow.CompetitorOutcomeWriter;
+import com.dance.street.game.service.impl.flow.JudgeCompletenessChecker;
 import com.dance.street.game.service.impl.flow.DownstreamRouter;
 import com.dance.street.game.service.impl.flow.MatchRoundLocator;
 import com.dance.street.game.service.impl.flow.MatchStateWriter;
@@ -84,6 +86,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private final TCompetitorMapper competitorMapper;
     private final ITStageLifecycleService stageLifecycleService;
     private final ITScoredMatchService scoredMatchService;
+    private final JudgeCompletenessChecker judgeCompletenessChecker;
     private final com.dance.street.game.service.ITRefereeStageService refereeStageService;
     private final RefereeSseNotifier refereeSseNotifier;
     private final TournamentEventNotifier tournamentEventNotifier;
@@ -197,6 +200,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         }
         accumulateRankScores(match, stage, competitorIds);
         List<MatchScoreResult> accumulated = loadAuditionResults(match, competitorIds);
+        // MANUAL:本场应到裁判对所有选手打完后进入待公布,不结算赛段
+        maybeHoldRankManualPublish(match, stage);
         refereeSseNotifier.notifyMatch(match.getStageId(), match.getId(), "scores");
         tournamentEventNotifier.notify(match.getTournamentId(), match.getStageId(), match.getId(), "scores");
         maybeAutoPublishRankStage(stage);
@@ -1392,6 +1397,10 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         if (stage == null) {
             throw new ServiceException("赛段不存在");
         }
+        // 排名赛 MANUAL:只把打分标为已公布并通知大屏,绝不走淘汰赛 WIN/LOSS 结算
+        if (profile(stage).rank()) {
+            return publishRankScores(match, stage);
+        }
         List<Long> competitorIds = competitorIdsOf(matchId);
         Map<Long, String> outcomes = parseResultJson(match.getResultJson());
         List<MatchScoreResult> results = outcomesToResults(competitorIds, outcomes);
@@ -1562,6 +1571,60 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             }
         }
         return java.math.BigDecimal.TEN;
+    }
+
+    /**
+     * 排名赛 MANUAL:本场应到裁判对所有选手打完后,写入待公布标记,场次保持 GAMING。
+     * 已公布的不再改回待公布;若补签导致又未打完,则清掉待公布标记。
+     */
+    private void maybeHoldRankManualPublish(TMatch match, TStage stage) {
+        RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
+        if (rc == null || !"MANUAL".equalsIgnoreCase(rc.getPublishMode())) {
+            return;
+        }
+        TMatch current = matchMapper.selectById(match.getId());
+        if (current == null || !StageConstants.MATCH_GAMING.equals(current.getStatus())) {
+            return;
+        }
+        if (ScorePublishState.isPublished(current.getResultJson())) {
+            return;
+        }
+        boolean complete = judgeCompletenessChecker.unjudgedNames(List.of(current)).isEmpty();
+        if (complete) {
+            if (!ScorePublishState.isPending(current.getResultJson())) {
+                TMatch upd = new TMatch();
+                upd.setId(current.getId());
+                upd.setResultJson(ScorePublishState.PENDING_JSON);
+                matchMapper.updateById(upd);
+                current.setResultJson(ScorePublishState.PENDING_JSON);
+                log.info("排名赛场次[{}]全部应到裁判已打完,结果待导播台公布", current.getId());
+            }
+        } else if (ScorePublishState.isPending(current.getResultJson())) {
+            matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
+                .eq(TMatch::getId, current.getId())
+                .set(TMatch::getResultJson, null));
+            current.setResultJson(null);
+            log.info("排名赛场次[{}]打分不再齐全,已撤销待公布", current.getId());
+        }
+        match.setResultJson(current.getResultJson());
+    }
+
+    /**
+     * 排名赛 MANUAL「公布结果」:只标记已公布并推送 SSE,场次与赛段都保持进行中。
+     * 「完成赛段」仍负责结算与晋级。
+     */
+    private MatchResultVo publishRankScores(TMatch match, TStage stage) {
+        if (!ScorePublishState.isPending(match.getResultJson())) {
+            throw new ServiceException("该场暂无待公布结果,请等待裁判打分完成");
+        }
+        TMatch upd = new TMatch();
+        upd.setId(match.getId());
+        upd.setResultJson(ScorePublishState.PUBLISHED_JSON);
+        matchMapper.updateById(upd);
+        log.info("排名赛场次[{}]打分已由导播台公布,赛段保持进行中", match.getId());
+        refereeSseNotifier.notifyMatch(stage.getId(), match.getId(), "scores");
+        tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), match.getId(), "scores");
+        return buildVo(match.getId(), StageConstants.MATCH_GAMING, loadAuditionResults(match, competitorIdsOf(match.getId())));
     }
 
     /**

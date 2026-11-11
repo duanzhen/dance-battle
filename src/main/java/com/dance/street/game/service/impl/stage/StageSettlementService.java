@@ -17,6 +17,7 @@ import com.dance.street.game.engine.common.DimensionConfig;
 import com.dance.street.game.engine.common.RosterConstants;
 import com.dance.street.game.engine.common.RuleConfigHolder;
 import com.dance.street.game.engine.common.RuleConfigParser;
+import com.dance.street.game.engine.common.ScorePublishState;
 import com.dance.street.game.engine.common.StageConstants;
 import com.dance.street.game.engine.common.enums.AggregateRuleEnum;
 import com.dance.street.game.engine.common.enums.OutcomeStatusEnum;
@@ -448,9 +449,8 @@ public class StageSettlementService {
             throw new ServiceException("仅排名赛赛段支持排名明细");
         }
         RuleConfigHolder rc = RuleConfigParser.parse(stage.getRuleConfig());
-        // 公布控制:MANUAL/BATCH 且未结算前隐藏分数与维度分
-        boolean hidden = !StageConstants.STAGE_SETTLED.equals(stage.getStatus())
-            && rc != null && rc.getPublishMode() != null && !"AUTO".equalsIgnoreCase(rc.getPublishMode());
+        // 公布控制按场次:MANUAL/BATCH 未公布的圈隐藏分数、名次与维度分;
+        // MANUAL 已公布但赛段尚未 SETTLED 的圈照常露分。
         AggregateRuleEnum refRule = AggregateRuleEnum.fromCode(
             rc != null && rc.getScoring() != null ? rc.getScoring().getRefereeAggregateRule() : null);
         java.math.BigDecimal trimRatio = rc != null && rc.getScoring() != null ? rc.getScoring().getTrimRatio() : null;
@@ -506,7 +506,8 @@ public class StageSettlementService {
                 TCompetitor comp = compMap.get(p.getCompetitorId());
                 c.setName(comp != null ? comp.getName() : null);
                 c.setNumber(comp != null ? comp.getNumber() : null);
-                c.setRankInMatch(p.getRankInMatch());
+                boolean hidden = ScorePublishState.hideRankPublic(stage, m);
+                c.setRankInMatch(hidden ? null : p.getRankInMatch());
                 c.setScoreValue(hidden ? null : p.getScoreValue());
                 if (!hidden) {
                     c.setDimensions(aggregateCompetitorDimensions(

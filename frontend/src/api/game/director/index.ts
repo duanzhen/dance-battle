@@ -226,3 +226,32 @@ export function directorSaveFreeMatchAdvancers(stageId: string | number, competi
     data: { competitorIds }
   });
 }
+
+/** 当前赛事下全部「评分详情」组件(供 MC 选择推送到哪个 widgetId) */
+export function directorListScoreDetailWidgets() {
+  return directorRequest({
+    url: '/game/director/score-detail-widgets',
+    method: 'get'
+  });
+}
+
+/** 查询某个评分详情组件当前推送目标;未推送返回 null */
+export function directorGetWidgetScoreDetail(widgetId: string | number) {
+  return directorRequest({
+    url: `/game/director/widget/${widgetId}/score-detail`,
+    method: 'get'
+  });
+}
+
+/** 将指定场次选手推到某个评分详情组件;matchId/competitorId 传 null 清除 */
+export function directorSetWidgetScoreDetail(
+  widgetId: string | number,
+  matchId: string | number | null,
+  competitorId: string | number | null
+) {
+  return directorRequest({
+    url: `/game/director/widget/${widgetId}/score-detail`,
+    method: 'put',
+    data: { matchId, competitorId }
+  });
+}

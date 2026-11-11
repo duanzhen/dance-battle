@@ -21,6 +21,7 @@ import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.domain.vo.MatchResultVo;
 import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
+import com.dance.street.game.domain.bo.StartMatchBo;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITStageLifecycleService;
@@ -145,8 +146,12 @@ public class TMatchController extends BaseController {
     @Log(title = "开始场次", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
     @PostMapping("/{id}/start")
-    public R<Void> start(@NotNull(message = "场次ID不能为空") @PathVariable Long id) {
-        tMatchResultService.startMatch(id);
+    public R<Void> start(@NotNull(message = "场次ID不能为空") @PathVariable Long id,
+                         @RequestParam(value = "format", required = false) String format,
+                         @RequestBody(required = false) StartMatchBo bo) {
+        String resolved = (bo != null && bo.getFormat() != null && !bo.getFormat().isBlank())
+            ? bo.getFormat() : format;
+        tMatchResultService.startMatch(id, resolved);
         return R.ok();
     }
 

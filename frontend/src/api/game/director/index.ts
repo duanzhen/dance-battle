@@ -109,10 +109,11 @@ export function directorArenaOverview(stageId: string | number) {
 }
 
 /** 开始场次 */
-export function directorStartMatch(id: string | number) {
+export function directorStartMatch(id: string | number, format?: string | null) {
   return directorRequest({
     url: `/game/director/match/${id}/start`,
-    method: 'post'
+    method: 'post',
+    data: format ? { format } : undefined
   });
 }
 
@@ -140,6 +141,7 @@ export function directorCancelStartMatch(id: string | number) {
     method: 'post'
   });
 }
+
 
 /** 回退单场结算 */
 export function directorResetMatch(id: string | number) {

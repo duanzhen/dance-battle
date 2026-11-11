@@ -62,10 +62,11 @@ export const publishResult = (id: string | number): AxiosPromise<MatchResultVO> 
  * 开始指定场次:PENDING → GAMING(赛段未开始则随场次开始),其余场次保持 PENDING
  * 用于跳过其他场次、先开始指定场次
  */
-export const startMatch = (id: string | number) => {
+export const startMatch = (id: string | number, format?: string | null) => {
   return request({
     url: '/game/match/' + id + '/start',
-    method: 'post'
+    method: 'post',
+    data: format ? { format } : undefined
   });
 };
 

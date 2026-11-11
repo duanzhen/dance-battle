@@ -204,8 +204,8 @@ public class TMatchServiceImpl implements ITMatchService {
     }
 
     /**
-     * 淘汰赛 BO 局分:bestOf/需赢局数取赛段 format;局分从每局判罚明细现算(不加字段)。
-     * 左/右按场次槽位 0/1,胜局 = 该局该方得票多于对方;平局局双方都不计。
+     * 淘汰赛 BO 局分:本场 format 已写入时用本场;为空(尚未开赛)时用赛段默认。
+     * 局分从每局判罚明细现算(不加字段)。左/右按场次槽位 0/1,胜局 = 该局该方得票多于对方;平局局双方都不计。
      */
     private void fillSeriesInfo(List<TMatchVo> matches) {
         if (matches == null || matches.isEmpty()) {
@@ -242,10 +242,12 @@ public class TMatchServiceImpl implements ITMatchService {
                     .eq(TRoundScore::getAction, StageConstants.SCORE_ACTION_VOTE))
                 .stream().collect(Collectors.groupingBy(TRoundScore::getRoundId));
         for (TMatchVo vo : koMatches) {
-            MatchFormat fmt = MatchFormat.of(stageById.get(vo.getStageId()).getRuleConfig());
+            TStage stage = stageById.get(vo.getStageId());
+            MatchFormat stageFmt = MatchFormat.of(stage.getRuleConfig());
+            List<TMatchRound> roundList = roundsByMatch.getOrDefault(vo.getId(), List.of());
+            MatchFormat fmt = MatchFormat.ofStored(vo.getFormat(), stageFmt);
             vo.setBestOf(fmt.maxGames());
             vo.setRequiredWins(fmt.requiredWins());
-            List<TMatchRound> roundList = roundsByMatch.getOrDefault(vo.getId(), List.of());
             int leftWins = 0;
             int rightWins = 0;
             for (TMatchRound r : roundList) {

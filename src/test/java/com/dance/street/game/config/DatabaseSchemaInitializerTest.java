@@ -114,6 +114,13 @@ class DatabaseSchemaInitializerTest {
             .map(DatabaseSchemaInitializer::parseColumnDefinitions)
             .orElseThrow();
         assertTrue(tournamentColumns.containsKey("deleted"), "t_tournament 应解析出 deleted 列(供老库自动补列)");
+
+        java.util.Map<String, String> matchColumns = ddlList.stream()
+            .filter(ddl -> "t_match".equals(DatabaseSchemaInitializer.extractTableName(ddl)))
+            .findFirst()
+            .map(DatabaseSchemaInitializer::parseColumnDefinitions)
+            .orElseThrow();
+        assertTrue(matchColumns.containsKey("format"), "t_match 应解析出 format 列(供老库自动补列)");
     }
 
     @Test

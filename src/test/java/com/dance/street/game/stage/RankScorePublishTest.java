@@ -5,6 +5,8 @@ import com.dance.street.game.domain.TCompetitor;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TMatchParticipant;
 import com.dance.street.game.domain.TReferee;
+import com.dance.street.game.domain.TVisScene;
+import com.dance.street.game.domain.TVisWidget;
 import com.dance.street.game.domain.TTournament;
 import com.dance.street.game.domain.bo.ScoreEntryBo;
 import com.dance.street.game.domain.bo.StageRefereeBo;
@@ -12,6 +14,7 @@ import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TMatchBo;
 import com.dance.street.game.domain.bo.TStageBo;
 import com.dance.street.game.domain.vo.MatchRoundScoreVo;
+import com.dance.street.game.domain.vo.RefereeMatchVo;
 import com.dance.street.game.domain.vo.RankDetailVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.engine.common.ScorePublishState;
@@ -21,10 +24,15 @@ import com.dance.street.game.mapper.TCompetitorMapper;
 import com.dance.street.game.mapper.TMatchMapper;
 import com.dance.street.game.mapper.TMatchParticipantMapper;
 import com.dance.street.game.mapper.TRefereeMapper;
+import com.dance.street.game.mapper.TVisSceneMapper;
+import com.dance.street.game.mapper.TVisWidgetMapper;
 import com.dance.street.game.mapper.TTournamentMapper;
 import com.dance.street.game.service.ITMatchResultService;
 import com.dance.street.game.service.ITMatchService;
 import com.dance.street.game.service.ITRefereeStageService;
+import com.dance.street.game.service.IRefereeMatchService;
+import com.dance.street.game.service.impl.WidgetScoreDetailService;
+import com.dance.street.game.service.impl.WidgetScoreDetailStore;
 import com.dance.street.game.service.ITStageLifecycleService;
 import com.dance.street.game.service.ITStageService;
 import com.dance.street.game.service.impl.ScreenResultMasker;
@@ -94,7 +102,11 @@ class RankScorePublishTest {
     @Autowired private ITMatchResultService matchResultService;
     @Autowired private ITMatchService matchService;
     @Autowired private ITRefereeStageService refereeStageService;
+    @Autowired private IRefereeMatchService refereeMatchService;
     @Autowired private ScreenResultMasker screenResultMasker;
+    @Autowired private WidgetScoreDetailService widgetScoreDetailService;
+    @Autowired private TVisSceneMapper visSceneMapper;
+    @Autowired private TVisWidgetMapper visWidgetMapper;
 
     private MockMvc mvc() {
         return MockMvcBuilders.webAppContextSetup(wac).build();
@@ -314,6 +326,114 @@ class RankScorePublishTest {
         assertEquals(StageConstants.MATCH_GAMING, matchMapper.selectById(match.getId()).getStatus());
     }
 
+
+    /** 公布前:评分详情公共接口只给目标 ID,当前场次 flow 与场次详情不露真实分,只保留已打勾;导播/裁判仍可见真分。 */
+    @Test
+    void publicWidgetAndCurrentMatchHideScoresUntilPublish() throws Exception {
+        Long tid = newTournament("排名赛公布遮罩-评分详情");
+        var stage = newRankStage(tid, "排名手动", 2, 1, "MANUAL");
+        Long judge = assignReferee(tid, stage.getId(), "裁判A", "ref-rank-mask");
+        insertPending(tid, stage.getId(), "选手1", "1", 1);
+        insertPending(tid, stage.getId(), "选手2", "2", 2);
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        List<TMatchParticipant> parts = realParticipants(match.getId());
+        submitTech(match.getId(), judge, parts, 90);
+
+        Long widgetId = newScoreDetailWidget(tid, "评分详情");
+        widgetScoreDetailService.setTarget(tid, widgetId, match.getId(), parts.get(0).getCompetitorId());
+
+        // 导播台仍看真分
+        TMatchVo director = directorMatch(stage.getId(), match.getId());
+        assertEquals(0, new BigDecimal("90").compareTo(director.getRoundScores().get(0).getScore()));
+
+        // 裁判端仍看自己的打分
+        RefereeMatchVo referee = refereeMatchService.myMatch(tid, judge, "裁判A", stage.getId(), match.getId());
+        assertNotNull(referee.getMyScores());
+        assertFalse(referee.getMyScores().isEmpty(), "裁判应能看到自己已提交的分数");
+        assertTrue(referee.getMyScores().stream().anyMatch(s -> s.getScore() != null
+            && s.getScore().compareTo(new BigDecimal("90")) == 0), "裁判明细应含真实分数");
+        assertTrue(referee.getParticipants().stream().anyMatch(p -> p.getMyScore() != null
+            || p.getCurrentScore() != null), "裁判端参赛方应带真分");
+
+        // 评分详情公共接口只返回目标,不含分数字段
+        mvc().perform(get("/tournament/screen/widget/" + widgetId + "/score-detail"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.matchId").value(match.getId()))
+            .andExpect(jsonPath("$.data.competitorId").value(parts.get(0).getCompetitorId()))
+            .andExpect(jsonPath("$.data.score").doesNotExist());
+
+        // 该组件实际用来展示分数的场次公共详情:已打只出 scored,不露分
+        mvc().perform(get("/tournament/screen/match/" + match.getId()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roundScores[0].score").value(nullValue()))
+            .andExpect(jsonPath("$.data.roundScores[0].dimensions[0].refereeScores[0].scored").value(true))
+            .andExpect(jsonPath("$.data.roundScores[0].dimensions[0].refereeScores[0].score").value(nullValue()));
+
+        // 当前场次控件:公布前不露总分/名次
+        mvc().perform(get("/tournament/screen/flow/" + tid))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.currentMatch.id").value(match.getId()))
+            .andExpect(jsonPath("$.data.currentMatchParticipants[0].scoreValue").value(nullValue()))
+            .andExpect(jsonPath("$.data.currentMatchParticipants[0].rankInMatch").value(nullValue()));
+
+        matchResultService.publishResult(match.getId());
+        TMatchVo publicAfter = copyAndMask(directorMatch(stage.getId(), match.getId()));
+        assertEquals(0, new BigDecimal("90").compareTo(publicAfter.getRoundScores().get(0).getScore()));
+        mvc().perform(get("/tournament/screen/flow/" + tid))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.currentMatchParticipants[0].scoreValue").value(org.hamcrest.Matchers.not(nullValue())));
+    }
+
+    /** 淘汰赛 MANUAL:公布前当前场次公共接口隐藏胜负;裁判端仍能看到自己的判罚。 */
+    @Test
+    void knockoutCurrentMatchAndRefereeRespectManualPublish() throws Exception {
+        Long tid = newTournament("淘汰赛当前场次遮罩");
+        TStageBo bo = new TStageBo();
+        bo.setTournamentId(tid);
+        bo.setName("决赛");
+        bo.setStageMode("KNOCKOUT");
+        bo.setStatus(StageConstants.STAGE_DRAFT);
+        bo.setTeamCountStart(2L);
+        bo.setTeamCountEnd(1L);
+        bo.setIsInitialized(0L);
+        bo.setRuleConfig("{\"mode\":\"KNOCKOUT\",\"format\":\"BO1\",\"knockout\":{\"teamsCount\":2,"
+            + "\"advanceCount\":1,\"pairingMode\":\"SEED\",\"publishMode\":\"MANUAL\"},"
+            + "\"scoring\":{\"matchMode\":\"STANDARD\"}}");
+        var stage = stageService.insertByBo(bo);
+        insertPending(tid, stage.getId(), "选手A", "1", 1);
+        insertPending(tid, stage.getId(), "选手B", "2", 2);
+        Long judge = assignReferee(tid, stage.getId(), "裁判1", "ref-ko-mask");
+
+        lifecycleService.startStage(stage.getId());
+        TMatch match = matchesOf(stage.getId()).get(0);
+        matchResultService.startMatch(match.getId());
+        voteLeft(match.getId(), judge);
+
+        TMatchVo director = directorMatch(stage.getId(), match.getId());
+        assertNotNull(director.getRoundVotes().get(0).getRefereeVotes().get(0).getVote(),
+            "导播台应看到真实判罚");
+
+        RefereeMatchVo referee = refereeMatchService.myMatch(tid, judge, "裁判1", stage.getId(), match.getId());
+        assertTrue(Boolean.TRUE.equals(referee.getPendingPublish()));
+        assertNotNull(referee.getMyScores());
+        assertFalse(referee.getMyScores().isEmpty(), "裁判应能看到自己已提交的判罚");
+        assertTrue(referee.getMyScores().stream().anyMatch(s -> s.getScore() != null),
+            "裁判端不得把已判结果遮掉");
+
+        mvc().perform(get("/tournament/screen/match/" + match.getId()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.roundVotes[0].winnerSide").value(nullValue()))
+            .andExpect(jsonPath("$.data.roundVotes[0].refereeVotes[0].vote").value(nullValue()))
+            .andExpect(jsonPath("$.data.roundVotes[0].refereeVotes[0].voted").value(true));
+
+        mvc().perform(get("/tournament/screen/flow/" + tid))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.currentMatch.id").value(match.getId()))
+            .andExpect(jsonPath("$.data.currentMatchParticipants[0].outcomeStatus").value(nullValue()));
+    }
+
+
     private TMatchVo directorMatch(Long stageId, Long matchId) {
         TMatchBo q = new TMatchBo();
         q.setStageId(stageId);
@@ -383,9 +503,14 @@ class RankScorePublishTest {
     }
 
     private Long assignReferee(Long tid, Long stageId, String name) {
+        return assignReferee(tid, stageId, name, null);
+    }
+
+    private Long assignReferee(Long tid, Long stageId, String name, String authKey) {
         TReferee r = new TReferee();
         r.setTournamentId(tid);
         r.setName(name);
+        r.setAuthKey(authKey);
         refereeMapper.insert(r);
         StageRefereeBo bo = new StageRefereeBo();
         bo.setStageId(stageId);
@@ -426,4 +551,29 @@ class RankScorePublishTest {
             .eq(TCompetitor::getStageId, stageId)
             .eq(TCompetitor::getOutcomeStatus, outcome));
     }
+    private Long newScoreDetailWidget(Long tid, String name) {
+        TVisScene scene = new TVisScene();
+        scene.setTournamentId(tid);
+        scene.setName("主场景");
+        scene.setDesignWidth(1920L);
+        scene.setDesignHeight(1080L);
+        visSceneMapper.insert(scene);
+        TVisWidget widget = new TVisWidget();
+        widget.setTournamentId(tid);
+        widget.setSceneId(scene.getId());
+        widget.setName(name);
+        widget.setType(WidgetScoreDetailStore.WIDGET_TYPE);
+        widget.setLayoutConfig("{}");
+        widget.setRenderConfig("{}");
+        widget.setX(0L);
+        widget.setY(0L);
+        widget.setW(800L);
+        widget.setH(400L);
+        widget.setZIndex(1L);
+        widget.setVisible(1L);
+        widget.setLocked(0L);
+        visWidgetMapper.insert(widget);
+        return widget.getId();
+    }
+
 }

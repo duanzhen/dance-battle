@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS `t_match` (
   `parent_match_id` INTEGER,
   `promotion_rule` TEXT,
   `result_json` TEXT,
+  `format` TEXT,
   `create_by` INTEGER,
   `create_time` TEXT,
   `update_by` INTEGER,

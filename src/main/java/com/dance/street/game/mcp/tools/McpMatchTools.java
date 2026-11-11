@@ -66,6 +66,10 @@ public class McpMatchTools implements IMcpTool {
         properties.put("competitorIds", McpToolSupport.idListProperty(
             "Free-match advancing competitors in seed order."));
         properties.put("roundSequence", McpToolSupport.idProperty("One-based round sequence to reset."));
+        properties.put("format", Map.of(
+            "type", "string",
+            "description", "Optional series format for start: BO1, BO3 or BO5. Omit to use the stage default."
+        ));
         properties.put("currentCompetitorId", Map.of(
             "description", "Current on-stage competitor. Omit to leave unchanged; pass null to clear.",
             "anyOf", List.of(
@@ -115,7 +119,9 @@ public class McpMatchTools implements IMcpTool {
                 case "publish_result" -> resultService.publishResult(
                     McpToolSupport.requiredLong(arguments, "matchId"));
                 case "start" -> {
-                    resultService.startMatch(McpToolSupport.requiredLong(arguments, "matchId"));
+                    resultService.startMatch(
+                        McpToolSupport.requiredLong(arguments, "matchId"),
+                        McpToolSupport.optionalString(arguments, "format"));
                     yield Map.of("started", true);
                 }
                 case "cancel_start" -> {

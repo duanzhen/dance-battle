@@ -353,7 +353,7 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     private MatchResultVo resolveKnockoutSeries(TMatch match, TStage stage, SubmitResultBo bo,
                                                 List<MatchScoreResult> results, List<Long> competitorIds,
                                                 Map<Long, String> effectiveOutcomes, String publishMode) {
-        MatchFormat format = MatchFormat.of(stage.getRuleConfig());
+        MatchFormat format = seriesFormatOf(match, stage);
         boolean draw = isDrawResult(competitorIds, results);
         TMatchRound round = matchRoundLocator.current(match);
         // 本局判完(胜/平都算一局打完):置本局已结算
@@ -778,6 +778,12 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void startMatch(Long matchId) {
+        startMatch(matchId, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void startMatch(Long matchId, String format) {
         TMatch match = matchMapper.selectById(matchId);
         if (match == null) {
             throw new ServiceException("场次不存在");
@@ -845,7 +851,16 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 赛段若尚未开始,随本场一起进入 GAMING
         stageLifecycleService.ensureStageGaming(stage.getId());
         matchStateWriter.setStatus(match.getId(), StageConstants.MATCH_GAMING);
-        prepareSeriesRounds(match, stage);
+        MatchFormat resolved = resolveStartFormat(stage, format);
+        // 淘汰赛才落本场 format:即使用的是赛段默认也写上,后续判罚/局分/重置不再依赖赛段配置
+        if (profile(stage).knockout()
+            && MatchModeEnum.STANDARD.getCode().equals(match.getMatchMode())) {
+            matchMapper.update(null, Wrappers.<TMatch>lambdaUpdate()
+                .eq(TMatch::getId, match.getId())
+                .set(TMatch::getFormat, resolved.name()));
+            match.setFormat(resolved.name());
+        }
+        prepareSeriesRounds(match, resolved);
         refereeSseNotifier.notifyMatch(stage.getId(), match.getId(), "match");
         tournamentEventNotifier.notify(stage.getTournamentId(), stage.getId(), match.getId(), "match");
         log.info("场次[{}]已单独开始", matchId);
@@ -900,9 +915,11 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
             && !StageConstants.MATCH_GAMING.equals(match.getStatus())) {
             throw new ServiceException("仅已结算或进行中的场次可重启,当前[{}]", match.getStatus());
         }
+        // 整场重置沿用已写入的本场 format,不要掉回赛段默认
+        MatchFormat series = seriesFormatOf(match, stage);
         rollbackDownstreamIfSettled(match);
         clearMatchState(match, StageConstants.MATCH_GAMING);
-        prepareSeriesRounds(match, stage);
+        prepareSeriesRounds(match, series);
         // 本场参赛方的赛段结果已回退待定:之前按旧结果落进下一赛段中间态的座位还原成空位。
         // 同样只同步"本场参赛方"——重判只改对应那一行。
         List<Long> affected = participantMapper.selectList(Wrappers.<TMatchParticipant>lambdaQuery()
@@ -944,8 +961,8 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         // 整场已结算:先回退下游占位/晋级,避免重置后旧胜者残留(下游已开赛则拒绝)
         rollbackDownstreamIfSettled(match);
         // BO 的后续轮次已在开赛时预建:重置只清空判罚并回到目标局,
-        // 仅删除平局加赛产生、且超出标准 BO 数量的额外轮次。
-        int standardGames = MatchFormat.of(stage == null ? null : stage.getRuleConfig()).maxGames();
+        // 仅删除平局加赛产生、且超出本场 format 标准局数的额外轮次。
+        int standardGames = seriesFormatOf(match, stage).maxGames();
         long keepThrough = Math.max(standardGames, roundSequence);
         List<Long> dropRoundIds = rounds.stream()
             .filter(r -> r.getRoundSequence() != null && r.getRoundSequence() > keepThrough)
@@ -1154,51 +1171,58 @@ public class TMatchResultServiceImpl implements ITMatchResultService {
         matchStateWriter.setStatus(matchId, targetStatus);
     }
 
+    /** 开赛传入的临时局数;空或空白则用赛段默认。非法编码直接拒绝。 */
+    private MatchFormat resolveStartFormat(TStage stage, String format) {
+        if (format == null || format.isBlank()) {
+            return stageFormatOf(stage);
+        }
+        if (!MatchFormat.isValidCode(format)) {
+            throw new ServiceException("局数格式仅支持 BO1/BO3/BO5");
+        }
+        return MatchFormat.fromCode(format);
+    }
+
+    private MatchFormat stageFormatOf(TStage stage) {
+        return MatchFormat.of(stage == null ? null : stage.getRuleConfig());
+    }
+
+    /** 本场已写入的 format;尚未开赛(字段为空)时回退赛段默认。 */
+    private MatchFormat seriesFormatOf(TMatch match, TStage stage) {
+        return MatchFormat.ofStored(match == null ? null : match.getFormat(), stageFormatOf(stage));
+    }
+
     /**
-     * 淘汰赛开赛时按 BO 格式预建全部轮次:第 1 局立即进行,其余轮次待开始。
-     * 已有轮次保持幂等,平局产生的超额加赛轮在重新开赛时清理。
+     * 淘汰赛按指定 BO 重建本场全部轮次:先删除本场旧轮次及对应打分,再从第 1 局新建。
+     * 第 1 局立即进行,其余轮次待开始。平局补局不改本场 format。
      */
-    private void prepareSeriesRounds(TMatch match, TStage stage) {
-        if (match == null || stage == null || !profile(stage).knockout()
+    private void prepareSeriesRounds(TMatch match, MatchFormat seriesFormat) {
+        if (match == null || match.getId() == null || seriesFormat == null) {
+            return;
+        }
+        TStage stage = match.getStageId() == null ? null : stageMapper.selectById(match.getStageId());
+        if (stage == null || !profile(stage).knockout()
             || !MatchModeEnum.STANDARD.getCode().equals(match.getMatchMode())) {
             return;
         }
-        int maxGames = MatchFormat.of(stage.getRuleConfig()).maxGames();
-        List<TMatchRound> rounds = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
+        List<TMatchRound> existing = matchRoundMapper.selectList(Wrappers.<TMatchRound>lambdaQuery()
             .eq(TMatchRound::getMatchId, match.getId())
-            .orderByAsc(TMatchRound::getRoundSequence));
-        Map<Long, TMatchRound> bySequence = rounds.stream()
-            .filter(r -> r.getRoundSequence() != null)
-            .collect(Collectors.toMap(TMatchRound::getRoundSequence, r -> r, (a, b) -> a));
-
-        List<Long> extraRoundIds = rounds.stream()
-            .filter(r -> r.getRoundSequence() != null && r.getRoundSequence() > maxGames)
-            .map(TMatchRound::getId).filter(Objects::nonNull).toList();
-        if (!extraRoundIds.isEmpty()) {
+            .select(TMatchRound::getId));
+        List<Long> existingIds = existing.stream().map(TMatchRound::getId).filter(Objects::nonNull).toList();
+        if (!existingIds.isEmpty()) {
             roundScoreMapper.delete(Wrappers.<TRoundScore>lambdaQuery()
-                .in(TRoundScore::getRoundId, extraRoundIds));
+                .in(TRoundScore::getRoundId, existingIds));
             matchRoundMapper.delete(Wrappers.<TMatchRound>lambdaQuery()
-                .in(TMatchRound::getId, extraRoundIds));
+                .in(TMatchRound::getId, existingIds));
         }
-
+        int maxGames = seriesFormat.maxGames();
         for (long sequence = 1; sequence <= maxGames; sequence++) {
-            String status = sequence == 1
-                ? StageConstants.MATCH_GAMING : StageConstants.MATCH_PENDING;
-            TMatchRound round = bySequence.get(sequence);
-            if (round == null) {
-                round = new TMatchRound();
-                round.setTournamentId(match.getTournamentId());
-                round.setMatchId(match.getId());
-                round.setTenantId(match.getTenantId());
-                round.setRoundSequence(sequence);
-                round.setStatus(status);
-                matchRoundMapper.insert(round);
-            } else if (!status.equals(round.getStatus())) {
-                TMatchRound upd = new TMatchRound();
-                upd.setId(round.getId());
-                upd.setStatus(status);
-                matchRoundMapper.updateById(upd);
-            }
+            TMatchRound round = new TMatchRound();
+            round.setTournamentId(match.getTournamentId());
+            round.setMatchId(match.getId());
+            round.setTenantId(match.getTenantId());
+            round.setRoundSequence(sequence);
+            round.setStatus(sequence == 1 ? StageConstants.MATCH_GAMING : StageConstants.MATCH_PENDING);
+            matchRoundMapper.insert(round);
         }
     }
 

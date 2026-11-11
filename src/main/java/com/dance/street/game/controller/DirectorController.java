@@ -1,6 +1,7 @@
 package com.dance.street.game.controller;
 
 import com.dance.street.game.domain.bo.FreeMatchAdvanceBo;
+import com.dance.street.game.domain.bo.StartMatchBo;
 import com.dance.street.game.domain.bo.FreeMatchBo;
 import com.dance.street.game.domain.bo.SubmitResultBo;
 import com.dance.street.game.domain.bo.TMatchBo;
@@ -237,9 +238,14 @@ public class DirectorController {
      */
     @Log(title = "导播台开始场次", businessType = BusinessType.UPDATE)
     @PostMapping("/match/{id}/start")
-    public R<Void> startMatch(@PathVariable("id") Long id, HttpServletRequest request) {
+    public R<Void> startMatch(@PathVariable("id") Long id,
+                              @RequestParam(value = "format", required = false) String format,
+                              @RequestBody(required = false) StartMatchBo bo,
+                              HttpServletRequest request) {
         assertMatchInTournament(currentTournament(request), id);
-        matchResultService.startMatch(id);
+        String resolved = (bo != null && bo.getFormat() != null && !bo.getFormat().isBlank())
+            ? bo.getFormat() : format;
+        matchResultService.startMatch(id, resolved);
         return R.ok();
     }
 
@@ -254,6 +260,7 @@ public class DirectorController {
         matchResultService.cancelStartMatch(id);
         return R.ok();
     }
+
 
     /**
      * 回退单场结算(调试用)

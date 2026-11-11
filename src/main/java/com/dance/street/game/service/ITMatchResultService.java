@@ -19,8 +19,16 @@ public interface ITMatchResultService {
     /**
      * 开始指定场次:PENDING → GAMING(轮次同步 GAMING)。
      * 赛段若尚未开始则随场次一起进入 GAMING;未指定的场次保持 PENDING,实现"跳过先开始指定场次"。
+     * 局数走赛段默认 format。
      */
     void startMatch(Long matchId);
+
+    /**
+     * 开始指定场次,并可临时指定本场局数(BO1/BO3/BO5)。
+     * {@code format} 为空则用赛段默认;实际采用的局数写入本场 {@code t_match.format}
+     * (即使用的是赛段默认也会落上),不改赛段 ruleConfig。
+     */
+    void startMatch(Long matchId, String format);
 
     /**
      * 取消开始场次(误触回退):GAMING → PENDING,清空本场已提交分数/结果与轮次状态,

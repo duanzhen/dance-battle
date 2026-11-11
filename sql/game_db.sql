@@ -95,6 +95,7 @@ CREATE TABLE `t_match` (
   `parent_match_id` bigint DEFAULT NULL COMMENT '加赛场次的来源场次(仅 TIEBREAKER 有值)',
   `promotion_rule` json DEFAULT NULL,
   `result_json` varchar(1000) DEFAULT NULL COMMENT '手动公布模式待公布结果(competitorId->WIN/LOSS/DRAW)',
+  `format` varchar(10) DEFAULT NULL COMMENT '本场实际局数:BO1/BO3/BO5,空=尚未开赛、继承赛段默认',
   `create_by` bigint DEFAULT NULL COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_by` bigint DEFAULT NULL COMMENT '更新者',

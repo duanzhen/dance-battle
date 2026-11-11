@@ -204,7 +204,13 @@ public class TMatchVo implements Serializable {
     private List<RoundVoteInfo> roundVotes;
 
     /**
-     * BO 局数(BO1=1/BO3=3/BO5=5);非淘汰赛为 null
+     * 本场实际局数:BO1/BO3/BO5。空表示尚未开赛,此时 bestOf 走赛段默认。
+     */
+    private String format;
+
+    /**
+     * BO 局数(BO1=1/BO3=3/BO5=5);非淘汰赛为 null。
+     * 本场 format 已写入时用本场;为空时(待开始尚未开赛)用赛段默认。
      */
     private Integer bestOf;
 

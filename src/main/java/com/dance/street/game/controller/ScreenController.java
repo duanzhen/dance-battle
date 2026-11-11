@@ -175,7 +175,9 @@ public class ScreenController {
     @GetMapping("/flow/{tournamentId}")
     public R<StageFlowVo> flow(@PathVariable("tournamentId") Long tournamentId,
                                @RequestParam(value = "stageId", required = false) Long stageId) {
-        return R.ok(stageService.getFlowByTournamentId(tournamentId, stageId));
+        StageFlowVo vo = stageService.getFlowByTournamentId(tournamentId, stageId);
+        screenResultMasker.maskFlow(vo);
+        return R.ok(vo);
     }
 
     // ==================== 场次 / 参赛方 ====================

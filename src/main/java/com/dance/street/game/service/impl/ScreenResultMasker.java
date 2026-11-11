@@ -3,6 +3,7 @@ package com.dance.street.game.service.impl;
 import com.dance.street.game.domain.TMatch;
 import com.dance.street.game.domain.TStage;
 import com.dance.street.game.domain.vo.MatchRoundScoreVo;
+import com.dance.street.game.domain.vo.StageFlowVo;
 import com.dance.street.game.domain.vo.TMatchParticipantVo;
 import com.dance.street.game.domain.vo.TMatchVo;
 import com.dance.street.game.engine.common.ScorePublishState;
@@ -35,6 +36,34 @@ public class ScreenResultMasker {
     public void maskMatch(TMatchVo vo) {
         if (vo != null) {
             maskMatches(List.of(vo));
+        }
+    }
+
+    /**
+     * 当前场次控件({@code /tournament/screen/flow})的公开遮罩:
+     * 公布前去掉参赛方总分/名次,以及未结算场次上的胜负结果。
+     */
+    public void maskFlow(StageFlowVo vo) {
+        if (vo == null || vo.getCurrentMatch() == null) {
+            return;
+        }
+        TMatch match = vo.getCurrentMatch().getId() == null ? null
+            : matchMapper.selectById(vo.getCurrentMatch().getId());
+        TStage stage = match == null || match.getStageId() == null ? null
+            : stageMapper.selectById(match.getStageId());
+        if (vo.getCurrentMatchParticipants() == null || vo.getCurrentMatchParticipants().isEmpty()) {
+            return;
+        }
+        if (ScorePublishState.hideRankPublic(stage, match)) {
+            for (StageFlowVo.StageFlowParticipant p : vo.getCurrentMatchParticipants()) {
+                p.setScoreValue(null);
+                p.setRankInMatch(null);
+            }
+        }
+        if (ScorePublishState.hideJudgementPublic(stage, vo.getCurrentMatch().getStatus())) {
+            for (StageFlowVo.StageFlowParticipant p : vo.getCurrentMatchParticipants()) {
+                p.setOutcomeStatus(null);
+            }
         }
     }
 

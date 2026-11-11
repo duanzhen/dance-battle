@@ -120,7 +120,6 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         boolean isAuditionStage = profile.audition();
         boolean isRankStage = profile.rank();
         boolean perCompetitorStage = profile.perCompetitor();
-        MatchFormat matchFormat = MatchFormat.of(stage.getRuleConfig());
         // 分圈海选:裁判只应看到/判罚自己绑定的圈(t_match_referee 圈级绑定)。
         // 只有该赛段确实做了圈级绑定时才启用过滤,单圈/未配置圈裁判的旧数据保持原行为。
         Set<Long> allowedMatchIds = allowedMatchIds(stage.getId(), refereeId);
@@ -202,7 +201,10 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         vo.setPublishMode(publishMode);
         vo.setPublishScope(publishScope);
         // BO 局分:淘汰赛(非逐选手赛制)展示「第几局 + 已赢局数 + 是否待提前确认」
+        // 本场 format 已写入时用本场;为空(尚未开赛)时用赛段默认
         if (!perCompetitorStage) {
+            MatchFormat stageFmt = MatchFormat.of(stage.getRuleConfig());
+            MatchFormat matchFormat = MatchFormat.ofStored(match == null ? null : match.getFormat(), stageFmt);
             vo.setBestOf(matchFormat.maxGames());
             vo.setRequiredWins(matchFormat.requiredWins());
             // 局分不加字段:从每局判罚明细(t_round_score 的 VOTE)现算,左/右按场次槽位 0/1
@@ -375,6 +377,8 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             sm.setMatchMode(m.getMatchMode());
             List<TMatchRound> mr = roundsByMatch.getOrDefault(m.getId(), List.of());
             List<RefereeRoundInfo> ris = new ArrayList<>();
+            MatchFormat stageFmt = MatchFormat.of(stage.getRuleConfig());
+            MatchFormat itemFormat = MatchFormat.ofStored(m.getFormat(), stageFmt);
             for (int i = 0; i < mr.size(); i++) {
                 TMatchRound r = mr.get(i);
                 RefereeRoundInfo ri = new RefereeRoundInfo();
@@ -383,7 +387,7 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
                 ri.setStatus(r.getStatus());
                 // BO1 平局加赛轮:已结算且非最后一轮即平局局。BO3/BO5 有胜局也会产生后续局,
                 // 不能据此判平——局分以整场 seriesLeftWins/seriesRightWins 为准,这里不再标注每局胜平。
-                if (!perCompetitorStage && matchFormat.maxGames() <= 1
+                if (!perCompetitorStage && itemFormat.maxGames() <= 1
                     && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < mr.size() - 1) {
                     ri.setOutcome("DRAW");
                 }
@@ -428,6 +432,8 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
         }
         // 本场全部轮次(多轮制时前端按轮次切换)
         List<RefereeRoundInfo> roundInfos = new ArrayList<>();
+        MatchFormat stageFmtForRounds = MatchFormat.of(stage.getRuleConfig());
+        MatchFormat currentFormat = MatchFormat.ofStored(match == null ? null : match.getFormat(), stageFmtForRounds);
         for (int i = 0; i < rounds.size(); i++) {
             TMatchRound r = rounds.get(i);
             RefereeRoundInfo ri = new RefereeRoundInfo();
@@ -435,7 +441,7 @@ public class RefereeMatchServiceImpl implements IRefereeMatchService {
             ri.setRoundSequence(r.getRoundSequence());
             ri.setStatus(r.getStatus());
             // BO1 平局加赛轮才把"已结算且非最后一轮"判为平局;BO3/BO5 胜局也会有后续局。
-            if (!perCompetitorStage && matchFormat.maxGames() <= 1
+            if (!perCompetitorStage && currentFormat.maxGames() <= 1
                 && StageConstants.MATCH_SETTLED.equals(r.getStatus()) && i < rounds.size() - 1) {
                 ri.setOutcome("DRAW");
             }

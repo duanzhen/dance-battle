@@ -90,6 +90,12 @@ public class TMatch extends TenantEntity {
     private String resultJson;
 
     /**
+     * 本场实际局数:BO1/BO3/BO5。空表示尚未开赛,后续展示与默认继承赛段 format。
+     * 开赛时写入实际采用的局数(即使用的是赛段默认也会落上),取消开始后可保留,下次开赛覆盖。
+     */
+    private String format;
+
+    /**
      * 备注
      */
     private String remark;

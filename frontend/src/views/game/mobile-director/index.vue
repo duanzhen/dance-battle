@@ -518,10 +518,25 @@
                   <template v-else>{{ match.status === 'SETTLED' ? '已结束' : '待开始' }}</template>
                 </span>
               </div>
-              <!-- BO3/BO5 局分:当前第几局 + 已赢局数 -->
-              <div v-if="(match.bestOf || 1) > 1" class="flex items-center justify-center gap-2 mb-1.5 text-[10px]">
-                <span class="text-neutral-500">BO{{ match.bestOf }} · 第{{ match.currentGame }}ROUND</span>
-                <span class="font-mono font-bold">
+              <!-- 淘汰赛 BO:待开始始终可见(含 BO1)并可临时改本场;开赛后只展示实际 BO,不可再改 -->
+              <div
+                v-if="currentStage?.stageMode === 'KNOCKOUT'"
+                class="flex items-center justify-center gap-2 mb-1.5 text-[10px]"
+              >
+                <div v-if="match.status === 'PENDING'" class="flex items-center gap-1">
+                  <button
+                    v-for="opt in knockoutFormatOptions"
+                    :key="opt"
+                    type="button"
+                    @click.stop="handleChangeMatchFormat(match, opt)"
+                    class="px-1.5 py-0.5 rounded text-[9px] font-bold border transition-colors active:scale-95"
+                    :class="matchFormatButtonClass(match, opt)"
+                  >
+                    {{ opt }}
+                  </button>
+                </div>
+                <span v-else class="text-neutral-500">BO{{ match.bestOf || 1 }} · 第{{ match.currentGame }}ROUND</span>
+                <span v-if="(match.bestOf || 1) > 1 && match.status !== 'PENDING'" class="font-mono font-bold">
                   <span :class="sideColorClass('LEFT')">{{ match.seriesLeftWins || 0 }}</span>
                   <span class="text-neutral-600 mx-0.5">:</span>
                   <span :class="sideColorClass('RIGHT')">{{ match.seriesRightWins || 0 }}</span>
@@ -1196,7 +1211,7 @@ interface MatchInfo {
   leftVotes?: number;
   rightVotes?: number;
   drawVotes?: number;
-  /** BO3/BO5 局分信息(bestOf=总局数, requiredWins=先赢几局, currentGame=第几局) */
+  /** 本场实际 BO 局分信息(bestOf=总局数, requiredWins=先赢几局, currentGame=第几局);待开始为赛段默认 */
   bestOf?: number;
   requiredWins?: number;
   currentGame?: number;
@@ -1852,10 +1867,62 @@ const handleMarkCurrent = async (match: MatchInfo, round: any) => {
 };
 
 /** 开始指定场次:跳过其他场次,先开始这一场 */
+const knockoutFormatOptions = ['BO1', 'BO3', 'BO5'] as const;
+type KnockoutFormatOption = (typeof knockoutFormatOptions)[number];
+
+/** 待开始卡片上临时选中的本场 BO;点开始时才传给接口,不提前写库 */
+const pendingFormatByMatch = ref<Record<string, KnockoutFormatOption>>({});
+
+const parseStageFormat = (stage?: Stage | null): KnockoutFormatOption => {
+  try {
+    const rc = JSON.parse(stage?.ruleConfig || '{}') as { format?: string; knockout?: { format?: string } };
+    const code = String(rc?.format || rc?.knockout?.format || '').toUpperCase();
+    if (code === 'BO1' || code === 'BO3' || code === 'BO5') return code;
+  } catch {
+    /* 解析失败回退 */
+  }
+  const fallback = String(stage?.format || '').toUpperCase();
+  if (fallback === 'BO1' || fallback === 'BO3' || fallback === 'BO5') return fallback;
+  return 'BO1';
+};
+
+const toFormatOption = (bestOf?: number): KnockoutFormatOption => {
+  if (bestOf === 5) return 'BO5';
+  if (bestOf === 3) return 'BO3';
+  return 'BO1';
+};
+
+/** 待开始:本地选择优先,否则赛段默认;开赛后展示本场实际预建 BO */
+const selectedMatchFormat = (match: MatchInfo): KnockoutFormatOption => {
+  if (match.status !== 'PENDING') {
+    return toFormatOption(match.bestOf);
+  }
+  return pendingFormatByMatch.value[String(match.id)] || parseStageFormat(currentStage.value);
+};
+
+const matchFormatButtonClass = (match: MatchInfo, opt: KnockoutFormatOption) => {
+  const selected = selectedMatchFormat(match) === opt;
+  if (!selected) {
+    return 'bg-transparent text-neutral-500 border-neutral-800';
+  }
+  return selectedMatchFormat(match) !== parseStageFormat(currentStage.value)
+    ? 'bg-amber-600/20 text-amber-400 border-amber-600/30'
+    : 'bg-neutral-700 text-neutral-200 border-neutral-600';
+};
+
+/** 只改本场卡片上的本地选择,开始时再传入接口 */
+const handleChangeMatchFormat = (match: MatchInfo, format: KnockoutFormatOption) => {
+  if (match.status !== 'PENDING') return;
+  pendingFormatByMatch.value = { ...pendingFormatByMatch.value, [String(match.id)]: format };
+};
+
 const handleStartMatch = async (match: MatchInfo) => {
   if (!(await askConfirm(`确认开始场次？其他未开始的场次保持待开始。`))) return;
   try {
-    await directorStartMatch(match.id);
+    await directorStartMatch(match.id, selectedMatchFormat(match));
+    const next = { ...pendingFormatByMatch.value };
+    delete next[String(match.id)];
+    pendingFormatByMatch.value = next;
     await refreshMatches();
     await loadStages();
   } catch (e: any) {

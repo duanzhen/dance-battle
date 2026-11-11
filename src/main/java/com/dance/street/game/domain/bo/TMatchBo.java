@@ -76,6 +76,11 @@ public class TMatchBo extends BaseEntity {
     private String promotionRule;
 
     /**
+     * 本场实际局数:BO1/BO3/BO5;空表示尚未开赛、继承赛段默认
+     */
+    private String format;
+
+    /**
      * 备注
      */
     private String remark;
